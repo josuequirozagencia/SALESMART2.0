@@ -1,0 +1,40 @@
+name: CI
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-only-admin-pw   # BD efímera del job; no es un secreto real
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      TEST_PG_ADMIN_URL: postgresql://postgres:ci-only-admin-pw@127.0.0.1:5432/postgres
+      REQUIRE_PGBOUNCER: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4          # versión tomada de "packageManager"
+      - uses: actions/setup-node@v4
+        with: { node-version-file: .nvmrc, cache: pnpm }
+      - name: Instalar PgBouncer (prueba de compatibilidad en modo transacción)
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pgbouncer && sudo systemctl stop pgbouncer || true
+      - run: pnpm install --frozen-lockfile
+      - name: Vulnerabilidades (moderadas o superiores)
+        run: pnpm audit --audit-level moderate
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - name: Tests (aislamiento, HTTP, identidad, PgBouncer)
+        run: pnpm test
+      - name: e2e del artefacto compilado
+        run: pnpm e2e

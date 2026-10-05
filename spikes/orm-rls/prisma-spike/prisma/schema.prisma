@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Organization {
+  id       String    @id @db.Uuid
+  name     String
+  contacts Contact[]
+  deals    Deal[]
+  @@map("organizations")
+}
+
+model Contact {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  name           String
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  deals          Deal[]
+  @@map("contacts")
+}
+
+model Deal {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  contactId      String       @map("contact_id") @db.Uuid
+  amount         Decimal      @db.Decimal(14, 2)
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  contact        Contact      @relation(fields: [contactId], references: [id])
+  @@map("deals")
+}
+
+model Counter {
+  organizationId String @map("organization_id") @db.Uuid
+  key            String
+  value          Int    @default(0)
+  @@id([organizationId, key])
+  @@map("counters")
+}
+
+model AiPricing {
+  id          Int     @id
+  costPerCredit Decimal @map("cost_per_credit") @db.Decimal(10, 4)
+  @@map("ai_pricing")
+}

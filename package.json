@@ -1,0 +1,39 @@
+{
+  "name": "sales-smart-2",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Sales Smart 2.0 \u2014 monorepo (M0 en curso)",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint . --max-warnings 0 --report-unused-disable-directives",
+    "test": "pnpm --filter @sales-smart/api test",
+    "test:iso": "pnpm --filter @sales-smart/api test:iso",
+    "db:bootstrap": "bash scripts/db-bootstrap.sh",
+    "db:migrate": "pnpm --filter @sales-smart/api db:migrate",
+    "db:audit": "pnpm --filter @sales-smart/api db:audit",
+    "bootstrap:super-admin": "pnpm --filter @sales-smart/api bootstrap:super-admin",
+    "check": "pnpm typecheck && pnpm lint && pnpm test",
+    "build": "pnpm -r --if-present build",
+    "dev:setup": "bash scripts/dev-setup.sh",
+    "dev": "bash scripts/dev.sh",
+    "e2e": "pnpm build && pnpm --filter @sales-smart/api e2e",
+    "audit": "pnpm audit --audit-level moderate",
+    "db:load-disposable-domains": "pnpm --filter @sales-smart/api db:load-disposable-domains"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.12.0",
+    "globals": "17.13.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0"
+  },
+  "pnpm": {
+    "overrides": {
+      "esbuild": ">=0.25.0"
+    }
+  }
+}

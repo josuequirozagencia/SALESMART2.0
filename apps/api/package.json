@@ -1,0 +1,43 @@
+{
+  "name": "@sales-smart/api",
+  "version": "0.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "start": "node dist/main.js",
+    "test": "vitest run",
+    "test:iso": "vitest run test/isolation",
+    "db:migrate": "tsx src/db/migrate-cli.ts",
+    "db:audit": "tsx src/db/audit/cli.ts",
+    "bootstrap:super-admin": "tsx src/modules/auth/bootstrap-super-admin.cli.ts",
+    "e2e": "vitest run --config vitest.e2e.config.mts",
+    "db:load-disposable-domains": "tsx src/db/load-disposable-domains.cli.ts"
+  },
+  "dependencies": {
+    "@nestjs/common": "12.1.2",
+    "@nestjs/core": "12.1.2",
+    "@nestjs/platform-express": "12.1.2",
+    "@node-rs/argon2": "2.0.2",
+    "@sales-smart/shared": "workspace:*",
+    "drizzle-orm": "0.45.3",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@swc/core": "1.16.13",
+    "@types/express": "5.0.3",
+    "@types/node": "22.20.5",
+    "@types/pg": "8.23.1",
+    "drizzle-kit": "0.31.11",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "unplugin-swc": "2.0.0",
+    "vitest": "5.0.3"
+  }
+}

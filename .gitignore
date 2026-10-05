@@ -1,0 +1,12 @@
+!.env.example
+*.log
+.DS_Store
+.env
+.env.*
+.tmp-*/
+coverage/
+dist/
+node_modules/
+spikes/**/generated/
+spikes/**/node_modules/
+.vitest/

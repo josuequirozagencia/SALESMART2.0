@@ -1,0 +1,98 @@
+{
+  "orm": "drizzle",
+  "version": "0.45.3 / kit 0.31.11",
+  "results": [
+    {
+      "id": "S1",
+      "name": "sin contexto: lectura vacía (falla cerrado)",
+      "ok": true,
+      "detail": "0 filas; insert bloqueado (new row violates row-level security policy for table \"contacts\")"
+    },
+    {
+      "id": "S2",
+      "name": "contexto A solo ve datos de A",
+      "ok": true,
+      "detail": "2 filas, todas de A"
+    },
+    {
+      "id": "S3",
+      "name": "A pide por id un contacto de B",
+      "ok": true,
+      "detail": "0 filas"
+    },
+    {
+      "id": "S4",
+      "name": "A intenta UPDATE sobre contacto de B",
+      "ok": true,
+      "detail": "0 afectadas; B intacto"
+    },
+    {
+      "id": "S5",
+      "name": "A intenta DELETE sobre contacto de B",
+      "ok": true,
+      "detail": "0 afectadas"
+    },
+    {
+      "id": "S6",
+      "name": "A intenta INSERT con organization_id de B (WITH CHECK)",
+      "ok": true,
+      "detail": "new row violates row-level security policy for table \"contacts\""
+    },
+    {
+      "id": "S7",
+      "name": "SQL crudo dentro de la transacción respeta RLS (incl. OR 1=1)",
+      "ok": true,
+      "detail": "2 filas (solo A) aun con OR 1=1"
+    },
+    {
+      "id": "S8",
+      "name": "JOIN entre tablas con RLS",
+      "ok": true,
+      "detail": "1 fila (A, 100.00)"
+    },
+    {
+      "id": "S9",
+      "name": "el contexto NO sobrevive al commit (pool de 1 conexión)",
+      "ok": true,
+      "detail": "0 filas tras la transacción en la misma conexión"
+    },
+    {
+      "id": "S10",
+      "name": "A y luego B en la misma conexión: sin fuga",
+      "ok": true,
+      "detail": "B ve solo a B"
+    },
+    {
+      "id": "S11",
+      "name": "40 transacciones concurrentes A/B intercaladas (pool 4)",
+      "ok": true,
+      "detail": "40 txs, 0 fugas"
+    },
+    {
+      "id": "S12",
+      "name": "advisory lock xact serializa read-modify-write",
+      "ok": true,
+      "detail": "sin lock=5/20 (carrera), con lock=20/20; 0 locks residuales tras commit"
+    },
+    {
+      "id": "S13",
+      "name": "tabla de plataforma: app_rw denegado, app_platform permitido",
+      "ok": true,
+      "detail": "app_rw: permission denied for table ai_pricing; app_platform: 1 fila"
+    },
+    {
+      "id": "S14",
+      "name": "PROHIBIDO: SET de sesión (no LOCAL) FILTRA entre peticiones",
+      "ok": true,
+      "detail": "FUGA demostrada: petición sin contexto vio 2 filas de A (por eso se prohíbe)"
+    },
+    {
+      "id": "S15",
+      "name": "la política no se puede evadir cambiando de rol desde la app",
+      "ok": true,
+      "detail": "SET ROLE: permission denied to set role \"app_owner\"; ALTER: must be owner of table contacts"
+    }
+  ],
+  "perTxMs": "1.07",
+  "perBareMs": "0.68"
+}

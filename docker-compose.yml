@@ -1,0 +1,35 @@
+# Entorno de DESARROLLO local (no es producción; hosting/región siguen sin decidir).
+# Uso: pnpm dev:setup  (crea .env con contraseñas aleatorias, levanta PostgreSQL, crea roles y migra)
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?ejecuta pnpm dev:setup}
+    ports:
+      - "127.0.0.1:5432:5432"   # solo loopback
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  # PgBouncer en modo transacción (opcional: `docker compose --profile pooler up`). Imagen NO probada aquí;
+  # la compatibilidad se verifica en CI/local con el binario real (apps/api/test/isolation/pgbouncer.test.ts).
+  pgbouncer:
+    profiles: ["pooler"]
+    image: edoburu/pgbouncer:latest
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      DB_HOST: postgres
+      POOL_MODE: transaction
+      AUTH_TYPE: scram-sha-256
+      ADMIN_USERS: postgres
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?ejecuta pnpm dev:setup}
+    ports:
+      - "127.0.0.1:6432:5432"
+volumes:
+  pgdata:
