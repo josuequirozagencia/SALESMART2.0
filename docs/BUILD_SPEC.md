@@ -11,6 +11,7 @@ Fecha: 2026-10-03 · Estado: **aprobado (2026-10-03)**; los valores marcados PRO
 2. Se implementa por **hitos** (sección 14). Un hito no empieza hasta cerrar el anterior (definición de terminado incluida).
 3. El prototipo (`sales-smart-2-prototipo.html`, v14) es la referencia de **pantallas y flujos**, no de código. Sus datos son sintéticos.
 4. Todo cambio de arquitectura se registra como ADR nuevo (decisión, alternativas, ventajas, desventajas, motivo, impacto).
+5. **Revisión 2026-10-05 (prototipo v9 validado por Josué):** se incorporaron campañas masivas del asesor, gestor de grupos de WhatsApp (QR), «Mis ventas» del asesor y los permisos asociados (§1, §5, §6.4–6.9, §9, §10.1, §15, §16). Lo derivado de v9 que implica decisiones nuevas está en **ADR-32 (PROPUESTO)** y marcado aquí como **[PROPUESTA v9]**; hasta aprobar ADR-32 no se implementa.
 
 ---
 
@@ -18,9 +19,11 @@ Fecha: 2026-10-03 · Estado: **aprobado (2026-10-03)**; los valores marcados PRO
 
 | Fase | Contenido |
 |---|---|
-| **MVP** | Fundaciones (auth, organizaciones, RLS, auditoría, observabilidad) · Contactos y listas · Oportunidades y pipelines · Inbox omnicanal con WhatsApp oficial · Etiquetas del sistema · Citas y recordatorios · Ventas con abono · Dashboard · Meta CAPI (Lead/Schedule/Purchase) · GHL (Private Token) · SLA · Registro con prueba de 7 días · Plataforma Súper Admin · Móvil |
-| **V1** | WhatsApp QR (Evolution) · Agentes IA + Knowledge Base/RAG · Créditos IA · Formularios embebibles · Telefonía + WebRTC (Twilio) · Automatizaciones · Comisiones · Planes y cobro · Clonado de configuración · API pública · Consentimiento |
+| **MVP** | Fundaciones (auth, organizaciones, RLS, auditoría, observabilidad) · Contactos y listas · Oportunidades y pipelines · Inbox omnicanal con WhatsApp oficial · Etiquetas del sistema · Citas y recordatorios · Ventas con abono · Dashboard · Meta CAPI (Lead/Schedule/Purchase) · GHL (Private Token) · SLA · Registro con prueba de 7 días · Plataforma Súper Admin · Móvil · **«Mis ventas» del asesor (el asesor crea ventas, no las modifica) [PROPUESTA v9]** · Inbox: botón Enviar, panel de contacto oculto por defecto |
+| **V1** | WhatsApp QR (Evolution) · Agentes IA + Knowledge Base/RAG · Créditos IA · Formularios embebibles · Telefonía + WebRTC (Twilio) · Automatizaciones · Comisiones · Planes y cobro · Clonado de configuración · API pública · Consentimiento · **Gestor de grupos de WhatsApp (solo QR, con permisos por asesor) [PROPUESTA v9]** · **Comisión propia del asesor, plan en solo lectura [PROPUESTA v9]** |
 | **V2** | IA de voz (tras PoC) · Llamadas masivas · Campañas masivas · Cumpleaños · Marca blanca · Migración desde ChatIA · Exportar XLSX/PDF |
+
+**Nota v9:** las **campañas masivas** (incluidas las del asesor con plantilla/texto libre según la conexión) permanecen en **V2**; adelantarlas exige decidir cobro, límites y consentimiento (§15 #17).
 
 **Fuera de alcance (descartado):** chat interno, anuncios, ayuda, Typebot/Dialogflow, marcador predictivo, OAuth de GHL Marketplace, login social (Google) en primera versión.
 
@@ -108,12 +111,12 @@ Módulos del backend (carpeta `apps/api/src/modules/*`), con **fronteras estrict
 | `super_admin` | Plataforma: agencias, carteras, planes, proveedores, créditos/márgenes, pruebas, accesos. Puede entrar a cualquier organización |
 | `agency` | Organización tipo `agency`; ve «Mis clientes» y entra **solo** a los clientes de su cartera (`parent_agency_id = su org`), con nivel por cliente (sin acceso / solo lectura / asesor / administrador) |
 | `client_admin` | Administra su organización |
-| `advisor` | Ve sus chats y los que le compartieron; no ve filtro por asesor ni conversión por asesor |
+| `advisor` | Ve sus chats y los que le compartieron; no ve filtro por asesor ni conversión por asesor. **[PROPUESTA v9]** Crea ventas pero no las modifica; ve «Mis ventas» y su comisión en solo lectura; campañas y grupos solo si el Cliente se los activa |
 
 ### 5.2 Catálogo de permisos (nombres canónicos, extensible)
-`inbox.view_all` · `inbox.reply` · `inbox.transfer` · `inbox.share` · `contacts.read|write|import|export` · `opportunities.read|write` · `pipelines.manage` · `sales.create|cancel` · `appointments.manage` · `queues.manage` · `tags.manage` · `agents.manage|test` · `knowledge.manage` · `channels.manage` · `integrations.manage` · `forms.manage` · `automations.manage` · `commissions.view|manage` · `analytics.view` · `export` · `team.manage` · `billing.manage` · `platform.providers.manage` · `platform.agencies.manage` · `platform.trials.manage` · `platform.access_log.read`
+`inbox.view_all` · `inbox.reply` · `inbox.transfer` · `inbox.share` · `contacts.read|write|import|export` · `opportunities.read|write` · `pipelines.manage` · `sales.create|cancel` · **[PROPUESTA v9]** `sales.read_own` · `campaigns.send` (alcance: contactos propios/compartidos; tope diario por asesor) · `groups.view|send|manage` (`send` y `manage` requieren `view`) · `appointments.manage` · `queues.manage` · `tags.manage` · `agents.manage|test` · `knowledge.manage` · `channels.manage` · `integrations.manage` · `forms.manage` · `automations.manage` · `commissions.view|manage` · `analytics.view` · `export` · `team.manage` · `billing.manage` · `platform.providers.manage` · `platform.agencies.manage` · `platform.trials.manage` · `platform.access_log.read`
 
-Los permisos se evalúan en **un guard central**; la interfaz solo oculta, nunca protege.
+Los permisos se evalúan en **un guard central**; la interfaz solo oculta, nunca protege. `commissions.view` admite alcance propio (el asesor solo ve la suya). La matriz rol→permiso sigue **PROVISIONAL** (ADR-29); los permisos [PROPUESTA v9] se añaden al catálogo por migración solo tras aprobar ADR-32.
 
 ---
 
@@ -143,13 +146,14 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - `channels` · `channel_accounts(provider, is_official, credentials_encrypted, status, settings)` · `whatsapp_accounts(waba_id, phone_number_id)` · `qr_sessions`
 - `conversations(contact_id, channel_account_id, owner_id, queue_id, status, close_reason, last_message_at)` — **única parcial** para impedir duplicadas abiertas (+ advisory lock)
 - `messages(external_id, channel_account_id, direction, sender_type ∈ human|ai|campaign|automation|system, body, status, sent_at)` — **único** `(channel_account_id, external_id)` · `message_attachments(storage_key, mime, size, checksum, scan_status)` · `scheduled_messages` · `quick_messages` · `whatsapp_templates`
+- **[PROPUESTA v9, V1, solo canal QR]** `wa_groups(channel_account_id, external_id, name, description, settings)` · `wa_group_participants(group_id, phone, is_admin, contact_id?)` · `wa_group_scheduled_messages(group_id, body, attachments, mention_all, schedule, recurrence_rule, status)`. Todas con `organization_id` y RLS. Los grupos son de toda la organización; el acceso por asesor lo da `groups.*` (asignación por asesor: pendiente §15 #16).
 - `conversation_participants(role ∈ owner|collaborator, permission ∈ reply|view, revoked_at)`
 - `response_timers` · `sla_policies` · `business_hours` · `holidays`
 
 ### 6.5 Colas, citas, ventas
 - `queues(name, color, status, default_pipeline_id, schedule, messages)` · `queue_members(queue_id, user_id, active, weight)` · `queue_distribution_rules` · `queue_distribution_state` · `queue_products(queue_id, name, kind, price, active)`
 - `appointments` · `appointment_reminders(offset_minutes, channel, status, scheduled_at, sent_at)` · `appointment_reminder_limits` (config por organización: 3 / 5 para QR, Messenger, Instagram)
-- `sales(amount, currency, queue_id, product_id, conversation_id, status, created_by)` · `sale_payments(sale_id, amount, method, paid_at)` · `sale_status_history` (nunca se borra) · saldo = `amount − Σ sale_payments`
+- `sales(amount, currency, queue_id, product_id, conversation_id, status, created_by)` · `sale_payments(sale_id, amount, method, paid_at)` · `sale_status_history` (nunca se borra) · saldo = `amount − Σ sale_payments` · **[PROPUESTA v9]** `sale_change_requests(sale_id, requested_by, reason, status, resolved_by)`: el asesor pide corrección; solo quien tenga permiso de gestión de ventas la resuelve
 - `commission_plans` (parámetros versionados en JSONB, `reversal_rule` desactivada por defecto) · `commission_plan_assignments` · `commissions` · `commission_splits` · `commission_payouts` · `goals`
 
 ### 6.6 Atribución y eventos
@@ -164,7 +168,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - Créditos: `ai_wallets(balance_cache)` · `ai_ledger(kind ∈ use|topup|welcome|grant|test, credits, amount_usd, cost_usd, margin_pct, ref)` · `ai_packages` · `ai_auto_topup` · `payment_methods(processor_token, brand, last4, exp)` (ADR-19)
 
 ### 6.9 Formularios, telefonía, campañas (V1/V2)
-`forms` · `form_fields` · `form_submissions` (único `(form_id, idempotency_key)`) · `telephony_accounts` · `phone_numbers` · `calls` · `call_events` · `recordings` · `transcriptions` · `call_summaries` · `call_campaigns` · `call_campaign_items` · `call_attempts` · `automations` + `automation_*` + `automation_runs`
+**[PROPUESTA v9, V2]** `campaigns(connection_id, mode ∈ template|free_text, template_id?, body?, scheduled_at, status, created_by)` · `campaign_recipients(campaign_id, contact_id, status, error)` · límite diario por usuario (ajuste por membresía, por definir) · regla de «no contactar». `forms` · `form_fields` · `form_submissions` (único `(form_id, idempotency_key)`) · `telephony_accounts` · `phone_numbers` · `calls` · `call_events` · `recordings` · `transcriptions` · `call_summaries` · `call_campaigns` · `call_campaign_items` · `call_attempts` · `automations` + `automation_*` + `automation_runs`
 
 ### 6.10 Preferencias y auditoría
 `user_dashboard_prefs(layout, hidden, default_range)` · `user_nav_pins` · `audit_logs(entity_type, entity_id, field, old_value, new_value, actor_user_id, acting_as, acting_org_id, source ∈ manual|ai|automation|ghl|meta|api, at)` **append-only** (revocar `UPDATE`/`DELETE` al rol de la app) · `platform_audit`
@@ -210,7 +214,7 @@ Consumidores: atribución Meta (`lead.created`→Lead, `appointment.created`→S
 | Interfaz | Implementaciones | Notas |
 |---|---|---|
 | `AuthProvider` | `LocalAuthProvider` (ahora), `ClerkAuthProvider` (posible) | `user.id` interno siempre |
-| `WhatsAppProvider` | `MetaCloudProvider`, `EvolutionProvider` (QR, **no oficial**, marcado en datos y UI) | El núcleo solo habla `NormalizedMessage` |
+| `WhatsAppProvider` | `MetaCloudProvider`, `EvolutionProvider` (QR, **no oficial**, marcado en datos y UI) | El núcleo solo habla `NormalizedMessage`. **[PROPUESTA v9]** Capacidad opcional `groups` (listar/crear grupos, participantes, enviar a grupo): solo `EvolutionProvider`; `MetaCloudProvider` no la implementa (verificar §15 #15). Capacidad `campaign_mode`: la conexión oficial exige plantilla aprobada, la QR admite texto libre con límites bajos |
 | `TelephonyProvider` | `TwilioProvider` | Preparado para Telnyx/SIP |
 | `VoiceAIProvider` | `RetellProvider`, `VapiProvider` | Decide el PoC |
 | `AIProvider` | OpenAI (clave de plataforma) | «Usar mi propia clave» por organización |
@@ -239,6 +243,15 @@ Cada regla enlaza su ADR; los criterios de aceptación completos están en la se
 - **Formularios (ADR-09):** token público de solo envío, dominios autorizados, límite por IP, trampa + captcha, validación en servidor, mismo `event_id` en Pixel y CAPI.
 - **Llamadas masivas (ADR-10):** progresivo y vista previa; sin predictivo; resultado obligatorio por llamada; grabación solo con aviso.
 - **Analítica y exportación (ADR-18):** cada pestaña con «ver reporte» y CSV; exportar exige permiso `export` y queda en auditoría; **conversión lead→venta por cohorte** con muestra mínima de 20 leads para el ranking.
+
+---
+
+### 10.1 Reglas derivadas del prototipo v9 **[PROPUESTA v9 — requieren ADR-32]**
+- **Ventas del asesor:** el asesor crea ventas (`sales.create`) pero no modifica valor, método de pago, comisión ni plan; la corrección se pide con `sale_change_requests`. Ninguna API de edición de venta acepta al rol `advisor`.
+- **Acceso a contactos del asesor:** «Mis contactos» (propios) + «Compartidos»; extiende ADR-14 (hoy definido para conversaciones) a contactos; se aplica en servidor y RLS.
+- **Campañas (V2):** el tipo de conexión decide el modo: oficial ⇒ plantilla aprobada; QR ⇒ texto libre con límites bajos. Límite efectivo = mínimo(tope del asesor, tope de la conexión). Se respeta «no contactar».
+- **Grupos (V1, solo QR):** sin proveedor QR no hay módulo de grupos; el envío programado y recurrente corre en el worker (idempotente); `@todos` y adjuntos según capacidad del proveedor.
+- **Interfaz:** el botón Enviar y Enter envían (Shift+Enter = salto de línea); el panel de datos del contacto inicia oculto. La interfaz solo oculta; el servidor decide.
 
 ---
 
@@ -360,8 +373,13 @@ Tras el PoC Retell vs. Vapi.
 | 12 | Normativa local (llamadas masivas, consentimiento, protección de datos) | A revisar con asesoría | V2 |
 | 13 | Ítems de certeza «I» de la Fase 27 (R11, R15, R16, R17, R19, X1) | Confirmar al construir cada pantalla | Cada módulo |
 | 14 | Archivos del repo actual sin leer (ver Fase 27 §5.2) | Pueden aportar reglas finas | Ninguno |
+| 15 | ¿La API oficial de Meta permite alguna gestión de grupos? (sin verificar) | ABIERTO | Gestor de grupos |
+| 16 | Grupos: ¿asignación por asesor o de toda la organización? (hoy: toda la organización) | ABIERTO | Gestor de grupos |
+| 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | ABIERTO (V2) | Campañas masivas |
+| 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | PROPUESTA (ADR-32) | Contactos/M3 |
+| 19 | Spike de WhatsApp QR (Evolution) sobre Railway con chip de prueba | APROBADO (ADR-31); en curso | EvolutionProvider/M9 |
 
 ---
 
 ## 16. Mapa prototipo → módulos
-Login/registro/verificación/vencida → `auth`, `trials` · Dashboard → `dashboard` · Inbox → `conversations`, `channels` · Contactos/listas → `contacts`, `lists` · Oportunidades → `pipelines`, `opportunities` · Agenda y tareas → `appointments`, `tasks` · Formularios → `forms` · Mensajes rápidos → `quick-messages` · Conexiones → `channels` · Colas y asignación → `queues` · Agentes IA → `agents`, `knowledge` · Créditos IA → `ai-credits` · Telefonía → `telephony` · Analytics y asesores/comisiones → `analytics`, `commissions` · Configuración → `organizations`, `custom-fields`, `sla` · Plataforma (Empresas y planes, Agencias, Carteras, Pruebas, Accesos, Proveedores) → `platform`
+Login/registro/verificación/vencida → `auth`, `trials` · Dashboard → `dashboard` · Inbox → `conversations`, `channels` · Contactos/listas → `contacts`, `lists` · Oportunidades → `pipelines`, `opportunities` · Agenda y tareas → `appointments`, `tasks` · Formularios → `forms` · Mensajes rápidos → `quick-messages` · Conexiones → `channels` · Colas y asignación → `queues` · Agentes IA → `agents`, `knowledge` · Créditos IA → `ai-credits` · Telefonía → `telephony` · Analytics y asesores/comisiones → `analytics`, `commissions` · Configuración → `organizations`, `custom-fields`, `sla` · Plataforma (Empresas y planes, Agencias, Carteras, Pruebas, Accesos, Proveedores) → `platform` · **[v9]** Mis ventas → `sales` · Campañas masivas → `campaigns` (V2) · Grupos de WhatsApp → `wa-groups` (V1)

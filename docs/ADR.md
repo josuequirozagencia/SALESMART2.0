@@ -467,3 +467,47 @@ Velocidad de entrega y bajo costo operativo en la fase MVP/piloto, manteniendo p
 ### Impacto
 Cierra el punto abierto "Hosting" del Build Spec §15 solo para staging/piloto. Pendiente antes de producción: verificación de roles/RLS/pgvector en Railway (prueba de una hora), política de backups con restauración probada, residencia de grabaciones (telefonía), proveedor de correo, CAPTCHA y pasarela de pago (siguen ABIERTOS).
 
+---
+
+## ADR-31 — Spike de WhatsApp QR (Evolution API) sobre Railway
+**Estado: APROBADO el 2026-10-05 (alcance: spike desechable; NO reordena los hitos).**
+
+### Decisión
+Ejecutar un spike técnico aislado en `spikes/whatsapp-qr/` (fuera de `apps/`, sin tocar el núcleo) para validar Evolution API con un **chip de prueba dedicado**: vincular por QR, enviar/recibir texto y medios, webhooks, reconexión tras reinicio/redeploy (volumen persistente) y comportamiento ante caídas. Resultado: informe con hallazgos y recomendación para `EvolutionProvider`. El código del spike es descartable; lo aprendido alimenta el adaptador real.
+
+### Alternativas
+Esperar a M9 (descubre riesgos tarde); implementar `EvolutionProvider` directamente (acopla antes de conocer el comportamiento); usar otra librería no oficial (Baileys directo: más control, más mantenimiento).
+
+### Ventajas / desventajas
++ Reduce el mayor riesgo técnico del canal QR pronto, sin comprometer arquitectura. − Los números QR pueden bloquearse (solo chip desechable); Evolution y WhatsApp Web cambian sin aviso; el spike no prueba escala.
+
+### Motivo
+Priorizar el aprendizaje del riesgo más incierto con costo mínimo.
+
+### Impacto
+Nueva carpeta `spikes/whatsapp-qr/`. El orden de hitos M5/M9 **no cambia** hasta que el responsable de producto lo apruebe tras ver el informe.
+
+---
+
+## ADR-32 — Grupos, campañas y ventas del asesor (derivado del prototipo v9)
+**Estado: PROPUESTO (pendiente de aprobación).** Recoge lo que el prototipo v9 exige y que el Build Spec no cubría; aplicado en el Build Spec como **[PROPUESTA v9]**.
+
+### Decisión propuesta
+1. **Ventas:** el asesor crea pero no modifica; correcciones por `sale_change_requests`. (MVP)
+2. **Contactos del asesor:** acceso a propios + compartidos (extiende ADR-14 a contactos). (MVP/M3)
+3. **Grupos de WhatsApp:** módulo `wa-groups` solo con canal QR, capacidad opcional `groups` en `WhatsAppProvider`; permisos `groups.view|send|manage`. (V1)
+4. **Campañas masivas:** permanecen en V2; modo por tipo de conexión (oficial ⇒ plantilla; QR ⇒ texto libre); permiso `campaigns.send` con alcance propio y tope diario. (V2)
+5. **Comisión propia** del asesor en solo lectura (`commissions.view` con alcance propio). (V1)
+
+### Alternativas
+Adelantar campañas a V1 (mayor valor comercial, mayor riesgo legal/bloqueo); grupos asignados por asesor en vez de por organización; permitir al asesor editar ventas con auditoría (menos fricción, menos control).
+
+### Ventajas / desventajas
++ Coherente con el prototipo y con el principio de mínimo privilegio; separa lo oficial de lo no oficial. − Más tablas y permisos; los grupos quedan atados a un proveedor no oficial; asignación de grupos y límites de campañas aún abiertos (§15 #15–#18).
+
+### Motivo
+Reflejar en el Build Spec lo validado en el prototipo sin adelantar fases ni asumir decisiones comerciales.
+
+### Impacto
+Build Spec §1, §5, §6, §9, §10.1, §15, §16. Ninguna migración ni código hasta aprobar este ADR. Cambia la matriz de permisos provisional de ADR-29 (por migración, cuando se apruebe).
+

@@ -10,3 +10,7 @@ node_modules/
 spikes/**/generated/
 spikes/**/node_modules/
 .vitest/
+
+# spike whatsapp-qr: datos locales
+spikes/whatsapp-qr/events.jsonl
+spikes/whatsapp-qr/qr.png

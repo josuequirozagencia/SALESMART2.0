@@ -1,0 +1,44 @@
+# SPIKE DESECHABLE (ADR-31). No es infraestructura del producto.
+# Uso local: cp .env.example .env && docker compose up -d
+services:
+  evolution:
+    image: atendai/evolution-api:v2.1.1   # fijar versión: Evolution cambia sin aviso
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    environment:
+      SERVER_URL: ${SERVER_URL:-http://localhost:8080}
+      AUTHENTICATION_API_KEY: ${EVOLUTION_API_KEY:?define EVOLUTION_API_KEY en .env}
+      DATABASE_ENABLED: "true"
+      DATABASE_PROVIDER: postgresql
+      DATABASE_CONNECTION_URI: postgresql://evo:${EVO_DB_PASSWORD:?define EVO_DB_PASSWORD}@postgres:5432/evolution
+      DATABASE_SAVE_DATA_INSTANCE: "true"
+      DATABASE_SAVE_DATA_NEW_MESSAGE: "true"
+      DATABASE_SAVE_DATA_CONTACTS: "true"
+      DATABASE_SAVE_DATA_CHATS: "true"
+      CACHE_REDIS_ENABLED: "true"
+      CACHE_REDIS_URI: redis://redis:6379/1
+      CACHE_REDIS_PREFIX_KEY: evolution_v2
+    volumes: ["evolution_instances:/evolution/instances"]
+    depends_on: [postgres, redis]
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: evo
+      POSTGRES_PASSWORD: ${EVO_DB_PASSWORD:?define EVO_DB_PASSWORD}
+      POSTGRES_DB: evolution
+    volumes: ["evo_pg:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7
+    restart: unless-stopped
+  receiver:            # receptor de webhooks del spike (registra eventos en events.jsonl)
+    image: node:22-alpine
+    working_dir: /app
+    command: node scripts/webhook-receiver.mjs
+    ports: ["4000:4000"]
+    environment:
+      WEBHOOK_TOKEN: ${WEBHOOK_TOKEN:?define WEBHOOK_TOKEN}
+    volumes: [".:/app"]
+volumes:
+  evolution_instances:
+  evo_pg:
