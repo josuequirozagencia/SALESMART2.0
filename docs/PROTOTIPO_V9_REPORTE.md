@@ -67,3 +67,13 @@ Todo el envío (campañas, grupos, mensajes), la sincronización de grupos, la i
 
 ## Pruebas realizadas
 Navegador real (Chromium) en 1440, 820 y 390 px con los 4 perfiles: 0 errores de JavaScript, 0 desbordes horizontales en todas las pantallas, flujos previos intactos (nota interna, mensaje programado, respuesta rápida) y comparación con la copia v8 (se detectó y corrigió una regresión de ancho en el hilo móvil).
+
+---
+## Ajustes v10 (2026-10-09, por indicación de Josué)
+- **Mis ventas (asesor):** columnas separadas **Valor · Abono · Saldo · Comisión**; botón **Registrar abono** (fila y detalle) con monto, método y nota, «pagó todo el saldo», validación contra el saldo, historial de abonos (no editable) y paso automático a «Cobrada». Valor, producto, comisión y plan siguen bloqueados.
+- **Se quitó el pago de comisión:** columna «Pago de comisión», fila «Forma de pago de la comisión» y KPI «Comisión por cobrar» (reemplazado por «Saldo por cobrar»).
+- **+ Contacto:** formulario completo (nombre, teléfono, correo, ciudad, interés, fuente, asignado, pipeline/etapa, etiquetas, consentimiento + campos personalizados); teléfono duplicado se rechaza; el asesor solo se asigna a sí mismo.
+- **Campos del formulario:** en Configuración › Campos personalizados cada campo se puede mostrar/ocultar en el formulario de contacto y marcar como obligatorio; al crear un campo se indican opciones (selección), obligatorio y visibilidad; botón «Ver formulario de contacto». Los campos aparecen también al editar un contacto.
+- **Solo visual:** todo se guarda en memoria del navegador; archivos adjuntos de campos de tipo «Archivo» simulados.
+- Respaldo previo: `proto-v9-backup-20261009.html`.
+

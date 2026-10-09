@@ -1045,6 +1045,7 @@ const S={
  setTab:'fields'
 };
 const CH={'wa-official':['WhatsApp oficial','ok'],'wa-qr':['WhatsApp QR · no oficial','warn'],'messenger':['Messenger','info'],'instagram':['Instagram','info'],'ghl':['GoHighLevel','acc']};
+S.fields.forEach(f=>{if(f.k==='ciudad'||f.k==='interes'){f.std=1;f.form=1}if(f.k==='nacimiento')f.form=1});
 const cName=id=>S.contacts.find(c=>c.id===id);
 const oppStage=id=>S.stageOf[id];
 const pipeByName=n=>S.pipes.find(p=>p.n===n)||S.pipes[0];
@@ -1270,8 +1271,8 @@ function vSettings(){
   if(T==='att')body=attHtml();
   if(T==='meta')body=metaHtml();
   if(T==='look')body=lookHtml();
-  if(T==='fields')body=`<div class="card tbl-wrap"><table><thead><tr><th>Campo</th><th>Variable</th><th>Tipo</th><th>Se usa en</th></tr></thead><tbody>${S.fields.map(f=>`<tr><td><b>${f.l}</b></td><td><span class="code">{{contact.${f.k}}}</span></td><td>${f.t}</td><td class="muted">${f.u}</td></tr>`).join('')}</tbody></table></div>
-   <div class="card pad" style="margin-top:12px"><h3>Nuevo campo</h3><div class="row-flex" style="margin-top:8px"><input class="inp" id="nfn" placeholder="Nombre, p. ej. Nivel de experiencia" style="flex:2"><select class="inp" id="nft" style="flex:1">${['Texto','Texto largo','Número','Moneda','Porcentaje','Fecha','Fecha/hora','Sí/No','Email','Teléfono','URL','Selección única','Selección múltiple','Radio','Checkbox','Archivo'].map(t=>`<option>${t}</option>`).join('')}</select><button class="btn pri" data-act="addfield">Crear</button></div><div class="muted sm" style="margin-top:8px">Un campo creado aquí queda disponible para IA, automatizaciones, segmentación, analytics y API.</div></div>`;
+  if(T==='fields')body=`<div class="card tbl-wrap"><table><thead><tr><th>Campo</th><th>Variable</th><th>Tipo</th><th>Se usa en</th><th>En el formulario de contacto</th><th>Obligatorio</th></tr></thead><tbody>${S.fields.map((f,i)=>`<tr><td><b>${f.l}</b>${f.opts?`<div class="xs muted">${esc(f.opts)}</div>`:''}</td><td><span class="code">{{contact.${f.k}}}</span></td><td>${f.t}</td><td class="muted">${f.u}</td><td>${f.std?'<span class="pill ok">Siempre</span>':`<label class="sm" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-act="cftog" data-p="form" data-i="${i}" ${f.form?'checked':''}> Mostrar</label>`}</td><td>${f.std?'<span class="muted">—</span>':`<label class="sm" style="display:flex;gap:6px;align-items:center"><input type="checkbox" data-act="cftog" data-p="req" data-i="${i}" ${f.req?'checked':''} ${f.form?'':'disabled'}> Sí</label>`}</td></tr>`).join('')}</tbody></table></div>
+   <div class="card pad" style="margin-top:12px"><h3>Nuevo campo</h3><div class="muted sm" style="margin-top:4px">Añade información extra al formulario de contacto (por ejemplo: cédula, empresa, presupuesto o cualquier dato que tus clientes necesiten registrar).</div><div class="row-flex" style="margin-top:8px"><input class="inp" id="nfn" placeholder="Nombre, p. ej. Nivel de experiencia" style="flex:2"><select class="inp" id="nft" style="flex:1">${['Texto','Texto largo','Número','Moneda','Porcentaje','Fecha','Fecha/hora','Sí/No','Email','Teléfono','URL','Selección única','Selección múltiple','Radio','Checkbox','Archivo'].map(t=>`<option>${t}</option>`).join('')}</select><button class="btn pri" data-act="addfield">Crear</button></div><div class="row-flex" style="margin-top:8px;flex-wrap:wrap"><input class="inp" id="nfo" placeholder="Opciones separadas por coma (solo para selección)" style="flex:2;min-width:220px"><label class="sm" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="nff" checked> Mostrar en el formulario de contacto</label><label class="sm" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="nfr"> Obligatorio</label><button class="btn" data-act="newcontact">Ver formulario de contacto</button></div><div class="muted sm" style="margin-top:8px">Un campo creado aquí queda disponible para IA, automatizaciones, segmentación, analytics y API.</div></div>`;
   if(T==='oppf')body=`<div class="card pad"><h3>Configuración global de la tarjeta de oportunidad</h3><p class="muted sm" style="margin:4px 0 10px">Todas las oportunidades heredan esto. Cada una puede tener excepciones propias sin tocar esta lista.</p>
    ${S.gfields.map((g,i)=>`<div class="kv" style="align-items:center"><span style="color:var(--fg)"><b>${g.l}</b> <span class="muted xs">${g.src==='contact'?'del contacto':'de la oportunidad'}</span></span><button class="sw ${g.on?'on':''}" data-act="gtog" data-i="${i}" role="switch" aria-checked="${!!g.on}" aria-label="${g.l}"></button></div>`).join('')}
    <div class="muted sm" style="margin-top:10px">Prueba: apaga «Fuente» y vuelve a Oportunidades. Las tarjetas sin excepciones se actualizan; las que tienen cambios propios conservan los suyos.</div></div>`;
@@ -2022,7 +2023,9 @@ const ACT={
  addtag(){const n=$('#ntag').value.trim();if(!n)return;if(S.tags.some(t=>t.n.toLowerCase()===n.toLowerCase())){toast('Ya existe una etiqueta con ese nombre');return}S.tags.push({n,color:TAGCOL[S.tags.length%TAGCOL.length],uses:0,sale:false,ghl:false,kan:false});render();toast('Etiqueta creada')},
  deltag(t){const g=S.tags[+t.dataset.v];if(!g||g.fixed){toast('Las etiquetas fijas no se pueden eliminar');return}S.tags.splice(+t.dataset.v,1);S.convs.forEach(c=>{c.tags=(c.tags||[]).filter(x=>x!==g.n)});S.contacts.forEach(c=>{if(c.tags)c.tags=c.tags.filter(x=>x!==g.n)});render();toast('Etiqueta «'+g.n+'» eliminada de todos los chats y contactos')},
  ptab(t){S.plat=t.dataset.v;render()},covf(t){S.covF=t.dataset.v;render()},antab(t){S.anTab=t.dataset.v;render()},
- addfield(){const n=$('#nfn').value.trim();if(!n)return;S.fields.push({l:n,k:n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_'),t:$('#nft').value,u:'Contacto'});render();toast('Campo creado. Ya es variable y condición de automatización.')},
+ addfield(){const n=$('#nfn').value.trim();if(!n)return;const k=n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9]+/g,'_').replace(/^_+|_+$/g,'')||'campo';if(S.fields.some(f=>f.k===k)){toast('Ya existe un campo con ese nombre');return}const t=$('#nft').value,o=($('#nfo')||{value:''}).value.trim();if(/^Selección|Radio/.test(t)&&!o){toast('Escribe las opciones separadas por coma');return}
+  const fm=($('#nff')||{checked:true}).checked;S.fields.push({l:n,k,t,u:'Contacto',form:fm,req:fm&&($('#nfr')||{}).checked,opts:o});render();toast(fm?'Campo creado y añadido al formulario de contacto.':'Campo creado. Ya es variable y condición de automatización.')},
+ cftog(t){const f=S.fields[+t.dataset.i];if(!f)return;f[t.dataset.p]=t.checked;if(t.dataset.p==='form'&&!t.checked)f.req=false;render();toast(t.dataset.p==='form'?(t.checked?'El campo aparece en el formulario de contacto':'El campo ya no aparece en el formulario'):(t.checked?'Campo obligatorio':'Campo opcional'))},
  saleprod(t){S.saleF.pi=+t.value;S.saleF.total=null;openSale(S.saleF.cid)},
  salesubmit(){const F=S.saleF,pr=catalogOf(F.cid)[F.pi];if(!pr)return;const tot=saleTotal(),dep=Number(F.dep)||0;
   if(tot<=0){toast('El valor total debe ser mayor que 0');return}
@@ -2096,6 +2099,7 @@ document.addEventListener('click',e=>{
 document.addEventListener('change',e=>{
   const t=e.target;
   if(t.dataset.act==='coltog')ACT.coltog(t);
+  else if(t.dataset.act==='cftog')ACT.cftog(t);
   else if(t.dataset.set){
     const p=t.dataset.set.split('.');let o=S;for(let i=0;i<p.length-1;i++)o=o[p[i]];
     const k=p[p.length-1];o[k]=(t.type==='number'||typeof o[k]==='number'||o[k]===null)?Number(t.value):t.value;
@@ -2548,7 +2552,7 @@ Object.assign(ACT,{
  fabact(t){
   const k=t.dataset.v,cid=(conv()||S.convs[0]).cid;S.sheet=false;
   if(k==='sale'){render();openSale(cid)}else if(k==='apt'){render();openApt(cid)}
-  else if(k==='contact'){go('contacts');toast('Crear contacto: formulario con campos estándar y personalizados')}
+  else if(k==='contact'){go('contacts');openNewContact()}
   else if(k==='opp')go('opps');else if(k==='call')go('phone');
   else if(k==='imp'){go('contacts');ACT.impstart()}
  },
@@ -2659,6 +2663,58 @@ document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.tar
 
 /* ---- 2. editar contacto (popup) ---- */
 const SRCS=['WhatsApp oficial','WhatsApp QR','Messenger','Instagram','Formulario web','Referido'];
+/* --- Nuevo contacto (alta manual) y campos del formulario --- */
+Object.assign(S,{nc:null});
+const INTS=['Curso de Uñas','Repostería','Barbería'];
+const cfOpts=f=>(f.opts||'').split(',').map(x=>x.trim()).filter(Boolean);
+const cfList=()=>S.fields.filter(f=>!f.std&&f.form);
+function cfInput(f,val,pre){
+  const id=pre+f.k,lab=esc(f.l)+(f.req?' <span style="color:var(--crit)">*</span>':''),v=val==null?'':val,t=f.t,o=cfOpts(f);
+  if(t==='Texto largo')return `<label class="sm" style="grid-column:1/-1">${lab}<textarea class="inp" id="${id}" rows="2">${esc(v)}</textarea></label>`;
+  if(t==='Sí/No'||t==='Selección única'||t==='Radio'){const L=t==='Sí/No'?['Sí','No']:o;return `<label class="sm">${lab}<select class="inp" id="${id}"><option value="">—</option>${L.map(x=>`<option ${x===v?'selected':''}>${esc(x)}</option>`).join('')}</select></label>`}
+  if(t==='Selección múltiple'){const sel=Array.isArray(v)?v:[];return `<div class="sm" style="grid-column:1/-1"><div>${lab}</div><div class="row-flex" style="flex-wrap:wrap;gap:6px;margin-top:4px" id="${id}">${(o.length?o:['Opción 1','Opción 2']).map(x=>`<label class="pill" style="cursor:pointer"><input type="checkbox" value="${esc(x)}" ${sel.includes(x)?'checked':''}> ${esc(x)}</label>`).join('')}</div></div>`}
+  if(t==='Checkbox')return `<label class="sm" style="display:flex;gap:8px;align-items:center;margin-top:20px"><input type="checkbox" id="${id}" ${v?'checked':''}> ${lab}</label>`;
+  if(t==='Archivo')return `<label class="sm">${lab}<input class="inp" type="file" id="${id}" disabled title="Simulado en el prototipo"></label>`;
+  const ty={'Número':'number','Moneda':'number','Porcentaje':'number','Fecha':'date','Fecha/hora':'datetime-local','Email':'email','Teléfono':'tel','URL':'url'}[t]||'text';
+  return `<label class="sm">${lab}<input class="inp" type="${ty}" id="${id}" value="${esc(v)}" ${ty==='number'?'step="any"':''}></label>`;
+}
+function cfRead(f,pre){
+  const e=document.getElementById(pre+f.k);if(!e)return '';
+  if(f.t==='Checkbox')return e.checked;
+  if(f.t==='Selección múltiple')return [...e.querySelectorAll('input:checked')].map(x=>x.value);
+  return (e.value||'').trim();
+}
+function ncCapture(){
+  const n=S.nc;if(!n)return;
+  ['name','phone','email','city','interest','source','owner','pipe','stage','tags'].forEach(k=>{const e=document.getElementById('nc_'+k);if(e)n[k]=e.value});
+  const c=document.getElementById('nc_consent');if(c)n.consent=c.checked;
+  cfList().forEach(f=>{n.cf[f.k]=cfRead(f,'ncf_')});
+}
+function openNewContact(){
+  const P=S.pipes[0];
+  S.nc={name:'',phone:'',email:'',city:'',interest:'',source:'Alta manual',owner:isAdm()?'—':ME,pipe:P.n,stage:P.stages[0],tags:'',consent:false,cf:{}};
+  ncDraw();
+}
+function ncDraw(){
+  const n=S.nc,P=pipeByName(n.pipe),adm=isAdm();
+  const inp=(l,k,x,req)=>`<label class="sm">${l}${req?' <span style="color:var(--crit)">*</span>':''}<input class="inp" id="nc_${k}" value="${esc(n[k])}" autocomplete="off" ${x||''}></label>`;
+  const cf=cfList();
+  $('#drawer').innerHTML=mhead('Nuevo contacto','Para clientes que no entraron directamente por un canal')+`<div class="body">
+   <div class="fgrid2">${inp('Nombre completo','name','',1)}${inp('WhatsApp / teléfono','phone','inputmode="tel" placeholder="+593 9X XXX XXXX"',1)}${inp('Correo','email','type="email"')}${inp('Ciudad','city')}
+    <label class="sm">Interés<select class="inp" id="nc_interest"><option value="">—</option>${INTS.map(x=>`<option ${x===n.interest?'selected':''}>${x}</option>`).join('')}</select></label>
+    <label class="sm">Fuente<select class="inp" id="nc_source">${['Alta manual',...SRCS].map(x=>`<option ${x===n.source?'selected':''}>${x}</option>`).join('')}</select></label>
+    <label class="sm">Asignado a<select class="inp" id="nc_owner" ${adm?'':'disabled'}>${[...ADV,'—'].map(a=>`<option value="${a}" ${n.owner===a?'selected':''}>${a==='—'?'Sin asignar':a}</option>`).join('')}</select></label>
+    <label class="sm">Pipeline<select class="inp" id="nc_pipe">${S.pipes.map(p=>`<option ${p.n===n.pipe?'selected':''}>${esc(p.n)}</option>`).join('')}</select></label>
+    <label class="sm">Etapa<select class="inp" id="nc_stage">${P.stages.map(x=>`<option ${x===n.stage?'selected':''}>${esc(x)}</option>`).join('')}</select></label>
+    ${inp('Etiquetas (separadas por coma)','tags','placeholder="curso, caliente"')}</div>
+   <label class="sm" style="display:flex;gap:8px;align-items:center;margin-top:10px"><input type="checkbox" id="nc_consent" ${n.consent?'checked':''}> El contacto aceptó que lo contactemos por WhatsApp o llamada</label>
+   <div class="row-flex" style="margin-top:16px"><div class="up" style="flex:1">Campos personalizados</div>${adm?`<button class="btn sm" data-act="ncfields">Añadir o editar campos</button>`:''}</div>
+   ${cf.length?`<div class="fgrid2" style="margin-top:6px">${cf.map(f=>cfInput(f,n.cf[f.k],'ncf_')).join('')}</div>`:`<div class="muted sm" style="margin-top:6px">${adm?'Aún no hay campos adicionales. Puedes crear los que tu empresa necesite en Configuración › Campos personalizados.':'Tu administrador puede añadir campos adicionales a este formulario.'}</div>`}
+   <div class="row-flex" style="margin-top:16px"><button class="btn pri" data-act="ncsave">Crear contacto</button><button class="btn" data-act="closedrawer">Cancelar</button></div>
+   <div class="muted xs" style="margin-top:8px">El teléfono es único por empresa: si ya existe, no se duplica. La creación queda en la auditoría con el origen «manual».</div></div>`;
+  openD(true);
+  const sel=document.getElementById('nc_pipe');if(sel)sel.onchange=()=>{ncCapture();S.nc.stage=pipeByName(S.nc.pipe).stages[0];ncDraw()};
+}
 function openContactDrawer(id){
   S.ctxOpen=false;const c=cName(id),src=SRCS.includes(c.source)?SRCS:[...SRCS,c.source];
   const f=(l,k,v,x='')=>`<label class="sm">${l}<input class="inp" id="ec_${k}" value="${esc(v)}" autocomplete="off" ${x}></label>`;
@@ -2667,14 +2723,28 @@ function openContactDrawer(id){
     <label class="sm">Fuente<select class="inp" id="ec_source">${opt(src,c.source)}</select></label>
     <label class="sm">Asignado a<select class="inp" id="ec_owner" ${isAdm()?'':'disabled'}>${[...ADV,'—'].map(a=>`<option value="${a}" ${c.owner===a?'selected':''}>${a==='—'?'Sin asignar':a}</option>`).join('')}</select></label>
     <div class="sm"><div class="muted" style="margin-bottom:3px">Etapa</div><div style="padding:6px 0">${esc(c.pipeline)} · <b>${esc(oppStage(id))}</b></div></div></div>
+   ${cfList().length?`<div class="up" style="margin-top:12px">Campos personalizados</div><div class="fgrid2" style="margin-top:6px">${cfList().map(f=>cfInput(f,(c.cf||{})[f.k],'ecf_')).join('')}</div>`:''}
    <div style="margin:12px 0">${c.tags.map(t=>`<span class="pill">${esc(t)}</span>`).join(' ')}</div>
    <div class="row-flex" style="margin-top:6px"><button class="btn pri" data-act="ctsave" data-v="${id}">Guardar cambios</button><button class="btn" data-act="closedrawer">Cancelar</button><span style="flex:1"></span><button class="btn sm" data-act="openopp" data-v="${id}">Ver oportunidad</button><button class="btn sm" data-act="go" data-v="inbox">Conversación</button></div></div>`;
   openD(true);
 }
 Object.assign(ACT,{
+ newcontact(){openNewContact()},
+ ncfields(){closeDrawer();S.setTab='fields';go('settings')},
+ ncsave(){
+  ncCapture();const n=S.nc,nm=n.name.trim(),ph=n.phone.trim(),dg=x=>x.replace(/\D/g,'');
+  if(!nm){toast('El nombre es obligatorio');return}
+  if(dg(ph).length<8){toast('Escribe un teléfono válido (con código de país)');return}
+  const dup=S.contacts.find(c=>dg(c.phone)===dg(ph));if(dup){toast('Ya existe un contacto con ese teléfono: '+dup.name);return}
+  for(const f of cfList()){const v=n.cf[f.k];if(f.req&&(v===''||v==null||(Array.isArray(v)&&!v.length))){toast('Falta el campo obligatorio: '+f.l);return}}
+  const id=Math.max(...S.contacts.map(c=>c.id))+1;
+  S.contacts.push({id,name:nm,phone:ph,email:n.email.trim(),city:n.city.trim(),interest:n.interest,source:n.source,tags:n.tags.split(',').map(x=>x.trim()).filter(Boolean),owner:isAdm()?n.owner:ME,pipeline:n.pipe,stage:n.stage,created:'09/10',sale:null,value:0,cf:n.cf,consent:n.consent});
+  S.stageOf[id]=n.stage;S.nc=null;closeDrawer();render();toast('Contacto creado. Queda en la auditoría con origen «manual».')},
  ctsave(t){const c=cName(+t.dataset.v),g=k=>{const e=$('#ec_'+k);return e?e.value.trim():''};
   if(!g('name')){toast('El nombre no puede quedar vacío');return}
   if(!g('phone')){toast('El teléfono no puede quedar vacío');return}
+  for(const f of cfList()){const v=cfRead(f,'ecf_');if(f.req&&(v===''||(Array.isArray(v)&&!v.length))){toast('Falta el campo obligatorio: '+f.l);return}}
+  c.cf=c.cf||{};cfList().forEach(f=>{c.cf[f.k]=cfRead(f,'ecf_')});
   c.name=g('name');c.phone=g('phone');c.email=g('email');c.city=g('city');c.interest=g('interest');c.source=g('source');
   if(isAdm())c.owner=g('owner')||c.owner;
   closeDrawer();render();toast('Contacto actualizado. Queda en la auditoría con el antes y el después.')}
@@ -2737,7 +2807,7 @@ function vContacts(){
   return `<div class="page-h"><div><h1>Contactos</h1><p>${rows.length} de ${S.contacts.length} · tabla configurable con listas guardadas</p></div>
    <div class="row-flex" style="position:relative"><button class="btn" data-act="colmenu">Columnas · ${cols.length}</button>
     ${S.colMenu?`<div class="card colmenu">${S.cols.map((c,i)=>`<label><input type="checkbox" data-act="coltog" data-i="${i}" ${c.on?'checked':''}> <span class="grow" style="flex:1">${c.l}</span><button class="iconbtn" data-act="colmv" data-i="${i}" data-d="-1" aria-label="Subir">${ico('up')}</button><button class="iconbtn" data-act="colmv" data-i="${i}" data-d="1" aria-label="Bajar">${ico('down')}</button></label>`).join('')}<div class="muted xs" style="padding:6px 4px">También: campos personalizados, métricas y fechas.</div></div>`:''}
-    <button class="btn" data-act="impstart">${ico('upload')}Importar</button><button class="btn" data-act="expstart">${ico('download')}Exportar</button><button class="btn pri" data-act="toast" data-v="Crear contacto: formulario con campos estándar y personalizados">${ico('plus')}Contacto</button></div></div>
+    <button class="btn" data-act="impstart">${ico('upload')}Importar</button><button class="btn" data-act="expstart">${ico('download')}Exportar</button><button class="btn pri" data-act="newcontact">${ico('plus')}Contacto</button></div></div>
    <div class="tabs">${S.views.map((v,i)=>`<button class="${S.curView===i?'on':''}" data-act="view" data-i="${i}">${esc(v.n)}${v.ids?` <span class="muted xs">${v.ids.length}</span>`:''}</button>${S.curView===i&&!v.sys?`<button class="iconbtn lpen" data-act="listedit" data-i="${i}" aria-label="Renombrar o eliminar la lista ${esc(v.n)}" title="Renombrar lista">${ico('pen')}</button>`:''}`).join('')}<button data-act="saveview">+ Nueva lista</button></div>
    <div class="row-flex" style="margin-bottom:12px">
     <input class="inp" id="q" style="max-width:260px" placeholder="Buscar nombre, teléfono, ciudad…" value="${esc(S.q)}" data-bind="q" aria-label="Buscar contactos">
@@ -3627,7 +3697,7 @@ Object.assign(S,{sv:{per:'mes',st:''}});
 const SPER=[['mes','Este mes (octubre)'],['ant','Mes anterior (septiembre)'],['7','Últimos 7 días'],['30','Últimos 30 días'],['all','Todo']];
 function saleAge(d){const [dd,mm]=d.split('/').map(Number);return 5-(mm===10?dd:dd-30)}
 function inPer(d,per){const mm=+d.split('/')[1];return per==='mes'?mm===10:per==='ant'?mm===9:per==='7'?saleAge(d)<=7:per==='30'?saleAge(d)<=30:true}
-const saleSt=s=>s.void?['Anulada','crit']:s.bal>0?['Abono · saldo '+money(s.bal),'warn']:['Cobrada','ok'];
+const saleSt=s=>s.void?['Anulada','crit']:(s.bal||0)>0?['Con saldo','warn']:['Cobrada','ok'];
 const planTxt=()=>{const p=S.plan;return p.type==='pct'?`${p.pct}% sobre el total de cada venta`:p.type==='fix'?`${money(p.fix)} fijos por venta`:p.type==='hyb'?`${money(p.fix)} fijos + ${p.pct}% del total`:`${p.pct}% sobre el total; ${p.pct2}% al cumplir la meta de ${money(p.goal)}`};
 function mySalesRows(){
   const a=ADV.indexOf(ME);let rows=S.sales.filter(s=>s.a===a&&inPer(s.d,S.sv.per));
@@ -3639,34 +3709,50 @@ function mySalesRows(){
 }
 function vSales(){
   const {rows,tot}=mySalesRows();const act=rows.filter(r=>!r.void);
-  const cm=act.reduce((x,r)=>x+r.cm,0),cmP=act.filter(r=>r.st==='pending').reduce((x,r)=>x+r.cm,0);
+  const cm=act.reduce((x,r)=>x+r.cm,0),balP=act.reduce((x,r)=>x+(r.bal||0),0);
   const all=S.sales.filter(s=>s.a===ADV.indexOf(ME)&&!s.void);
-  return `<div class="page-h"><div><h1>Mis ventas</h1><p>Solo ves tus propias ventas y comisiones. Son de solo lectura.</p></div>
+  return `<div class="page-h"><div><h1>Mis ventas</h1><p>Solo ves tus propias ventas y comisiones. Puedes registrar abonos; lo demás es de solo lectura.</p></div>
    <div class="row-flex"><select class="inp" style="width:auto" data-set="sv.per" aria-label="Periodo">${SPER.map(x=>`<option value="${x[0]}" ${S.sv.per===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select>
    <select class="inp" style="width:auto" data-set="sv.st" aria-label="Estado de la venta"><option value="">Todas las ventas</option>${[['full','Cobradas'],['part','Con saldo'],['void','Anuladas']].map(x=>`<option value="${x[0]}" ${S.sv.st===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></div></div>
   <div class="grid g4"><div class="card pad kpi"><div class="up">Vendido en el período</div><div class="v">${money(tot)}</div><div class="d muted">${SPER.find(x=>x[0]===S.sv.per)[1]}</div></div>
    <div class="card pad kpi"><div class="up">Número de ventas</div><div class="v">${act.length}</div><div class="d muted">${rows.length-act.length?`${rows.length-act.length} anulada${rows.length-act.length>1?'s':''} no cuentan`:'sin anuladas'}</div></div>
    <div class="card pad kpi"><div class="up">Comisión generada</div><div class="v">${money(cm.toFixed(0))}</div><div class="d muted">sobre el total de cada venta</div></div>
-   <div class="card pad kpi"><div class="up">Comisión por cobrar</div><div class="v">${money(cmP.toFixed(0))}</div><div class="d muted">${act.filter(r=>r.st==='pending').length} venta${act.filter(r=>r.st==='pending').length===1?'':'s'} con saldo</div></div></div>
+   <div class="card pad kpi"><div class="up">Saldo por cobrar</div><div class="v">${money(balP)}</div><div class="d muted">${act.filter(r=>(r.bal||0)>0).length} venta${act.filter(r=>(r.bal||0)>0).length===1?'':'s'} con saldo</div></div></div>
   <div class="muted sm" style="margin:8px 2px 0">Acumulado histórico: <b style="color:var(--fg)">${money(all.reduce((x,s)=>x+s.v,0))}</b> en ${all.length} ventas.</div>
   <div class="grid g2" style="margin-top:14px">
    <div class="card pad"><h2 style="display:flex;gap:8px;align-items:center">Plan de comisión <span class="pill acc">${ico('lock').replace('<svg','<svg style="width:12px;height:12px"')}Solo lectura</span></h2>
     <div class="kv" style="margin-top:8px"><span>Tipo de plan</span><b class="mono">${{pct:'Porcentaje',fix:'Monto fijo',hyb:'Híbrido',goal:'Por meta'}[S.plan.type]}</b></div>
-    <div class="kv"><span>Cálculo</span><b>${planTxt()}</b></div><div class="kv"><span>Forma de pago de la comisión</span><b>Se paga al cobrar la venta</b></div>
-    <div class="muted sm" style="margin-top:8px">El plan, la fórmula y las reglas de pago los define el administrador de tu empresa. Tú no puedes modificarlos ni cambiar el valor, el método de pago o la comisión de una venta.</div></div>
-   <div class="card pad"><h2>Qué puedes hacer</h2><div style="margin-top:8px">${[['Registrar una venta','Al finalizar un chat o desde la oportunidad',1],['Ver tus ventas y comisiones','Con filtros por período y estado',1],['Corregir una venta ya registrada','Pídelo al administrador: queda en auditoría',0],['Cambiar el plan de comisión','Solo el administrador del cliente',0]].map(r=>`<div class="kv"><span><b style="color:var(--fg)">${r[0]}</b><div class="xs">${r[1]}</div></span><span class="pill ${r[2]?'ok':''}">${r[2]?'Permitido':'Bloqueado'}</span></div>`).join('')}</div></div></div>
-  <div class="card tbl-wrap" style="margin-top:14px"><table><thead><tr><th>Fecha</th><th>Cliente / contacto</th><th>Producto</th><th>Valor</th><th>Estado de la venta</th><th>Comisión</th><th>Pago de comisión</th><th></th></tr></thead><tbody>
-   ${rows.map((r,i)=>{const st=saleSt(r);return `<tr><td>${r.d}</td><td><b>${esc(r.cl)}</b></td><td>${r.p}</td><td class="mono">${money(r.v)}</td><td><span class="pill ${st[1]}">${st[0]}</span></td><td class="mono">${r.void?'—':money(r.cm.toFixed(0))}</td><td>${r.void?'<span class="muted">—</span>':`<span class="pill ${r.st==='paid'?'ok':'warn'}">${r.st==='paid'?'Pagada':'Pendiente'}</span>`}</td><td><button class="btn sm" data-act="saledet" data-v="${r._i}">Ver detalle</button></td></tr>`}).join('')||'<tr><td colspan="8" class="muted" style="padding:22px;text-align:center">No hay ventas con estos filtros.</td></tr>'}</tbody></table></div>`;
+    <div class="kv"><span>Cálculo</span><b>${planTxt()}</b></div>
+    <div class="muted sm" style="margin-top:8px">El plan y la fórmula de comisión los define el administrador de tu empresa. Tú no puedes modificarlos ni cambiar el valor, el producto o la comisión de una venta. Sí puedes registrar los abonos que paga tu cliente.</div></div>
+   <div class="card pad"><h2>Qué puedes hacer</h2><div style="margin-top:8px">${[['Registrar una venta','Al finalizar un chat o desde la oportunidad',1],['Ver tus ventas y comisiones','Con filtros por período y estado',1],['Registrar abonos de tus ventas','Cuando tu cliente paga, actualiza abono y saldo',1],['Corregir valor, producto o comisión','Pídelo al administrador: queda en auditoría',0],['Cambiar el plan de comisión','Solo el administrador del cliente',0]].map(r=>`<div class="kv"><span><b style="color:var(--fg)">${r[0]}</b><div class="xs">${r[1]}</div></span><span class="pill ${r[2]?'ok':''}">${r[2]?'Permitido':'Bloqueado'}</span></div>`).join('')}</div></div></div>
+  <div class="card tbl-wrap" style="margin-top:14px"><table><thead><tr><th>Fecha</th><th>Cliente / contacto</th><th>Producto</th><th>Valor</th><th>Abono</th><th>Saldo</th><th>Comisión</th><th>Estado</th><th></th></tr></thead><tbody>
+   ${rows.map((r,i)=>{const st=saleSt(r),bal=r.bal||0,dep=r.dep!=null?r.dep:r.v-bal;return `<tr><td>${r.d}</td><td><b>${esc(r.cl)}</b></td><td>${r.p}</td><td class="mono">${money(r.v)}</td><td class="mono">${r.void?'—':money(dep)}</td><td class="mono" style="${bal>0?'color:var(--warn);font-weight:600':''}">${r.void?'—':money(bal)}</td><td class="mono">${r.void?'—':money(r.cm.toFixed(0))}</td><td><span class="pill ${st[1]}">${st[0]}</span></td><td style="white-space:nowrap">${!r.void&&bal>0?`<button class="btn sm pri" data-act="salepay" data-v="${r._i}">Registrar abono</button> `:''}<button class="btn sm" data-act="saledet" data-v="${r._i}">Ver detalle</button></td></tr>`}).join('')||'<tr><td colspan="9" class="muted" style="padding:22px;text-align:center">No hay ventas con estos filtros.</td></tr>'}</tbody></table></div>`;
 }
 function openSaleDet(i){
   const s=S.sales[i];if(!s)return;const tot=S.sales.filter(x=>x.a===s.a&&inPer(x.d,S.sv.per)&&!x.void).reduce((a,x)=>a+x.v,0),cm=s.void?0:commOf(s,tot),st=saleSt(s);
   const L=(l,v)=>`<div class="kv" style="align-items:center"><span>${l}</span><span style="display:flex;gap:6px;align-items:center"><b>${v}</b>${ico('lock').replace('<svg','<svg style="width:13px;height:13px;color:var(--muted)"')}</span></div>`;
   $('#drawer').innerHTML=mhead('Detalle de la venta',esc(s.cl))+`<div class="body"><div class="grid" style="gap:12px">
-   <div class="pill acc" style="justify-self:start">${ico('lock').replace('<svg','<svg style="width:12px;height:12px"')}Solo lectura para el asesor</div>
-   <div class="card pad">${L('Producto',s.p)}${L('Valor total',money(s.v))}${L('Abono',money(s.dep))}${L('Saldo',money(s.bal))}${L('Método de pago',s.pm)}${L('Fecha',s.d)}<div class="kv"><span>Estado</span><span class="pill ${st[1]}">${st[0]}</span></div></div>
+   <div class="pill acc" style="justify-self:start">${ico('lock').replace('<svg','<svg style="width:12px;height:12px"')}Valor, producto y comisión: solo lectura</div>
+   <div class="card pad">${L('Producto',s.p)}${L('Valor total',money(s.v))}${L('Abonado',money(s.dep!=null?s.dep:s.v-(s.bal||0)))}${L('Saldo',money(s.bal||0))}${L('Método de pago',s.pm)}${L('Fecha',s.d)}<div class="kv"><span>Estado</span><span class="pill ${st[1]}">${st[0]}</span></div></div>
    <div class="card pad">${L('Comisión',s.void?'—':money(cm.toFixed(0)))}${L('Cálculo',planTxt())}<div class="muted sm" style="margin-top:6px">${s.void?'La venta fue anulada: no genera comisión.':'La comisión se calcula sobre el total de la venta, aunque quede saldo pendiente.'}</div></div>
+   ${(s.pays&&s.pays.length)?`<div class="card pad"><h3>Abonos registrados</h3>${s.pays.map(x=>`<div class="kv"><span>${x.d} · ${esc(x.m)}${x.n?' · '+esc(x.n):''}</span><b class="mono">${money(x.a)}</b></div>`).join('')}<div class="muted xs" style="margin-top:6px">Los abonos no se editan ni se borran. Si te equivocaste, pide una corrección.</div></div>`:''}
+   ${!s.void&&(s.bal||0)>0?`<button class="btn pri" data-act="salepay" data-v="${i}">Registrar abono</button>`:''}
    <button class="btn" data-act="saleask" data-v="${i}">${ico('note').replace('<svg','<svg style="width:15px;height:15px"')}Pedir una corrección al administrador</button>
-   <div class="muted xs">No puedes editar ni anular ventas. La solicitud le llega al administrador y queda en la auditoría.</div></div></div>`;
+   <div class="muted xs">No puedes editar el valor ni anular ventas. Sí puedes registrar abonos. Toda solicitud le llega al administrador y queda en la auditoría.</div></div></div>`;
+  openD('modal');
+}
+
+function openSalePay(i){
+  const s=S.sales[i];if(!s||s.void)return;const bal=s.bal||0;if(bal<=0){toast('Esta venta ya está cobrada');return}
+  S.pay={i,a:bal,m:s.pm||'Transferencia',n:''};
+  $('#drawer').innerHTML=mhead('Registrar abono',esc(s.cl)+' · '+esc(s.p))+`<div class="body"><div class="grid" style="gap:12px">
+   <div class="card pad"><div class="kv"><span>Valor de la venta</span><b class="mono">${money(s.v)}</b></div><div class="kv"><span>Ya abonado</span><b class="mono">${money(s.dep!=null?s.dep:s.v-bal)}</b></div><div class="kv"><span>Saldo pendiente</span><b class="mono" style="color:var(--warn)">${money(bal)}</b></div></div>
+   <label class="sm">Monto que pagó el cliente<input class="inp mono" id="payamt" type="number" min="1" max="${bal}" step="0.01" value="${bal}"></label>
+   <div class="row-flex" style="gap:6px"><button class="btn sm" data-act="payfull" data-v="${bal}">Pagó todo el saldo</button></div>
+   <label class="sm">Método de pago<select class="inp" id="paymeth">${['Efectivo','Transferencia','Tarjeta','Depósito','Otro'].map(x=>`<option ${x===S.pay.m?'selected':''}>${x}</option>`).join('')}</select></label>
+   <label class="sm">Nota (opcional)<input class="inp" id="paynote" placeholder="Ej. Comprobante #1234"></label>
+   <button class="btn pri" data-act="payok" data-v="${i}">Guardar abono</button>
+   <div class="muted xs">El abono queda registrado con tu nombre y la fecha, y no se puede editar ni borrar. El valor de la venta y tu comisión no cambian por este registro. Si el saldo queda en $0, la venta pasa a «Cobrada» (simulado).</div></div></div>`;
   openD('modal');
 }
 
@@ -3910,6 +3996,11 @@ Object.assign(ACT,{
  advsel(t){setMe(t.value);S.fl.adv='';render();toast('Ahora ves el prototipo como el asesor '+ME)},
  viewas(t){const n=t.dataset.v||ADV[S.adv];if(!ADVISORS.includes(n)){toast('Ese usuario no es un asesor');return}setMe(n);S.role='advisor';S.org=1;S.fl.adv='';S.view='sales';S.sheet=false;S.openOpp=null;closeDrawer();render();toast('Ves el prototipo como '+n+' (asesor). Cambia el perfil abajo a la izquierda para volver.')},
  saledet(t){openSaleDet(+t.dataset.v)},
+ salepay(t){openSalePay(+t.dataset.v)},
+ payfull(t){const e=$('#payamt');if(e)e.value=t.dataset.v},
+ payok(t){const s=S.sales[+t.dataset.v],a=Number(($('#payamt')||{}).value),bal=s.bal||0;if(!(a>0)){toast('Escribe el monto del abono');return}if(a>bal){toast('El abono no puede superar el saldo ('+money(bal)+')');return}
+  s.dep=(s.dep!=null?s.dep:s.v-bal)+a;s.bal=Math.round((bal-a)*100)/100;if(s.bal===0)s.st='paid';(s.pays=s.pays||[]).push({a,m:($('#paymeth')||{}).value||'—',n:(($('#paynote')||{}).value||'').trim(),d:'09/10'});
+  closeDrawer();render();toast(s.bal===0?'Abono registrado: venta cobrada por completo (simulado)':'Abono registrado. Saldo: '+money(s.bal)+' (simulado)')},
  saleask(t){closeDrawer();toast('Solicitud enviada al administrador (simulado). Queda en la auditoría.')}
 });
 (function(){const o=renderNav;renderNav=function(){o();

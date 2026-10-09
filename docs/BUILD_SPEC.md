@@ -111,10 +111,10 @@ Módulos del backend (carpeta `apps/api/src/modules/*`), con **fronteras estrict
 | `super_admin` | Plataforma: agencias, carteras, planes, proveedores, créditos/márgenes, pruebas, accesos. Puede entrar a cualquier organización |
 | `agency` | Organización tipo `agency`; ve «Mis clientes» y entra **solo** a los clientes de su cartera (`parent_agency_id = su org`), con nivel por cliente (sin acceso / solo lectura / asesor / administrador) |
 | `client_admin` | Administra su organización |
-| `advisor` | Ve sus chats y los que le compartieron; no ve filtro por asesor ni conversión por asesor. **[PROPUESTA v9]** Crea ventas pero no las modifica; ve «Mis ventas» y su comisión en solo lectura; campañas y grupos solo si el Cliente se los activa |
+| `advisor` | Ve sus chats y los que le compartieron; no ve filtro por asesor ni conversión por asesor. **[ADR-32 aprobado + enmienda 1]** Crea ventas y registra abonos de las suyas, pero no modifica valor/producto/comisión; ve «Mis ventas» y su comisión en solo lectura; campañas y grupos solo si el Cliente se los activa |
 
 ### 5.2 Catálogo de permisos (nombres canónicos, extensible)
-`inbox.view_all` · `inbox.reply` · `inbox.transfer` · `inbox.share` · `contacts.read|write|import|export` · `opportunities.read|write` · `pipelines.manage` · `sales.create|cancel` · **[PROPUESTA v9]** `sales.read_own` · `campaigns.send` (alcance: contactos propios/compartidos; tope diario por asesor) · `groups.view|send|manage` (`send` y `manage` requieren `view`) · `appointments.manage` · `queues.manage` · `tags.manage` · `agents.manage|test` · `knowledge.manage` · `channels.manage` · `integrations.manage` · `forms.manage` · `automations.manage` · `commissions.view|manage` · `analytics.view` · `export` · `team.manage` · `billing.manage` · `platform.providers.manage` · `platform.agencies.manage` · `platform.trials.manage` · `platform.access_log.read`
+`inbox.view_all` · `inbox.reply` · `inbox.transfer` · `inbox.share` · `contacts.read|write|import|export` · `opportunities.read|write` · `pipelines.manage` · `sales.create|cancel` · **[v9, ADR-32 aprobado]** `sales.read_own` · `sales.register_payment` (alcance propio, enmienda 1) · `custom_fields.manage` · `campaigns.send` (alcance: contactos propios/compartidos; tope diario por asesor) · `groups.view|send|manage` (`send` y `manage` requieren `view`) · `appointments.manage` · `queues.manage` · `tags.manage` · `agents.manage|test` · `knowledge.manage` · `channels.manage` · `integrations.manage` · `forms.manage` · `automations.manage` · `commissions.view|manage` · `analytics.view` · `export` · `team.manage` · `billing.manage` · `platform.providers.manage` · `platform.agencies.manage` · `platform.trials.manage` · `platform.access_log.read`
 
 Los permisos se evalúan en **un guard central**; la interfaz solo oculta, nunca protege. `commissions.view` admite alcance propio (el asesor solo ve la suya). La matriz rol→permiso sigue **PROVISIONAL** (ADR-29); los permisos [PROPUESTA v9] se añaden al catálogo por migración solo tras aprobar ADR-32.
 
@@ -138,7 +138,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 
 ### 6.3 CRM
 - `contacts` (nombre, teléfonos normalizados E.164, email, `owner_id`, `source`, `consent`, …) · `contact_phones` · `companies` · `contact_companies` · `contact_lists(name)` · `contact_list_members`
-- `custom_field_definitions(entity ∈ contact|opportunity|company, type, options, var_key, validation)` · `custom_field_values(entity, entity_id, definition_id, value_text|number|bool|date|json)` con índices por tipo · `saved_views(columns, order, filters, owner, shared)`
+- `custom_field_definitions(entity ∈ contact|opportunity|company, type, options, var_key, validation, show_in_form, required, position)` · `custom_field_values(entity, entity_id, definition_id, value_text|number|bool|date|json)` con índices por tipo · `saved_views(columns, order, filters, owner, shared)`
 - `pipelines(name, position, appointment_stage_id)` · `pipeline_stages(pipeline_id, name, position, kind ∈ open|won|lost, is_hidden, color)` · `opportunities(pipeline_id, stage_id, contact_id, amount, owner_id, lost_reason)` · `opportunity_field_overrides` · `stage_history(opportunity_id, from_stage_id, to_stage_id, user_id, origin)`
 - `tags(is_system, system_key ∈ lead|appointment|sale, color)` · `taggings` · `notes` · `tasks` · `activities` · `assignments`
 
@@ -153,7 +153,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 ### 6.5 Colas, citas, ventas
 - `queues(name, color, status, default_pipeline_id, schedule, messages)` · `queue_members(queue_id, user_id, active, weight)` · `queue_distribution_rules` · `queue_distribution_state` · `queue_products(queue_id, name, kind, price, active)`
 - `appointments` · `appointment_reminders(offset_minutes, channel, status, scheduled_at, sent_at)` · `appointment_reminder_limits` (config por organización: 3 / 5 para QR, Messenger, Instagram)
-- `sales(amount, currency, queue_id, product_id, conversation_id, status, created_by)` · `sale_payments(sale_id, amount, method, paid_at)` · `sale_status_history` (nunca se borra) · saldo = `amount − Σ sale_payments` · **[PROPUESTA v9]** `sale_change_requests(sale_id, requested_by, reason, status, resolved_by)`: el asesor pide corrección; solo quien tenga permiso de gestión de ventas la resuelve
+- `sales(amount, currency, queue_id, product_id, conversation_id, status, created_by)` · `sale_payments(sale_id, amount, method, paid_at)` · `sale_status_history` (nunca se borra) · saldo = `amount − Σ sale_payments` · **[ADR-32 enmienda 1]** `sale_payments` append-only (el asesor solo inserta, con `created_by`); sin «pago de comisión» por ahora (`commission_payouts` diferido) · `sale_change_requests(sale_id, requested_by, reason, status, resolved_by)`: el asesor pide corrección; solo quien tenga permiso de gestión de ventas la resuelve
 - `commission_plans` (parámetros versionados en JSONB, `reversal_rule` desactivada por defecto) · `commission_plan_assignments` · `commissions` · `commission_splits` · `commission_payouts` · `goals`
 
 ### 6.6 Atribución y eventos
@@ -247,7 +247,8 @@ Cada regla enlaza su ADR; los criterios de aceptación completos están en la se
 ---
 
 ### 10.1 Reglas derivadas del prototipo v9 **[PROPUESTA v9 — requieren ADR-32]**
-- **Ventas del asesor:** el asesor crea ventas (`sales.create`) pero no modifica valor, método de pago, comisión ni plan; la corrección se pide con `sale_change_requests`. Ninguna API de edición de venta acepta al rol `advisor`.
+- **Ventas del asesor (ADR-32 + enmienda 1):** el asesor crea ventas (`sales.create`) y **registra abonos** de las suyas (`sales.register_payment`: fila append-only; abono > saldo se rechaza; saldo y «cobrada» los calcula el servidor; queda en `audit_logs`). No modifica valor, producto, comisión ni plan; la corrección se pide con `sale_change_requests`. Ninguna API de edición de venta acepta al rol `advisor`. No existe «pago de comisión» visible por ahora.
+- **Alta manual de contacto:** «+ Contacto» con campos estándar y personalizados; teléfono único por empresa (E.164); origen `manual` en auditoría; el asesor solo crea contactos asignados a sí mismo. El administrador gestiona los campos extra (tipo, opciones, obligatorio, visible en el formulario) con `custom_fields.manage`.
 - **Acceso a contactos del asesor:** «Mis contactos» (propios) + «Compartidos»; extiende ADR-14 (hoy definido para conversaciones) a contactos; se aplica en servidor y RLS.
 - **Campañas (V2):** el tipo de conexión decide el modo: oficial ⇒ plantilla aprobada; QR ⇒ texto libre con límites bajos. Límite efectivo = mínimo(tope del asesor, tope de la conexión). Se respeta «no contactar».
 - **Grupos (V1, solo QR):** sin proveedor QR no hay módulo de grupos; el envío programado y recurrente corre en el worker (idempotente); `@todos` y adjuntos según capacidad del proveedor.
@@ -376,7 +377,7 @@ Tras el PoC Retell vs. Vapi.
 | 15 | ¿La API oficial de Meta permite alguna gestión de grupos? (sin verificar) | ABIERTO | Gestor de grupos |
 | 16 | Grupos: ¿asignación por asesor o de toda la organización? (hoy: toda la organización) | ABIERTO | Gestor de grupos |
 | 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | ABIERTO (V2) | Campañas masivas |
-| 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | PROPUESTA (ADR-32) | Contactos/M3 |
+| 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | APROBADO (ADR-32, 2026-10-09) | Contactos/M3 |
 | 19 | Spike de WhatsApp QR (Evolution) sobre Railway con chip de prueba | APROBADO (ADR-31); en curso | EvolutionProvider/M9 |
 
 ---

@@ -490,7 +490,7 @@ Nueva carpeta `spikes/whatsapp-qr/`. El orden de hitos M5/M9 **no cambia** hasta
 ---
 
 ## ADR-32 — Grupos, campañas y ventas del asesor (derivado del prototipo v9)
-**Estado: PROPUESTO (pendiente de aprobación).** Recoge lo que el prototipo v9 exige y que el Build Spec no cubría; aplicado en el Build Spec como **[PROPUESTA v9]**.
+**Estado: APROBADO el 2026-10-09 por el responsable de producto, con la ENMIENDA 1 (abajo).** Recoge lo que el prototipo v9 exige y que el Build Spec no cubría; aplicado en el Build Spec como **[PROPUESTA v9]**.
 
 ### Decisión propuesta
 1. **Ventas:** el asesor crea pero no modifica; correcciones por `sale_change_requests`. (MVP)
@@ -510,4 +510,12 @@ Reflejar en el Build Spec lo validado en el prototipo sin adelantar fases ni asu
 
 ### Impacto
 Build Spec §1, §5, §6, §9, §10.1, §15, §16. Ninguna migración ni código hasta aprobar este ADR. Cambia la matriz de permisos provisional de ADR-29 (por migración, cuando se apruebe).
+
+### Enmienda 1 al ADR-32 (2026-10-09, instrucción explícita del responsable de producto; prototipo v10)
+1. **Abonos del asesor:** el asesor **sí puede registrar abonos** sobre sus propias ventas (permiso propuesto `sales.register_payment`, alcance propio). Cada abono es una fila `sale_payments` **append-only** (monto, método, nota, fecha, `created_by`); el asesor no edita ni borra abonos. El valor, el producto, la comisión y el plan siguen siendo solo lectura; las correcciones van por `sale_change_requests`. El saldo (`valor − Σ abonos`) y el estado «cobrada» se calculan en el servidor; un abono mayor al saldo se rechaza. Cada abono queda en `audit_logs`. Esto matiza el punto 1 original («crea pero no modifica»).
+2. **Pago de comisión: diferido.** Las empresas pagan comisiones con frecuencias distintas (diaria, mensual…), así que **no se muestra ni se registra** «pago de comisión» (ni columna, ni estado Pendiente/Pagada, ni «comisión por cobrar»). `commission_payouts` queda fuera del alcance visible hasta que se pida. El asesor ve Valor, Abono, Saldo y Comisión generada.
+3. **Alta manual de contactos:** el botón «+ Contacto» crea un contacto con todos los campos estándar y los personalizados; el teléfono es único por empresa (E.164); el origen queda «manual» en la auditoría. El asesor crea contactos solo asignados a sí mismo.
+4. **Campos personalizados del formulario de contacto:** el administrador del cliente define campos extra (tipo, opciones, obligatorio, mostrar en el formulario) en Configuración › Campos personalizados (`custom_field_definitions`, ya previstos en §6.3: se añaden `show_in_form`, `required`, `position`). El asesor los ve y los llena, no los administra (permiso propuesto `custom_fields.manage` para el administrador).
+
+**Impacto:** Build Spec §5.2, §6.3, §6.5, §10.1; prototipo v10. Sin migraciones ni código hasta M3/ventas.
 
