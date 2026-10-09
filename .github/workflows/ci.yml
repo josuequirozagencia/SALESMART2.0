@@ -34,6 +34,8 @@ jobs:
         run: pnpm audit --audit-level moderate
       - run: pnpm typecheck
       - run: pnpm lint
+      - name: Compilar (shared debe estar compilado: drizzle-kit lo carga en la prueba de migraciones)
+        run: pnpm build
       - name: Tests (aislamiento, HTTP, identidad, PgBouncer)
         run: pnpm test
       - name: e2e del artefacto compilado
