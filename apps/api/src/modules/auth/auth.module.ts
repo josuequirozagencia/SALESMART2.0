@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuditModule } from '../audit';
+import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import type { AppConfig } from '../../config';
 import type { AppLogger } from '../../logger';
@@ -21,7 +22,7 @@ import { SignupLimiter } from './signup/signup-limiter';
 import { SignupService } from './signup/signup.service';
 
 @Module({
-  imports: [AuditModule, PlatformModule],
+  imports: [AuditModule, PlatformModule, OrganizationsModule],
   controllers: [AuthController, SignupController, PasswordController],
   providers: [
     AuthService,

@@ -22,7 +22,7 @@ Flujo completo de ADR-23 en E2E · segunda solicitud de extensión rechazada · 
 | M1.2 | Registro y verificación: `POST /auth/signup|verify|resend`; `email_verifications`, `signup_attempts`, `disposable_domains`; `MailProvider`/`CaptchaVerifier` + fakes; creación de organización `client` + membresía `client_admin` | **HECHA y APROBADA (2026-10-04)** — ver `M1_PROGRESO.md` y ADR-27 |
 | M1.3 | Olvido/reset de contraseña (`password_resets`), cambio de contraseña (sube `session_version`), mensajes que no revelan existencia | **APROBADA** — ver `M1_PROGRESO.md` y ADR-28 |
 | M1.4 | RBAC: `roles/permissions/role_permissions`, guard de permisos central, `@RequirePermission`, matriz de roles (Build Spec §5); auditoría (`audit_log` tenant + `platform_audit`) | **APROBADA 2026-10-05** (matriz PROVISIONAL) — ver `M1_PROGRESO.md` y ADR-29 |
-| M1.5 | Pruebas: `trials`, `trial_config`, extensión única con aprobación (transición por CHECK), vencimiento (job), pantalla/estado «vencida»; endpoints `/trials/me/extension`, `/platform/trials*` | pendiente; requiere decidir cola (R3) |
+| M1.5 | Pruebas: `trials`, `trial_config`, extensión única con aprobación (transición por CHECK + trigger), vencimiento (job con `SKIP LOCKED`), estado «vencida» (cuenta en pausa); endpoints `/trials/me`, `/trials/me/extension`, `/platform/trials*` | **HECHA (2026-10-09), pendiente de aprobación** — ver `M1_PROGRESO.md` y ADR-33. R3 resuelto: PostgreSQL + `SKIP LOCKED` |
 | M1.6 | Pantallas de acceso (React) del prototipo + E2E del flujo ADR-23 | pendiente |
 
 ## 4. Decisiones propuestas (requieren tu revisión) — ver ADR-26
@@ -39,6 +39,6 @@ Longitud mínima por defecto 8, configurable solo en el rango `8 <= SIGNUP_PASSW
 ## 5. Riesgos
 - **R1** Verificación por petición con una consulta a BD (rol `app_identity`): coste aceptable al inicio; si aparece en profiling, caché corta con invalidación por `session_version`.
 - **R2** `auth_throttle` puede crecer: limpieza periódica (job de M1.5).
-- **R3** Jobs de vencimiento de prueba y purga requieren cola/cron; BullMQ+Redis está en el stack pero sin infraestructura. Decidir al llegar a M1.5 (alternativa: `pg_cron`/worker con `SELECT … FOR UPDATE SKIP LOCKED`).
+- **R3** (RESUELTO 2026-10-09) Jobs de vencimiento de prueba y purga: se usa PostgreSQL con `SELECT … FOR UPDATE SKIP LOCKED` en proceso, sin Redis (ADR-33). La limpieza de tablas de identidad y la purga quedan pendientes.
 - **R4** El resolvedor consulta identidad en cada petición: cualquier error de lógica allí es un fallo de aislamiento → tests A↔B obligatorios por endpoint (ya generados por el registro).
 - **R5** Cambio de contexto de agencia/super_admin (M2) amplía el principal (`actingAs`): el resolvedor ya devuelve la forma completa para no rediseñarlo.

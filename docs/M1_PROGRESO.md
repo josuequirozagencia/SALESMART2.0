@@ -79,3 +79,29 @@ Parámetros de M1.3 sin cambios: token de un solo uso, TTL 30 min, 3/h por corre
 **Resultados:** `pnpm check` **430 tests en verde**, typecheck y lint limpios · `pnpm e2e` 7 en verde · `pnpm audit` sin vulnerabilidades.
 **Ajustes durante la implementación:** `FORCE RLS` de `audit_logs` movido a la migración 0009 (el escáner lo exige en el mismo archivo; migración aún no publicada); `PlatformAuditService.record` pasó a `async`.
 **Pendiente / riesgos:** matriz PROVISIONAL (confirmar); limpieza de tablas de identidad antes de producción; `trust proxy`; correo/CAPTCHA/URL del frontend sin decidir; sin consulta de auditoría en la UI.
+
+
+## M1.5 — Pruebas de 7 días, extensión única, vencimiento y cuenta en pausa (2026-10-09) · pendiente de aprobación
+Decisión de Josué (2026-10-09): las tareas periódicas usan **PostgreSQL con `FOR UPDATE SKIP LOCKED`**, sin Redis/BullMQ por ahora. Decisiones y límites en **ADR-33 (PROPUESTO)**.
+
+**Qué hay**
+- **Datos** (migraciones `0011_trials`, `0012_trials_grants_seed`; tablas de identidad, `app_identity`): `trials` (una por organización; la extensión es parte de la fila), `trial_config` (una fila sembrada: 7 / 3 / 30 días y 1000 créditos de bienvenida inertes, todo PROVISIONAL). `CHECK trials_ext_consistent` + trigger `trials_ext_transition` (solo `none → pending → approved|denied`, campos inmutables, decisión no editable). Sin `DELETE` para nadie; `trial_config` solo `SELECT`.
+- **Alta**: la prueba nace en la misma transacción que la organización, **al verificar el correo**, con la duración de `trial_config`.
+- **Endpoints**: `GET /v1/trials/me` (`@SelfService`: estado de la prueba de la organización del principal), `POST /v1/trials/me/extension` (202; `billing.manage`; única), `GET /v1/platform/trials` (filtros `extension`, `state`; cursor; `pending_extensions` para la insignia), `POST /v1/platform/trials/:id/approve|deny` (`platform.trials.manage`). Aprobar antes de vencer suma al fin vigente; ya vencida cuenta desde la aprobación y reactiva la cuenta.
+- **Cuenta en pausa**: el resolvedor marca `Principal.paused` (por la hora, no por el estado) y el guard responde `403 TRIAL_EXPIRED` en las rutas de tenant, salvo `@AllowWhenPaused` y `@SelfService`.
+- **Tareas periódicas** (`src/jobs`): `JobRunner` + `trial-expiry` (lotes de 100 con `SKIP LOCKED`). `JOBS_ENABLED`, `JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS` (PROVISIONAL).
+- **Auditoría**: solicitud → `audit_logs` de la organización; decisiones → `platform_audit` (sin el motivo). Se escribe tras el commit (ADR-33 #6).
+
+**Pruebas nuevas (51):** `test/trials/trials.test.ts` (33: alta al verificar con duración de `trial_config`; `/trials/me` solo la propia, sin ids ajenos, 404 para Súper Admin/sin prueba; pausa por la hora y por estado, rutas abiertas, reapertura con el mismo token; solicitud: permisos, validación, **una sola** en pending/approved/denied, **6 simultáneas → 1×202 + 5×409**, A↔B; consola: 401/403, filtros, cursor sin repetidos ni huecos, aprobar antes/después de vencer, días desde `trial_config`, denegar, 404/409/400, **aprobar y denegar a la vez → una gana**; auditoría; CHECK y trigger de la BD; privilegios de los 3 roles; job: idempotente, lotes, **SKIP LOCKED** (no espera una fila bloqueada), tres ejecuciones simultáneas sin duplicar ni perder, carrera con una aprobación), `trial-domain.test.ts` (6), `job-runner.test.ts` (6: apagado, periódico, sin solapamiento, fallo → reintento, runOnce, cierre ordenado), `config.test.ts` (+6). Registro de endpoints, catálogo de fixtures y superficie del barrel de `db/` actualizados.
+**Mutaciones (revertidas):** guard sin la comprobación de pausa → 3 fallos; sin `SKIP LOCKED` → 2 fallos; aprobar sin reactivar → 2 fallos.
+
+### Resultados y entorno de verificación (léelo)
+Typecheck y lint (`--max-warnings 0`) limpios; `drizzle-kit generate` → «No schema changes»; `db:audit` (cobertura de políticas) limpio con `trials` y `trial_config`.
+Suite completa: **469 tests en verde, 4 omitidos y 8 fallos que NO vienen de este cambio** sino del entorno donde la corrí (Windows, **Node 24 y PostgreSQL 13** efímero, no Node 22 / PostgreSQL 16 de la CI): `security_invoker` no existe en PG 13 (1); en PG 13 `PUBLIC` puede crear tablas en `public` (5: `roles` ×2, `identity` ×1 y la tabla `evil` que esa prueba deja y contamina a `policy-coverage` ×2 — corriendo `policy-coverage` sola, esas dos pasan); y `spawnSync('pnpm')` no resuelve `pnpm.cmd` en Windows (2: `migrations`, `type-enforcement`; `drizzle-kit generate` lo comprobé a mano). No pude correr `pnpm e2e` ni el vitest oficial (el binario nativo de SWC se niega a materializar su caché en este entorno; usé una configuración temporal de vitest con el compilador de TypeScript, que no se versiona). **Falta una pasada verde en tu CI (PG 16, Node 22).**
+
+### Pendiente / decisiones tuyas
+1. **Aprobar ADR-33** (y la corrección al Build Spec §4.2: `trial_config` es de identidad, no de plataforma).
+2. **Limpieza de las tablas de identidad** (requisito previo a producción): elegir mecanismo (a/b/c del ADR-33; recomiendo la función `SECURITY DEFINER` mínima).
+3. **Purga a los 30 días** y su aviso por correo: se construye cuando haya datos de negocio y plantilla de correo.
+4. Aviso al Súper Admin por correo y en tiempo real, edición de `trial_config` por endpoint: diferidos (sin proveedor de correo ni WebSocket).
+5. Las matrices de permisos siguen PROVISIONALES: la extensión usa `billing.manage` (solo `client_admin`); si prefieres un permiso propio (`trial.request_extension`), es una migración.

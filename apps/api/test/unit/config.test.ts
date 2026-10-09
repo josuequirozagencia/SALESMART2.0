@@ -42,6 +42,20 @@ describe('configuración validada', () => {
     expect(loadConfig(prod).signup).toMatchObject({ mailProvider: 'none', captchaProvider: 'none' });
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
+  describe('tareas periódicas (M1.5)', () => {
+    it('por defecto: apagadas en test, encendidas en desarrollo y producción; intervalo PROVISIONAL de 60 s', () => {
+      expect(loadConfig(good).jobs).toEqual({ enabled: false, trialExpiryIntervalMs: 60_000 });
+      expect(loadConfig({ ...good, NODE_ENV: 'development' }).jobs.enabled).toBe(true);
+    });
+    it('JOBS_ENABLED explícito manda sobre el valor por defecto', () => {
+      expect(loadConfig({ ...good, JOBS_ENABLED: 'true' }).jobs.enabled).toBe(true);
+      expect(loadConfig({ ...good, NODE_ENV: 'development', JOBS_ENABLED: 'false' }).jobs.enabled).toBe(false);
+    });
+    it.each([['JOBS_ENABLED', 'si'], ['JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS', '1'], ['JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS', '99999'], ['JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS', 'abc']])('rechaza %s=%s', (k, v) => {
+      expect(() => loadConfig({ ...good, [k]: v })).toThrow(new RegExp(k));
+    });
+  });
+
   describe('longitud mínima de contraseña: 8 <= SIGNUP_PASSWORD_MIN_LENGTH <= 128', () => {
     it('por defecto es 8', () => {
       expect(loadConfig(good).signup.passwordMinLength).toBe(8);

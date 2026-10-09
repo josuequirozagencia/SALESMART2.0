@@ -38,7 +38,7 @@ Fecha: 2026-10-03 · Estado: **aprobado (2026-10-03)**; los valores marcados PRO
 | Frontend | React + Vite + TypeScript, TanStack Query/Table, **una** librería UI | **[PROPUESTA]** Tailwind + shadcn/ui; tokens de color y tema como en el prototipo (violeta/verde/rojo, claro/oscuro) |
 | BD | PostgreSQL 16 + RLS + pgvector | |
 | ORM | Prisma o Drizzle | **[ABIERTO]** decidir con *spike* de 1 día: soporte de `SET LOCAL app.org_id` dentro de la transacción de cada petición. Si no es limpio → Drizzle/Kysely con SQL tipado |
-| Colas | BullMQ + Redis | Todo job lleva `organization_id` |
+| Colas | BullMQ + Redis | Todo job lleva `organization_id`. **M1.5 (ADR-33):** las tareas periódicas de plataforma (vencimiento de pruebas) corren en proceso sobre PostgreSQL con `SKIP LOCKED`, sin Redis; BullMQ se incorpora cuando haya trabajo por ítem con reintentos/diferido (M6) |
 | Tiempo real | WebSocket (Socket.IO) con salas `org:{id}` y `user:{id}` | |
 | Auth | `LocalAuthProvider` (Argon2id) detrás de `AuthProvider` | ADR-01 |
 | Archivos | S3-compatible tras `StorageAdapter`, prefijo `org/{id}/`, URLs firmadas | |
@@ -93,7 +93,7 @@ Módulos del backend (carpeta `apps/api/src/modules/*`), con **fronteras estrict
 **Identidad (ADR-25; rol `app_identity`):** `users` · `organizations` · `organization_members`; las futuras `auth_identities` · `sessions` · `refresh_tokens` · `agency_grants` entrarán en esta categoría (se añaden al catálogo del auditor al crearlas). Su aislamiento entre organizaciones se garantiza con lógica de aplicación + tests A↔B; `app_rw` y `app_platform` no tienen ningún privilegio sobre ellas.
 
 **De plataforma (rol `app_platform`):**
-`provider_credentials` (de plataforma) · `ai_pricing` · `ai_org_pricing` (solo `super_admin`) · `plans` · `trial_config` · `access_sessions` (solo `super_admin`) · `platform_audit`. Se protegen por **rol de BD** + guard de aplicación, y tienen test que verifica que el rol `app_rw` no puede leerlas.
+`provider_credentials` (de plataforma) · `ai_pricing` · `ai_org_pricing` (solo `super_admin`) · `plans` · `access_sessions` (solo `super_admin`) · `platform_audit`. **`trials` y `trial_config` son de identidad (ADR-33, corrige este listado):** el ciclo de vida de la prueba corre con `app_identity`. Se protegen por **rol de BD** + guard de aplicación, y tienen test que verifica que el rol `app_rw` no puede leerlas.
 
 ### 4.3 Tests de aislamiento (puerta de CI)
 - Un test generado **por endpoint**: con dos organizaciones A y B, el usuario de A pide recursos de B por id, por filtro y por búsqueda → 404/vacío.
@@ -132,7 +132,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 
 ### 6.2 Pruebas y planes (ADR-23)
 - `trials(organization_id, owner_user_id, started_at, ends_at, ext_status ∈ none|pending|approved|denied, ext_reason, ext_decided_by, ext_decided_at, ext_days_granted)` — **una extensión por cuenta**: restricción única en la lógica y `CHECK` sobre transiciones
-- `trial_config` *(plataforma)*: `days=7`, `ext_days=3`, `retention_days=30`, créditos de bienvenida
+- `trial_config` *(identidad, ADR-33; una sola fila)*: `days=7`, `extension_days=3`, `retention_days=30`, `welcome_credits=1000` — todo PROVISIONAL, solo en esta tabla
 - `signup_attempts(email_hash, ip_hash, at, outcome)` (anti-abuso) · `disposable_domains`
 - `plans`, `subscriptions(organization_id, plan_id, status, current_period_end)`, `invoices` (V1)
 
@@ -196,7 +196,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - Tiempo real: eventos `conversation.updated`, `message.created`, `opportunity.moved`, `call.state`, `trial.extension_requested` (a salas por organización/usuario; el aviso de extensión va a la sala `platform`).
 
 Endpoints de plataforma y de auth mínimos del MVP:
-`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `POST /context/switch` · `POST /trials/me/extension` · `GET|POST /platform/trials`, `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
+`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET /platform/trials` (M1.5; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
 
 ---
 
@@ -379,6 +379,7 @@ Tras el PoC Retell vs. Vapi.
 | 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | ABIERTO (V2) | Campañas masivas |
 | 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | APROBADO (ADR-32, 2026-10-09) | Contactos/M3 |
 | 19 | Spike de WhatsApp QR (Evolution) sobre Railway con chip de prueba | APROBADO (ADR-31); en curso | EvolutionProvider/M9 |
+| 20 | Limpieza de tablas de identidad sin dar `DELETE` a `app_identity` (función `SECURITY DEFINER` mínima / rol de mantenimiento / `DELETE` acotado; ver ADR-33) y purga de datos a los 30 días de prueba vencida | ABIERTO | Producción (limpieza); M3+ (purga) |
 
 ---
 

@@ -1,9 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
-import { Database, type IdentityTx, organizationMembers, organizations, sessions, users } from '../../db';
+import { Database, type IdentityTx, organizationMembers, organizations, sessions, trials, users } from '../../db';
 import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
+import { isTrialExpired } from '../organizations';
 import { newToken, parseToken, sameHash } from './tokens';
 
 export interface AuthContext {
@@ -12,6 +13,8 @@ export interface AuthContext {
   organizationId: string;
   orgKind: 'platform' | 'agency' | 'client';
   role: string;
+  /** Prueba gratuita vencida (por la hora, no por el estado materializado): la cuenta está en pausa (ADR-23 #5). */
+  trialExpired: boolean;
 }
 export interface IssuedTokens {
   accessToken: string;
@@ -66,7 +69,7 @@ export class SessionService {
     const row = await this.load(t.sessionId);
     if (!row || !sameHash(row.s.accessHash, t.hash)) return null;
     if (row.s.accessExpiresAt <= now) return null;
-    return this.validState(row, now) ? this.ctx(row) : null;
+    return this.validState(row, now) ? this.ctx(row, now) : null;
   }
 
   async refresh(rawRefresh: string | undefined, now = new Date()): Promise<RefreshResult> {
@@ -94,7 +97,7 @@ export class SessionService {
         .update(sessions)
         .set({ accessHash: access.hash, accessExpiresAt, refreshHash: refresh.hash, refreshExpiresAt, lastRefreshedAt: now })
         .where(eq(sessions.id, s.id));
-      return { ok: true, tokens: { accessToken: access.token, refreshToken: refresh.token, accessExpiresAt, refreshExpiresAt }, ctx: this.ctx(row) };
+      return { ok: true, tokens: { accessToken: access.token, refreshToken: refresh.token, accessExpiresAt, refreshExpiresAt }, ctx: this.ctx(row, now) };
     });
   }
 
@@ -125,6 +128,10 @@ export class SessionService {
         orgDeletedAt: organizations.deletedAt,
         orgKind: organizations.kind,
         role: organizationMembers.role,
+        // Subconsultas correlacionadas (una sola ida a la BD): drizzle tipa como never el leftJoin sobre IdentityTx.
+        // Organizaciones sin prueba (plataforma, agencia, clientes de pago futuros) → null → nunca están en pausa.
+        trialStatus: sql<string | null>`(SELECT ${trials.status} FROM ${trials} WHERE ${trials.organizationId} = ${sessions.activeOrgId})`,
+        trialEndsAt: sql<Date | null>`(SELECT ${trials.endsAt} FROM ${trials} WHERE ${trials.organizationId} = ${sessions.activeOrgId})`.mapWith((v: string | Date | null) => (v === null ? null : new Date(v))),
       })
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
@@ -151,7 +158,8 @@ export class SessionService {
     );
   }
 
-  private ctx(r: NonNullable<Awaited<ReturnType<SessionService['load']>>>): AuthContext {
-    return { sessionId: r.s.id, userId: r.s.userId, organizationId: r.s.activeOrgId, orgKind: r.orgKind as AuthContext['orgKind'], role: r.role };
+  private ctx(r: NonNullable<Awaited<ReturnType<SessionService['load']>>>, now: Date): AuthContext {
+    const trialExpired = r.trialStatus !== null && r.trialEndsAt !== null && isTrialExpired({ status: r.trialStatus, endsAt: r.trialEndsAt }, now);
+    return { sessionId: r.s.id, userId: r.s.userId, organizationId: r.s.activeOrgId, orgKind: r.orgKind as AuthContext['orgKind'], role: r.role, trialExpired };
   }
 }

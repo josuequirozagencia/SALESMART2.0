@@ -15,6 +15,8 @@ export type Principal =
       /** Permisos del rol cargados de BD por el resolvedor (RBAC). Sin este campo el principal no tiene ninguno. */
       permissions?: ReadonlySet<PermissionKey>;
       sessionId?: string;
+      /** true = cuenta en pausa por prueba vencida (ADR-23 #5): el guard solo deja pasar rutas @AllowWhenPaused y @SelfService. */
+      paused?: boolean;
       /** Soporte: super admin / agencia actuando dentro de la organización (queda auditado). */
       actingAs?: 'super_admin' | 'agency';
       actingOrgId?: string;

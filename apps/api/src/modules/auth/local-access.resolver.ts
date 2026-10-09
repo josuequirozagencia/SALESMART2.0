@@ -27,6 +27,6 @@ export class LocalAccessResolver extends AccessResolver {
     if (ctx.orgKind === 'platform') {
       return ctx.role === 'super_admin' ? { kind: 'platform', userId: ctx.userId, role: ctx.role, permissions, sessionId: ctx.sessionId } : null;
     }
-    return { kind: 'tenant', userId: ctx.userId, organizationId: ctx.organizationId, role: ctx.role, permissions, sessionId: ctx.sessionId };
+    return { kind: 'tenant', userId: ctx.userId, organizationId: ctx.organizationId, role: ctx.role, permissions, sessionId: ctx.sessionId, ...(ctx.trialExpired ? { paused: true } : {}) };
   }
 }

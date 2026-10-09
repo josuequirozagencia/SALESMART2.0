@@ -28,4 +28,10 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/auth/forgot', kind: 'public' },
   { route: 'POST /v1/auth/reset', kind: 'public' },
   { route: 'POST /v1/auth/password', kind: 'self', test: '../../auth/password.test.ts' },
+  // Pruebas gratuitas (M1.5). Pruebas: test/trials/trials.test.ts (A↔B, una sola extensión, concurrencia, pausa, job SKIP LOCKED)
+  { route: 'GET /v1/trials/me', kind: 'self', test: '../../trials/trials.test.ts' },
+  { route: 'POST /v1/trials/me/extension', kind: 'tenant', isolationTest: '../../trials/trials.test.ts' },
+  { route: 'GET /v1/platform/trials', kind: 'platform', test: '../../trials/trials.test.ts' },
+  { route: 'POST /v1/platform/trials/:id/approve', kind: 'platform', test: '../../trials/trials.test.ts' },
+  { route: 'POST /v1/platform/trials/:id/deny', kind: 'platform', test: '../../trials/trials.test.ts' },
 ];

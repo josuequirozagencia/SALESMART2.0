@@ -7,6 +7,7 @@ import { AppError, InvalidVerificationCodeError, ServiceUnavailableError, TooMan
 import type { AppLogger } from '../../../logger';
 import type { PasswordHasher } from '../../../security';
 import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
+import { TrialsService } from '../../organizations';
 import { PASSWORD_HASHER } from '../auth.tokens';
 import { CAPTCHA_VERIFIER, MAIL_PROVIDER, type CaptchaVerifier, type MailProvider } from './ports';
 import { requireCaptcha } from './captcha-check';
@@ -38,6 +39,7 @@ export class SignupService {
     @Inject(MAIL_PROVIDER) private readonly mail: MailProvider,
     @Inject(CAPTCHA_VERIFIER) private readonly captcha: CaptchaVerifier,
     @Inject(SignupLimiter) private readonly limiter: SignupLimiter,
+    @Inject(TrialsService) private readonly trials: TrialsService,
   ) {}
 
   async signup(input: SignupInput): Promise<void> {
@@ -132,6 +134,8 @@ export class SignupService {
       if (consumed.length === 0) return false;
       const [org] = await tx.insert(organizations).values({ kind: 'client', name: row.orgName, timezone: row.tz }).returning({ id: organizations.id });
       await tx.insert(organizationMembers).values({ userId: row.userId, organizationId: org!.id, role: 'client_admin', grantedBy: null });
+      // La prueba de 7 días empieza AQUÍ, al verificar el correo (ADR-23 #2), en la misma transacción que la organización
+      await this.trials.startFor(tx, { organizationId: org!.id, ownerUserId: row.userId }, now);
       await tx.update(users).set({ status: 'active', emailVerifiedAt: now, updatedAt: now }).where(eq(users.id, row.userId));
       return true;
     });

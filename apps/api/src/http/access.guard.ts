@@ -5,7 +5,7 @@ import { ForbiddenError, UnauthorizedError } from '../errors';
 import { AccessResolver, type Principal } from './access-resolver';
 import { PERMISSION_KEY } from '../rbac';
 import type { PermissionKey } from '../rbac';
-import { ACCESS_KEY, type AccessKind } from './public.decorator';
+import { ACCESS_KEY, ALLOW_PAUSED_KEY, type AccessKind } from './public.decorator';
 
 export type AuthedRequest = Request & { requestId?: string; principal?: Principal };
 
@@ -34,6 +34,10 @@ export class AccessGuard implements CanActivate {
     // RBAC central: TODOS los permisos exigidos deben estar en los que el resolvedor cargó para el rol verificado
     const required = this.reflector.getAllAndOverride<readonly PermissionKey[] | undefined>(PERMISSION_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (required && required.length > 0 && !required.every((k) => principal.permissions?.has(k))) throw new ForbiddenError();
+    // Prueba vencida: la cuenta queda en pausa. Las rutas «self» (cambiar contraseña, ver el estado) y las @AllowWhenPaused siguen abiertas
+    if (kind === 'tenant' && principal.kind === 'tenant' && principal.paused && !this.reflector.getAllAndOverride<boolean | undefined>(ALLOW_PAUSED_KEY, [ctx.getHandler(), ctx.getClass()])) {
+      throw new ForbiddenError('TRIAL_EXPIRED', 'Tu período de prueba terminó. Elige un plan o solicita una extensión');
+    }
     req.principal = principal;
     return true;
   }

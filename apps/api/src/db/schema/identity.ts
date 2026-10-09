@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { identityTable } from './helpers';
 
@@ -220,4 +220,72 @@ export const rolePermissions = identityTable(
     permissionKey: text('permission_key').notNull().references(() => permissions.key),
   },
   (t) => [uniqueIndex('role_permissions_uq').on(t.roleKey, t.permissionKey)],
+);
+
+/**
+ * Parámetros de la prueba gratuita (ADR-23, ADR-33). UNA sola fila (CHECK de singleton) sembrada por la migración con
+ * valores PROVISIONALES; nunca viven en código. Es tabla de identidad (no de plataforma) porque el ciclo de vida de la
+ * prueba se ejecuta con `app_identity` (alta al verificar el correo, evaluación en cada petición, vencimiento): ver ADR-33.
+ * app_identity solo la LEE; se cambia por migración o con el rol propietario.
+ */
+export const trialConfig = identityTable(
+  'trial_config',
+  {
+    id: boolean('id').primaryKey().default(true),
+    days: integer('days').notNull(),
+    extensionDays: integer('extension_days').notNull(),
+    retentionDays: integer('retention_days').notNull(),
+    /** Créditos IA de bienvenida (ADR-23 #7). Inerte hasta M8 (libro de créditos); se guarda aquí para no hardcodearlo. */
+    welcomeCredits: integer('welcome_credits').notNull(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('trial_config_singleton', sql`${t.id} = true`),
+    check('trial_config_ranges', sql`${t.days} BETWEEN 1 AND 90 AND ${t.extensionDays} BETWEEN 1 AND 30 AND ${t.retentionDays} BETWEEN 1 AND 365 AND ${t.welcomeCredits} >= 0`),
+  ],
+);
+
+/**
+ * Prueba gratuita de una organización cliente (M1.5, ADR-23/ADR-33). Una fila por organización; la extensión es UNA
+ * sola por cuenta: la modela la propia fila (`ext_status`), el CHECK exige estados coherentes y el trigger
+ * `trials_ext_transition` impide cualquier transición distinta de none → pending → approved|denied.
+ * `ends_at` es el fin vigente. El acceso se decide por la HORA (ends_at), no por `status`: `status` solo lo materializa
+ * el job de vencimiento, así que un job caído nunca deja una cuenta vencida con acceso.
+ */
+export const trials = identityTable(
+  'trials',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id).unique('trials_org_uq'),
+    ownerUserId: uuid('owner_user_id').notNull().references(() => users.id),
+    startedAt: ts('started_at').notNull(),
+    endsAt: ts('ends_at').notNull(),
+    status: text('status').notNull().default('active'),
+    expiredAt: ts('expired_at'),
+    extStatus: text('ext_status').notNull().default('none'),
+    extReason: text('ext_reason'),
+    extRequestedAt: ts('ext_requested_at'),
+    extDecidedBy: uuid('ext_decided_by').references(() => users.id),
+    extDecidedAt: ts('ext_decided_at'),
+    extDaysGranted: integer('ext_days_granted'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('trials_status_valid', sql`${t.status} IN ('active', 'expired')`),
+    check('trials_expired_consistent', sql`(${t.status} = 'expired') = (${t.expiredAt} IS NOT NULL)`),
+    check('trials_period_valid', sql`${t.endsAt} > ${t.startedAt}`),
+    check('trials_ext_status_valid', sql`${t.extStatus} IN ('none', 'pending', 'approved', 'denied')`),
+    check('trials_ext_reason_len', sql`${t.extReason} IS NULL OR length(btrim(${t.extReason})) BETWEEN 10 AND 500`),
+    // Estados coherentes de la extensión (una sola por cuenta)
+    check(
+      'trials_ext_consistent',
+      sql`(${t.extStatus} = 'none' AND ${t.extReason} IS NULL AND ${t.extRequestedAt} IS NULL AND ${t.extDecidedBy} IS NULL AND ${t.extDecidedAt} IS NULL AND ${t.extDaysGranted} IS NULL)
+        OR (${t.extStatus} = 'pending' AND ${t.extReason} IS NOT NULL AND ${t.extRequestedAt} IS NOT NULL AND ${t.extDecidedBy} IS NULL AND ${t.extDecidedAt} IS NULL AND ${t.extDaysGranted} IS NULL)
+        OR (${t.extStatus} = 'approved' AND ${t.extReason} IS NOT NULL AND ${t.extRequestedAt} IS NOT NULL AND ${t.extDecidedBy} IS NOT NULL AND ${t.extDecidedAt} IS NOT NULL AND ${t.extDaysGranted} > 0)
+        OR (${t.extStatus} = 'denied' AND ${t.extReason} IS NOT NULL AND ${t.extRequestedAt} IS NOT NULL AND ${t.extDecidedBy} IS NOT NULL AND ${t.extDecidedAt} IS NOT NULL AND ${t.extDaysGranted} IS NULL)`,
+    ),
+    index('trials_ends_active_idx').on(t.endsAt).where(sql`${t.status} = 'active'`),
+    index('trials_ext_pending_idx').on(t.extRequestedAt).where(sql`${t.extStatus} = 'pending'`),
+  ],
 );
