@@ -6,9 +6,11 @@ import { Logo } from '../../ui/AuthShell';
 import { Button } from '../../ui/controls';
 import { usePendingBadge } from './usePlatformTrials';
 
+const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`;
+
 /**
- * Marco de la consola de plataforma (Súper Admin). Hoy solo existe la pestaña «Pruebas»; el resto (empresas y planes,
- * agencias, carteras, accesos, proveedores) llega con M2 y se suma a esta navegación.
+ * Marco de la consola de plataforma (Súper Admin). Pestañas: Empresas, Planes y Pruebas; el resto (agencias, carteras,
+ * accesos, proveedores) llega con M2 y se suma a esta navegación.
  */
 export function PlatformShell({ me, onLogout, children }: { me: Me; onLogout: () => void; children: ReactNode }) {
   const pending = usePendingBadge();
@@ -28,7 +30,9 @@ export function PlatformShell({ me, onLogout, children }: { me: Me; onLogout: ()
       <div className="mx-auto grid max-w-[1100px] gap-4 p-5">
         <h1 className="text-[22px] font-bold">Consola de plataforma</h1>
         <nav aria-label="Secciones de la consola" className="flex gap-1 border-b border-line">
-          <NavLink to="/platform/trials" className={({ isActive }) => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`}>
+          <NavLink to="/platform/companies" className={tab}>Empresas</NavLink>
+          <NavLink to="/platform/plans" className={tab}>Planes</NavLink>
+          <NavLink to="/platform/trials" className={tab}>
             Pruebas
             {n > 0 ? <span aria-label={`${n} solicitudes pendientes`} className="grid min-w-5 place-items-center rounded-full bg-crit px-1.5 text-[11px] font-bold leading-5 text-white">{n}</span> : null}
           </NavLink>

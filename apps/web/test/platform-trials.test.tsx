@@ -13,6 +13,7 @@ const item = (over: Partial<PlatformTrialItem> & { id: string }, ext: Partial<Pl
   owner_email: `${over.id}@empresa.test`,
   owner_name: `Titular ${over.id}`,
   owner_phone: '+593984217730',
+  plan_name: null,
   status: 'active',
   started_at: new Date(Date.now() - 2 * DAY).toISOString(),
   ends_at: new Date(Date.now() + 5 * DAY).toISOString(),
@@ -28,11 +29,12 @@ const APPROVED = item({ id: 'a1', organization_name: 'Café Origen' }, { status:
 const DENIED = item({ id: 'd1', organization_name: 'Barbería Norte' }, { status: 'denied', reason: 'Sin motivo claro' });
 
 /** Súper Admin con sesión recuperable + servidor de la consola. */
-const root = (trials: Handler): Record<string, Handler> => ({ ...authed(ME_ROOT, null), 'GET /platform/trials': trials });
+const EMPTY_COMPANIES = { items: [], next_cursor: null };
+const root = (trials: Handler): Record<string, Handler> => ({ ...authed(ME_ROOT, null), 'GET /platform/trials': trials, 'GET /platform/companies': () => ({ body: EMPTY_COMPANIES }), 'GET /platform/plans': () => ({ body: { items: [], feature_catalog: [] } }) });
 
 describe('Consola de plataforma · pestaña Pruebas', () => {
-  it('el Súper Admin que inicia sesión llega a la consola, con la pestaña «Pruebas» y la insignia de pendientes', async () => {
-    const api = mockApi({ ...anon(), 'POST /auth/login': () => loginReply(ME_ROOT), 'GET /platform/trials': () => ({ body: list([PENDING]) }) });
+  it('el Súper Admin que inicia sesión llega a la consola (pestaña Empresas) con la insignia de pendientes junto a «Pruebas»', async () => {
+    const api = mockApi({ ...anon(), 'POST /auth/login': () => loginReply(ME_ROOT), 'GET /platform/trials': () => ({ body: list([PENDING]) }), 'GET /platform/companies': () => ({ body: EMPTY_COMPANIES }) });
     renderApp('/login');
     const u = userEvent.setup();
     await u.type(await screen.findByLabelText('Correo'), 'root@plataforma.test');
@@ -40,7 +42,8 @@ describe('Consola de plataforma · pestaña Pruebas', () => {
     await u.click(screen.getByRole('button', { name: 'Entrar' }));
     expect(await screen.findByRole('heading', { name: 'Consola de plataforma' })).toBeInTheDocument();
     const nav = screen.getByRole('navigation', { name: 'Secciones de la consola' });
-    expect(within(nav).getByRole('link', { name: /Pruebas/ })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Empresas' })).toHaveAttribute('aria-current', 'page');
+    expect(within(nav).getByRole('link', { name: 'Planes' })).toHaveAttribute('href', '/platform/plans');
     expect(await within(nav).findByLabelText('3 solicitudes pendientes')).toHaveTextContent('3');
     expect(api.count('GET /trials/me')).toBe(0); // el Súper Admin no tiene prueba
   });
@@ -222,10 +225,12 @@ describe('Acceso a la consola', () => {
     expect(api.calls.filter((c) => c.path.startsWith('/platform'))).toHaveLength(0);
   });
 
-  it('el Súper Admin que abre la raíz es llevado a la consola', async () => {
+  it('el Súper Admin que abre la raíz es llevado a la consola (Empresas) y puede ir a Pruebas', async () => {
     mockApi(root(() => ({ body: list([PENDING]) })));
     renderApp('/');
     expect(await screen.findByRole('heading', { name: 'Consola de plataforma' })).toBeInTheDocument();
+    expect(await screen.findByText('Todavía no hay empresas.')).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('link', { name: /Pruebas/ }));
     expect(await screen.findByText('Estudio Luna')).toBeInTheDocument();
   });
 });

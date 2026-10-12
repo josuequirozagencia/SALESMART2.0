@@ -35,4 +35,12 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/platform/trials', kind: 'platform', test: '../../trials/trials.test.ts' },
   { route: 'POST /v1/platform/trials/:id/approve', kind: 'platform', test: '../../trials/trials.test.ts' },
   { route: 'POST /v1/platform/trials/:id/deny', kind: 'platform', test: '../../trials/trials.test.ts' },
+  // Empresas y planes (M2.2). Pruebas: test/platform/plans-companies.test.ts
+  { route: 'GET /v1/platform/plans', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'POST /v1/platform/plans', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'PATCH /v1/platform/plans/:id', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'POST /v1/platform/plans/:id/archive', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'POST /v1/platform/plans/:id/restore', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'GET /v1/platform/companies', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'PUT /v1/platform/companies/:id/plan', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
 ];

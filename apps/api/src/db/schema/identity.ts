@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { boolean, check, index, integer, jsonb, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { identityTable } from './helpers';
 
@@ -41,6 +41,37 @@ export const users = identityTable(
   ],
 );
 
+/**
+ * Planes de la plataforma (M2.2, ADR-38): catálogo que administra el Súper Admin y que asigna a cada organización
+ * (`organizations.plan_id`). Tabla de IDENTIDAD, no de plataforma como decía el Build Spec §4.2: asignarlo, listarlo junto a
+ * las empresas y (más adelante) cargar sus módulos al autenticar ocurre con `app_identity` (mismo criterio que ADR-33).
+ * Sin precios: «los precios se definen aparte» (prototipo) hasta decidir la pasarela. Un plan en uso no se archiva ni se borra.
+ */
+export const plans = identityTable(
+  'plans',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    name: text('name').notNull(),
+    description: text('description'),
+    /** Límites; NULL = ilimitado. Los aplican los módulos cuando existan (usuarios, conexiones, colas). */
+    maxUsers: integer('max_users'),
+    maxConnections: integer('max_connections'),
+    maxQueues: integer('max_queues'),
+    /** Módulos que el plan enciende (clave → booleano). Las claves válidas las fija el servidor (plan-features.ts). */
+    features: jsonb('features').notNull().default(sql`'{}'::jsonb`),
+    archivedAt: ts('archived_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('plans_name_len', sql`length(btrim(${t.name})) BETWEEN 2 AND 60`),
+    check('plans_description_len', sql`${t.description} IS NULL OR length(${t.description}) <= 200`),
+    check('plans_limits_range', sql`(${t.maxUsers} IS NULL OR ${t.maxUsers} BETWEEN 1 AND 100000) AND (${t.maxConnections} IS NULL OR ${t.maxConnections} BETWEEN 1 AND 100000) AND (${t.maxQueues} IS NULL OR ${t.maxQueues} BETWEEN 1 AND 100000)`),
+    check('plans_features_object', sql`jsonb_typeof(${t.features}) = 'object'`),
+    uniqueIndex('plans_name_uq').on(sql`lower(btrim(${t.name}))`),
+  ],
+);
+
 export const organizations = identityTable(
   'organizations',
   {
@@ -50,7 +81,7 @@ export const organizations = identityTable(
     createdByAgencyId: uuid('created_by_agency_id').references((): AnyPgColumn => organizations.id),
     name: text('name').notNull(),
     /** Plan y estados de la prueba se definen con ADR-23 en M1; aquí solo se reservan las columnas. */
-    planId: uuid('plan_id'),
+    planId: uuid('plan_id').references(() => plans.id),
     status: text('status').notNull().default('active'),
     timezone: text('timezone').notNull(),
     createdAt: ts('created_at').notNull().defaultNow(),
@@ -62,6 +93,7 @@ export const organizations = identityTable(
     check('organizations_platform_standalone', sql`${t.kind} <> 'platform' OR (${t.parentAgencyId} IS NULL AND ${t.createdByAgencyId} IS NULL)`),
     check('organizations_parent_only_client', sql`${t.parentAgencyId} IS NULL OR ${t.kind} = 'client'`),
     check('organizations_name_not_blank', sql`length(btrim(${t.name})) > 0`),
+    check('organizations_platform_no_plan', sql`${t.kind} <> 'platform' OR ${t.planId} IS NULL`),
     // Existe como máximo UNA organización de plataforma
     uniqueIndex('organizations_single_platform').on(t.kind).where(sql`${t.kind} = 'platform'`),
     index('organizations_parent_agency_idx').on(t.parentAgencyId),

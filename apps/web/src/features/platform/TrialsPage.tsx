@@ -4,6 +4,7 @@ import { shortDate, timeLeft } from '../../lib/format';
 import type { PlatformTrialItem } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Pill } from '../../ui/Pill';
 import { DecisionDialog, type Decision } from './DecisionDialog';
 import { usePlatformTrials, type TrialFilter } from './usePlatformTrials';
 
@@ -15,12 +16,8 @@ const EMPTY: Record<TrialFilter, string> = {
   expired: 'No hay pruebas vencidas.',
 };
 
-function Pill({ kind, children }: { kind: 'ok' | 'warn' | 'crit' | 'muted'; children: React.ReactNode }) {
-  const cls = { ok: 'bg-ok-soft text-ok', warn: 'bg-warn-soft text-warn', crit: 'bg-crit-soft text-crit', muted: 'bg-surface2 text-muted' }[kind];
-  return <span className={`inline-block rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold ${cls}`}>{children}</span>;
-}
-
 function StatusPill({ t, now }: { t: PlatformTrialItem; now: number }) {
+  if (t.plan_name) return <Pill kind="accent">Con plan: {t.plan_name}</Pill>; // ya no está en prueba (ADR-38)
   const left = new Date(t.ends_at).getTime() - now;
   if (t.status === 'expired' || left <= 0) return <Pill kind="crit">Vencida</Pill>;
   return <Pill kind={left < 2 * 86_400_000 ? 'warn' : 'ok'}>{timeLeft(left)}</Pill>;

@@ -86,7 +86,7 @@ async function toApiError(res: Response): Promise<ApiError> {
 }
 
 export interface RequestOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH';
   body?: unknown;
   /** false = ruta pública (login, registro…): no adjunta el access token ni intenta refrescar. */
   auth?: boolean;

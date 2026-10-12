@@ -127,6 +127,7 @@ export class SessionService {
         orgStatus: organizations.status,
         orgDeletedAt: organizations.deletedAt,
         orgKind: organizations.kind,
+        orgPlanId: organizations.planId,
         role: organizationMembers.role,
         // Subconsultas correlacionadas (una sola ida a la BD): drizzle tipa como never el leftJoin sobre IdentityTx.
         // Organizaciones sin prueba (plataforma, agencia, clientes de pago futuros) → null → nunca están en pausa.
@@ -159,7 +160,8 @@ export class SessionService {
   }
 
   private ctx(r: NonNullable<Awaited<ReturnType<SessionService['load']>>>, now: Date): AuthContext {
-    const trialExpired = r.trialStatus !== null && r.trialEndsAt !== null && isTrialExpired({ status: r.trialStatus, endsAt: r.trialEndsAt }, now);
+    // Con un plan asignado la empresa ya no depende de la prueba (ADR-38): no se pausa aunque su prueba haya vencido
+    const trialExpired = r.orgPlanId === null && r.trialStatus !== null && r.trialEndsAt !== null && isTrialExpired({ status: r.trialStatus, endsAt: r.trialEndsAt }, now);
     return { sessionId: r.s.id, userId: r.s.userId, organizationId: r.s.activeOrgId, orgKind: r.orgKind as AuthContext['orgKind'], role: r.role, trialExpired };
   }
 }

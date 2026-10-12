@@ -1,4 +1,6 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { CompaniesPage } from './features/platform/CompaniesPage';
+import { PlansPage } from './features/platform/PlansPage';
 import { PlatformShell } from './features/platform/PlatformShell';
 import { TrialsPage } from './features/platform/TrialsPage';
 import { TrialExpiredScreen } from './features/trial/TrialExpiredScreen';
@@ -41,7 +43,7 @@ function AppGate() {
   const trial = useTrial(clientOrg);
   if (state.status === 'loading') return <Splash />;
   if (state.status === 'anon') return <Navigate to="/login" replace />;
-  if (state.me.role === 'super_admin') return <Navigate to="/platform/trials" replace />;
+  if (state.me.role === 'super_admin') return <Navigate to="/platform/companies" replace />;
   if (clientOrg && trial.isPending) return <Splash />;
   const t = trial.data ?? null;
   const out = () => void logout();
@@ -59,6 +61,8 @@ export function App() {
       {/* El enlace del correo se abre con o sin sesión: restablecer no depende de estar autenticado */}
       <Route path="/reset-password" element={<ResetScreen />} />
       <Route path="/" element={<AppGate />} />
+      <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
+      <Route path="/platform/plans" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><PlansPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/trials" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><TrialsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

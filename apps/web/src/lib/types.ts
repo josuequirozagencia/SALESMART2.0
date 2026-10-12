@@ -32,6 +32,8 @@ export interface PlatformTrialItem {
   owner_email: string;
   owner_name: string | null;
   owner_phone: string | null;
+  /** Si la empresa ya tiene plan dejó de estar en prueba (ADR-38). */
+  plan_name: string | null;
   status: 'active' | 'expired';
   started_at: string;
   ends_at: string;
@@ -43,4 +45,46 @@ export interface PlatformTrialList {
   next_cursor: string | null;
   pending_extensions: number;
   summary: { active: number; expiring_soon: number; pending: number; extension_days: number };
+}
+
+/** Plan de la plataforma (módulos que enciende y límites; null = ilimitado). Sin precios todavía. */
+export interface Plan {
+  id: string;
+  name: string;
+  description: string | null;
+  max_users: number | null;
+  max_connections: number | null;
+  max_queues: number | null;
+  features: Record<string, boolean>;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+  /** Empresas que lo usan hoy. */
+  companies: number;
+}
+
+export interface PlanList {
+  items: Plan[];
+  /** Módulos que un plan puede encender (los define el servidor). */
+  feature_catalog: Array<{ key: string; label: string }>;
+}
+
+export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended';
+
+export interface Company {
+  id: string;
+  name: string;
+  kind: 'client' | 'agency';
+  state: CompanyState;
+  plan: { id: string; name: string } | null;
+  users: number;
+  owner_email: string | null;
+  timezone: string;
+  created_at: string;
+  trial_ends_at: string | null;
+}
+
+export interface CompanyList {
+  items: Company[];
+  next_cursor: string | null;
 }

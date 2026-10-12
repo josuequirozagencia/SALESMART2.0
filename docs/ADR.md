@@ -651,3 +651,29 @@ Postmark (mejor entregabilidad, de pago desde el primer envío); Amazon SES (el 
 
 ### Impacto
 `MAIL_PROVIDER=resend`, `CAPTCHA_PROVIDER=turnstile`, `RESEND_API_KEY`, `MAIL_FROM`, `TURNSTILE_SECRET_KEY`; `ResendMailProvider`, `TurnstileVerifier` y plantillas en `modules/auth/signup`; `useCaptcha`/`TurnstileWidget` en la web; la CSP ya permite el origen de Turnstile (ADR-36). Cierra el pendiente «proveedor de correo» y «CAPTCHA real» (Build Spec §15 #3 y #9); queda por **validar el envío real y el DNS** en el primer despliegue.
+
+---
+
+## ADR-38 — Planes de la plataforma y asignación a las empresas (M2.2)
+**Estado: APROBADO el 2026-10-12 por el responsable de producto, incluido el punto 4 (un plan asignado saca a la empresa de la prueba; el cobro es manual hasta decidir la pasarela).**
+
+### Decisión
+1. **`plans` es una tabla de IDENTIDAD** (rol `app_identity`), no de plataforma como decía el Build Spec §4.2. Mismo criterio de ADR-33: asignarlo (`organizations.plan_id`, con FK real), listarlo junto a las empresas, contar sus usos y, más adelante, cargar los módulos del plan al autenticar ocurre con `app_identity`; repartirlo en dos roles obligaría a cruzar datos en la aplicación y a perder la integridad referencial. `app_identity`: `SELECT/INSERT/UPDATE`, **sin `DELETE`** (los planes se archivan); `app_rw` y `app_platform` sin acceso.
+2. **Catálogo de planes** (`name` único sin importar mayúsculas ni espacios, `description`, límites `max_users/max_connections/max_queues` con `NULL` = ilimitado, y `features` = módulos que enciende). Los módulos válidos los fija el servidor (`plan-features.ts`: Kanban, Agenda, Campañas, Flujos, Agentes IA, API externa, Telefonía — los del prototipo) y la web pinta los interruptores desde `GET /v1/platform/plans`; una clave desconocida se rechaza. **Sin precios** («los precios se definen aparte», prototipo) y **sin datos sembrados**: los tres planes del prototipo (Básico, Pro, Agencia) eran ejemplos con límites inventados; el Súper Admin crea los reales. Que un plan encienda un módulo o fije un límite **no lo hace cumplir todavía**: lo hará cada módulo cuando exista.
+3. **Asignación manual** por el Súper Admin (`PUT /platform/companies/:id/plan`, `plan_id` o `null` para quitarlo). La plataforma nunca recibe plan (CHECK); un plan **archivado** no se asigna; un plan **en uso** no se archiva (409 con el número de empresas). Archivar y asignar a la vez nunca dejan una empresa con un plan archivado: ambas operaciones toman el bloqueo de la fila del plan (`FOR UPDATE` / `FOR SHARE`). Todo cambio queda en `platform_audit` (después del commit, como en ADR-33 #6).
+4. **Un plan asignado saca a la empresa de la prueba** *(propuesta; confirmar)*. Sin esto, asignar un plan sería inútil: la prueba vencida seguiría pausando la cuenta. Con plan, la empresa no se pausa aunque su prueba haya vencido (la comprobación va en cada petición, no se guarda), `GET /v1/trials/me` responde 404 (no hay prueba que mostrar) y la consola de pruebas la muestra «Con plan: X» y no la cuenta como activa ni vencida. Quitar el plan la devuelve a su prueba (si venció, vuelve la pausa). **El cobro es manual hasta decidir la pasarela de pagos**: asignar un plan no crea suscripción ni factura (`subscriptions`/`invoices` llegan con Billing); cuando existan, esta regla se revisa para que dependa de una suscripción vigente.
+5. **Estado de la empresa derivado, no guardado**: `suspended` (organización no activa) → `active` (con plan, o sin prueba como las agencias) → `trial_expired` → `trial`. Lista paginada por cursor con filtros (tipo, estado, plan o «sin plan», búsqueda por nombre o por correo de un miembro, con `%` y `_` literales).
+6. **Permisos nuevos** (catálogo y Build Spec §5.2): `platform.plans.manage` y `platform.companies.manage`, solo `super_admin`.
+
+### Fuera de alcance de M2.2 (no se hizo ni se decidió)
+- **«Nueva empresa»** del flujo F01 (nombre, plan, zona horaria, país → invitación por correo → el dueño define su contraseña): necesita `invitations`, el correo de invitación, una pantalla pública de aceptación y decidir el campo **país** (no existe en `organizations`) y la caducidad de la invitación.
+- Suspender/reactivar empresas, «Soporte» (entrar a una empresa = cambio de contexto), «Clonar configuración» e instantáneas, límites y módulos aplicados, precios y facturación, agencias y carteras.
+
+### Alternativas
+`plans` en `app_platform` (spec original; exige dos consultas y una FK sin validar en la aplicación); sembrar los tres planes del prototipo (rápido, pero convierte datos de ejemplo en configuración real); modelar el plan como `subscription` desde ya (correcto a largo plazo, pero depende de la pasarela); asignar un plan sin sacar a la empresa de la prueba (deja la pausa activa y obliga a extender la prueba a mano).
+
+### Ventajas / desventajas
++ Un solo rol y una sola transacción para asignar, contar y listar; integridad con FK y CHECK; el catálogo de módulos tiene una única fuente. − Otro apartado del Build Spec §4.2 corregido; mientras no haya pasarela, «con plan» significa «cliente aceptado manualmente» y el sistema no verifica pagos; los límites y módulos son datos sin efecto hasta que existan los módulos.
+
+### Impacto
+Migraciones `0015_plans` y `0016_plans_grants_permissions`; módulo `organizations` (`PlansService`, `CompaniesService`, controladores de plataforma); `SessionService` (la pausa ignora la prueba si hay plan); `TrialsService` (404 con plan, lista y resumen); consola web (pestañas Empresas y Planes; la consola abre en «Empresas»); Build Spec §4.2, §5.2, §6.2 y §7.

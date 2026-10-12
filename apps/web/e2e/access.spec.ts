@@ -195,6 +195,8 @@ test('consola del Súper Admin: ve la solicitud con el perfil del titular, la AP
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);
   await expect(page.getByRole('heading', { name: 'Consola de plataforma' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Empresas' })).toHaveAttribute('aria-current', 'page'); // la consola abre en «Empresas»
+  await page.getByRole('link', { name: /Pruebas/ }).click();
   await expect(page.getByRole('link', { name: /Pruebas/ })).toHaveAttribute('aria-current', 'page');
   const rowOf = (email: string) => page.getByRole('listitem').filter({ hasText: email });
   await expect(rowOf(approveMe)).toContainText('Ana E2E');
@@ -224,6 +226,73 @@ test('consola del Súper Admin: ve la solicitud con el perfil del titular, la AP
   await page.getByRole('tab', { name: 'Todas' }).click();
   await expect(rowOf(approveMe)).toContainText('Aprobada +3 d');
   await expect(rowOf(denyMe)).toContainText('Rechazada');
+});
+
+test('empresas y planes: crea un plan, lo asigna a una empresa con la prueba VENCIDA (se reabre) y al quitarlo vuelve la pausa', async ({ page, request }) => {
+  const email = await createAccount(request, uniqueEmail('plan'));
+  await expireTrialOf(email);
+  const planName = `Pro ${uniqueEmail('p').slice(2, 8)}`;
+
+  // 1) La persona cliente está en pausa (prueba vencida)
+  await uiLogin(page, email);
+  await expect(page.getByRole('heading', { name: 'Tu prueba gratuita terminó' })).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 2) El Súper Admin crea el plan desde la interfaz
+  const s = state();
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByRole('link', { name: 'Planes' }).click();
+  await page.getByRole('button', { name: 'Nuevo plan' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Nuevo plan' });
+  await dlg.getByLabel('Nombre', { exact: true }).fill(planName);
+  await dlg.getByLabel('Usuarios').fill('10');
+  await dlg.getByLabel('Kanban').check();
+  await dlg.getByLabel('Agenda').check();
+  await dlg.getByRole('button', { name: 'Crear plan' }).click();
+  const card = page.getByRole('listitem').filter({ hasText: planName });
+  await expect(card).toContainText('10 usuarios · ilimitados conexiones · ilimitados colas');
+  await expect(card.getByLabel(`Módulos de ${planName}`)).toContainText('Kanban');
+  await expect(card).toContainText('0 empresas');
+
+  // 3) Lo asigna a la empresa (se busca por el correo del responsable)
+  await page.getByRole('link', { name: 'Empresas' }).click();
+  await page.getByLabel('Buscar').fill(email);
+  const row = page.getByRole('listitem').filter({ hasText: email });
+  await expect(row).toContainText('Prueba vencida');
+  await row.getByRole('button', { name: /Cambiar el plan/ }).click();
+  const assign = page.getByRole('dialog', { name: /Plan de/ });
+  await assign.getByLabel('Plan').selectOption({ label: planName });
+  await expect(assign).toContainText('dejará de estar en prueba');
+  await assign.getByRole('button', { name: 'Asignar plan' }).click();
+  await expect(row).toContainText('Activa');
+  await expect(row).toContainText(planName);
+
+  // 4) El plan en uso no se archiva (el mensaje sale del servidor)
+  await page.getByRole('link', { name: 'Planes' }).click();
+  await expect(card).toContainText('1 empresa');
+  await card.getByRole('button', { name: /Archivar el plan/ }).click();
+  await expect(card.getByRole('alert')).toContainText('lo usan 1 empresa');
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 5) La persona cliente YA entra: ya no depende de la prueba
+  await uiLogin(page, email);
+  await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Prueba gratuita' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 6) Al quitar el plan vuelve la pausa
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByLabel('Buscar').fill(email);
+  const row2 = page.getByRole('listitem').filter({ hasText: email });
+  await row2.getByRole('button', { name: /Cambiar el plan/ }).click();
+  const unassign = page.getByRole('dialog', { name: /Plan de/ });
+  await unassign.getByLabel('Plan').selectOption({ label: 'Sin plan' });
+  await expect(unassign).toContainText('queda en pausa');
+  await unassign.getByRole('button', { name: 'Quitar plan' }).click();
+  await expect(row2).toContainText('Prueba vencida');
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+  await uiLogin(page, email);
+  await expect(page.getByRole('heading', { name: 'Tu prueba gratuita terminó' })).toBeVisible();
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

@@ -93,7 +93,7 @@ Módulos del backend (carpeta `apps/api/src/modules/*`), con **fronteras estrict
 **Identidad (ADR-25; rol `app_identity`):** `users` · `organizations` · `organization_members`; las futuras `auth_identities` · `sessions` · `refresh_tokens` · `agency_grants` entrarán en esta categoría (se añaden al catálogo del auditor al crearlas). Su aislamiento entre organizaciones se garantiza con lógica de aplicación + tests A↔B; `app_rw` y `app_platform` no tienen ningún privilegio sobre ellas.
 
 **De plataforma (rol `app_platform`):**
-`provider_credentials` (de plataforma) · `ai_pricing` · `ai_org_pricing` (solo `super_admin`) · `plans` · `access_sessions` (solo `super_admin`) · `platform_audit`. **`trials` y `trial_config` son de identidad (ADR-33, corrige este listado):** el ciclo de vida de la prueba corre con `app_identity`. Se protegen por **rol de BD** + guard de aplicación, y tienen test que verifica que el rol `app_rw` no puede leerlas.
+`provider_credentials` (de plataforma) · `ai_pricing` · `ai_org_pricing` (solo `super_admin`) · `access_sessions` (solo `super_admin`) · `platform_audit`. **`trials`, `trial_config` (ADR-33) y `plans` (ADR-38) son de identidad (corrige este listado):** el ciclo de vida de la prueba corre con `app_identity`. Se protegen por **rol de BD** + guard de aplicación, y tienen test que verifica que el rol `app_rw` no puede leerlas.
 
 ### 4.3 Tests de aislamiento (puerta de CI)
 - Un test generado **por endpoint**: con dos organizaciones A y B, el usuario de A pide recursos de B por id, por filtro y por búsqueda → 404/vacío.
@@ -114,7 +114,7 @@ Módulos del backend (carpeta `apps/api/src/modules/*`), con **fronteras estrict
 | `advisor` | Ve sus chats y los que le compartieron; no ve filtro por asesor ni conversión por asesor. **[ADR-32 aprobado + enmienda 1]** Crea ventas y registra abonos de las suyas, pero no modifica valor/producto/comisión; ve «Mis ventas» y su comisión en solo lectura; campañas y grupos solo si el Cliente se los activa |
 
 ### 5.2 Catálogo de permisos (nombres canónicos, extensible)
-`inbox.view_all` · `inbox.reply` · `inbox.transfer` · `inbox.share` · `contacts.read|write|import|export` · `opportunities.read|write` · `pipelines.manage` · `sales.create|cancel` · **[v9, ADR-32 aprobado]** `sales.read_own` · `sales.register_payment` (alcance propio, enmienda 1) · `custom_fields.manage` · `campaigns.send` (alcance: contactos propios/compartidos; tope diario por asesor) · `groups.view|send|manage` (`send` y `manage` requieren `view`) · `appointments.manage` · `queues.manage` · `tags.manage` · `agents.manage|test` · `knowledge.manage` · `channels.manage` · `integrations.manage` · `forms.manage` · `automations.manage` · `commissions.view|manage` · `analytics.view` · `export` · `team.manage` · `billing.manage` · `platform.providers.manage` · `platform.agencies.manage` · `platform.trials.manage` · `platform.access_log.read`
+`inbox.view_all` · `inbox.reply` · `inbox.transfer` · `inbox.share` · `contacts.read|write|import|export` · `opportunities.read|write` · `pipelines.manage` · `sales.create|cancel` · **[v9, ADR-32 aprobado]** `sales.read_own` · `sales.register_payment` (alcance propio, enmienda 1) · `custom_fields.manage` · `campaigns.send` (alcance: contactos propios/compartidos; tope diario por asesor) · `groups.view|send|manage` (`send` y `manage` requieren `view`) · `appointments.manage` · `queues.manage` · `tags.manage` · `agents.manage|test` · `knowledge.manage` · `channels.manage` · `integrations.manage` · `forms.manage` · `automations.manage` · `commissions.view|manage` · `analytics.view` · `export` · `team.manage` · `billing.manage` · `platform.providers.manage` · `platform.agencies.manage` · `platform.trials.manage` · `platform.plans.manage` · `platform.companies.manage` · `platform.access_log.read`
 
 Los permisos se evalúan en **un guard central**; la interfaz solo oculta, nunca protege. `commissions.view` admite alcance propio (el asesor solo ve la suya). La matriz rol→permiso sigue **PROVISIONAL** (ADR-29); los permisos [PROPUESTA v9] se añaden al catálogo por migración solo tras aprobar ADR-32.
 
@@ -134,7 +134,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - `trials(organization_id, owner_user_id, started_at, ends_at, ext_status ∈ none|pending|approved|denied, ext_reason, ext_decided_by, ext_decided_at, ext_days_granted)` — **una extensión por cuenta**: restricción única en la lógica y `CHECK` sobre transiciones
 - `trial_config` *(identidad, ADR-33; una sola fila)*: `days=7`, `extension_days=3`, `retention_days=30`, `welcome_credits=1000` — todo PROVISIONAL, solo en esta tabla
 - `signup_attempts(email_hash, ip_hash, at, outcome)` (anti-abuso) · `disposable_domains`
-- `plans`, `subscriptions(organization_id, plan_id, status, current_period_end)`, `invoices` (V1)
+- `plans(name único, description, max_users/max_connections/max_queues NULL=ilimitado, features jsonb, archived_at)` *(identidad, ADR-38; M2.2; `organizations.plan_id` con FK; sin precios)* · `subscriptions(organization_id, plan_id, status, current_period_end)`, `invoices` (V1, con Billing)
 
 ### 6.3 CRM
 - `contacts` (nombre, teléfonos normalizados E.164, email, `owner_id`, `source`, `consent`, …) · `contact_phones` · `companies` · `contact_companies` · `contact_lists(name)` · `contact_list_members`
@@ -196,7 +196,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - Tiempo real: eventos `conversation.updated`, `message.created`, `opportunity.moved`, `call.state`, `trial.extension_requested` (a salas por organización/usuario; el aviso de extensión va a la sala `platform`).
 
 Endpoints de plataforma y de auth mínimos del MVP:
-`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `GET /auth/me` (autenticado, M1.6/ADR-34) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET /platform/trials` (M1.5; devuelve `items`, `next_cursor`, `pending_extensions` y `summary` con totales globales; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
+`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `GET /auth/me` (autenticado, M1.6/ADR-34) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET|POST /platform/plans`, `PATCH /platform/plans/:id`, `POST /platform/plans/:id/archive|restore`, `GET /platform/companies`, `PUT /platform/companies/:id/plan` (M2.2, ADR-38) · `GET /platform/trials` (M1.5; devuelve `items`, `next_cursor`, `pending_extensions` y `summary` con totales globales; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
 
 ---
 
@@ -379,6 +379,7 @@ Tras el PoC Retell vs. Vapi.
 | 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | ABIERTO (V2) | Campañas masivas |
 | 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | APROBADO (ADR-32, 2026-10-09) | Contactos/M3 |
 | 19 | Spike de WhatsApp QR (Evolution) sobre Railway con chip de prueba | APROBADO (ADR-31); en curso | EvolutionProvider/M9 |
+| 21 | Un plan asignado saca a la empresa de la prueba; el cobro es manual hasta la pasarela (ADR-38, APROBADO 2026-10-12) | **CONFIRMADO** | Billing |
 | 20 | Limpieza de tablas de identidad sin dar `DELETE` a `app_identity`: **RESUELTO (ADR-35, 2026-10-11)**. Pendiente: purga de datos de negocio a los 30 días de prueba vencida | PARCIAL | M3+ (purga) |
 
 ---

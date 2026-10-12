@@ -17,6 +17,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'EMAIL_DOMAIN_NOT_ALLOWED': return 'Usa un correo de trabajo o personal permanente, no uno temporal.';
     case 'INVALID_CODE': return 'Código inválido o vencido. Revisa los 6 dígitos o pide uno nuevo.';
     case 'INVALID_TOKEN': return 'El enlace es inválido o venció. Pide uno nuevo.';
+    // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
+    case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;
     case 'EXTENSION_NOT_PENDING': return 'Esta solicitud ya fue resuelta (quizá por otra persona). Se actualizó la lista.';
     case 'EXTENSION_ALREADY_USED': return 'Tu cuenta ya usó su extensión.';
     case 'VALIDATION_ERROR': return 'Revisa los datos ingresados.';

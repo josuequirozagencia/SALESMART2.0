@@ -33,6 +33,8 @@ export interface PlatformTrialItem extends Omit<TrialView, 'extension'> {
   /** Para dar seguimiento a la prueba (solo la ve el Súper Admin). */
   owner_name: string | null;
   owner_phone: string | null;
+  /** Nombre del plan si la empresa ya tiene uno (dejó de estar en prueba, ADR-38). */
+  plan_name: string | null;
   extension: TrialView['extension'] & { reason: string | null };
 }
 
@@ -104,6 +106,9 @@ export class TrialsService {
   async mine(principal: Principal | undefined, now = new Date()): Promise<MyTrialView> {
     const org = this.tenantOf(principal);
     const found = await this.db.withIdentity(async (tx) => {
+      // Con un plan asignado la empresa ya no está en prueba (ADR-38): no hay prueba que mostrar ni que vencer
+      const [o] = await tx.select({ planId: organizations.planId }).from(organizations).where(eq(organizations.id, org)).limit(1);
+      if (!o || o.planId !== null) return null;
       const [r] = await tx.select().from(trials).where(eq(trials.organizationId, org)).limit(1);
       return r ? { r, cfg: await this.config(tx) } : null;
     });
@@ -143,11 +148,12 @@ export class TrialsService {
       const conds = [
         f.cursor ? lt(trials.id, f.cursor) : undefined,
         f.extension ? eq(trials.extStatus, f.extension) : undefined,
-        f.state === 'expired' ? sql`(${trials.status} = 'expired' OR ${trials.endsAt} <= ${now})` : undefined,
-        f.state === 'active' ? sql`(${trials.status} = 'active' AND ${trials.endsAt} > ${now})` : undefined,
+        // «Activas» y «Vencidas» son pruebas en curso: una empresa con plan ya no cuenta (ADR-38); sigue visible en «Todas»
+        f.state === 'expired' ? sql`(${trials.status} = 'expired' OR ${trials.endsAt} <= ${now}) AND ${organizations.planId} IS NULL` : undefined,
+        f.state === 'active' ? sql`(${trials.status} = 'active' AND ${trials.endsAt} > ${now}) AND ${organizations.planId} IS NULL` : undefined,
       ].filter((c) => c !== undefined);
       const rows = await tx
-        .select({ t: trials, orgName: organizations.name, ownerEmail: users.email, ownerName: users.fullName, ownerPhone: users.phone })
+        .select({ t: trials, orgName: organizations.name, ownerEmail: users.email, ownerName: users.fullName, ownerPhone: users.phone, planName: sql<string | null>`(SELECT p.name FROM plans p WHERE p.id = ${organizations.planId})` })
         .from(trials)
         .innerJoin(organizations, eq(organizations.id, trials.organizationId))
         .innerJoin(users, eq(users.id, trials.ownerUserId))
@@ -156,10 +162,11 @@ export class TrialsService {
         .limit(f.limit + 1);
       const soon = new Date(now.getTime() + EXPIRING_SOON_MS);
       const cfg = await this.config(tx);
+      const noPlan = sql`NOT EXISTS (SELECT 1 FROM organizations o WHERE o.id = ${trials.organizationId} AND o.plan_id IS NOT NULL)`;
       const [s] = await tx
         .select({
-          active: sql<number>`(count(*) FILTER (WHERE ${trials.status} = 'active' AND ${trials.endsAt} > ${now}))::int`,
-          soon: sql<number>`(count(*) FILTER (WHERE ${trials.status} = 'active' AND ${trials.endsAt} > ${now} AND ${trials.endsAt} <= ${soon}))::int`,
+          active: sql<number>`(count(*) FILTER (WHERE ${trials.status} = 'active' AND ${trials.endsAt} > ${now} AND ${noPlan}))::int`,
+          soon: sql<number>`(count(*) FILTER (WHERE ${trials.status} = 'active' AND ${trials.endsAt} > ${now} AND ${trials.endsAt} <= ${soon} AND ${noPlan}))::int`,
           pending: sql<number>`(count(*) FILTER (WHERE ${trials.extStatus} = 'pending'))::int`,
         })
         .from(trials);
@@ -167,7 +174,7 @@ export class TrialsService {
       return {
         items: page.map((r) => {
           const v = viewOf(r.t, now);
-          return { id: r.t.id, organization_id: r.t.organizationId, organization_name: r.orgName, owner_email: r.ownerEmail, owner_name: r.ownerName, owner_phone: r.ownerPhone, status: v.status, started_at: v.started_at, ends_at: v.ends_at, extension: { ...v.extension, reason: r.t.extReason } };
+          return { id: r.t.id, organization_id: r.t.organizationId, organization_name: r.orgName, owner_email: r.ownerEmail, owner_name: r.ownerName, owner_phone: r.ownerPhone, plan_name: r.planName, status: v.status, started_at: v.started_at, ends_at: v.ends_at, extension: { ...v.extension, reason: r.t.extReason } };
         }),
         next_cursor: rows.length > f.limit ? (page[page.length - 1]?.t.id ?? null) : null,
         pending_extensions: s?.pending ?? 0,

@@ -38,6 +38,8 @@ export const PERMISSIONS = {
   'platform.providers.manage': 'platform',
   'platform.agencies.manage': 'platform',
   'platform.trials.manage': 'platform',
+  'platform.plans.manage': 'platform',
+  'platform.companies.manage': 'platform',
   'platform.access_log.read': 'platform',
 } as const satisfies Record<string, PermissionScope>;
 
