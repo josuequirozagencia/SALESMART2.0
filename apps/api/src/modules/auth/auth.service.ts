@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNull } from 'drizzle-orm';
-import { Database, organizationMembers, organizations, users } from '../../db';
+import { Database, organizationMembers, organizations, sessions, users } from '../../db';
 import { TooManyAttemptsError, UnauthorizedError } from '../../errors';
 import type { PasswordHasher } from '../../security';
 import { PASSWORD_HASHER } from './auth.tokens';
@@ -9,7 +9,7 @@ import { ThrottleService } from './throttle.service';
 
 export interface LoginResult {
   tokens: IssuedTokens;
-  user: { id: string; email: string };
+  user: { id: string; email: string; full_name: string | null };
   organization: { id: string; name: string; kind: string };
   role: string;
 }
@@ -62,13 +62,29 @@ export class AuthService {
     const { u, m } = found as NonNullable<typeof found> & { m: NonNullable<NonNullable<typeof found>['m']> };
     await this.throttle.reset(eKey);
     const tokens = await this.sessions.create({ userId: u.id, organizationId: m.orgId, sessionVersion: u.sessionVersion, userAgent: input.userAgent });
-    return { tokens, user: { id: u.id, email: u.email }, organization: { id: m.orgId, name: m.name, kind: m.kind }, role: m.role };
+    return { tokens, user: { id: u.id, email: u.email, full_name: u.fullName }, organization: { id: m.orgId, name: m.name, kind: m.kind }, role: m.role };
   }
 
   async refresh(rawRefresh: string | undefined): Promise<{ tokens: IssuedTokens; ctx: AuthContext }> {
     const r = await this.sessions.refresh(rawRefresh);
     if (!r.ok) throw new UnauthorizedError();
     return { tokens: r.tokens, ctx: r.ctx };
+  }
+
+  /** Identidad de la sesión VERIFICADA (la web la necesita tras recargar: el refresh no devuelve usuario ni organización). */
+  async me(sessionId: string): Promise<{ user: { id: string; email: string; full_name: string | null }; organization: { id: string; name: string; kind: string }; role: string }> {
+    const [r] = await this.db.withIdentity((tx) =>
+      tx
+        .select({ uid: users.id, email: users.email, fullName: users.fullName, oid: organizations.id, oname: organizations.name, okind: organizations.kind, role: organizationMembers.role })
+        .from(sessions)
+        .innerJoin(users, eq(users.id, sessions.userId))
+        .innerJoin(organizations, eq(organizations.id, sessions.activeOrgId))
+        .innerJoin(organizationMembers, and(eq(organizationMembers.userId, sessions.userId), eq(organizationMembers.organizationId, sessions.activeOrgId), isNull(organizationMembers.revokedAt)))
+        .where(eq(sessions.id, sessionId))
+        .limit(1),
+    );
+    if (!r) throw new UnauthorizedError();
+    return { user: { id: r.uid, email: r.email, full_name: r.fullName }, organization: { id: r.oid, name: r.oname, kind: r.okind }, role: r.role };
   }
 
   logout(raw: string | undefined): Promise<void> {

@@ -110,7 +110,7 @@ describe('pruebas gratuitas (M1.5)', () => {
 
   it('la prueba empieza al VERIFICAR el correo, con la duración de trial_config (no hardcodeada)', async () => {
     await admin.query(`UPDATE trial_config SET days = 5`);
-    const reg = await call('POST', '/auth/signup', undefined, { email: 'nuevo@empresa.test', password: PW, organization_name: 'Mi Empresa SA', captcha_token: FAKE_CAPTCHA_PASS });
+    const reg = await call('POST', '/auth/signup', undefined, { email: 'nuevo@empresa.test', password: PW, full_name: 'Luis Navas', phone: '+593987654321', organization_name: 'Mi Empresa SA', captcha_token: FAKE_CAPTCHA_PASS });
     expect(reg.status).toBe(202);
     expect((await admin.query(`SELECT count(*)::int AS n FROM trials`)).rows[0].n).toBe(0); // sin verificar: no hay prueba
     const code = b.mail.last('nuevo@empresa.test')!.code;
@@ -123,6 +123,7 @@ describe('pruebas gratuitas (M1.5)', () => {
     expect(Math.round((row[0].ends_at.getTime() - row[0].started_at.getTime()) / DAY)).toBe(5);
     const token = await login('nuevo@empresa.test');
     const me = (await (await call('GET', '/trials/me', token)).json()) as { status: string; extension: { can_request: boolean } };
+    expect((await admin.query(`SELECT full_name, phone FROM users WHERE email = 'nuevo@empresa.test'`)).rows[0]).toEqual({ full_name: 'Luis Navas', phone: '+593987654321' });
     expect(me.status).toBe('active');
     expect(me.extension.can_request).toBe(true);
   });
@@ -132,13 +133,15 @@ describe('pruebas gratuitas (M1.5)', () => {
   it('GET /trials/me: cada organización ve SOLO la suya; sin sesión 401; el Súper Admin y una organización sin prueba reciben 404', async () => {
     await trial({ org: ORG_A, owner: IDS.alice, endsInDays: 4 });
     await trial({ org: ORG_B, owner: IDS.bob, endsInDays: 1, ext: 'pending' });
-    const a = (await (await call('GET', '/trials/me', await login('alice@a.test'))).json()) as { ends_at: string; extension: { status: string } };
+    const a = (await (await call('GET', '/trials/me', await login('alice@a.test'))).json()) as { ends_at: string; retention_days: number; extension_days: number; extension: { status: string } };
     const bb = (await (await call('GET', '/trials/me', await login('bob@b.test'))).json()) as { ends_at: string; extension: { status: string } };
     expect(a.extension.status).toBe('none');
     expect(bb.extension.status).toBe('pending');
     expect(new Date(a.ends_at).getTime()).toBeGreaterThan(Date.now() + 3 * DAY);
     expect(new Date(bb.ends_at).getTime()).toBeLessThan(Date.now() + 2 * DAY);
     expect(JSON.stringify(a)).not.toMatch(/organization|owner|email|reason/i); // nada de otras cuentas ni de la decisión interna
+    expect(a.retention_days).toBe(30);
+    expect(a.extension_days).toBe(3); // para la pantalla de «vencida»: sale de trial_config
     expect((await call('GET', '/trials/me')).status).toBe(401);
     expect((await call('GET', '/trials/me', await login('root@plat.test'))).status).toBe(404);
     // Un asesor también la ve (la pantalla de «vencida» es para todos los miembros)
@@ -282,13 +285,15 @@ describe('pruebas gratuitas (M1.5)', () => {
       const org = (await admin.query(`SELECT id FROM organizations WHERE name = $1`, [`Cliente ${i}`])).rows[0].id as string;
       ids.push(await trial({ org, owner: IDS.alice, endsInDays: i < 2 ? -1 : 3, ext: i === 0 || i === 3 ? 'pending' : 'none', status: i === 0 ? 'expired' : 'active' }));
     }
+    await admin.query(`UPDATE users SET full_name = 'Alicia Torres', phone = '+593911111111' WHERE id = $1`, [IDS.alice]);
     const root = await login('root@plat.test');
-    const get = async (qs = '') => (await (await call('GET', `/platform/trials${qs}`, root)).json()) as { items: Array<{ id: string; owner_email: string; organization_name: string; status: string; extension: { status: string; reason: string | null } }>; next_cursor: string | null; pending_extensions: number };
+    const get = async (qs = '') => (await (await call('GET', `/platform/trials${qs}`, root)).json()) as { items: Array<{ id: string; owner_email: string; owner_name: string | null; owner_phone: string | null; organization_name: string; status: string; extension: { status: string; reason: string | null } }>; next_cursor: string | null; pending_extensions: number };
 
     const all = await get();
     expect(all.items).toHaveLength(5);
     expect(all.pending_extensions).toBe(2);
     expect(all.items[0]!.owner_email).toBe('alice@a.test');
+    expect(all.items[0]).toMatchObject({ owner_name: 'Alicia Torres', owner_phone: '+593911111111' }); // para el seguimiento del Súper Admin
     expect(all.items.map((i) => i.id)).toEqual([...ids].sort().reverse()); // más recientes (id v7) primero
 
     expect((await get('?extension=pending')).items).toHaveLength(2);

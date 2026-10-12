@@ -13,7 +13,7 @@ Flujo completo de ADR-23 en E2E · segunda solicitud de extensión rechazada · 
 | Captcha real (#9) | PROPUESTA | Puerto `CaptchaVerifier` + fake. hCaptcha/Turnstile se decide después. |
 | Valores de prueba (7 d, 3 d, 30 d, 1000 créditos) (#8) | PROVISIONAL | Solo en `trial_config` (editable), nunca en código. |
 | Redis/BullMQ | no hay infraestructura aún | Throttling de login en PostgreSQL (tabla `auth_throttle`), sin Redis. Los jobs de vencimiento de prueba (M1.5) requieren cola: se decide entonces (ver riesgo R3). |
-| Frontend | no existe `apps/web` | Pantallas de acceso van en M1.6, después de que la API esté estable. |
+| Frontend | `apps/web` creado en M1.6 | Pantallas de acceso del prototipo sobre la API estable (ADR-34). |
 
 ## 3. Rebanadas (cada una termina con tests, documentación y parada para revisión)
 | # | Contenido | Estado |
@@ -22,8 +22,8 @@ Flujo completo de ADR-23 en E2E · segunda solicitud de extensión rechazada · 
 | M1.2 | Registro y verificación: `POST /auth/signup|verify|resend`; `email_verifications`, `signup_attempts`, `disposable_domains`; `MailProvider`/`CaptchaVerifier` + fakes; creación de organización `client` + membresía `client_admin` | **HECHA y APROBADA (2026-10-04)** — ver `M1_PROGRESO.md` y ADR-27 |
 | M1.3 | Olvido/reset de contraseña (`password_resets`), cambio de contraseña (sube `session_version`), mensajes que no revelan existencia | **APROBADA** — ver `M1_PROGRESO.md` y ADR-28 |
 | M1.4 | RBAC: `roles/permissions/role_permissions`, guard de permisos central, `@RequirePermission`, matriz de roles (Build Spec §5); auditoría (`audit_log` tenant + `platform_audit`) | **APROBADA 2026-10-05** (matriz PROVISIONAL) — ver `M1_PROGRESO.md` y ADR-29 |
-| M1.5 | Pruebas: `trials`, `trial_config`, extensión única con aprobación (transición por CHECK + trigger), vencimiento (job con `SKIP LOCKED`), estado «vencida» (cuenta en pausa); endpoints `/trials/me`, `/trials/me/extension`, `/platform/trials*` | **HECHA (2026-10-09), pendiente de aprobación** — ver `M1_PROGRESO.md` y ADR-33. R3 resuelto: PostgreSQL + `SKIP LOCKED` |
-| M1.6 | Pantallas de acceso (React) del prototipo + E2E del flujo ADR-23 | pendiente |
+| M1.5 | Pruebas: `trials`, `trial_config`, extensión única con aprobación (transición por CHECK + trigger), vencimiento (job con `SKIP LOCKED`), estado «vencida» (cuenta en pausa); endpoints `/trials/me`, `/trials/me/extension`, `/platform/trials*` | **HECHA y APROBADA (2026-10-09)** — ver `M1_PROGRESO.md` y ADR-33. R3 resuelto: PostgreSQL + `SKIP LOCKED` |
+| M1.6 | Pantallas de acceso (React) del prototipo + E2E del flujo ADR-23 | **HECHA y APROBADA (2026-10-11)** — ver `M1_PROGRESO.md` y ADR-34 |
 
 ## 4. Decisiones propuestas (requieren tu revisión) — ver ADR-26
 1. Tokens **opacos** (no JWT), guardados solo como hash SHA-256, con la sesión en BD → revocación inmediata y verificación de usuario activo/versión en cada petición (Build Spec §11.6).

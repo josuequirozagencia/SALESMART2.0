@@ -298,7 +298,63 @@ describe('refresh rotativo con detección de reutilización', () => {
   });
 });
 
+describe('GET /v1/auth/me (@SelfService)', () => {
+  it('devuelve el usuario, la organización activa y el rol de la sesión; super_admin ve la organización de plataforma', async () => {
+    const a = await login('alice@a.test');
+    const r = await get('/auth/me', a.access_token);
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ user: { id: IDS.alice, email: 'alice@a.test', full_name: null }, organization: { id: ORG_A, name: 'Empresa A', kind: 'client' }, role: 'client_admin' });
+    const root = await login('root@plat.test');
+    expect(await (await get('/auth/me', root.access_token)).json()).toEqual({ user: { id: IDS.root, email: 'root@plat.test', full_name: null }, organization: { id: IDS.platformOrg, name: 'Plataforma', kind: 'platform' }, role: 'super_admin' });
+  });
+  it('login y /me devuelven la MISMA identidad (la web usa una u otra según recargue o no)', async () => {
+    await admin.query(`UPDATE users SET full_name = 'Alicia Torres' WHERE id = '${IDS.alice}'`);
+    const a = await login('alice@a.test');
+    const me = (await (await get('/auth/me', a.access_token)).json()) as { user: unknown; organization: unknown; role: unknown };
+    expect({ user: a.user, organization: a.organization, role: a.role }).toMatchObject({ user: me.user, role: me.role });
+    expect(a.user).toEqual({ id: IDS.alice, email: 'alice@a.test', full_name: 'Alicia Torres' });
+  });
+  it('incluye el nombre del perfil cuando existe', async () => {
+    await admin.query(`UPDATE users SET full_name = 'Alicia Torres' WHERE id = '${IDS.alice}'`);
+    const a = await login('alice@a.test');
+    expect(((await (await get('/auth/me', a.access_token)).json()) as { user: { full_name: string } }).user.full_name).toBe('Alicia Torres');
+  });
+  it('sin sesión o con un token inválido → 401; con la sesión revocada → 401', async () => {
+    expect((await get('/auth/me')).status).toBe(401);
+    expect((await get('/auth/me', 'basura')).status).toBe(401);
+    const a = await login('alice@a.test');
+    await post('/auth/logout', { refresh_token: a.refresh_token });
+    expect((await get('/auth/me', a.access_token)).status).toBe(401);
+  });
+  it('A↔B: no admite ids ni organización de la petición; siempre responde por el principal', async () => {
+    const a = await login('alice@a.test');
+    const mine = await (await get('/auth/me', a.access_token)).text();
+    for (const q of [`?id=${IDS.bob}`, `?user_id=${IDS.bob}`, `?organization_id=${ORG_B}`]) {
+      expect(await (await get(`/auth/me${q}`, a.access_token, { 'x-organization-id': ORG_B })).text(), q).toBe(mine);
+    }
+    expect(mine).not.toContain('bob@b.test');
+    expect(mine).not.toContain('Empresa B');
+  });
+  it('si la membresía se revoca, deja de responder (la identidad sale de la sesión viva)', async () => {
+    const a = await login('alice@a.test');
+    await admin.query(`UPDATE organization_members SET revoked_at = now() WHERE user_id = '${IDS.alice}'`);
+    expect((await get('/auth/me', a.access_token)).status).toBe(401);
+  });
+});
+
 describe('logout', () => {
+  it('por cookie borra ss_refresh con el MISMO Path con el que se emitió (si no, el navegador conserva la cookie)', async () => {
+    const l = await post('/auth/login', { email: 'alice@a.test', password: PW });
+    const issued = l.headers.get('set-cookie') ?? '';
+    const cookie = issued.split(';')[0]!;
+    expect(issued).toMatch(/Path=\/v1\/auth/);
+    const out = await post('/auth/logout', {}, { cookie, 'x-requested-by': 'sales-smart-web' });
+    expect(out.status).toBe(204);
+    const cleared = out.headers.get('set-cookie') ?? '';
+    expect(cleared).toMatch(/^ss_refresh=;/);
+    expect(cleared).toMatch(/Path=\/v1\/auth/);
+    expect(cleared).toMatch(/Expires=Thu, 01 Jan 1970/);
+  });
   it('revoca la sesión (access y refresh dejan de valer), es idempotente y acepta basura sin error', async () => {
     const t = await login('alice@a.test');
     expect((await post('/auth/logout', { refresh_token: t.refresh_token })).status).toBe(204);

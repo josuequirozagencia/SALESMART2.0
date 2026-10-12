@@ -22,6 +22,10 @@ export const users = identityTable(
     passwordHash: text('password_hash').notNull(),
     emailVerifiedAt: ts('email_verified_at'),
     status: text('status').notNull().default('pending'),
+    /** Perfil capturado en el registro (M1.6, ADR-34). Nulo en cuentas creadas por otras vías (p. ej. el super_admin del bootstrap). */
+    fullName: text('full_name'),
+    /** WhatsApp del titular en E.164 (+593987654321). Lo ve el Súper Admin en la lista de pruebas para dar seguimiento. */
+    phone: text('phone'),
     /** Se incrementa para invalidar TODAS las sesiones del usuario (cambio de contraseña, desactivación). */
     sessionVersion: integer('session_version').notNull().default(1),
     createdAt: ts('created_at').notNull().defaultNow(),
@@ -32,6 +36,8 @@ export const users = identityTable(
     check('users_email_normalized', sql`${t.email} = lower(btrim(${t.email})) AND length(${t.email}) BETWEEN 3 AND 254`),
     check('users_status_valid', sql`${t.status} IN ('pending', 'active', 'disabled')`),
     check('users_password_hash_argon2id', sql`${t.passwordHash} LIKE '$argon2id$%'`),
+    check('users_full_name_len', sql`${t.fullName} IS NULL OR length(btrim(${t.fullName})) BETWEEN 2 AND 100`),
+    check('users_phone_e164', sql`${t.phone} IS NULL OR ${t.phone} ~ '^\\+[1-9][0-9]{7,14}$'`),
   ],
 );
 

@@ -14,3 +14,9 @@ spikes/**/node_modules/
 # spike whatsapp-qr: datos locales
 spikes/whatsapp-qr/events.jsonl
 spikes/whatsapp-qr/qr.png
+
+# apps/web: artefactos del E2E (Playwright) y de la compilación de prueba
+apps/web/dist-e2e/
+apps/web/e2e/.run/
+apps/web/test-results/
+apps/web/playwright-report/

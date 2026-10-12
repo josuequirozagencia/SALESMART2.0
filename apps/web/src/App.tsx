@@ -1,0 +1,52 @@
+import { Navigate, Route, Routes } from 'react-router-dom';
+import { TrialExpiredScreen } from './features/trial/TrialExpiredScreen';
+import { useTrial } from './features/trial/useTrial';
+import { useSession } from './lib/session';
+import { ForgotScreen } from './screens/ForgotScreen';
+import { HomeScreen } from './screens/HomeScreen';
+import { LoginScreen } from './screens/LoginScreen';
+import { ResetScreen } from './screens/ResetScreen';
+import { SignupScreen } from './screens/SignupScreen';
+import { VerifyScreen } from './screens/VerifyScreen';
+import { Spinner } from './ui/controls';
+
+function Splash() {
+  return <div className="grid min-h-full place-items-center text-muted"><Spinner label="Cargando" /></div>;
+}
+
+/** Rutas de acceso: si ya hay sesión, se va a la app. */
+function Public({ children }: { children: React.ReactNode }) {
+  const { state } = useSession();
+  if (state.status === 'loading') return <Splash />;
+  if (state.status === 'authed') return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/** Puerta de la app: sin sesión → login; con la prueba vencida → pantalla de «vencida»; si no → inicio. */
+function AppGate() {
+  const { state, logout } = useSession();
+  const clientOrg = state.status === 'authed' && state.me.organization.kind === 'client';
+  const trial = useTrial(clientOrg);
+  if (state.status === 'loading') return <Splash />;
+  if (state.status === 'anon') return <Navigate to="/login" replace />;
+  if (clientOrg && trial.isPending) return <Splash />;
+  const t = trial.data ?? null;
+  const out = () => void logout();
+  if (t?.status === 'expired') return <TrialExpiredScreen trial={t} role={state.me.role} onLogout={out} />;
+  return <HomeScreen me={state.me} trial={t} onLogout={out} />;
+}
+
+export function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Public><LoginScreen /></Public>} />
+      <Route path="/signup" element={<Public><SignupScreen /></Public>} />
+      <Route path="/verify" element={<Public><VerifyScreen /></Public>} />
+      <Route path="/forgot" element={<Public><ForgotScreen /></Public>} />
+      {/* El enlace del correo se abre con o sin sesión: restablecer no depende de estar autenticado */}
+      <Route path="/reset-password" element={<ResetScreen />} />
+      <Route path="/" element={<AppGate />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
+}

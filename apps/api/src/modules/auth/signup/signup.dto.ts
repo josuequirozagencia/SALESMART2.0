@@ -12,8 +12,13 @@ const isValidTimezone = (tz: string): boolean => {
   }
 };
 
+/** Teléfono en E.164: «+» y de 8 a 15 dígitos, sin ceros iniciales tras el «+». La web arma el número con el prefijo del país. */
+const phoneE164 = z.string().trim().regex(/^\+[1-9]\d{7,14}$/, 'debe estar en formato internacional, por ejemplo +593987654321');
+
 export const signupSchema = z
   .object({
+    full_name: z.string().trim().min(2).max(100).refine((v) => !/\p{Cc}/u.test(v), 'caracteres no permitidos'),
+    phone: phoneE164,
     email,
     password: z.string().min(1).max(1024),
     organization_name: z.string().trim().min(2).max(100).refine((v) => !/\p{Cc}/u.test(v), 'caracteres no permitidos'),

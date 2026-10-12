@@ -40,3 +40,7 @@ jobs:
         run: pnpm test
       - name: e2e del artefacto compilado
         run: pnpm e2e
+      - name: Navegador para el E2E web
+        run: pnpm --filter @sales-smart/web exec playwright install --with-deps chromium
+      - name: e2e web (flujo de acceso ADR-23 en navegador real)
+        run: pnpm --filter @sales-smart/web e2e

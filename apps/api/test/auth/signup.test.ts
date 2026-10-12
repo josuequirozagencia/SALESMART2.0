@@ -9,6 +9,7 @@ import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { CAPTCHA_VERIFIER, FAKE_CAPTCHA_PASS, MAIL_PROVIDER, MemoryMailProvider } from '../../src/modules/auth/signup';
+import { Argon2idHasher } from '../../src/security';
 import { TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
@@ -36,7 +37,7 @@ const mk = (b: Booted) => ({
   post: (path: string, body: unknown) => fetch(`${b.base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
 });
 const scrub = (o: unknown) => JSON.stringify(o, (k, v) => (k === 'request_id' ? undefined : v));
-const reg = (email: string, extra: Record<string, unknown> = {}) => ({ email, password: PW, organization_name: 'Mi Empresa SA', timezone: 'America/Guayaquil', captcha_token: FAKE_CAPTCHA_PASS, ...extra });
+const reg = (email: string, extra: Record<string, unknown> = {}) => ({ email, password: PW, full_name: 'Ana Pérez', phone: '+593987654321', organization_name: 'Mi Empresa SA', timezone: 'America/Guayaquil', captcha_token: FAKE_CAPTCHA_PASS, ...extra });
 const wrongCode = (real: string) => (real === '000000' ? '000001' : '000000');
 const bypassCooldown = (email: string) => admin.query(`UPDATE email_verifications SET last_sent_at = now() - interval '1 hour' WHERE user_id = (SELECT id FROM users WHERE email = $1)`, [email]);
 
@@ -111,6 +112,39 @@ describe('registro y verificación (proveedores fake)', () => {
     expect(b.mail.outbox.map((m) => m.to)).toEqual(['nuevo@a.test']); // la cuenta activa NO recibe correo
     expect((await admin.query(`SELECT password_hash, session_version FROM users WHERE email='activo@a.test'`)).rows[0]).toEqual(before);
     expect((await api.post('/auth/login', { email: 'activo@a.test', password: PW })).status).toBe(200); // su contraseña sigue igual
+  });
+
+  it('el perfil (nombre y WhatsApp) queda en el usuario y un re-registro pendiente lo actualiza', async () => {
+    await api.post('/auth/signup', reg('perfil@a.test', { full_name: '  Ana  Pérez ', phone: ' +593987654321 ' }));
+    expect((await admin.query(`SELECT full_name, phone FROM users WHERE email='perfil@a.test'`)).rows[0]).toEqual({ full_name: 'Ana  Pérez', phone: '+593987654321' });
+    await bypassCooldown('perfil@a.test');
+    await api.post('/auth/signup', reg('perfil@a.test', { full_name: 'Ana María Pérez', phone: '+573001234567' }));
+    expect((await admin.query(`SELECT full_name, phone FROM users WHERE email='perfil@a.test'`)).rows[0]).toEqual({ full_name: 'Ana María Pérez', phone: '+573001234567' });
+  });
+
+  it('nombre y WhatsApp son obligatorios y estrictos: faltantes, cortos, sin «+», con letras, demasiado largos o con ceros tras el «+» → 400 y no se crea nada', async () => {
+    const base = reg('v@a.test');
+    const without = (key: string): Record<string, unknown> => Object.fromEntries(Object.entries(base).filter(([k]) => k !== key));
+    const noName = without('full_name');
+    const noPhone = without('phone');
+    const bad: Array<[string, Record<string, unknown>]> = [
+      ['sin nombre', noName], ['sin teléfono', noPhone],
+      ['nombre de 1 letra', reg('v@a.test', { full_name: 'A' })], ['nombre de 101', reg('v@a.test', { full_name: 'x'.repeat(101) })], ['nombre con control', reg('v@a.test', { full_name: 'Ana' })],
+      ['sin +', reg('v@a.test', { phone: '593987654321' })], ['con letras', reg('v@a.test', { phone: '+5939876abc21' })], ['7 dígitos', reg('v@a.test', { phone: '+5939876' })],
+      ['16 dígitos', reg('v@a.test', { phone: '+5939876543210123' })], ['cero tras el +', reg('v@a.test', { phone: '+0987654321' })], ['con espacios internos', reg('v@a.test', { phone: '+593 98 765 4321' })],
+    ];
+    for (const [name, body] of bad) {
+      const r = await api.post('/auth/signup', body);
+      expect(r.status, name).toBe(400);
+      expect(((await r.json()) as { error: { code: string } }).error.code, name).toBe('VALIDATION_ERROR');
+    }
+    expect((await admin.query('SELECT count(*)::int AS n FROM users')).rows[0].n).toBe(0);
+    expect(b.mail.outbox).toHaveLength(0);
+  });
+
+  it('la BD también impone el formato (CHECK) aunque se salte la aplicación', async () => {
+    await expect(admin.query(`INSERT INTO users(id,email,password_hash,phone) VALUES (gen_random_uuid(),'x@a.test',$1,'0987654321')`, [await new Argon2idHasher().hash(PW)])).rejects.toThrow(/users_phone_e164/);
+    await expect(admin.query(`INSERT INTO users(id,email,password_hash,full_name) VALUES (gen_random_uuid(),'y@a.test',$1,'A')`, [await new Argon2idHasher().hash(PW)])).rejects.toThrow(/users_full_name_len/);
   });
 
   it('re-registro de un correo pendiente: invalida el código anterior y usa la contraseña/organización nuevas', async () => {

@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Tokens del prototipo (violeta; claro/oscuro). Mismas variables que prototype/sales-smart-2-prototipo.html. */
+:root {
+  --bg: #f4f2fc; --surface: #ffffff; --line: #e2def2; --fg: #16112e; --muted: #5f5a7a;
+  --accent: #6a44f2; --accent-soft: #ece6ff; --accent-ink: #ffffff;
+  --ok: #1b7f48; --ok-soft: #dcf1e5; --warn: #9a6200; --warn-soft: #f8ebcc; --crit: #b3341f; --crit-soft: #f8ddd7;
+  --info: #2b5bb8; --info-soft: #dee8f8; --shadow: 0 10px 34px rgba(60, 40, 140, 0.14);
+  --grad: linear-gradient(135deg, #8b67ff 0%, #5b3fe0 100%); --on-grad: #fff;
+  --side-bg: linear-gradient(180deg, #1a1438 0%, #120d2b 100%);
+  --f-ui: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --surface2: #eeebfa;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e0a1f; --surface: #171230; --surface2: #211a42; --line: #30275a; --fg: #eeeafb; --muted: #a39cc4;
+    --accent: #9b7bff; --accent-soft: #2d2260; --accent-ink: #120a33;
+    --ok: #5bd08a; --ok-soft: #14331f; --warn: #e8b04a; --warn-soft: #3a2d10; --crit: #f0836f; --crit-soft: #3e1b15;
+    --info: #8db0f5; --info-soft: #1b2a55; --shadow: 0 10px 34px rgba(0, 0, 0, 0.55); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e0a1f; --surface: #171230; --surface2: #211a42; --line: #30275a; --fg: #eeeafb; --muted: #a39cc4;
+  --accent: #9b7bff; --accent-soft: #2d2260; --accent-ink: #120a33;
+  --ok: #5bd08a; --ok-soft: #14331f; --warn: #e8b04a; --warn-soft: #3a2d10; --crit: #f0836f; --crit-soft: #3e1b15;
+  --info: #8db0f5; --info-soft: #1b2a55; --shadow: 0 10px 34px rgba(0, 0, 0, 0.55); color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg); --color-surface: var(--surface); --color-surface2: var(--surface2); --color-line: var(--line);
+  --color-fg: var(--fg); --color-muted: var(--muted); --color-accent: var(--accent); --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink); --color-ok: var(--ok); --color-ok-soft: var(--ok-soft); --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft); --color-crit: var(--crit); --color-crit-soft: var(--crit-soft); --color-info: var(--info);
+  --color-info-soft: var(--info-soft); --font-sans: var(--f-ui); --font-mono: var(--f-mono);
+}
+
+html, body, #root { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-ui); font-size: 13.5px; line-height: 1.45; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }

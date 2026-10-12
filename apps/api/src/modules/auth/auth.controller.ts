@@ -1,9 +1,10 @@
-import { Body, Controller, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Post, Req, Res } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { ForbiddenError, UnauthorizedError } from '../../errors';
-import { Public, ZodValidationPipe } from '../../http';
+import { Public, SelfService, ZodValidationPipe } from '../../http';
+import type { AuthedRequest } from '../../http/access.guard';
 import { AuthService } from './auth.service';
 import { CSRF_HEADER, CSRF_VALUE, REFRESH_COOKIE, REFRESH_COOKIE_PATH } from './auth.constants';
 import { loginSchema, tokenBodySchema, type LoginDto, type TokenBodyDto } from './auth.dto';
@@ -65,6 +66,15 @@ export class AuthController {
     };
   }
 
+  /** Quién soy: usuario, organización activa y rol de la sesión verificada (no acepta ids; sale del principal). */
+  @SelfService()
+  @Get('me')
+  me(@Req() req: AuthedRequest) {
+    const sessionId = req.principal?.sessionId;
+    if (!sessionId) throw new UnauthorizedError();
+    return this.auth.me(sessionId);
+  }
+
   @Post('logout')
   @HttpCode(204)
   async logout(@Body(new ZodValidationPipe(tokenBodySchema)) body: TokenBodyDto, @Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<void> {
@@ -103,6 +113,6 @@ export class AuthController {
   }
 
   private clearCookie(res: Response): void {
-    res.clearCookie(REFRESH_COOKIE, { httpOnly: true, sameSite: 'strict', secure: this.cfg.nodeEnv === 'production', path: '/auth' });
+    res.clearCookie(REFRESH_COOKIE, { httpOnly: true, sameSite: 'strict', secure: this.cfg.nodeEnv === 'production', path: REFRESH_COOKIE_PATH });
   }
 }

@@ -20,6 +20,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/auth/login', kind: 'public' },
   { route: 'POST /v1/auth/refresh', kind: 'public' },
   { route: 'POST /v1/auth/logout', kind: 'public' },
+  { route: 'GET /v1/auth/me', kind: 'self', test: '../../auth/auth.test.ts' },
   // Registro (M1.2): públicas; protegidas con CAPTCHA, límites por IP/correo y respuestas uniformes. Pruebas: signup.test.ts
   { route: 'POST /v1/auth/signup', kind: 'public' },
   { route: 'POST /v1/auth/verify', kind: 'public' },

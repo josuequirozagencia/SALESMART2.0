@@ -3,6 +3,7 @@
 // y `--max-warnings 0` lo convierte en fallo).
 import js from '@eslint/js';
 import globals from 'globals';
+import reactHooks from 'eslint-plugin-react-hooks';
 import tseslint from 'typescript-eslint';
 
 const ADR = 'docs/ADR.md → ADR-24';
@@ -74,7 +75,7 @@ const importsRule = (allow = []) => {
 const TS_FILES = ['apps/*/src/**/*.ts', 'packages/*/src/**/*.ts'];
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', 'spikes/**', 'prototype/**', 'docs/**', '**/migrations/**', 'apps/web/**', 'packages/ui/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', 'spikes/**', 'prototype/**', 'docs/**', '**/migrations/**', 'packages/ui/**'] },
   { linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' } },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -148,6 +149,21 @@ export default tseslint.config(
   {
     files: ['apps/api/src/modules/platform/**/*.ts', 'apps/api/src/http/context.interceptor.ts'],
     rules: { 'no-restricted-syntax': syntaxRule(['P10-platform']) },
+  },
+  // Web (React): navegador, hooks y las mismas reglas generales. Las reglas ADR-24 de servidor no aplican a la UI (no toca la base de datos).
+  {
+    files: ['apps/web/**/*.{ts,tsx}'],
+    plugins: { 'react-hooks': reactHooks },
+    languageOptions: { globals: { ...globals.browser }, parserOptions: { ecmaFeatures: { jsx: true } } },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
+      '@typescript-eslint/no-explicit-any': ['error', { fixToUnknown: false }],
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+      'no-console': 'error',
+      eqeqeq: ['error', 'always'],
+      'no-restricted-syntax': 'off',
+      'no-restricted-imports': 'off',
+    },
   },
   // Tests: pueden atacar la base de datos directamente (es su función). Siguen sin poder desactivar reglas.
   {

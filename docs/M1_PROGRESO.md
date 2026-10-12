@@ -81,7 +81,7 @@ Parámetros de M1.3 sin cambios: token de un solo uso, TTL 30 min, 3/h por corre
 **Pendiente / riesgos:** matriz PROVISIONAL (confirmar); limpieza de tablas de identidad antes de producción; `trust proxy`; correo/CAPTCHA/URL del frontend sin decidir; sin consulta de auditoría en la UI.
 
 
-## M1.5 — Pruebas de 7 días, extensión única, vencimiento y cuenta en pausa (2026-10-09) · pendiente de aprobación
+## M1.5 — Pruebas de 7 días, extensión única, vencimiento y cuenta en pausa (2026-10-09) · APROBADA (2026-10-09; ADR-33 aprobado)
 Decisión de Josué (2026-10-09): las tareas periódicas usan **PostgreSQL con `FOR UPDATE SKIP LOCKED`**, sin Redis/BullMQ por ahora. Decisiones y límites en **ADR-33 (PROPUESTO)**.
 
 **Qué hay**
@@ -105,3 +105,38 @@ Suite completa: **469 tests en verde, 4 omitidos y 8 fallos que NO vienen de est
 3. **Purga a los 30 días** y su aviso por correo: se construye cuando haya datos de negocio y plantilla de correo.
 4. Aviso al Súper Admin por correo y en tiempo real, edición de `trial_config` por endpoint: diferidos (sin proveedor de correo ni WebSocket).
 5. Las matrices de permisos siguen PROVISIONALES: la extensión usa `billing.manage` (solo `client_admin`); si prefieres un permiso propio (`trial.request_extension`), es una migración.
+
+
+## M1.6 — Pantallas de acceso (React) y E2E del flujo ADR-23 (2026-10-09) · APROBADA (2026-10-11; ADR-34 aprobado)
+Decisiones y diferencias con el prototipo en **ADR-34 (PROPUESTO)**.
+
+**Qué hay**
+- **`apps/web`** (React 19 + Vite + TypeScript + Tailwind 4 con los tokens del prototipo, claro/oscuro, responsive): Iniciar sesión, Crear cuenta, Verificar correo (código de 6 dígitos, reenvío con espera), Recuperar contraseña, Crear contraseña nueva (enlace del correo), **Prueba vencida** (cuenta en pausa), aviso de prueba con **Pedir extensión** (modal accesible, única), y una pantalla inicial provisional (organización, rol, estado de la prueba; consola de plataforma para el Súper Admin).
+- **Sesión**: access token solo en memoria; refresh por cookie HttpOnly; un único refresh en vuelo + candado entre pestañas; recuperación al recargar; cierre de sesión con la cabecera anti-CSRF.
+- **API (cambios necesarios para la web)**: `GET /v1/auth/me` (`@SelfService`), `retention_days` y `extension_days` en `GET /v1/trials/me`, y **corrección de un bug previo**: la cookie de refresh se emitía con `Path=/v1/auth` pero se borraba con `Path=/auth`, así que el navegador nunca la eliminaba al cerrar sesión (test nuevo).
+- **ESLint** para la web (antes `apps/web` estaba ignorado) con las reglas de hooks de React; `pnpm test` ahora corre también las pruebas de la web; `pnpm dev:web`, `pnpm e2e:web`; CI con el E2E web.
+
+**Pruebas**
+- **Web (Vitest + Testing Library, 50):** login (validación, éxito sin tocar el almacenamiento, 401 genérico, 429 con espera, sin red, Súper Admin, mostrar contraseña, redirección con sesión), registro (validación, **payload exacto** sin campos inventados, contraseña fuera de la URL/historial/almacenamiento, 503/dominio desechable/429, errores de campo), verificación (flujo completo con entrada automática, solo dígitos, código inválido, sin contraseña en memoria, reenvío), recuperar/crear contraseña (respuesta uniforme, token del fragmento **borrado de la URL**, token inválido, StrictMode), sesión (**un solo refresh** aunque React monte dos veces, 401 simultáneos comparten uno, sesión perdida, logout con CSRF y aunque falle la red, rutas públicas sin token) y prueba (aviso, asesor sin extensión, estados pendiente/aprobada/denegada, modal: validación/409/Escape, pantalla de vencida por rol y estado, vencimiento a mitad de sesión por 403 `TRIAL_EXPIRED`).
+- **E2E en navegador real (Playwright, 11):** BD efímera con los 4 roles + API compilada + web compilada. **ADR-23 completo** (registro por la UI → código del «correo» → prueba → pedir extensión → Súper Admin aprueba → recargar conserva la sesión → **segunda solicitud 409** → vence → pantalla de vencida sin extensión → cerrar sesión), vencida sin extensión usada → pedir → denegar, **bloqueo tras 5 intentos** (el 6.º falla aun con la contraseña correcta), mensaje idéntico para correo inexistente y contraseña errónea, **correo desechable rechazado**, **correo duplicado no revelado** (la cuenta original sigue entrando), recuperar contraseña (enlace de un solo uso), Súper Admin a su consola, redirecciones y 3 pantallas a 390 px sin desborde.
+- **API (nuevas):** `GET /v1/auth/me` (identidad, 401, A↔B sin ids, membresía revocada), cookie de logout, `retention_days`/`extension_days`.
+- **Mutaciones (revertidas):** refresh sin compartir → 1 fallo; sin cabecera anti-CSRF en el refresh → 1 fallo; el memo del arranque es redundante con el refresh compartido (mutación equivalente).
+
+### Resultados y entorno de verificación (léelo)
+Typecheck, ESLint (`--max-warnings 0`) y `vite build` limpios. Web: **50/50**. E2E: **11/11** (Microsoft Edge instalado, PostgreSQL 13 desechable, Node 24). API: **474 en verde, 4 omitidos y los mismos 8 fallos de entorno de M1.5** (PG 13 en vez de 16; `spawnSync('pnpm')` en Windows); la CI de M1.5 con PG 16 y Node 22 los pasa. **Falta la pasada verde de la CI con el E2E web** (el paso nuevo instala Chromium en el runner).
+
+### Pendiente / decisiones tuyas
+1. **Aprobar ADR-34** y confirmar las diferencias con el prototipo: **¿se capturan «nombre» y «WhatsApp» en el registro?** (hoy no hay dónde guardarlos), y la contraseña mínima de 8.
+2. **Dominio y CORS**: producción necesita web y API bajo el mismo origen (proxy) o CORS con credenciales; depende del hosting.
+3. **Proveedor de CAPTCHA** (hoy `fake`/`none`) y de correo: sin ellos el registro en producción responde 503.
+4. **Consola de plataforma** (M2): hoy el Súper Admin no puede aprobar extensiones desde la UI.
+5. Heredado de M1.5: mecanismo de limpieza de tablas de identidad.
+
+### Ajustes tras la aprobación de M1.6 (2026-10-11)
+- **Nombre completo y WhatsApp en el registro** (decisión del responsable de producto): migración `0013_users_profile` (`users.full_name`, `users.phone`, CHECK de longitud y de formato E.164, nulos permitidos para cuentas creadas por otras vías); `signup` los exige y un re-registro pendiente los actualiza; `/auth/login` y `/auth/me` devuelven `full_name`; `GET /platform/trials` añade `owner_name` y `owner_phone`; el formulario web tiene selector de país (EC, CO, PE, MX, ES, US), arma el número en E.164 (quita el 0 de marcación nacional) y exige al menos 7 dígitos nacionales; el encabezado muestra el nombre.
+- **Contraseña mínima de 8**: confirmada.
+- **Pruebas nuevas:** API (+5: perfil guardado y actualizado en el re-registro, 11 formatos inválidos de nombre/teléfono → 400 sin crear nada, CHECK de la BD, login ≡ /me, nombre en /me y en la lista del Súper Admin), web (+16: payload exacto con `full_name`/`phone`, prefijo de país, número corto, formato E.164) y el E2E verifica que el perfil del registro llega a la lista del Súper Admin y al encabezado.
+- **Resultados:** web **66/66**; E2E **11/11** (Edge); API **478 en verde, 4 omitidos y los mismos 8 fallos de entorno** (PG 13 / Windows); typecheck, ESLint y `pnpm audit` limpios.
+
+### Estado de los pendientes de M1 tras la respuesta del 2026-10-11
+1. ADR-34 y nombre/WhatsApp: **resuelto**. 2. Contraseña de 8: **resuelto**. 3. Dominio y CORS: recomendación = una sola URL para web y API (la API sirve la web compilada), ver el mensaje de cierre; sin implementar. 4. Correo y CAPTCHA: recomendación Resend + Cloudflare Turnstile; sin implementar. 5. Consola del Súper Admin: primera rebanada de M2 («Pruebas»). 6. Limpieza de identidad: recomendación (a) del ADR-33; sin implementar.

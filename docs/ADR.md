@@ -523,7 +523,7 @@ Build Spec §1, §5, §6, §9, §10.1, §15, §16. Ninguna migración ni código
 ---
 
 ## ADR-33 — Pruebas gratuitas, tareas periódicas en PostgreSQL y cuenta en pausa (M1.5)
-**Estado: PROPUESTO (2026-10-09), pendiente de aprobación. El punto 1 (usar PostgreSQL con `SKIP LOCKED` en lugar de BullMQ/Redis) lo decidió el responsable de producto el 2026-10-09; los puntos 2 a 6 son decisiones mías que hay que revisar.**
+**Estado: APROBADO el 2026-10-09 por el responsable de producto (puntos 1 a 6, incluida la corrección al Build Spec §4.2 y la auditoría posterior al commit). Sigue ABIERTO el mecanismo de limpieza de las tablas de identidad (opciones a/b/c abajo): requiere su propia decisión.**
 
 ### Decisión
 1. **Tareas periódicas en proceso, con PostgreSQL y `FOR UPDATE SKIP LOCKED`** (resuelve el riesgo R3 de `M1_PLAN`). Sin Redis ni BullMQ por ahora. `JobRunner` (src/jobs) programa cada `ScheduledJob` con un temporizador: nunca solapa la misma tarea en el proceso, un fallo se registra y se reintenta en el siguiente intervalo, y al cerrar espera a lo que esté corriendo. Cada tarea es idempotente y trabaja por **lotes** (100 filas por transacción) con `SELECT … FOR UPDATE SKIP LOCKED`: varias instancias (API o worker) pueden correr a la vez sin duplicar trabajo y una fila que otra transacción está decidiendo se salta y se reintenta en la vuelta siguiente. `JOBS_ENABLED` las apaga (por defecto: encendidas salvo `NODE_ENV=test`); `JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS` (5–3600, defecto 60, PROVISIONAL). Primera tarea: `trial-expiry`.
@@ -553,3 +553,35 @@ Cuando haya trabajo por ítem con reintentos/backoff y programación diferida (e
 
 ### Impacto
 Migraciones `0011_trials` y `0012_trials_grants_seed`; nuevos módulos `modules/organizations` y `src/jobs`; `Principal.paused` y `@AllowWhenPaused`; `SignupService.verify` crea la prueba en su transacción; endpoints `GET /v1/trials/me`, `POST /v1/trials/me/extension` (permiso `billing.manage`, reutilizado: no se añadió permiso nuevo), `GET /v1/platform/trials`, `POST /v1/platform/trials/:id/approve|deny` (permiso `platform.trials.manage`). Build Spec §4.2, §6.2, §7 y §15 actualizados.
+
+---
+
+## ADR-34 — Frontend web: pantallas de acceso (M1.6)
+**Estado: APROBADO el 2026-10-11 por el responsable de producto, con dos confirmaciones: (1) el registro SÍ captura nombre completo y WhatsApp (se implementó el mismo día: `users.full_name` y `users.phone` en E.164, migración 0013) y (2) contraseña mínima de 8. Siguen ABIERTOS el dominio/CORS de producción, los proveedores de correo y CAPTCHA, y la consola de plataforma (M2).**
+
+### Decisión
+1. **Stack** (Build Spec §2): React 19 + Vite + TypeScript estricto, React Router, TanStack Query y Tailwind 4 con **los tokens del prototipo** (violeta; claro/oscuro; mismas variables CSS). La «una librería UI» del Build Spec queda como **Tailwind + componentes propios mínimos** (Button, Field, Input, Alert…): no se incorporó shadcn/Radix todavía porque las pantallas de acceso no necesitan más que un modal accesible (hecho a mano); se adoptará cuando haya menús, selectores y tablas (M3 en adelante).
+2. **Sesión en el navegador (ADR-26)**: el access token vive **solo en memoria**; el refresh viaja en cookie `HttpOnly; SameSite=Strict; Path=/v1/auth` con la cabecera `X-Requested-By: sales-smart-web`. Como el refresh es de un solo uso y sin ventana de gracia, hay **un único refresh en vuelo** (promesa compartida: varias peticiones con 401 comparten uno y se reintentan) y, entre pestañas, un **candado Web Locks** que serializa su uso (la segunda pestaña lee la cookie ya rotada). Al cargar la página se recupera la sesión con un refresh y `GET /v1/auth/me`.
+3. **`GET /v1/auth/me` (nuevo, `@SelfService`)**: usuario, organización activa y rol de la sesión verificada. Hace falta porque el refresh no devuelve identidad y, tras recargar, la web no sabría quién es. No acepta ids; sale de la sesión.
+4. **`/v1/trials/me` ahora incluye `retention_days` y `extension_days`** (de `trial_config`): las pantallas de «vencida» y de «pedir extensión» muestran esos números sin hardcodearlos en la web. Por la misma razón el texto de marketing de las pantallas públicas **no** cita «7 días».
+5. **Registro → verificación → entrada**: verificar el correo no abre sesión (M1.2). Para no obligar a escribir la contraseña otra vez, la web la conserva **solo en memoria** entre «Crear cuenta» y «Verificar», entra automáticamente al verificar y la borra; nunca va a la URL, al historial (que sobrevive a recargas) ni al almacenamiento. Si se recarga la página en medio, se verifica y se manda al login con un aviso.
+6. **Restablecer contraseña**: el token del enlace va en el **fragmento** (`#token=`); la pantalla lo captura al montar y lo borra de la barra de direcciones. La pantalla `/reset-password` no estaba en el prototipo (solo «olvidé»); se añadió porque el flujo la exige.
+7. **Anti-bots**: un único módulo (`lib/captcha.ts`) entrega el token; hoy `fake` (solo desarrollo/pruebas, exige `CAPTCHA_PROVIDER=fake` en el backend) o `none` (el backend responde 503). El proveedor real sigue ABIERTO (Build Spec §15 #9).
+8. **Mismo origen**: en desarrollo y en el E2E la web y la API comparten origen mediante el proxy de Vite (`/v1`). **En producción hace falta lo mismo (un dominio con proxy) o implementar CORS con credenciales**, que la API todavía no tiene («CORS/CSRF/CSP llegan con el bloque de seguridad web»). Depende de la decisión de hosting/dominio.
+
+### Diferencias deliberadas con el prototipo (no inventé nada del backend)
+- ~~Registro sin «nombre completo» ni «WhatsApp»~~ **(resuelto el 2026-10-11)**: el negocio decidió capturarlos. `POST /auth/signup` ahora exige `full_name` (2–100) y `phone` en E.164; se guardan en `users` (nulos en cuentas creadas por otras vías, como el super_admin del bootstrap), `/auth/login` y `/auth/me` devuelven `full_name`, y la lista de pruebas del Súper Admin muestra `owner_name` y `owner_phone` para el seguimiento. El WhatsApp es dato personal: se redacta en logs (clave `phone`) y solo lo ve el titular y el Súper Admin.
+- **Contraseña mínima de 8** (aprobada en M1.2), sin las reglas «10 caracteres + letra + número» del prototipo ni su medidor.
+- Se omiten el atajo de roles de demostración y la casilla «Mantener la sesión» (la sesión la gobierna el refresh de 30 días; no hay dos modos).
+- **«Elegir plan» está deshabilitado** (la pasarela de pago está ABIERTA). Los términos y la política de privacidad aparecen como texto («se publicarán antes del lanzamiento»), sin enlaces.
+- Tras iniciar sesión solo hay una pantalla inicial provisional (organización, rol, aviso de prueba); el menú y los módulos salen del prototipo en los hitos siguientes.
+- Los Súper Admin aún no tienen UI para aprobar extensiones (consola en M2); el E2E las aprueba por la API.
+
+### Alternativas
+shadcn/ui + Radix desde ya (más componentes listos, más dependencias para 6 pantallas); guardar el access token en `sessionStorage` (sobrevive a recargas, pero lo expone a XSS); CSS Modules o styled-components en lugar de Tailwind; formularios con react-hook-form + zod compartido (se evaluará con formularios largos en M3).
+
+### Ventajas / desventajas
++ Token fuera del alcance de scripts persistentes; sin refrescos duplicados que revoquen la sesión; pantallas verificadas en navegador real. − Cada recarga cuesta un refresh + `/auth/me` antes de pintar; el candado Web Locks no existe en navegadores muy antiguos (se degrada al refresh compartido de la pestaña); la contraseña en memoria entre dos pantallas es un riesgo menor aceptado frente a una recarga manual.
+
+### Impacto
+Nueva app `apps/web` (scripts `pnpm dev:web`, `pnpm e2e:web`), ESLint de la web (hooks de React), `GET /v1/auth/me`, campos extra en `GET /v1/trials/me`, corrección del `Path` de la cookie al cerrar sesión (se emitía con `/v1/auth` y se borraba con `/auth`, así que el navegador nunca la eliminaba), paso de E2E web en la CI.

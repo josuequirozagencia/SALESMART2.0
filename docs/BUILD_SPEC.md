@@ -125,7 +125,7 @@ Los permisos se evalúan en **un guard central**; la interfaz solo oculta, nunca
 Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico donde aplique), `organization_id` + RLS en toda tabla de negocio, saldos **derivados** (nunca campos libres), dinero en `numeric(14,2)` + `currency`. Columnas `legacy_id`, `legacy_source` (nullable) en `contacts`, `companies`, `opportunities`, `conversations`, `messages`, `sales` (ADR-06).
 
 ### 6.1 Acceso y organizaciones
-- `users` (email único, `password_hash` Argon2id, `email_verified_at`, `status`) · `auth_identities(user_id, provider, external_id)` · `sessions` · `refresh_tokens` (rotativos) · `email_verifications` · `password_resets` · `session_events` · `invitations`
+- `users` (email único, `password_hash` Argon2id, `email_verified_at`, `status`, **`full_name`, `phone` E.164 — capturados en el registro, ADR-34**) · `auth_identities(user_id, provider, external_id)` · `sessions` · `refresh_tokens` (rotativos) · `email_verifications` · `password_resets` · `session_events` · `invitations`
 - `organizations(kind ∈ platform|agency|client, parent_agency_id, created_by_agency_id, name, plan_id, status, timezone, …)` · `organization_members(user_id, organization_id, role, access_level, granted_by, revoked_at)` · `agency_grants` · `organization_ownership_history` · `access_sessions` *(plataforma)*
 - `roles`, `permissions`, `role_permissions` (permisos por rol; roles de sistema + personalizados por organización en V1)
 - `api_keys(hash, scope, expires_at, last_used_at)` (V1)
@@ -196,7 +196,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - Tiempo real: eventos `conversation.updated`, `message.created`, `opportunity.moved`, `call.state`, `trial.extension_requested` (a salas por organización/usuario; el aviso de extensión va a la sala `platform`).
 
 Endpoints de plataforma y de auth mínimos del MVP:
-`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET /platform/trials` (M1.5; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
+`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `GET /auth/me` (autenticado, M1.6/ADR-34) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET /platform/trials` (M1.5; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
 
 ---
 

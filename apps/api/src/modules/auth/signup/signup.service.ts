@@ -16,6 +16,9 @@ import { SignupLimiter } from './signup-limiter';
 export interface SignupInput {
   email: string;
   password: string;
+  /** Perfil del titular capturado en el registro. */
+  fullName: string;
+  phone: string;
   organizationName: string;
   timezone?: string;
   captchaToken: string;
@@ -67,10 +70,10 @@ export class SignupService {
         if (existing.status !== 'pending' || existing.verifiedAt !== null) return false; // cuenta ya real: no se toca ni se envía nada
         const [v] = await tx.select({ lastSentAt: emailVerifications.lastSentAt }).from(emailVerifications).where(eq(emailVerifications.userId, existing.id)).for('update');
         if (v && Date.now() - v.lastSentAt.getTime() < s.resendCooldownMs) return false;
-        await tx.update(users).set({ passwordHash, updatedAt: new Date() }).where(eq(users.id, existing.id));
+        await tx.update(users).set({ passwordHash, fullName: input.fullName, phone: input.phone, updatedAt: new Date() }).where(eq(users.id, existing.id));
         userId = existing.id;
       } else {
-        const [created] = await tx.insert(users).values({ email: input.email, passwordHash, status: 'pending' }).onConflictDoNothing({ target: users.email }).returning({ id: users.id });
+        const [created] = await tx.insert(users).values({ email: input.email, passwordHash, status: 'pending', fullName: input.fullName, phone: input.phone }).onConflictDoNothing({ target: users.email }).returning({ id: users.id });
         if (!created) return false; // carrera: otro registro del mismo correo ganó
         userId = created.id;
       }

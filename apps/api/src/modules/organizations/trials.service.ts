@@ -19,11 +19,20 @@ export interface TrialView {
   extension: { status: ExtensionStatus; can_request: boolean; requested_at: string | null; decided_at: string | null; days_granted: number | null };
 }
 
+/** Lo que ve el cliente en /trials/me: la vista + los parámetros que muestran sus pantallas (días de extensión y retención, de trial_config). */
+export interface MyTrialView extends TrialView {
+  retention_days: number;
+  extension_days: number;
+}
+
 export interface PlatformTrialItem extends Omit<TrialView, 'extension'> {
   id: string;
   organization_id: string;
   organization_name: string;
   owner_email: string;
+  /** Para dar seguimiento a la prueba (solo la ve el Súper Admin). */
+  owner_name: string | null;
+  owner_phone: string | null;
   extension: TrialView['extension'] & { reason: string | null };
 }
 
@@ -87,11 +96,14 @@ export class TrialsService {
   }
 
   /** Prueba de la organización del principal VERIFICADO. 404 si no tiene (Súper Admin, agencia, cliente de pago futuro). */
-  async mine(principal: Principal | undefined, now = new Date()): Promise<TrialView> {
+  async mine(principal: Principal | undefined, now = new Date()): Promise<MyTrialView> {
     const org = this.tenantOf(principal);
-    const [r] = await this.db.withIdentity((tx) => tx.select().from(trials).where(eq(trials.organizationId, org)).limit(1));
-    if (!r) throw new NotFoundError();
-    return viewOf(r, now);
+    const found = await this.db.withIdentity(async (tx) => {
+      const [r] = await tx.select().from(trials).where(eq(trials.organizationId, org)).limit(1);
+      return r ? { r, cfg: await this.config(tx) } : null;
+    });
+    if (!found) throw new NotFoundError();
+    return { ...viewOf(found.r, now), retention_days: found.cfg.retentionDays, extension_days: found.cfg.extensionDays };
   }
 
   /** Alta de la solicitud de extensión de la organización del principal verificado. */
@@ -130,7 +142,7 @@ export class TrialsService {
         f.state === 'active' ? sql`(${trials.status} = 'active' AND ${trials.endsAt} > ${now})` : undefined,
       ].filter((c) => c !== undefined);
       const rows = await tx
-        .select({ t: trials, orgName: organizations.name, ownerEmail: users.email })
+        .select({ t: trials, orgName: organizations.name, ownerEmail: users.email, ownerName: users.fullName, ownerPhone: users.phone })
         .from(trials)
         .innerJoin(organizations, eq(organizations.id, trials.organizationId))
         .innerJoin(users, eq(users.id, trials.ownerUserId))
@@ -142,7 +154,7 @@ export class TrialsService {
       return {
         items: page.map((r) => {
           const v = viewOf(r.t, now);
-          return { id: r.t.id, organization_id: r.t.organizationId, organization_name: r.orgName, owner_email: r.ownerEmail, status: v.status, started_at: v.started_at, ends_at: v.ends_at, extension: { ...v.extension, reason: r.t.extReason } };
+          return { id: r.t.id, organization_id: r.t.organizationId, organization_name: r.orgName, owner_email: r.ownerEmail, owner_name: r.ownerName, owner_phone: r.ownerPhone, status: v.status, started_at: v.started_at, ends_at: v.ends_at, extension: { ...v.extension, reason: r.t.extReason } };
         }),
         next_cursor: rows.length > f.limit ? (page[page.length - 1]?.t.id ?? null) : null,
         pending_extensions: pending?.n ?? 0,

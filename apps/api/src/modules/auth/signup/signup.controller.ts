@@ -13,7 +13,7 @@ export class SignupController {
   @Post('signup')
   @HttpCode(202)
   async register(@Body(new ZodValidationPipe(signupSchema)) b: SignupDto, @Req() req: Request) {
-    await this.signup.signup({ email: b.email, password: b.password, organizationName: b.organization_name, ...(b.timezone ? { timezone: b.timezone } : {}), captchaToken: b.captcha_token, ...(req.ip ? { ip: req.ip } : {}) });
+    await this.signup.signup({ email: b.email, password: b.password, fullName: b.full_name, phone: b.phone, organizationName: b.organization_name, ...(b.timezone ? { timezone: b.timezone } : {}), captchaToken: b.captcha_token, ...(req.ip ? { ip: req.ip } : {}) });
     return { status: 'verification_requested' };
   }
 
