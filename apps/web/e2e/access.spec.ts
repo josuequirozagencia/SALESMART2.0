@@ -1,6 +1,6 @@
 // E2E del flujo de acceso (ADR-23) en un navegador real contra la API y la web COMPILADAS.
 import { expect, test } from '@playwright/test';
-import { apiLogin, createAccount, decide, expireTrialOf, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
+import { apiLogin, createAccount, decide, expireTrialOf, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
 
 const REASON = 'Aún estoy conectando mi WhatsApp y probando los agentes';
 
@@ -183,6 +183,47 @@ test('la CSP de la API no rompe la web: ninguna pantalla de acceso produce viola
   }
   // los errores de red de recursos externos (fuentes de Google sin internet) no cuentan; las violaciones de CSP sí
   expect(problems.filter((p) => /Content Security Policy|Refused to/i.test(p))).toEqual([]);
+});
+
+test('consola del Súper Admin: ve la solicitud con el perfil del titular, la APRUEBA desde la interfaz y RECHAZA otra', async ({ page, request }) => {
+  const approveMe = await createAccount(request, uniqueEmail('aprobar'));
+  const denyMe = await createAccount(request, uniqueEmail('rechazar'));
+  await requestExtensionViaApi(request, approveMe, REASON);
+  await requestExtensionViaApi(request, denyMe, 'Necesito terminar la migración de contactos');
+  await expireTrialOf(denyMe); // una de las dos ya venció: la aprobación/rechazo debe funcionar igual
+
+  const s = state();
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await expect(page.getByRole('heading', { name: 'Consola de plataforma' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Pruebas/ })).toHaveAttribute('aria-current', 'page');
+  const rowOf = (email: string) => page.getByRole('listitem').filter({ hasText: email });
+  await expect(rowOf(approveMe)).toContainText('Ana E2E');
+  await expect(rowOf(approveMe)).toContainText('+593984217730');
+  await expect(rowOf(approveMe)).toContainText(REASON);
+  await expect(page.getByRole('navigation', { name: 'Secciones de la consola' }).getByLabel(/solicitudes pendientes$/)).toBeVisible();
+
+  // Aprobar con confirmación
+  await rowOf(approveMe).getByRole('button', { name: /Aprobar la extensión/ }).click();
+  const dlg = page.getByRole('dialog', { name: 'Aprobar extensión' });
+  await expect(dlg).toContainText('Se suman 3 días');
+  await dlg.getByRole('button', { name: 'Aprobar' }).click();
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(rowOf(approveMe)).toHaveCount(0); // ya no está entre las pendientes
+
+  // Rechazar (la prueba ya vencida no se reactiva)
+  await rowOf(denyMe).getByRole('button', { name: /Rechazar la extensión/ }).click();
+  await expect(page.getByRole('dialog', { name: 'Rechazar extensión' })).toContainText('La prueba no cambia');
+  await page.getByRole('dialog').getByRole('button', { name: 'Rechazar' }).click();
+  await expect(rowOf(denyMe)).toHaveCount(0);
+
+  // El efecto llegó al servidor
+  expect(await trialOf(request, approveMe)).toMatchObject({ status: 'active', extension: { status: 'approved', days_granted: 3 } });
+  expect(await trialOf(request, denyMe)).toMatchObject({ status: 'expired', extension: { status: 'denied', days_granted: null } });
+
+  // «Todas» las muestra ya resueltas
+  await page.getByRole('tab', { name: 'Todas' }).click();
+  await expect(rowOf(approveMe)).toContainText('Aprobada +3 d');
+  await expect(rowOf(denyMe)).toContainText('Rechazada');
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

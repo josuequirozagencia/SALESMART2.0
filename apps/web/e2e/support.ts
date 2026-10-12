@@ -68,6 +68,19 @@ export async function pendingTrialOf(request: APIRequestContext, email: string):
   return (await pendingTrialItemOf(request, email)).id;
 }
 
+/** La persona cliente pide su extensión (la solicitud llega a la consola del Súper Admin). */
+export async function requestExtensionViaApi(request: APIRequestContext, email: string, reason: string): Promise<void> {
+  const { apiBase } = state();
+  const token = await apiLogin(request, email);
+  expect((await request.post(`${apiBase}/v1/trials/me/extension`, { headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, data: { reason } })).status()).toBe(202);
+}
+
+export async function trialOf(request: APIRequestContext, email: string): Promise<{ status: string; extension: { status: string; days_granted: number | null } }> {
+  const { apiBase } = state();
+  const token = await apiLogin(request, email);
+  return (await (await request.get(`${apiBase}/v1/trials/me`, { headers: { authorization: `Bearer ${token}` } })).json()) as { status: string; extension: { status: string; days_granted: number | null } };
+}
+
 export async function decide(request: APIRequestContext, trialId: string, action: 'approve' | 'deny'): Promise<void> {
   const { apiBase } = state();
   const token = await adminToken(request);

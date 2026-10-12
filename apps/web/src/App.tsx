@@ -1,6 +1,9 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { PlatformShell } from './features/platform/PlatformShell';
+import { TrialsPage } from './features/platform/TrialsPage';
 import { TrialExpiredScreen } from './features/trial/TrialExpiredScreen';
 import { useTrial } from './features/trial/useTrial';
+import type { Me } from './lib/types';
 import { useSession } from './lib/session';
 import { ForgotScreen } from './screens/ForgotScreen';
 import { HomeScreen } from './screens/HomeScreen';
@@ -22,13 +25,23 @@ function Public({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Puerta de la app: sin sesión → login; con la prueba vencida → pantalla de «vencida»; si no → inicio. */
+/** Consola de plataforma: solo el Súper Admin; cualquier otra persona vuelve al inicio. */
+function PlatformGate({ children }: { children: (me: Me, logout: () => void) => React.ReactNode }) {
+  const { state, logout } = useSession();
+  if (state.status === 'loading') return <Splash />;
+  if (state.status === 'anon') return <Navigate to="/login" replace />;
+  if (state.me.role !== 'super_admin') return <Navigate to="/" replace />;
+  return <>{children(state.me, () => void logout())}</>;
+}
+
+/** Puerta de la app: sin sesión → login; Súper Admin → consola; con la prueba vencida → pantalla de «vencida»; si no → inicio. */
 function AppGate() {
   const { state, logout } = useSession();
   const clientOrg = state.status === 'authed' && state.me.organization.kind === 'client';
   const trial = useTrial(clientOrg);
   if (state.status === 'loading') return <Splash />;
   if (state.status === 'anon') return <Navigate to="/login" replace />;
+  if (state.me.role === 'super_admin') return <Navigate to="/platform/trials" replace />;
   if (clientOrg && trial.isPending) return <Splash />;
   const t = trial.data ?? null;
   const out = () => void logout();
@@ -46,6 +59,7 @@ export function App() {
       {/* El enlace del correo se abre con o sin sesión: restablecer no depende de estar autenticado */}
       <Route path="/reset-password" element={<ResetScreen />} />
       <Route path="/" element={<AppGate />} />
+      <Route path="/platform/trials" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><TrialsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

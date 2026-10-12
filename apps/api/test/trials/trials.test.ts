@@ -283,19 +283,22 @@ describe('pruebas gratuitas (M1.5)', () => {
     for (let i = 0; i < 5; i++) {
       await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES (gen_random_uuid(),'client',$1,'UTC')`, [`Cliente ${i}`]);
       const org = (await admin.query(`SELECT id FROM organizations WHERE name = $1`, [`Cliente ${i}`])).rows[0].id as string;
-      ids.push(await trial({ org, owner: IDS.alice, endsInDays: i < 2 ? -1 : 3, ext: i === 0 || i === 3 ? 'pending' : 'none', status: i === 0 ? 'expired' : 'active' }));
+      ids.push(await trial({ org, owner: IDS.alice, endsInDays: i < 2 ? -1 : i === 4 ? 1 : 3, ext: i === 0 || i === 3 ? 'pending' : 'none', status: i === 0 ? 'expired' : 'active' }));
     }
     await admin.query(`UPDATE users SET full_name = 'Alicia Torres', phone = '+593911111111' WHERE id = $1`, [IDS.alice]);
     const root = await login('root@plat.test');
-    const get = async (qs = '') => (await (await call('GET', `/platform/trials${qs}`, root)).json()) as { items: Array<{ id: string; owner_email: string; owner_name: string | null; owner_phone: string | null; organization_name: string; status: string; extension: { status: string; reason: string | null } }>; next_cursor: string | null; pending_extensions: number };
+    const get = async (qs = '') => (await (await call('GET', `/platform/trials${qs}`, root)).json()) as { items: Array<{ id: string; owner_email: string; owner_name: string | null; owner_phone: string | null; organization_name: string; status: string; extension: { status: string; reason: string | null } }>; next_cursor: string | null; pending_extensions: number; summary: { active: number; expiring_soon: number; pending: number; extension_days: number } };
 
     const all = await get();
     expect(all.items).toHaveLength(5);
     expect(all.pending_extensions).toBe(2);
+    expect(all.summary).toEqual({ active: 3, expiring_soon: 1, pending: 2, extension_days: 3 }); // totales de TODA la plataforma
     expect(all.items[0]!.owner_email).toBe('alice@a.test');
     expect(all.items[0]).toMatchObject({ owner_name: 'Alicia Torres', owner_phone: '+593911111111' }); // para el seguimiento del Súper Admin
     expect(all.items.map((i) => i.id)).toEqual([...ids].sort().reverse()); // más recientes (id v7) primero
 
+    expect((await get('?limit=1')).summary).toEqual({ active: 3, expiring_soon: 1, pending: 2, extension_days: 3 }); // no depende del tamaño de la página ni de los filtros
+    expect((await get('?state=expired&limit=1')).summary).toEqual({ active: 3, expiring_soon: 1, pending: 2, extension_days: 3 });
     expect((await get('?extension=pending')).items).toHaveLength(2);
     expect((await get('?state=expired')).items).toHaveLength(2); // 0 (job) y 1 (por la hora)
     expect((await get('?state=active')).items).toHaveLength(3);

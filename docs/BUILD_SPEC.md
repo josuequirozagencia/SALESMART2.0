@@ -196,7 +196,7 @@ Convenciones: UUID v7, `created_at`, `updated_at`, `deleted_at` (borrado lógico
 - Tiempo real: eventos `conversation.updated`, `message.created`, `opportunity.moved`, `call.state`, `trial.extension_requested` (a salas por organización/usuario; el aviso de extensión va a la sala `platform`).
 
 Endpoints de plataforma y de auth mínimos del MVP:
-`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `GET /auth/me` (autenticado, M1.6/ADR-34) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET /platform/trials` (M1.5; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
+`POST /auth/signup` · `POST /auth/verify` · `POST /auth/resend` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `POST /auth/forgot` · `POST /auth/reset` · `POST /auth/password` (autenticado, ADR-28) · `GET /auth/me` (autenticado, M1.6/ADR-34) · `POST /context/switch` · `GET /trials/me` · `POST /trials/me/extension` · `GET /platform/trials` (M1.5; devuelve `items`, `next_cursor`, `pending_extensions` y `summary` con totales globales; el `POST` del borrador queda sin definir: la prueba nace sola al verificar el correo), `POST /platform/trials/:id/approve|deny` · `GET|POST /platform/agencies`, `PUT /platform/organizations/:id/agency` · `GET /platform/access-sessions`
 
 ---
 

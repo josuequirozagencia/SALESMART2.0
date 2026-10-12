@@ -1,13 +1,14 @@
-import { useId, useState, type ButtonHTMLAttributes, type InputHTMLAttributes, type ReactNode } from 'react';
+import { useId, useState, type ComponentPropsWithRef, type InputHTMLAttributes, type ReactNode } from 'react';
 
 const cx = (...c: Array<string | false | undefined>): string => c.filter(Boolean).join(' ');
 
-type Variant = 'primary' | 'secondary' | 'link';
-export function Button({ variant = 'secondary', block, className, loading, children, disabled, ...rest }: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: Variant; block?: boolean; loading?: boolean }) {
+type Variant = 'primary' | 'secondary' | 'danger' | 'link';
+export function Button({ variant = 'secondary', block, className, loading, children, disabled, ...rest }: ComponentPropsWithRef<'button'> & { variant?: Variant; block?: boolean; loading?: boolean }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded-[10px] text-[14px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60';
   const styles: Record<Variant, string> = {
     primary: 'bg-accent text-accent-ink border border-accent px-4 py-3 hover:brightness-110',
     secondary: 'bg-surface text-fg border border-line px-4 py-3 hover:bg-surface2',
+    danger: 'bg-crit-soft text-crit border border-transparent px-4 py-3 hover:brightness-95',
     link: 'bg-transparent border-0 p-0 text-accent text-[length:inherit] font-semibold hover:underline',
   };
   return (

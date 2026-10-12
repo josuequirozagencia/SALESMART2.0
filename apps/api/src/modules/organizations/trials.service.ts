@@ -41,7 +41,12 @@ export interface PlatformTrialList {
   next_cursor: string | null;
   /** Insignia de navegación (ADR-23 #3): solicitudes de extensión pendientes en toda la plataforma. */
   pending_extensions: number;
+  /** Tarjetas de la pestaña «Pruebas»: totales de TODA la plataforma (no de la página). */
+  summary: { active: number; expiring_soon: number; pending: number; extension_days: number };
 }
+
+/** «Vencen pronto»: menos de 2 días (PROVISIONAL, el mismo criterio del prototipo). */
+export const EXPIRING_SOON_MS = 2 * 86_400_000;
 
 export interface PlatformTrialFilter {
   extension?: ExtensionStatus | undefined;
@@ -149,7 +154,15 @@ export class TrialsService {
         .where(conds.length > 0 ? and(...conds) : undefined)
         .orderBy(desc(trials.id))
         .limit(f.limit + 1);
-      const [pending] = await tx.select({ n: sql<number>`count(*)::int` }).from(trials).where(eq(trials.extStatus, 'pending'));
+      const soon = new Date(now.getTime() + EXPIRING_SOON_MS);
+      const cfg = await this.config(tx);
+      const [s] = await tx
+        .select({
+          active: sql<number>`(count(*) FILTER (WHERE ${trials.status} = 'active' AND ${trials.endsAt} > ${now}))::int`,
+          soon: sql<number>`(count(*) FILTER (WHERE ${trials.status} = 'active' AND ${trials.endsAt} > ${now} AND ${trials.endsAt} <= ${soon}))::int`,
+          pending: sql<number>`(count(*) FILTER (WHERE ${trials.extStatus} = 'pending'))::int`,
+        })
+        .from(trials);
       const page = rows.slice(0, f.limit);
       return {
         items: page.map((r) => {
@@ -157,7 +170,8 @@ export class TrialsService {
           return { id: r.t.id, organization_id: r.t.organizationId, organization_name: r.orgName, owner_email: r.ownerEmail, owner_name: r.ownerName, owner_phone: r.ownerPhone, status: v.status, started_at: v.started_at, ends_at: v.ends_at, extension: { ...v.extension, reason: r.t.extReason } };
         }),
         next_cursor: rows.length > f.limit ? (page[page.length - 1]?.t.id ?? null) : null,
-        pending_extensions: pending?.n ?? 0,
+        pending_extensions: s?.pending ?? 0,
+        summary: { active: s?.active ?? 0, expiring_soon: s?.soon ?? 0, pending: s?.pending ?? 0, extension_days: cfg.extensionDays },
       };
     });
   }

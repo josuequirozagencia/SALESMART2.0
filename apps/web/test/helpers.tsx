@@ -10,7 +10,7 @@ import { createQueryClient } from '../src/lib/query';
 import { resetBootstrapForTests, SessionProvider } from '../src/lib/session';
 import type { Me, Trial } from '../src/lib/types';
 
-export interface Call { method: string; path: string; body: unknown; headers: Record<string, string> }
+export interface Call { method: string; path: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 export interface Reply { status?: number; body?: unknown; headers?: Record<string, string> }
 export type Handler = (call: Call) => Reply | Promise<Reply>;
 
@@ -18,11 +18,11 @@ export type Handler = (call: Call) => Reply | Promise<Reply>;
 export function mockApi(routes: Record<string, Handler>): { calls: Call[]; count: (key: string) => number; last: (key: string) => Call | undefined } {
   const calls: Call[] = [];
   vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
-    const path = String(input).replace(/^https?:\/\/[^/]+/, '').replace(/^\/v1/, '');
+    const [path = '', qs = ''] = String(input).replace(/^https?:\/\/[^/]+/, '').replace(/^\/v1/, '').split('?');
     const method = (init?.method ?? 'GET').toUpperCase();
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((v, k) => { headers[k] = v; });
-    const call: Call = { method, path, body: init?.body ? JSON.parse(String(init.body)) : undefined, headers };
+    const call: Call = { method, path, query: new URLSearchParams(qs), body: init?.body ? JSON.parse(String(init.body)) : undefined, headers };
     calls.push(call);
     const h = routes[`${method} ${path}`];
     if (!h) throw new Error(`Ruta sin manejador en la prueba: ${method} ${path}`);

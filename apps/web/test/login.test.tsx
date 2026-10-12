@@ -74,7 +74,7 @@ describe('Iniciar sesión', () => {
   });
 
   it('el Súper Admin entra a la consola de plataforma y no consulta /trials/me', async () => {
-    const api = mockApi({ ...anon(), 'POST /auth/login': () => loginReply(ME_ROOT) });
+    const api = mockApi({ ...anon(), 'POST /auth/login': () => loginReply(ME_ROOT), 'GET /platform/trials': () => ({ body: { items: [], next_cursor: null, pending_extensions: 0, summary: { active: 0, expiring_soon: 0, pending: 0, extension_days: 3 } } }) });
     renderApp('/login');
     const u = await fill('root@plataforma.test', 'Clave-Segura-1');
     await u.click(screen.getByRole('button', { name: 'Entrar' }));
