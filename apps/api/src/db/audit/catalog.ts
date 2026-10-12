@@ -20,5 +20,6 @@ export const PRODUCTION_CATALOG: TableCatalog = {
   identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config'],
   reference: [],
   tenantRoot: [],
-  securityDefiner: [],
+  // ADR-35: limpieza de tablas de identidad sin dar DELETE a app_identity
+  securityDefiner: ['purge_expired_identity_rows'],
 };

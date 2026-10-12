@@ -46,6 +46,7 @@ export interface AppConfig {
     readonly enabled: boolean;
     /** PROVISIONAL (M1.5). */
     readonly trialExpiryIntervalMs: number;
+    readonly identityCleanupIntervalMs: number;
   };
   readonly db: {
     readonly appUrl: string;
@@ -160,7 +161,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       ipMaxPerHour: e.RESET_IP_MAX_PER_HOUR,
       attemptIpMaxPerHour: e.RESET_ATTEMPT_IP_MAX_PER_HOUR,
     },
-    jobs: { enabled: e.JOBS_ENABLED === undefined ? e.NODE_ENV !== 'test' : e.JOBS_ENABLED === 'true', trialExpiryIntervalMs: e.JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS * 1000 },
+    jobs: { enabled: e.JOBS_ENABLED === undefined ? e.NODE_ENV !== 'test' : e.JOBS_ENABLED === 'true', trialExpiryIntervalMs: e.JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS * 1000, identityCleanupIntervalMs: e.JOBS_IDENTITY_CLEANUP_INTERVAL_SECONDS * 1000 },
     db: {
       appUrl: e.DATABASE_URL_APP,
       platformUrl: e.DATABASE_URL_PLATFORM,

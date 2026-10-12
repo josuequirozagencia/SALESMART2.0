@@ -63,7 +63,7 @@ describe('migraciones', () => {
   it('SQL de migraciones sin construcciones prohibidas (USING true, SECURITY DEFINER, BYPASSRLS, locks de sesión...)', () => {
     const files = readdirSync(MIG_DIR).filter((f) => f.endsWith('.sql'));
     expect(files.length).toBeGreaterThan(0);
-    for (const f of files) expect(scanMigrationSql(readFileSync(path.join(MIG_DIR, f), 'utf8'), [], PRODUCTION_CATALOG.identity), f).toEqual([]);
+    for (const f of files) expect(scanMigrationSql(readFileSync(path.join(MIG_DIR, f), 'utf8'), PRODUCTION_CATALOG.securityDefiner, PRODUCTION_CATALOG.identity), f).toEqual([]);
   });
 
   it('el escáner SQL tiene dientes: detecta cada construcción prohibida y tablas tenant sin FORCE/política', () => {
@@ -80,6 +80,12 @@ describe('migraciones', () => {
       'CREATE TABLE "x" ("id" uuid, "organization_id" uuid);',
     ];
     for (const s of bad) expect(scanMigrationSql(s).length, s).toBeGreaterThan(0);
+    // un SECURITY DEFINER solo pasa si la función está APROBADA por nombre (ADR-35); cualquier otra se sigue rechazando
+    const definer = (name: string) => `CREATE FUNCTION "public"."${name}"() RETURNS int LANGUAGE sql SECURITY DEFINER AS $$ select 1 $$;`;
+    expect(scanMigrationSql(definer('purge_expired_identity_rows'), ['purge_expired_identity_rows'])).toEqual([]);
+    expect(scanMigrationSql(definer('otra_funcion'), ['purge_expired_identity_rows']).length).toBeGreaterThan(0);
+    expect(scanMigrationSql(`${definer('purge_expired_identity_rows')}
+${definer('otra_funcion')}`, ['purge_expired_identity_rows']).length).toBeGreaterThan(0);
     // comentarios no cuentan, y una tabla tenant bien declarada pasa
     expect(scanMigrationSql('-- USING (true) SECURITY DEFINER\nSELECT 1;')).toEqual([]);
     expect(

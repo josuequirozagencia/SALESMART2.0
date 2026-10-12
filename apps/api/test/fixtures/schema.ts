@@ -42,5 +42,5 @@ export const FIXTURE_CATALOG = {
   identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config'],
   reference: [],
   tenantRoot: [],
-  securityDefiner: [],
+  securityDefiner: ['purge_expired_identity_rows'],
 } as const;

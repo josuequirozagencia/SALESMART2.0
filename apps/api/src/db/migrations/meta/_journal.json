@@ -99,6 +99,13 @@
       "when": 1791772605334,
       "tag": "0013_users_profile",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1791776669631,
+      "tag": "0014_identity_cleanup",
+      "breakpoints": true
     }
   ]
 }

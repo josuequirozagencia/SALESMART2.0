@@ -106,6 +106,30 @@ describe('cobertura de políticas RLS (auditoría del catálogo real)', () => {
     expect(codes(ok)).not.toContain('VIEW_NOT_INVOKER');
   });
 
+  it('una función SECURITY DEFINER APROBADA también debe ser segura: dueño app_owner, search_path fijo y EXECUTE solo para app_identity (ADR-35)', async () => {
+    const catalog = { ...FIXTURE_CATALOG, securityDefiner: [...FIXTURE_CATALOG.securityDefiner, 'risky_fn'] } as never;
+    // sin search_path y con EXECUTE para todos (el valor por defecto de PostgreSQL) → debe objetarse
+    const bad = await auditWith(owner, [`CREATE FUNCTION public.risky_fn() RETURNS int LANGUAGE sql SECURITY DEFINER AS $$ SELECT 1 $$`], catalog);
+    expect(codes(bad)).toEqual(expect.arrayContaining(['DEFINER_SEARCH_PATH', 'DEFINER_EXECUTE']));
+    expect(codes(bad)).not.toContain('SECURITY_DEFINER'); // está aprobada por nombre; lo que falla es cómo está definida
+    // dueño equivocado
+    const wrongOwner = await auditWith(admin, [
+      `CREATE FUNCTION public.risky_fn() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$ SELECT 1 $$`,
+      `REVOKE ALL ON FUNCTION public.risky_fn() FROM PUBLIC`,
+      `GRANT EXECUTE ON FUNCTION public.risky_fn() TO app_identity`,
+    ], catalog);
+    expect(codes(wrongOwner)).toContain('DEFINER_OWNER');
+    // una definición correcta no genera objeciones sobre la función
+    const good = await auditWith(owner, [
+      `CREATE FUNCTION public.risky_fn() RETURNS int LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$ SELECT 1 $$`,
+      `REVOKE ALL ON FUNCTION public.risky_fn() FROM PUBLIC, app_rw, app_platform`,
+      `GRANT EXECUTE ON FUNCTION public.risky_fn() TO app_identity`,
+    ], catalog);
+    expect(codes(good).filter((c) => c.startsWith('DEFINER_') || c === 'SECURITY_DEFINER')).toEqual([]);
+    // y la función real de la migración 0014 cumple lo mismo
+    expect(codes(await auditDatabase(owner, FIXTURE_CATALOG as never)).filter((c) => c.startsWith('DEFINER_'))).toEqual([]);
+  });
+
   it('detecta FK entre tablas tenant que no incluye organization_id', async () => {
     const v = await auditWith(owner, [
       `ALTER TABLE contacts ADD CONSTRAINT contacts_id_uq UNIQUE (id)`,

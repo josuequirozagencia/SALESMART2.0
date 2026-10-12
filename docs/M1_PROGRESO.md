@@ -140,3 +140,6 @@ Typecheck, ESLint (`--max-warnings 0`) y `vite build` limpios. Web: **50/50**. E
 
 ### Estado de los pendientes de M1 tras la respuesta del 2026-10-11
 1. ADR-34 y nombre/WhatsApp: **resuelto**. 2. Contraseña de 8: **resuelto**. 3. Dominio y CORS: recomendación = una sola URL para web y API (la API sirve la web compilada), ver el mensaje de cierre; sin implementar. 4. Correo y CAPTCHA: recomendación Resend + Cloudflare Turnstile; sin implementar. 5. Consola del Súper Admin: primera rebanada de M2 («Pruebas»). 6. Limpieza de identidad: recomendación (a) del ADR-33; sin implementar.
+
+## Limpieza de identidad (ADR-35, 2026-10-11)
+Función `purge_expired_identity_rows()` (migración 0014) + job `identity-cleanup`, con auditor y escáner ampliados. Pruebas: borra solo lo caducado de cada una de las 5 tablas y conserva lo vivo o reciente, nunca toca usuarios/organizaciones, privilegios por rol, sin parámetros, `SKIP LOCKED`, más de un lote en una pasada, dos ejecuciones simultáneas, y el auditor rechaza una función aprobada pero insegura (dueño, `search_path`, EXECUTE). Resultado local: todo en verde salvo los fallos de entorno ya conocidos (PG 13/Windows).

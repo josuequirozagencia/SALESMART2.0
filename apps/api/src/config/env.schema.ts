@@ -60,6 +60,7 @@ export const envSchema = z.object({
   // ── Tareas periódicas (M1.5, ADR-33). JOBS_ENABLED omitido = activas salvo NODE_ENV=test; 'false' las apaga (p. ej. la API cuando exista un worker aparte) ──
   JOBS_ENABLED: z.enum(['true', 'false']).optional(),
   JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(3600).default(60), // PROVISIONAL
+  JOBS_IDENTITY_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600), // PROVISIONAL (ADR-35)
   DB_POOL_MAX_APP: z.coerce.number().int().min(1).max(100).default(10),
   DB_POOL_MAX_PLATFORM: z.coerce.number().int().min(1).max(20).default(3),
   DB_POOL_MAX_IDENTITY: z.coerce.number().int().min(1).max(20).default(3),

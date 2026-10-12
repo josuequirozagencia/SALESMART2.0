@@ -9,6 +9,7 @@ import { Argon2idHasher } from '../../security';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { PASSWORD_HASHER } from './auth.tokens';
+import { IdentityCleanupJob } from './identity-cleanup.job';
 import { LocalAccessResolver } from './local-access.resolver';
 import { SessionService } from './session.service';
 import { PermissionService } from './permission.service';
@@ -38,7 +39,7 @@ import { SignupService } from './signup/signup.service';
       inject: [APP_CONFIG, APP_LOGGER],
     },
     { provide: CAPTCHA_VERIFIER, useFactory: (cfg: AppConfig) => (cfg.signup.captchaProvider === 'fake' ? new FakeCaptchaVerifier() : new UnavailableCaptchaVerifier()), inject: [APP_CONFIG] },
-     SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
-  exports: [SessionService, LocalAccessResolver, PermissionService],
+     IdentityCleanupJob, SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
+  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob],
 })
 export class AuthModule {}

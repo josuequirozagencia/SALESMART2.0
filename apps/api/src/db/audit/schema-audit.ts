@@ -85,6 +85,25 @@ export async function auditDatabase(db: Queryable, catalog: TableCatalog): Promi
     if (!catalog.securityDefiner.includes(d.proname)) add('SECURITY_DEFINER', d.proname, 'función SECURITY DEFINER no aprobada (requiere ADR y alta en el catálogo)');
   }
 
+  // Las aprobadas deben ser SEGURAS: dueño app_owner, search_path fijo y EXECUTE solo para app_identity (ADR-35)
+  const approved = (
+    await db.query<{ proname: string; owner: string; config: string[] | null; public_exec: boolean; rw_exec: boolean; platform_exec: boolean; identity_exec: boolean }>(
+      `SELECT p.proname, pg_get_userbyid(p.proowner) AS owner, p.proconfig AS config,
+              EXISTS (SELECT 1 FROM aclexplode(COALESCE(p.proacl, acldefault('f', p.proowner))) a WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_exec,
+              has_function_privilege($2, p.oid, 'EXECUTE') AS rw_exec, has_function_privilege($3, p.oid, 'EXECUTE') AS platform_exec,
+              has_function_privilege($4, p.oid, 'EXECUTE') AS identity_exec
+         FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = 'public' AND p.prosecdef AND p.proname = ANY($1)`,
+      [[...catalog.securityDefiner], DB_ROLES.rw, DB_ROLES.platform, DB_ROLES.identity],
+    )
+  ).rows;
+  for (const f of approved) {
+    if (f.owner !== DB_ROLES.owner) add('DEFINER_OWNER', f.proname, `debe pertenecer a ${DB_ROLES.owner} (pertenece a ${f.owner})`);
+    if (!(f.config ?? []).some((c) => /^search_path=/i.test(c))) add('DEFINER_SEARCH_PATH', f.proname, 'una función SECURITY DEFINER debe fijar search_path');
+    if (f.public_exec || f.rw_exec || f.platform_exec) add('DEFINER_EXECUTE', f.proname, `EXECUTE solo para ${DB_ROLES.identity}: PUBLIC, ${DB_ROLES.rw} y ${DB_ROLES.platform} no pueden ejecutarla`);
+    if (!f.identity_exec) add('DEFINER_NOT_EXECUTABLE', f.proname, `${DB_ROLES.identity} debe poder ejecutarla`);
+  }
+
   // ── Vistas (eluden RLS salvo security_invoker) ──────────────────────────────────────────────────
   const views = (
     await db.query<{ relname: string; reloptions: string[] | null }>(

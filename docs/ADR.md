@@ -523,7 +523,7 @@ Build Spec §1, §5, §6, §9, §10.1, §15, §16. Ninguna migración ni código
 ---
 
 ## ADR-33 — Pruebas gratuitas, tareas periódicas en PostgreSQL y cuenta en pausa (M1.5)
-**Estado: APROBADO el 2026-10-09 por el responsable de producto (puntos 1 a 6, incluida la corrección al Build Spec §4.2 y la auditoría posterior al commit). Sigue ABIERTO el mecanismo de limpieza de las tablas de identidad (opciones a/b/c abajo): requiere su propia decisión.**
+**Estado: APROBADO el 2026-10-09 por el responsable de producto (puntos 1 a 6, incluida la corrección al Build Spec §4.2 y la auditoría posterior al commit). El mecanismo de limpieza de las tablas de identidad (opciones a/b/c abajo) se decidió el 2026-10-11: ver ADR-35 (opción a).**
 
 ### Decisión
 1. **Tareas periódicas en proceso, con PostgreSQL y `FOR UPDATE SKIP LOCKED`** (resuelve el riesgo R3 de `M1_PLAN`). Sin Redis ni BullMQ por ahora. `JobRunner` (src/jobs) programa cada `ScheduledJob` con un temporizador: nunca solapa la misma tarea en el proceso, un fallo se registra y se reintenta en el siguiente intervalo, y al cerrar espera a lo que esté corriendo. Cada tarea es idempotente y trabaja por **lotes** (100 filas por transacción) con `SELECT … FOR UPDATE SKIP LOCKED`: varias instancias (API o worker) pueden correr a la vez sin duplicar trabajo y una fila que otra transacción está decidiendo se salta y se reintenta en la vuelta siguiente. `JOBS_ENABLED` las apaga (por defecto: encendidas salvo `NODE_ENV=test`); `JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS` (5–3600, defecto 60, PROVISIONAL). Primera tarea: `trial-expiry`.
@@ -585,3 +585,24 @@ shadcn/ui + Radix desde ya (más componentes listos, más dependencias para 6 pa
 
 ### Impacto
 Nueva app `apps/web` (scripts `pnpm dev:web`, `pnpm e2e:web`), ESLint de la web (hooks de React), `GET /v1/auth/me`, campos extra en `GET /v1/trials/me`, corrección del `Path` de la cookie al cerrar sesión (se emitía con `/v1/auth` y se borraba con `/auth`, así que el navegador nunca la eliminaba), paso de E2E web en la CI.
+
+---
+
+## ADR-35 — Limpieza de las tablas de identidad con una función SECURITY DEFINER
+**Estado: APROBADO el 2026-10-11 por el responsable de producto (opción (a) del ADR-33). Implementado el mismo día.**
+
+### Decisión
+1. La función **`public.purge_expired_identity_rows()`** (migración `0014_identity_cleanup`) es la ÚNICA vía para borrar filas de las tablas de identidad. Es `SECURITY DEFINER`: la ejecuta `app_identity`, pero corre con los privilegios de su dueño `app_owner`. `app_identity` **sigue sin `DELETE`/`TRUNCATE`** (decisión de ADR-26 intacta).
+2. **Sin parámetros**: la aplicación no puede pedirle que borre más ni otra cosa; las retenciones están dentro de la función (PROVISIONALES; cambiarlas es una migración). Solo borra: `sessions` (vencidas o revocadas hace más de 7 días), `auth_throttle` (sin actividad hace más de 7 días y sin bloqueo vigente), `email_verifications` y `password_resets` (vencidas o consumidas hace más de 7 días), `signup_attempts` (ventanas de más de 1 día). **No toca** `users`, `organizations`, `organization_members`, `trials` ni los datos de referencia.
+3. **Seguridad de la propia función**: `SET search_path = pg_catalog, public` y objetos con esquema explícito (no se puede secuestrar por `search_path`); `REVOKE ALL … FROM PUBLIC, app_rw, app_platform` y `EXECUTE` solo para `app_identity`; lotes de 5000 por tabla y llamada con `FOR UPDATE SKIP LOCKED` (varias instancias no se esperan ni se pisan).
+4. **El auditor lo hace cumplir**: `db:audit` y la CI exigen que toda función `SECURITY DEFINER` esté en `PRODUCTION_CATALOG.securityDefiner` (hoy solo esta) y, además, que su dueño sea `app_owner`, fije `search_path` y no sea ejecutable por PUBLIC, `app_rw` ni `app_platform` (códigos `DEFINER_*`). El escáner de migraciones aprueba un `SECURITY DEFINER` solo si la función está aprobada **por nombre**; cualquier otra se sigue rechazando.
+5. **Job `identity-cleanup`** (`modules/auth`): cada hora (`JOBS_IDENTITY_CLEANUP_INTERVAL_SECONDS`, 60–86400, PROVISIONAL) llama a la función y repite mientras un lote venga lleno.
+
+### Alternativas
+Un quinto rol `app_maintenance` con `DELETE` acotado (más roles que operar y credenciales que rotar); `DELETE` acotado para `app_identity` (lo más simple, pero revierte una decisión aprobada); `pg_cron` (no disponible de forma uniforme en Railway).
+
+### Ventajas / desventajas
++ La app sigue sin poder borrar nada por su cuenta; la superficie es una función de 5 `DELETE` fijos, auditada por la CI. − Es la primera función `SECURITY DEFINER` del sistema: cualquier cambio futuro exige ADR y alta en el catálogo; las retenciones solo cambian por migración; las filas de `users` pendientes de verificar nunca se borran (queda como decisión futura: qué hacer con cuentas sin verificar tras N días).
+
+### Impacto
+Migración `0014`; `PRODUCTION_CATALOG.securityDefiner`; auditor (`DEFINER_OWNER`, `DEFINER_SEARCH_PATH`, `DEFINER_EXECUTE`, `DEFINER_NOT_EXECUTABLE`); escáner de migraciones; módulo `auth` (job) y `jobs`. Cierra el pendiente de producción «limpieza de `sessions`/`auth_throttle`» (Build Spec §15 #20, parte de la limpieza; la **purga de datos de negocio a los 30 días de prueba vencida** sigue pendiente hasta M3).

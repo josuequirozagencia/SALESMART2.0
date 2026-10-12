@@ -379,7 +379,7 @@ Tras el PoC Retell vs. Vapi.
 | 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | ABIERTO (V2) | Campañas masivas |
 | 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | APROBADO (ADR-32, 2026-10-09) | Contactos/M3 |
 | 19 | Spike de WhatsApp QR (Evolution) sobre Railway con chip de prueba | APROBADO (ADR-31); en curso | EvolutionProvider/M9 |
-| 20 | Limpieza de tablas de identidad sin dar `DELETE` a `app_identity` (función `SECURITY DEFINER` mínima / rol de mantenimiento / `DELETE` acotado; ver ADR-33) y purga de datos a los 30 días de prueba vencida | ABIERTO | Producción (limpieza); M3+ (purga) |
+| 20 | Limpieza de tablas de identidad sin dar `DELETE` a `app_identity`: **RESUELTO (ADR-35, 2026-10-11)**. Pendiente: purga de datos de negocio a los 30 días de prueba vencida | PARCIAL | M3+ (purga) |
 
 ---
 

@@ -22,6 +22,15 @@ export function stripSqlComments(sql: string): string {
   return sql.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
 }
 
+/** Cada `CREATE FUNCTION` con SECURITY DEFINER debe estar en la lista aprobada (ADR); si no hay lista, ninguna pasa. */
+function definersAllApproved(sql: string, allowed: readonly string[]): boolean {
+  if (allowed.length === 0) return false;
+  for (const m of sql.matchAll(/create\s+(?:or\s+replace\s+)?function\s+(?:"?public"?\.)?"?(\w+)"?[\s\S]*?(?:\$\$[\s\S]*?\$\$|;)/gi)) {
+    if (/\bsecurity\s+definer\b/i.test(m[0]) && !allowed.includes(m[1] ?? '')) return false;
+  }
+  return true;
+}
+
 /**
  * `identityTables`: tablas de identidad (ADR-25) que, aunque tengan organization_id (p. ej. organization_members),
  * NO llevan RLS por organización; su acceso se restringe por GRANT a app_identity y lo verifica el audit.
@@ -32,7 +41,7 @@ export function scanMigrationSql(sqlText: string, allowedDefiners: readonly stri
   for (const [rule, re] of FORBIDDEN) {
     const m = re.exec(sql);
     if (m) {
-      if (rule === 'P8 SECURITY DEFINER' && allowedDefiners.length > 0) continue;
+      if (rule === 'P8 SECURITY DEFINER' && definersAllApproved(sql, allowedDefiners)) continue;
       out.push({ rule, excerpt: m[0] });
     }
   }
