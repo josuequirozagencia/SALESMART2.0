@@ -42,6 +42,24 @@ describe('configuración validada', () => {
     expect(loadConfig(prod).signup).toMatchObject({ mailProvider: 'none', captchaProvider: 'none' });
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
+  describe('puerto y proxy (despliegue en Railway)', () => {
+    it('usa PORT cuando no hay HTTP_PORT; HTTP_PORT manda sobre PORT; por defecto 3000', () => {
+      expect(loadConfig(good).httpPort).toBe(3000);
+      expect(loadConfig({ ...good, PORT: '8080' }).httpPort).toBe(8080);
+      expect(loadConfig({ ...good, PORT: '8080', HTTP_PORT: '4000' }).httpPort).toBe(4000);
+      expect(() => loadConfig({ ...good, PORT: '0' })).toThrow(/PORT/);
+    });
+    it('TRUST_PROXY_HOPS: 0 por defecto (no se confía en X-Forwarded-For) y de 0 a 5', () => {
+      expect(loadConfig(good).trustProxyHops).toBe(0);
+      expect(loadConfig({ ...good, TRUST_PROXY_HOPS: '1' }).trustProxyHops).toBe(1);
+      for (const bad of ['-1', '6', 'x', '1.5']) expect(() => loadConfig({ ...good, TRUST_PROXY_HOPS: bad }), bad).toThrow(/TRUST_PROXY_HOPS/);
+    });
+    it('WEB_DIST_DIR es opcional', () => {
+      expect(loadConfig(good).web.distDir).toBeUndefined();
+      expect(loadConfig({ ...good, WEB_DIST_DIR: 'apps/web/dist' }).web.distDir).toBe('apps/web/dist');
+    });
+  });
+
   describe('tareas periódicas (M1.5)', () => {
     it('por defecto: apagadas en test, encendidas en desarrollo y producción; intervalo PROVISIONAL de 60 s', () => {
       expect(loadConfig(good).jobs).toEqual({ enabled: false, trialExpiryIntervalMs: 60_000, identityCleanupIntervalMs: 3_600_000 });

@@ -57,8 +57,10 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   execFileSync(node, [path.join(API_DIST, 'db/migrate-cli.js')], { env: toolEnv, stdio: 'pipe' });
   execFileSync(node, [path.join(API_DIST, 'db/load-disposable-domains.cli.js'), path.join(REPO, 'data/disposable_email_blocklist.conf')], { env: toolEnv, stdio: 'pipe' });
 
-  const apiPort = Number(process.env['E2E_API_PORT'] ?? 3100);
-  const webPort = Number(process.env['E2E_WEB_PORT'] ?? 4173);
+  const apiPort = Number(process.env['E2E_PORT'] ?? 3100);
+  // La web compilada (con el CAPTCHA «fake») la sirve la propia API: UN solo origen, como en producción (ADR-36), con su CSP
+  const vite = path.join(WEB, 'node_modules/vite/bin/vite.js');
+  execFileSync(node, [vite, 'build', '--outDir', 'dist-e2e', '--emptyOutDir'], { cwd: WEB, env: { ...process.env, VITE_CAPTCHA_PROVIDER: 'fake' }, stdio: 'pipe' });
   const apiEnv = {
     PATH: process.env['PATH'] ?? '',
     SystemRoot: process.env['SystemRoot'] ?? '',
@@ -72,7 +74,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     // Solo E2E: el código de verificación se imprime en el log (la prueba lo lee) y el CAPTCHA acepta «fake-pass»
     MAIL_PROVIDER: 'console',
     CAPTCHA_PROVIDER: 'fake',
-    FRONTEND_BASE_URL: `http://127.0.0.1:${webPort}`,
+    FRONTEND_BASE_URL: `http://127.0.0.1:${apiPort}`,
+    WEB_DIST_DIR: path.join(WEB, 'dist-e2e'),
     // Todas las pruebas salen de la misma IP: límites holgados (los límites en sí los cubre la suite de la API)
     SIGNUP_IP_MAX_PER_HOUR: '200',
     SIGNUP_VERIFY_IP_MAX_PER_HOUR: '500',
@@ -94,17 +97,11 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   api.stderr?.pipe(log, { end: false });
   await waitFor(`http://127.0.0.1:${apiPort}/health`, api, 'la API');
 
-  // 4) Web compilada con el CAPTCHA «fake» y servida con proxy a la API (mismo origen: la cookie de refresh funciona igual)
-  const vite = path.join(WEB, 'node_modules/vite/bin/vite.js');
-  execFileSync(node, [vite, 'build', '--outDir', 'dist-e2e', '--emptyOutDir'], { cwd: WEB, env: { ...process.env, VITE_CAPTCHA_PROVIDER: 'fake' }, stdio: 'pipe' });
-  const web = spawn(node, [vite, 'preview', '--outDir', 'dist-e2e', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'], { cwd: WEB, env: { ...process.env, API_URL: `http://127.0.0.1:${apiPort}` }, stdio: 'ignore' });
-  await waitFor(`http://127.0.0.1:${webPort}/`, web, 'la web');
-
   const state: E2EState = { adminDbUrl, rootEmail, rootPassword, apiBase: `http://127.0.0.1:${apiPort}` };
   writeFileSync(STATE_FILE, JSON.stringify(state));
 
   return async () => {
-    for (const p of [web, api]) if (p.exitCode === null) p.kill('SIGKILL');
+    if (api.exitCode === null) api.kill('SIGKILL');
     log.end();
     await sleep(300);
     const c = new pg.Client({ connectionString: adminUrl });

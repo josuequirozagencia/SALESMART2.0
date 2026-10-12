@@ -3,9 +3,9 @@ import { defineConfig } from '@playwright/test';
 /**
  * E2E del flujo de acceso en un navegador real contra la API COMPILADA (apps/api/dist) y la web compilada, con una base
  * de datos efímera. Requiere `pnpm build` y `TEST_PG_ADMIN_URL` (superusuario de un PostgreSQL desechable).
- * globalSetup arranca y detiene todo (BD, API, web). `PW_CHANNEL=msedge|chrome` usa un navegador ya instalado.
+ * globalSetup arranca y detiene todo (BD y la API, que sirve la web compilada: un solo origen). `PW_CHANNEL=msedge|chrome` usa un navegador ya instalado.
  */
-const webPort = Number(process.env['E2E_WEB_PORT'] ?? 4173);
+const port = Number(process.env['E2E_PORT'] ?? 3100);
 
 export default defineConfig({
   testDir: 'e2e',
@@ -18,7 +18,7 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   reporter: [['list']],
   use: {
-    baseURL: `http://127.0.0.1:${webPort}`,
+    baseURL: `http://127.0.0.1:${port}`,
     ...(process.env['PW_CHANNEL'] ? { channel: process.env['PW_CHANNEL'] } : {}),
     locale: 'es-EC',
     trace: 'retain-on-failure',

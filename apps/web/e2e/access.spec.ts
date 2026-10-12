@@ -172,6 +172,19 @@ test('recuperar contraseña: enlace del correo → contraseña nueva → entra; 
   await expect(page.getByRole('heading', { name: 'Enlace inválido o vencido' })).toBeVisible();
 });
 
+test('la CSP de la API no rompe la web: ninguna pantalla de acceso produce violaciones ni errores de consola', async ({ page }) => {
+  const problems: string[] = [];
+  page.on('console', (m) => { if (m.type() === 'error' || /Content Security Policy/i.test(m.text())) problems.push(m.text()); });
+  page.on('pageerror', (e) => problems.push(e.message));
+  for (const route of ['/login', '/signup', '/forgot', '/reset-password', '/verify']) {
+    const res = await page.goto(route);
+    expect(res?.headers()['content-security-policy'], route).toContain("default-src 'self'");
+    await expect(page.getByRole('main')).toBeVisible();
+  }
+  // los errores de red de recursos externos (fuentes de Google sin internet) no cuentan; las violaciones de CSP sí
+  expect(problems.filter((p) => /Content Security Policy|Refused to/i.test(p))).toEqual([]);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

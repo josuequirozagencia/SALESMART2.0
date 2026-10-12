@@ -606,3 +606,24 @@ Un quinto rol `app_maintenance` con `DELETE` acotado (más roles que operar y cr
 
 ### Impacto
 Migración `0014`; `PRODUCTION_CATALOG.securityDefiner`; auditor (`DEFINER_OWNER`, `DEFINER_SEARCH_PATH`, `DEFINER_EXECUTE`, `DEFINER_NOT_EXECUTABLE`); escáner de migraciones; módulo `auth` (job) y `jobs`. Cierra el pendiente de producción «limpieza de `sessions`/`auth_throttle`» (Build Spec §15 #20, parte de la limpieza; la **purga de datos de negocio a los 30 días de prueba vencida** sigue pendiente hasta M3).
+
+---
+
+## ADR-36 — Un solo origen: la API sirve la web compilada (sin CORS) y confía en el proxy de Railway
+**Estado: APROBADO el 2026-10-11 por el responsable de producto (recomendación 3). Implementado el mismo día.**
+
+### Decisión
+1. **Un servicio, un dominio.** Con `WEB_DIST_DIR=apps/web/dist` la API sirve la web compilada: la raíz y las rutas de la SPA devuelven `index.html`; `/v1/*` y `/health*` los atiende siempre la API. La cookie de refresh (`HttpOnly; SameSite=Strict; Path=/v1/auth`) y las peticiones funcionan sin CORS, y no hace falta abrir la API a otros orígenes. En desarrollo (`pnpm dev:web`) Vite hace de proxy y el comportamiento es el mismo.
+2. **Reglas de lo que se sirve** (`src/http/web-static.ts`, con `serve-static`): archivos con hash en `assets/` con caché larga e inmutable; `index.html` sin caché; un archivo inexistente, una ruta con extensión, un cliente que no acepta HTML o un método distinto de GET/HEAD reciben el 404 JSON estándar (no se disfraza con `index.html`); sin dotfiles ni listados; sin salida de la carpeta (`..`, `%2e%2e`, barras invertidas); si `WEB_DIST_DIR` no contiene `index.html` la API **no arranca**.
+3. **Cabeceras de seguridad** en todo lo que sirve la web: CSP (`default-src 'self'`; scripts solo propios y `challenges.cloudflare.com` para el CAPTCHA; iframes solo Turnstile; estilos propios y `fonts.googleapis.com`; fuentes `fonts.gstatic.com`; `frame-ancestors 'none'`; `object-src 'none'`), `X-Content-Type-Options`, `Referrer-Policy: no-referrer` (el enlace de restablecer lleva el token en el fragmento), `X-Frame-Options: DENY`, `Permissions-Policy`, `Cross-Origin-Opener-Policy` y, en producción, HSTS. Las fuentes de Google son las del prototipo; autoalojarlas es una mejora posterior (permitiría cerrar `fonts.*` en la CSP).
+4. **IP del cliente detrás del proxy**: `TRUST_PROXY_HOPS` (0 por defecto = se ignora `X-Forwarded-For`). Con N>0 se toma la IP N saltos desde el final de la cadena; lo que el cliente escriba al inicio no cuenta. **Sin esto, en Railway todos los usuarios compartirían la IP del proxy y los límites por IP (intentos de acceso, registro, restablecer) bloquearían a todos a la vez.** El valor correcto para Railway (se espera 1) **debe validarse en staging** (dos peticiones desde IPs distintas no deben compartir contador).
+5. **Puerto**: se acepta `PORT` (lo inyecta Railway) cuando no hay `HTTP_PORT`.
+
+### Alternativas
+Dos servicios con `app.` y `api.` (exige CORS con credenciales, `SameSite`/dominio de la cookie y más superficie); un proxy inverso aparte (Caddy/nginx: otro servicio que operar); CDN para la web con proxy a la API (mejor rendimiento, más piezas; se puede adoptar después sin cambiar la API).
+
+### Ventajas / desventajas
++ Sin CORS ni configuración cruzada; un único dominio, un solo despliegue y la CSP bajo nuestro control; el E2E ya corre contra esta misma arquitectura. − La web y la API se despliegan juntas (un cambio de pantalla redespliega la API); los estáticos pasan por Node (aceptable en piloto; un CDN lo resuelve después); la CSP permite estilos/fuentes de Google hasta autoalojarlas.
+
+### Impacto
+`WEB_DIST_DIR`, `TRUST_PROXY_HOPS`, `PORT`; `src/http/web-static.ts`; dependencia `serve-static`; el E2E web ahora usa la web servida por la API (y verifica que la CSP no rompa ninguna pantalla); `docs/DESPLIEGUE_RAILWAY.md`.

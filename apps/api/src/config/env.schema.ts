@@ -22,6 +22,14 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   LOG_LEVEL: z.enum(['silent', 'fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   HTTP_PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  /** Puerto que inyectan plataformas como Railway. Solo se usa si no hay HTTP_PORT. */
+  PORT: z.coerce.number().int().min(1).max(65535).optional(),
+  /**
+   * Saltos de proxy de confianza delante de la API (Railway = 1, a validar en staging). Con 0 se ignora X-Forwarded-For y
+   * `req.ip` es el de la conexión. Con N>0 se toma la IP del cliente N saltos desde el final de la cadena (lo que un cliente
+   * escriba al inicio de X-Forwarded-For NO cuenta). Sin esto, detrás de un proxy todos comparten IP en los límites de intentos.
+   */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   DATABASE_URL_APP: postgresUrl,
   DATABASE_URL_PLATFORM: postgresUrl,
   DATABASE_URL_IDENTITY: postgresUrl,
@@ -61,6 +69,8 @@ export const envSchema = z.object({
   JOBS_ENABLED: z.enum(['true', 'false']).optional(),
   JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(3600).default(60), // PROVISIONAL
   JOBS_IDENTITY_CLEANUP_INTERVAL_SECONDS: z.coerce.number().int().min(60).max(86400).default(3600), // PROVISIONAL (ADR-35)
+  // ── Web servida por la API (ADR-36). Omitida = solo API (desarrollo con Vite y proxy) ──
+  WEB_DIST_DIR: z.string().min(1).max(500).optional(),
   DB_POOL_MAX_APP: z.coerce.number().int().min(1).max(100).default(10),
   DB_POOL_MAX_PLATFORM: z.coerce.number().int().min(1).max(20).default(3),
   DB_POOL_MAX_IDENTITY: z.coerce.number().int().min(1).max(20).default(3),

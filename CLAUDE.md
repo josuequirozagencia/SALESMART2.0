@@ -7,6 +7,7 @@ Propietario: Josué Quiroz (agencia de tráfico digital, Guayaquil). Idioma de t
 ## Documentos que mandan (léelos antes de tocar un módulo)
 - `docs/BUILD_SPEC.md` — contrato de construcción, hitos y criterios de aceptación.
 - `docs/ADR.md` — decisiones (ADR-01..). Si algo contradice un ADR, **para y pregunta**.
+- `docs/DESPLIEGUE_RAILWAY.md` — guía de despliegue (staging/piloto) con lo que hay que VALIDAR en el primer despliegue (ADR-30, ADR-36).
 - `docs/FLUJOS.md` — los 21 flujos de usuario. El modelo de datos está en `BUILD_SPEC` §6 y el contrato de API en §7 (no hay archivos aparte para no duplicar y que se desfasen).
 - `docs/legacy-audit/` — auditoría del repo antiguo (Entrega 1, Listas Fase 27, Lectura profunda, Inventario). Solo consulta; **no copies código del repo antiguo**.
 - `spikes/` — pruebas **descartables**. Su código no pasa al producto sin revisión y aprobación explícita.

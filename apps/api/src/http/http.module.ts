@@ -2,10 +2,13 @@ import { DynamicModule, Inject, Module, OnApplicationBootstrap, Type } from '@ne
 import { HttpAdapterHost } from '@nestjs/core';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import type { AppConfig } from '../config';
 import { AllExceptionsFilter } from '../errors';
+import { APP_CONFIG } from '../tokens';
 import { AccessGuard } from './access.guard';
 import { AccessResolver, DenyAllAccessResolver } from './access-resolver';
 import { ContextInterceptor } from './context.interceptor';
+import { mountWeb } from './web-static';
 
 export interface HttpModuleOptions {
   /** Implementación del puerto de acceso. Por defecto DENIEGA todo (hasta M1). */
@@ -16,7 +19,10 @@ export interface HttpModuleOptions {
 
 @Module({})
 export class HttpModule implements OnApplicationBootstrap {
-  constructor(@Inject(HttpAdapterHost) private readonly host: HttpAdapterHost) {}
+  constructor(
+    @Inject(HttpAdapterHost) private readonly host: HttpAdapterHost,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+  ) {}
 
   /**
    * Cierra la cadena de Express con un 404 JSON estándar. El manejador 404 de Nest solo cubre rutas bajo el prefijo
@@ -25,6 +31,8 @@ export class HttpModule implements OnApplicationBootstrap {
    */
   onApplicationBootstrap(): void {
     const express = this.host.httpAdapter.getInstance<Express>();
+    // Con WEB_DIST_DIR la API también sirve la web (mismo origen, ADR-36); si no, solo el 404 JSON estándar
+    if (this.cfg.web.distDir) return mountWeb(express, { distDir: this.cfg.web.distDir, production: this.cfg.nodeEnv === 'production' });
     express.use((req: Request & { requestId?: string }, res: Response, _next: NextFunction) => {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Recurso no encontrado', request_id: req.requestId ?? 'unknown', details: [] } });
     });

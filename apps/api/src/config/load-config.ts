@@ -4,6 +4,7 @@ export interface AppConfig {
   readonly nodeEnv: 'development' | 'test' | 'production';
   readonly logLevel: 'silent' | 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
   readonly httpPort: number;
+  readonly trustProxyHops: number;
   readonly auth: {
     readonly throttleKey: string;
     /** Todo lo siguiente es PROVISIONAL (ADR-26) y configurable por entorno. */
@@ -41,6 +42,10 @@ export interface AppConfig {
     readonly emailMaxPerHour: number;
     readonly ipMaxPerHour: number;
     readonly attemptIpMaxPerHour: number;
+  };
+  readonly web: {
+    /** Carpeta de la web compilada (apps/web/dist). Si está definida, la API la sirve bajo el mismo origen. */
+    readonly distDir: string | undefined;
   };
   readonly jobs: {
     readonly enabled: boolean;
@@ -130,7 +135,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return deepFreeze({
     nodeEnv: e.NODE_ENV,
     logLevel: e.LOG_LEVEL,
-    httpPort: e.HTTP_PORT,
+    httpPort: env['HTTP_PORT'] === undefined && e.PORT !== undefined ? e.PORT : e.HTTP_PORT,
+    trustProxyHops: e.TRUST_PROXY_HOPS,
     auth: {
       throttleKey: e.AUTH_THROTTLE_KEY,
       accessTtlMs: e.AUTH_ACCESS_TTL_SECONDS * 1000,
@@ -161,6 +167,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       ipMaxPerHour: e.RESET_IP_MAX_PER_HOUR,
       attemptIpMaxPerHour: e.RESET_ATTEMPT_IP_MAX_PER_HOUR,
     },
+    web: { distDir: e.WEB_DIST_DIR },
     jobs: { enabled: e.JOBS_ENABLED === undefined ? e.NODE_ENV !== 'test' : e.JOBS_ENABLED === 'true', trialExpiryIntervalMs: e.JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS * 1000, identityCleanupIntervalMs: e.JOBS_IDENTITY_CLEANUP_INTERVAL_SECONDS * 1000 },
     db: {
       appUrl: e.DATABASE_URL_APP,

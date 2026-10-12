@@ -143,3 +143,6 @@ Typecheck, ESLint (`--max-warnings 0`) y `vite build` limpios. Web: **50/50**. E
 
 ## Limpieza de identidad (ADR-35, 2026-10-11)
 Función `purge_expired_identity_rows()` (migración 0014) + job `identity-cleanup`, con auditor y escáner ampliados. Pruebas: borra solo lo caducado de cada una de las 5 tablas y conserva lo vivo o reciente, nunca toca usuarios/organizaciones, privilegios por rol, sin parámetros, `SKIP LOCKED`, más de un lote en una pasada, dos ejecuciones simultáneas, y el auditor rechaza una función aprobada pero insegura (dueño, `search_path`, EXECUTE). Resultado local: todo en verde salvo los fallos de entorno ya conocidos (PG 13/Windows).
+
+## Un solo origen y proxy (ADR-36, 2026-10-11)
+La API sirve la web compilada (`WEB_DIST_DIR`) con CSP y cabeceras de seguridad; `TRUST_PROXY_HOPS` y `PORT` para Railway; guía `docs/DESPLIEGUE_RAILWAY.md`. Pruebas: 11 de la web servida (SPA, caché, 404 JSON, `..`/dotfiles/%2e, HEAD/POST, HSTS en producción, CSP), 3 de trust proxy (suplantación de `X-Forwarded-For`, 1 y 2 saltos), 3 de configuración; el E2E (12/12 en Edge) ahora corre contra esta arquitectura y verifica que la CSP no rompa ninguna pantalla. **Pendiente de validar en el primer despliegue:** el valor real de `TRUST_PROXY_HOPS` en Railway y la prueba de una hora de la base de datos (ADR-30).
