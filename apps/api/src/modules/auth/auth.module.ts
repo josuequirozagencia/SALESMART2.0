@@ -18,6 +18,8 @@ import { PasswordService } from './password/password.service';
 import { ThrottleService } from './throttle.service';
 import { ConsoleMailProvider, FakeCaptchaVerifier, MemoryMailProvider, UnavailableCaptchaVerifier, UnavailableMailProvider } from './signup/fakes';
 import { CAPTCHA_VERIFIER, MAIL_PROVIDER } from './signup/ports';
+import { ResendMailProvider } from './signup/resend-mail.provider';
+import { TurnstileVerifier } from './signup/turnstile.verifier';
 import { SignupController } from './signup/signup.controller';
 import { SignupLimiter } from './signup/signup-limiter';
 import { SignupService } from './signup/signup.service';
@@ -31,14 +33,30 @@ import { SignupService } from './signup/signup.service';
     PasswordService,
     PermissionService,
     SignupLimiter,
-    // Sin proveedor real elegido: solo 'none' (503) o fakes de desarrollo/pruebas (la config los prohíbe en producción)
+    // Proveedores reales (ADR-37): Resend y Turnstile. 'none' (503) o fakes de desarrollo/pruebas (la config los prohíbe en producción)
     {
       provide: MAIL_PROVIDER,
-      useFactory: (cfg: AppConfig, log: AppLogger) =>
-        cfg.signup.mailProvider === 'memory' ? new MemoryMailProvider() : cfg.signup.mailProvider === 'console' ? new ConsoleMailProvider(log) : new UnavailableMailProvider(),
+      useFactory: (cfg: AppConfig, log: AppLogger) => {
+        switch (cfg.signup.mailProvider) {
+          case 'resend': return new ResendMailProvider({ apiKey: cfg.providers.resendApiKey ?? '', from: cfg.providers.mailFrom ?? '' });
+          case 'memory': return new MemoryMailProvider();
+          case 'console': return new ConsoleMailProvider(log);
+          default: return new UnavailableMailProvider();
+        }
+      },
       inject: [APP_CONFIG, APP_LOGGER],
     },
-    { provide: CAPTCHA_VERIFIER, useFactory: (cfg: AppConfig) => (cfg.signup.captchaProvider === 'fake' ? new FakeCaptchaVerifier() : new UnavailableCaptchaVerifier()), inject: [APP_CONFIG] },
+    {
+      provide: CAPTCHA_VERIFIER,
+      useFactory: (cfg: AppConfig) => {
+        switch (cfg.signup.captchaProvider) {
+          case 'turnstile': return new TurnstileVerifier({ secret: cfg.providers.turnstileSecret ?? '' });
+          case 'fake': return new FakeCaptchaVerifier();
+          default: return new UnavailableCaptchaVerifier();
+        }
+      },
+      inject: [APP_CONFIG],
+    },
      IdentityCleanupJob, SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
   exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob],
 })

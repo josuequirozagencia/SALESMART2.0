@@ -46,8 +46,14 @@ export const envSchema = z.object({
   AUTH_FAILURE_WINDOW_HOURS: z.coerce.number().int().min(1).max(168).default(24), // PROVISIONAL
   // ── Registro y verificación de correo (M1.2). Proveedores: NINGUNO elegido aún (decisión abierta) ──
   // 'none' = sin proveedor → el registro responde 503. 'console'/'memory'/'fake' son solo desarrollo/pruebas y se rechazan en producción.
-  MAIL_PROVIDER: z.enum(['none', 'console', 'memory']).default('none'),
-  CAPTCHA_PROVIDER: z.enum(['none', 'fake']).default('none'),
+  // 'resend' y 'turnstile' son los proveedores reales elegidos (ADR-37); 'console'/'memory'/'fake' solo desarrollo y pruebas.
+  MAIL_PROVIDER: z.enum(['none', 'console', 'memory', 'resend']).default('none'),
+  CAPTCHA_PROVIDER: z.enum(['none', 'fake', 'turnstile']).default('none'),
+  /** Claves de los proveedores: sin valor por defecto, obligatorias solo si el proveedor está elegido, y sin espacios (se envían en cabeceras). */
+  RESEND_API_KEY: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'formato inválido').optional(),
+  /** Remitente verificado en Resend: «Sales Smart <no-reply@dominio>» o solo la dirección. */
+  MAIL_FROM: z.string().max(200).regex(/^(?:[^<>\r\n]{1,80} <[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,})$/, 'debe ser «Nombre <correo@dominio>» o «correo@dominio»').optional(),
+  TURNSTILE_SECRET_KEY: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'formato inválido').optional(),
   SIGNUP_CODE_TTL_MINUTES: z.coerce.number().int().min(5).max(60).default(15), // PROVISIONAL
   SIGNUP_CODE_MAX_ATTEMPTS: z.coerce.number().int().min(3).max(10).default(5), // PROVISIONAL
   SIGNUP_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(600).default(60), // PROVISIONAL

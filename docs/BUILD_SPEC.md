@@ -362,13 +362,13 @@ Tras el PoC Retell vs. Vapi.
 |---|---|---|---|
 | 1 | Hosting y región | PARCIAL: Railway aprobado para staging/piloto (ADR-30); producción por revalidar | Despliegue (M0 staging) |
 | 2 | ORM y `SET LOCAL` para RLS (spike 1 día) | ABIERTO | M0 |
-| 3 | Proveedor de correo transaccional | ABIERTO | M1 |
+| 3 | Proveedor de correo transaccional | **RESUELTO: Resend (ADR-37, 2026-10-11)**; falta validar el envío real y el DNS de `growthconsulting.digital` | Despliegue |
 | 4 | Pasarela de pago | ABIERTO | Billing, recarga de créditos |
 | 5 | PoC Retell vs. Vapi | ABIERTO | M11 |
 | 6 | Retención de grabaciones y transcripciones | ABIERTO | Telefonía |
 | 7 | Prueba real en Events Manager: ¿se puede retirar un evento? | ABIERTO | M6 |
 | 8 | Valores de ejemplo: 1000 créditos de bienvenida, $0,01/crédito, margen 100 %, retención 30 días de prueba | PROPUESTA | Billing |
-| 9 | Anti-abuso del registro: captcha real (hCaptcha/Turnstile) | PROPUESTA | M1 |
+| 9 | Anti-abuso del registro: captcha real | **RESUELTO: Cloudflare Turnstile (ADR-37, 2026-10-11)**; falta crear el sitio y las claves | Despliegue |
 | 10 | Prueba del agente consume créditos `kind = test` | PROPUESTA | M8 |
 | 11 | Logos oficiales de marca para Conexiones | PENDIENTE | Pulido |
 | 12 | Normativa local (llamadas masivas, consentimiento, protección de datos) | A revisar con asesoría | V2 |

@@ -1,10 +1,10 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
-import { captchaToken } from '../lib/captcha';
 import { friendlyError } from '../lib/errors';
 import { pendingSignup } from '../lib/pending';
 import { useSession } from '../lib/session';
+import { CAPTCHA_PENDING, useCaptcha } from '../lib/useCaptcha';
 import { isEmail, isSixDigits, normalizeEmail } from '../lib/validation';
 import { AuthShell, Title } from '../ui/AuthShell';
 import { Alert, Button, Field, Input } from '../ui/controls';
@@ -22,6 +22,7 @@ export function VerifyScreen() {
   const [busy, setBusy] = useState(false);
   const [wait, setWait] = useState(0);
   const emailKnown = Boolean(pendingSignup.get()?.email);
+  const captcha = useCaptcha();
 
   useEffect(() => {
     if (wait <= 0) return;
@@ -63,9 +64,11 @@ export function VerifyScreen() {
   async function resend() {
     const em = normalizeEmail(email);
     if (!isEmail(em)) return setError('Escribe un correo válido');
+    const captchaTok = captcha.take();
+    if (!captchaTok) return setError(CAPTCHA_PENDING);
     setError(undefined);
     try {
-      await api<{ status: string }>('/auth/resend', { method: 'POST', auth: false, body: { email: em, captcha_token: captchaToken() } });
+      await api<{ status: string }>('/auth/resend', { method: 'POST', auth: false, body: { email: em, captcha_token: captchaTok } });
       setInfo('Si tu registro está pendiente, te enviamos un código nuevo.');
       setWait(RESEND_WAIT_SECONDS);
     } catch (err) {
@@ -90,6 +93,7 @@ export function VerifyScreen() {
             <Input {...p} inputMode="numeric" maxLength={6} autoComplete="one-time-code" placeholder="••••••" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} className="p-3 text-center font-mono text-[26px] tracking-[.5em]" />
           )}
         </Field>
+        {captcha.widget}
         {error ? <Alert>{error}</Alert> : null}
         {info ? <Alert kind="ok">{info}</Alert> : null}
         <Button type="submit" variant="primary" block loading={busy}>Verificar y entrar</Button>

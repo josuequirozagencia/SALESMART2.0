@@ -627,3 +627,27 @@ Dos servicios con `app.` y `api.` (exige CORS con credenciales, `SameSite`/domin
 
 ### Impacto
 `WEB_DIST_DIR`, `TRUST_PROXY_HOPS`, `PORT`; `src/http/web-static.ts`; dependencia `serve-static`; el E2E web ahora usa la web servida por la API (y verifica que la CSP no rompa ninguna pantalla); `docs/DESPLIEGUE_RAILWAY.md`.
+
+---
+
+## ADR-37 — Proveedores reales de correo (Resend) y anti-bots (Cloudflare Turnstile)
+**Estado: APROBADO el 2026-10-11 por el responsable de producto (recomendación 4). Adaptadores implementados y probados con la red simulada; el envío real queda por validar en el primer despliegue (requiere las claves y el DNS del dominio `growthconsulting.digital`).**
+
+### Decisión
+1. **Correo transaccional: Resend** detrás del puerto `MailProvider` (`MAIL_PROVIDER=resend`). Cubre el código de verificación y el enlace de restablecer contraseña, con plantillas en español (HTML con estilos en línea + texto plano, sin imágenes ni scripts, enlaces escapados y solo http(s)). Host fijo `api.resend.com`; tiempo máximo de 10 s; la clave solo viaja en la cabecera y **nunca** aparece en errores ni en logs; un fallo del proveedor lanza (el registro responde igual y el usuario puede reenviar), jamás finge éxito. El código **no** va en el asunto (se vería en notificaciones con la pantalla bloqueada).
+2. **Anti-bots: Cloudflare Turnstile** detrás del puerto `CaptchaVerifier` (`CAPTCHA_PROVIDER=turnstile`). Verificación en el servidor contra `siteverify` con el secreto, el token y la IP del cliente; **falla cerrado**: un token inválido devuelve 400 `CAPTCHA_FAILED`, y una caída de Cloudflare también (y queda en el log, a diferencia de un bot rechazado). En la web, el widget (explícito, gestionado, en español) vive en registro, reenvío de código y recuperar contraseña; el token es de **un solo uso**: tras cada envío se genera uno nuevo, y si caduca (5 min) hay que resolverlo otra vez.
+3. **Configuración sin valores por defecto**: `RESEND_API_KEY`, `MAIL_FROM` y `TURNSTILE_SECRET_KEY` son obligatorias solo si el proveedor está elegido, se validan por formato (sin espacios ni saltos de línea: van en cabeceras) y no salen en `describeConfig`. La clave de sitio de Turnstile (pública) es `VITE_TURNSTILE_SITE_KEY` y se fija **al compilar** la web, junto con `VITE_CAPTCHA_PROVIDER=turnstile`. Los fakes siguen prohibidos en producción.
+4. **Cada adaptador tiene su fake y su contract test**: el mismo conjunto de pruebas lo pasan `MemoryMailProvider`/`ResendMailProvider` y `FakeCaptchaVerifier`/`TurnstileVerifier`, y una prueba de integración recorre registro → correo → verificación → entrada con los adaptadores reales y la red externa simulada.
+
+### Alta de los servicios (pasos para quien configura; los portales cambian, verifica cada paso)
+**Resend** — (1) Crear la cuenta en resend.com. (2) *Domains → Add domain*. **Recomendación:** usar un **subdominio de envío** (p. ej. `mail.growthconsulting.digital`) y no el dominio raíz, para que la reputación del correo transaccional no se mezcle con el resto del correo de la agencia; si prefieres el raíz, también funciona. (3) Resend muestra los registros DNS (SPF, DKIM y el de retorno): créalos en el proveedor de DNS de `growthconsulting.digital` y pulsa *Verify*. (4) Añadir un registro DMARC (`_dmarc`, empezando con `p=none` y un buzón en `rua=`), y endurecerlo cuando se confirme que todo el correo legítimo pasa. (5) *API Keys → Create*: permiso **solo de envío** y, si el portal lo permite, limitada al dominio. (6) En Railway: `MAIL_PROVIDER=resend`, `RESEND_API_KEY=…`, `MAIL_FROM=Sales Smart <no-reply@mail.growthconsulting.digital>` (la dirección debe pertenecer al dominio verificado).
+**Cloudflare Turnstile** — (1) Cuenta de Cloudflare → *Turnstile → Add site*; hostname = el dominio público de la app; modo **Managed**. (2) Copiar la clave de **sitio** (pública) y la **secreta**. (3) Railway: `CAPTCHA_PROVIDER=turnstile`, `TURNSTILE_SECRET_KEY=…` y, como variables de **compilación**, `VITE_CAPTCHA_PROVIDER=turnstile` y `VITE_TURNSTILE_SITE_KEY=…`. Para desarrollo local Cloudflare publica claves de prueba (siempre aprueban / siempre fallan): úsalas en un sitio aparte, nunca en producción.
+
+### Alternativas
+Postmark (mejor entregabilidad, de pago desde el primer envío); Amazon SES (el más barato, más configuración y salida de «sandbox»); hCaptcha (alternativa a Turnstile, con más fricción para el usuario).
+
+### Ventajas / desventajas
++ Resend: integración simple y plan gratuito para el piloto; el adaptador se cambia sin tocar el servicio. Turnstile: gratuito y casi invisible. − Dependencia de dos terceros en el camino de registro (si caen, el registro falla cerrado; la recuperación de contraseña depende de ambos); Resend y Cloudflare reciben el correo del destinatario / la IP del cliente (revisar su tratamiento de datos antes del lanzamiento); los precios y límites cambian: **verificar los vigentes** antes de elegir plan.
+
+### Impacto
+`MAIL_PROVIDER=resend`, `CAPTCHA_PROVIDER=turnstile`, `RESEND_API_KEY`, `MAIL_FROM`, `TURNSTILE_SECRET_KEY`; `ResendMailProvider`, `TurnstileVerifier` y plantillas en `modules/auth/signup`; `useCaptcha`/`TurnstileWidget` en la web; la CSP ya permite el origen de Turnstile (ADR-36). Cierra el pendiente «proveedor de correo» y «CAPTCHA real» (Build Spec §15 #3 y #9); queda por **validar el envío real y el DNS** en el primer despliegue.

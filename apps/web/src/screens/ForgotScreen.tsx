@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import { captchaToken } from '../lib/captcha';
 import { friendlyError } from '../lib/errors';
+import { CAPTCHA_PENDING, useCaptcha } from '../lib/useCaptcha';
 import { isEmail, normalizeEmail } from '../lib/validation';
 import { AuthShell, Title } from '../ui/AuthShell';
 import { Alert, Button, CheckIcon, Field, Input } from '../ui/controls';
@@ -13,6 +13,7 @@ export function ForgotScreen() {
   const [fieldError, setFieldError] = useState<string>();
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
+  const captcha = useCaptcha();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -20,9 +21,11 @@ export function ForgotScreen() {
     const em = normalizeEmail(email);
     if (!isEmail(em)) return setFieldError('Escribe un correo válido');
     setFieldError(undefined);
+    const captchaTok = captcha.take();
+    if (!captchaTok) return setError(CAPTCHA_PENDING);
     setBusy(true);
     try {
-      await api<{ status: string }>('/auth/forgot', { method: 'POST', auth: false, body: { email: em, captcha_token: captchaToken() } });
+      await api<{ status: string }>('/auth/forgot', { method: 'POST', auth: false, body: { email: em, captcha_token: captchaTok } });
       setSent(true); // el servidor responde igual exista o no la cuenta; la pantalla tampoco lo revela
     } catch (err) {
       setError(friendlyError(err));
@@ -48,6 +51,7 @@ export function ForgotScreen() {
         <Field label="Correo" error={fieldError}>
           {(p) => <Input {...p} type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@empresa.com" />}
         </Field>
+        {captcha.widget}
         {error ? <Alert>{error}</Alert> : null}
         <Button type="submit" variant="primary" block loading={busy}>Enviar enlace</Button>
         <Link to="/login" className="inline-flex w-full items-center justify-center rounded-[10px] border border-line bg-surface px-4 py-3 text-[14px] font-semibold hover:bg-surface2">Volver</Link>

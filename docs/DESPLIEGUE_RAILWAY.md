@@ -29,15 +29,19 @@ Con el PostgreSQL de Railway creado, desde tu equipo (usa la URL pública/TCP pr
 | `WEB_DIST_DIR` | `apps/web/dist` |
 | `FRONTEND_BASE_URL` | `https://app.growthconsulting.digital` (https, sin barra final; así se arman los enlaces de los correos) |
 | `TRUST_PROXY_HOPS` | `1` — **VALIDAR** (dos peticiones desde IPs distintas no deben compartir contador de intentos) |
-| `MAIL_PROVIDER` / `RESEND_API_KEY` / `MAIL_FROM` | ver ADR-37 y sección 3 |
-| `CAPTCHA_PROVIDER` / `TURNSTILE_SECRET_KEY` y, **en el build**, `VITE_TURNSTILE_SITE_KEY` | ver ADR-37 y sección 3 |
+| `MAIL_PROVIDER` | `resend` |
+| `RESEND_API_KEY` | clave de **solo envío** creada en Resend (ADR-37) |
+| `MAIL_FROM` | `Sales Smart <no-reply@mail.growthconsulting.digital>` (la dirección debe pertenecer al dominio verificado en Resend) |
+| `CAPTCHA_PROVIDER` | `turnstile` |
+| `TURNSTILE_SECRET_KEY` | clave **secreta** del sitio de Turnstile |
+| `VITE_CAPTCHA_PROVIDER` y `VITE_TURNSTILE_SITE_KEY` | `turnstile` y la clave de **sitio** (pública). Son variables de **compilación** (Vite las incrusta al construir la web): deben existir cuando corre `pnpm build`, y cambiarlas exige volver a construir |
 | `LOG_LEVEL` | `info` (opcional) |
 | `JOBS_ENABLED` | omitir (encendido) — cuando exista un worker aparte, `false` en la API |
 
 `HTTP_PORT` no hace falta: se usa el `PORT` que inyecta Railway. **No** definir `DATABASE_URL_OWNER`, `DATABASE_URL_ADMIN` ni `TOOLS_*` en este servicio.
 
 ## 3. Correo y anti-bots (ADR-37)
-Ver `docs/ADR.md` (ADR-37) para el alta de **Resend** (dominio `growthconsulting.digital`: registros SPF/DKIM/DMARC en tu DNS) y de **Cloudflare Turnstile** (clave de sitio pública y clave secreta).
+Los pasos de alta de **Resend** (dominio `growthconsulting.digital`: registros SPF/DKIM/DMARC en tu DNS) y de **Cloudflare Turnstile** (clave de sitio y clave secreta) están en `docs/ADR.md` (ADR-37). Las claves se escriben directamente en las variables de Railway; no se guardan en el repositorio.
 
 ## 4. Primer Súper Admin
 Desde tu equipo, con las tres URLs de la app y `AUTH_THROTTLE_KEY` en el entorno:

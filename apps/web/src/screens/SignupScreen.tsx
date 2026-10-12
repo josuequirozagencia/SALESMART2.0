@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
-import { captchaToken } from '../lib/captcha';
 import { friendlyError } from '../lib/errors';
 import { pendingSignup } from '../lib/pending';
+import { CAPTCHA_PENDING, useCaptcha } from '../lib/useCaptcha';
 import { COUNTRIES, isE164, MIN_NATIONAL_DIGITS, nationalDigits, toE164 } from '../lib/phone';
 import { isEmail, normalizeEmail, passwordError } from '../lib/validation';
 import { AuthShell, Title } from '../ui/AuthShell';
@@ -23,6 +23,7 @@ export function SignupScreen() {
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string>();
   const [busy, setBusy] = useState(false);
+  const captcha = useCaptcha();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -42,6 +43,8 @@ export function SignupScreen() {
     setErrors(next);
     setFormError(undefined);
     if (Object.keys(next).length > 0) return;
+    const captchaTok = captcha.take(); // un solo uso: si el envío falla, se resuelve de nuevo
+    if (!captchaTok) return setFormError(CAPTCHA_PENDING);
 
     setBusy(true);
     try {
@@ -55,7 +58,7 @@ export function SignupScreen() {
           phone: e164,
           organization_name: org,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          captcha_token: captchaToken(),
+          captcha_token: captchaTok,
         },
       });
       pendingSignup.set({ email: normalizeEmail(email), password });
@@ -116,6 +119,7 @@ export function SignupScreen() {
           </label>
           {errors.terms ? <span role="alert" className="text-[12px] font-medium text-crit">{errors.terms}</span> : null}
         </div>
+        {captcha.widget}
         {formError ? <Alert>{formError}</Alert> : null}
         <Button type="submit" variant="primary" block loading={busy}>Crear cuenta y empezar la prueba</Button>
         <p className="text-center text-[13.5px] text-muted">

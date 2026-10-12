@@ -42,6 +42,38 @@ describe('configuración validada', () => {
     expect(loadConfig(prod).signup).toMatchObject({ mailProvider: 'none', captchaProvider: 'none' });
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
+  describe('proveedores reales: Resend y Turnstile (ADR-37)', () => {
+    const real = { MAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_test_1234567890abcdef', MAIL_FROM: 'Sales Smart <no-reply@growthconsulting.digital>', FRONTEND_BASE_URL: 'https://app.growthconsulting.digital', CAPTCHA_PROVIDER: 'turnstile', TURNSTILE_SECRET_KEY: '0x4AAAAAAAbcdefgh1234567' };
+    it('configuración completa válida, también en producción (los fakes siguen prohibidos allí)', () => {
+      const c = loadConfig({ ...good, NODE_ENV: 'production', ...real });
+      expect(c.signup).toMatchObject({ mailProvider: 'resend', captchaProvider: 'turnstile' });
+      expect(c.providers).toEqual({ resendApiKey: real.RESEND_API_KEY, mailFrom: real.MAIL_FROM, turnstileSecret: real.TURNSTILE_SECRET_KEY });
+    });
+    it('exige la clave y el remitente de Resend y el secreto de Turnstile cuando se eligen', () => {
+      const without = (key: string): Record<string, string> => Object.fromEntries(Object.entries(real).filter(([k]) => k !== key));
+      const noKey = without('RESEND_API_KEY');
+      const noFrom = without('MAIL_FROM');
+      const noSecret = without('TURNSTILE_SECRET_KEY');
+      expect(() => loadConfig({ ...good, ...noKey })).toThrow(/RESEND_API_KEY/);
+      expect(() => loadConfig({ ...good, ...noFrom })).toThrow(/MAIL_FROM/);
+      expect(() => loadConfig({ ...good, ...noSecret })).toThrow(/TURNSTILE_SECRET_KEY/);
+    });
+    it('rechaza claves con espacios o saltos de línea (van en cabeceras) y remitentes mal formados', () => {
+      for (const k of ['re_ con espacio', 'corta', 're_abc\r\nX-Evil: 1', '']) expect(() => loadConfig({ ...good, ...real, RESEND_API_KEY: k }), k).toThrow(/RESEND_API_KEY/);
+      for (const f of ['sin-arroba', 'Nombre <x@y>', '<x@y.com>', 'a b@y.com', 'Nombre <x@y.com>\r\nBcc: z@z.com', 'x@y.com, z@z.com']) expect(() => loadConfig({ ...good, ...real, MAIL_FROM: f }), f).toThrow(/MAIL_FROM/);
+      for (const f of ['no-reply@growthconsulting.digital', 'Sales Smart <no-reply@growthconsulting.digital>']) expect(() => loadConfig({ ...good, ...real, MAIL_FROM: f }), f).not.toThrow();
+    });
+    it('los secretos NO salen en describeConfig (lo que se registra al arrancar)', () => {
+      const text = JSON.stringify(describeConfig(loadConfig({ ...good, ...real })));
+      for (const secret of [real.RESEND_API_KEY, real.TURNSTILE_SECRET_KEY]) expect(text).not.toContain(secret);
+    });
+    it('por defecto no hay proveedor real (503 en el registro) y los secretos no tienen valor por defecto', () => {
+      const c = loadConfig(good);
+      expect(c.signup).toMatchObject({ mailProvider: 'none', captchaProvider: 'none' });
+      expect(c.providers).toEqual({ resendApiKey: undefined, mailFrom: undefined, turnstileSecret: undefined });
+    });
+  });
+
   describe('puerto y proxy (despliegue en Railway)', () => {
     it('usa PORT cuando no hay HTTP_PORT; HTTP_PORT manda sobre PORT; por defecto 3000', () => {
       expect(loadConfig(good).httpPort).toBe(3000);

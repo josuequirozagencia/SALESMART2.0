@@ -93,7 +93,7 @@ pnpm audit          # vulnerabilidades moderadas o superiores (CI lo exige)
 CI: `.github/workflows/ci.yml` (PostgreSQL 16 efímero + PgBouncer real; audit, typecheck, lint, test, e2e). `REQUIRE_PGBOUNCER=1` hace obligatoria la prueba de PgBouncer (sin esa variable se omite si falta el binario).
 
 ## Decisiones aún abiertas (no las decidas tú)
-Hosting/región · proveedor de correo · pasarela de pago · PoC voz (Retell vs. Vapi) · retención de grabaciones · validación en Events Manager de retirar eventos de Meta · valores de ejemplo de créditos y retención de prueba.
+Hosting/región (Railway aprobado para piloto; producción por revalidar) · pasarela de pago · PoC voz (Retell vs. Vapi) · retención de grabaciones · validación en Events Manager de retirar eventos de Meta · valores de ejemplo de créditos y retención de prueba.
 
 ## Estado del trabajo
 - **M0 — Fundaciones: cerrado** (ver `docs/M0_PROGRESO.md`): monorepo, config, logger, roles PG (`app_owner`/`app_rw`/`app_platform`/`app_identity`), TenantContext, RLS, identidad (ADR-25), capa HTTP segura, CI, PgBouncer verificado.

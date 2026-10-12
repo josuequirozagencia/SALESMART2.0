@@ -18,8 +18,8 @@ export interface AppConfig {
     readonly failureWindowMs: number;
   };
   readonly signup: {
-    readonly mailProvider: 'none' | 'console' | 'memory';
-    readonly captchaProvider: 'none' | 'fake';
+    readonly mailProvider: 'none' | 'console' | 'memory' | 'resend';
+    readonly captchaProvider: 'none' | 'fake' | 'turnstile';
     /** PROVISIONAL (M1.2): configurables por entorno. */
     readonly codeTtlMs: number;
     readonly codeMaxAttempts: number;
@@ -28,6 +28,12 @@ export interface AppConfig {
     readonly ipMaxPerHour: number;
     readonly verifyIpMaxPerHour: number;
     readonly passwordMinLength: number;
+  };
+  /** Credenciales de proveedores (nunca se registran ni se devuelven: ver describeConfig). */
+  readonly providers: {
+    readonly resendApiKey: string | undefined;
+    readonly mailFrom: string | undefined;
+    readonly turnstileSecret: string | undefined;
   };
   readonly frontend: {
     /** Base explícita (sin barra final) o undefined si no se configuró. Nunca se deriva de la petición. */
@@ -124,6 +130,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       issues.push('FRONTEND_BASE_URL: URL ilegible');
     }
   }
+  if (e.MAIL_PROVIDER === 'resend' && e.RESEND_API_KEY === undefined) issues.push('RESEND_API_KEY: obligatoria cuando MAIL_PROVIDER es "resend"');
+  if (e.MAIL_PROVIDER === 'resend' && e.MAIL_FROM === undefined) issues.push('MAIL_FROM: obligatoria cuando MAIL_PROVIDER es "resend" (remitente de un dominio verificado en Resend)');
+  if (e.CAPTCHA_PROVIDER === 'turnstile' && e.TURNSTILE_SECRET_KEY === undefined) issues.push('TURNSTILE_SECRET_KEY: obligatoria cuando CAPTCHA_PROVIDER es "turnstile"');
   if (e.MAIL_PROVIDER !== 'none' && e.FRONTEND_BASE_URL === undefined) issues.push('FRONTEND_BASE_URL: obligatoria cuando MAIL_PROVIDER no es "none" (los enlaces de los correos no se derivan de la petición)');
   if (!/^\/[A-Za-z0-9._~/-]*$/.test(e.RESET_LINK_PATH) || e.RESET_LINK_PATH.includes('//') || e.RESET_LINK_PATH.includes('..')) issues.push('RESET_LINK_PATH: debe empezar por "/" y contener solo caracteres de ruta seguros');
   if (e.NODE_ENV === 'production') {
@@ -159,6 +168,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       verifyIpMaxPerHour: e.SIGNUP_VERIFY_IP_MAX_PER_HOUR,
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
+    providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY },
     frontend: { baseUrl: frontendBase, resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH },
     reset: {
       tokenTtlMs: e.RESET_TOKEN_TTL_MINUTES * 60_000,
