@@ -1,6 +1,16 @@
 # Despliegue en Railway (staging / piloto)
 
-> Estado: **guía sin ejecutar**. ADR-30 (hosting) y ADR-36 (un solo origen) están aprobados, pero todavía no se ha desplegado nada ni se hizo la prueba de una hora de roles/RLS/pgvector. Los valores marcados **«VALIDAR»** deben comprobarse en el primer despliegue.
+> Estado: **prueba de base de datos de ADR-30 ejecutada (2026-10-12)**; la app todavía **no está desplegada** (faltan secretos y dominio). Resultado en la sección «Resultado de la prueba de ADR-30». Los valores marcados **«VALIDAR»** que siguen abiertos deben comprobarse en el primer despliegue.
+
+## Resultado de la prueba de ADR-30 (2026-10-12, proyecto `virtuous-wonder`)
+- **Imagen**: `ghcr.io/railwayapp-templates/postgres-ssl:18` → **PostgreSQL 18.6** (la CI usa PostgreSQL 16; la guía de producción debe decidir si se fija una versión o se sube la CI).
+- **Superusuario real**: el rol `postgres` del servicio es `SUPERUSER`, con `CREATEROLE` y `CREATEDB` → el bootstrap funciona sin cambios.
+- **pgvector**: disponible (`vector` 0.8.7); `CREATE EXTENSION vector` funciona (probado dentro de una transacción revertida; todavía no se instala porque ninguna migración lo usa).
+- **Bootstrap**: `scripts/db-bootstrap.sh` con `DB_NAME=sales_smart` terminó bien. Los cuatro roles (`app_owner`, `app_rw`, `app_platform`, `app_identity`) quedan sin superusuario ni `BYPASSRLS`.
+- **Migraciones**: `pnpm db:migrate` aplicó 17 migraciones; **`pnpm db:audit` sin violaciones de ADR-24**.
+- **Acceso público TCP**: se activó solo para esta prueba y se **eliminó** al terminar (el Postgres se redesplegó sin `DATABASE_PUBLIC_URL`). Para tareas desde tu equipo (p. ej. `bootstrap:super-admin`) hay que reactivarlo temporalmente o usar `railway connect Postgres --tunnel-only`.
+- **Variables de la app**: las tres URLs de rol usan el host privado con la referencia de Railway `${{Postgres.RAILWAY_PRIVATE_DOMAIN}}` (puerto 5432, base `sales_smart`); se cargan a mano en el servicio app. No existen `DATABASE_URL_OWNER`, `DATABASE_URL_ADMIN` ni `TOOLS_*` en ese servicio.
+- **Pendiente de VALIDAR**: región/latencia (EU West, Ámsterdam, para usuarios en Ecuador), política de copias del plan, `TRUST_PROXY_HOPS=1` y el envío real de correo.
 
 ## Arquitectura (ADR-36)
 Un servicio **app** (la API, que también sirve la web compilada) + un servicio **PostgreSQL**. Un dominio público (p. ej. `app.growthconsulting.digital`) apuntando al servicio **app**. No hay CORS.
