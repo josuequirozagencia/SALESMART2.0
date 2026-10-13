@@ -25,7 +25,7 @@ export const envSchema = z.object({
   /** Puerto que inyectan plataformas como Railway. Solo se usa si no hay HTTP_PORT. */
   PORT: z.coerce.number().int().min(1).max(65535).optional(),
   /**
-   * Saltos de proxy de confianza delante de la API (Railway = 1, a validar en staging). Con 0 se ignora X-Forwarded-For y
+   * Saltos de proxy de confianza delante de la API (Railway = 2, validado en staging el 2026-10-12: con 1 el límite por IP no bloqueaba). Con 0 se ignora X-Forwarded-For y
    * `req.ip` es el de la conexión. Con N>0 se toma la IP del cliente N saltos desde el final de la cadena (lo que un cliente
    * escriba al inicio de X-Forwarded-For NO cuenta). Sin esto, detrás de un proxy todos comparten IP en los límites de intentos.
    */
