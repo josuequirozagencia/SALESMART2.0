@@ -1,6 +1,6 @@
 # Despliegue en Railway (staging / piloto)
 
-> Estado: **prueba de base de datos de ADR-30 ejecutada (2026-10-12)**; la app todavía **no está desplegada** (faltan secretos y dominio). Resultado en la sección «Resultado de la prueba de ADR-30». Los valores marcados **«VALIDAR»** que siguen abiertos deben comprobarse en el primer despliegue.
+> Estado: **prueba de base de datos de ADR-30 ejecutada (2026-10-12)** y **despliegue de prueba en la URL pública de Railway** (correo y captcha en `none`, sin dominio propio; aún no abierto a usuarios). Resultado en la sección «Resultado de la prueba de ADR-30». Los valores marcados **«VALIDAR»** que siguen abiertos deben comprobarse en el primer despliegue.
 
 ## Resultado de la prueba de ADR-30 (2026-10-12, proyecto `virtuous-wonder`)
 - **Imagen**: `ghcr.io/railwayapp-templates/postgres-ssl:18` → **PostgreSQL 18.6** (la CI usa PostgreSQL 16; la guía de producción debe decidir si se fija una versión o se sube la CI).
@@ -10,7 +10,9 @@
 - **Migraciones**: `pnpm db:migrate` aplicó 17 migraciones; **`pnpm db:audit` sin violaciones de ADR-24**.
 - **Acceso público TCP**: se activó solo para esta prueba y se **eliminó** al terminar (el Postgres se redesplegó sin `DATABASE_PUBLIC_URL`). Para tareas desde tu equipo (p. ej. `bootstrap:super-admin`) hay que reactivarlo temporalmente o usar `railway connect Postgres --tunnel-only`.
 - **Variables de la app**: las tres URLs de rol usan el host privado con la referencia de Railway `${{Postgres.RAILWAY_PRIVATE_DOMAIN}}` (puerto 5432, base `sales_smart`); se cargan a mano en el servicio app. No existen `DATABASE_URL_OWNER`, `DATABASE_URL_ADMIN` ni `TOOLS_*` en ese servicio.
-- **Pendiente de VALIDAR**: región/latencia (EU West, Ámsterdam, para usuarios en Ecuador), política de copias del plan, `TRUST_PROXY_HOPS=1` y el envío real de correo.
+- **`TRUST_PROXY_HOPS` = 2 (no 1)**. Primer despliegue de prueba (`MAIL_PROVIDER=none`, `CAPTCHA_PROVIDER=none`, URL pública de Railway): con `1`, 59 inicios de sesión fallidos desde una misma IP nunca activaron el bloqueo por IP (umbral 25), mientras que el bloqueo por cuenta sí funcionaba → la IP que veía la API no era estable. Con `2`, los mismos intentos, cada uno con un `X-Forwarded-For` falso distinto, bloquearon desde el intento 26 (HTTP 429 con `Retry-After`): la IP real es estable y lo que escriba el cliente no cuenta. **Falta**: comprobar desde una segunda red (p. ej. el móvil con datos) que otro cliente no queda bloqueado por los intentos del primero.
+- **Salud y cabeceras** (despliegue de prueba): `/health` y `/health/ready` OK; CSP, HSTS (`max-age=15552000; includeSubDomains`) y `X-Frame-Options: DENY` presentes; `/login` carga.
+- **Pendiente de VALIDAR**: región/latencia (EU West, Ámsterdam, para usuarios en Ecuador), política de copias del plan y el envío real de correo. Antes de abrir a usuarios reales hay que pasar de `none` a `resend` y `turnstile`, registrar el dominio propio y rehacer el despliegue.
 
 ## Arquitectura (ADR-36)
 Un servicio **app** (la API, que también sirve la web compilada) + un servicio **PostgreSQL**. Un dominio público (p. ej. `app.growthconsulting.digital`) apuntando al servicio **app**. No hay CORS.
@@ -38,7 +40,7 @@ Con el PostgreSQL de Railway creado, desde tu equipo (usa la URL pública/TCP pr
 | `AUTH_THROTTLE_KEY` | cadena aleatoria de 48+ caracteres (distinta de cualquier otra clave) |
 | `WEB_DIST_DIR` | `apps/web/dist` |
 | `FRONTEND_BASE_URL` | `https://app.growthconsulting.digital` (https, sin barra final; así se arman los enlaces de los correos) |
-| `TRUST_PROXY_HOPS` | `1` — **VALIDAR** (dos peticiones desde IPs distintas no deben compartir contador de intentos) |
+| `TRUST_PROXY_HOPS` | `2` — **validado en Railway el 2026-10-12** (con `1` el límite por IP nunca bloqueaba: hay dos proxies delante de la app; ver «Resultado de la prueba de ADR-30») |
 | `MAIL_PROVIDER` | `resend` |
 | `RESEND_API_KEY` | clave de **solo envío** creada en Resend (ADR-37) |
 | `MAIL_FROM` | `Sales Smart <no-reply@mail.growthconsulting.digital>` (la dirección debe pertenecer al dominio verificado en Resend) |
@@ -62,5 +64,5 @@ Desde tu equipo, con las tres URLs de la app y `AUTH_THROTTLE_KEY` en el entorno
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.
 3. Registro completo con un correo real: llega el código, se verifica y se entra.
 4. Recuperar contraseña: llega el enlace y funciona una sola vez.
-5. Cinco intentos fallidos con una cuenta bloquean **solo a esa cuenta**; otro usuario desde otra red puede entrar (valida `TRUST_PROXY_HOPS`).
+5. Cinco intentos fallidos con una cuenta bloquean **solo a esa cuenta**; otro usuario desde otra red puede entrar (valida `TRUST_PROXY_HOPS=2`). Si se cambia de hosting o Railway altera su cadena de proxies, repetir la prueba: 26+ fallos desde una IP deben dar 429 aunque el cliente envíe `X-Forwarded-For` falsos distintos.
 6. `pnpm db:audit` contra la base de Railway sin violaciones.
