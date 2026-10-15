@@ -295,6 +295,61 @@ test('empresas y planes: crea un plan, lo asigna a una empresa con la prueba VEN
   await expect(page.getByRole('heading', { name: 'Tu prueba gratuita terminó' })).toBeVisible();
 });
 
+test('nueva empresa: el Súper Admin la crea e invita; el dueño abre el enlace, crea su cuenta y entra con su prueba; el enlace no se reutiliza', async ({ page, request }) => {
+  const s = state();
+  const owner = uniqueEmail('dueno');
+  const company = `Cafe ${uniqueEmail('c').slice(2, 8)}`;
+
+  // 1) El Súper Admin crea la empresa desde la consola (Ecuador y su zona horaria vienen sugeridos)
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  const since = mailMark();
+  await page.getByRole('button', { name: 'Nueva empresa' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Nueva empresa' });
+  await dlg.getByLabel('Nombre de la empresa').fill(company);
+  await dlg.getByLabel('Correo del dueño').fill(owner);
+  await expect(dlg.getByLabel('País')).toHaveValue('EC');
+  await expect(dlg.getByLabel('Zona horaria')).toHaveValue('America/Guayaquil');
+  await dlg.getByRole('button', { name: 'Crear e invitar' }).click();
+  const done = page.getByRole('dialog', { name: 'Empresa creada' });
+  await expect(done).toContainText('Enviamos la invitación');
+  await expect(done.getByLabel('Enlace de invitación')).toHaveCount(0); // con el correo enviado el enlace NO viaja a la pantalla
+  await done.getByRole('button', { name: 'Listo' }).click();
+  const row = page.getByRole('listitem').filter({ hasText: company });
+  await expect(row).toContainText('Invitación pendiente');
+  await expect(row).toContainText(owner);
+  const { inviteUrl } = await nextMail('invitación', since);
+  expect(inviteUrl).toContain('/accept-invite#token=');
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 2) El dueño abre el enlace: el token se borra de la barra de direcciones y crea su cuenta
+  await page.goto(inviteUrl!);
+  await expect(page.getByRole('heading', { name: 'Crea tu cuenta' })).toBeVisible();
+  await expect(page.getByText(company)).toBeVisible();
+  expect(page.url()).not.toContain('token=');
+  await page.getByLabel('Nombre completo').fill('Dora Quinde');
+  await page.getByLabel('WhatsApp').fill('098 765 4321');
+  await page.getByLabel('Contraseña', { exact: true }).fill(PASSWORD);
+  await page.getByLabel('Repite la contraseña').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Crear cuenta y entrar' }).click();
+  await expect(page.getByText(`Cuenta lista. Inicia sesión con ${owner}`)).toBeVisible();
+
+  // 3) Entra con la contraseña elegida y ve su prueba de 7 días (la empresa no tiene plan)
+  await uiLogin(page, owner);
+  await expect(page.getByRole('heading', { name: new RegExp(`Hola, ${company}`) })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Prueba gratuita' })).toBeVisible();
+  expect((await trialOf(request, owner)).status).toBe('active');
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 4) El enlace es de un solo uso
+  await page.goto(inviteUrl!);
+  await expect(page.getByRole('heading', { name: 'Invitación no válida' })).toBeVisible();
+
+  // 5) En la consola la empresa ya no figura como pendiente
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByLabel('Buscar').fill(owner);
+  await expect(page.getByRole('listitem').filter({ hasText: company })).toContainText('En prueba');
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

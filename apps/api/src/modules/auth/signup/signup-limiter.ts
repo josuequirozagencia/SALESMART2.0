@@ -5,13 +5,13 @@ import type { AppConfig } from '../../../config';
 import { Database, signupAttempts } from '../../../db';
 import { APP_CONFIG } from '../../../tokens';
 
-export type LimitKind = 's' | 'v' | 'm' | 'f' | 'r' | 'x';
+export type LimitKind = 's' | 'v' | 'm' | 'f' | 'r' | 'x' | 'i';
 const HOUR_MS = 3_600_000;
 
 /**
  * Contadores de ventana fija (1 h) en PostgreSQL para el registro. Claves HMAC (nunca IP/correo en claro):
  *  s = registros y reenvíos por IP · v = intentos de verificación por IP · m = solicitudes por correo ·
- *  f = «olvidé mi contraseña» por IP · r = ídem por correo · x = intentos de /reset por IP.
+ *  f = «olvidé mi contraseña» por IP · r = ídem por correo · x = intentos de /reset por IP · i = vista previa y aceptación de invitaciones por IP.
  */
 @Injectable()
 export class SignupLimiter {

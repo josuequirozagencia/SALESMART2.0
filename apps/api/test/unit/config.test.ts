@@ -129,11 +129,11 @@ describe('configuración validada', () => {
   describe('URL base del frontend (enlaces de correo)', () => {
     const withMail = { ...good, MAIL_PROVIDER: 'console' };
     it('sin MAIL_PROVIDER no es obligatoria; con un proveedor de correo sí (no se deriva de la petición)', () => {
-      expect(loadConfig(good).frontend).toEqual({ baseUrl: undefined, resetLinkBase: undefined });
+      expect(loadConfig(good).frontend).toEqual({ baseUrl: undefined, resetLinkBase: undefined, inviteLinkBase: undefined });
       expect(() => loadConfig(withMail)).toThrow(/FRONTEND_BASE_URL/);
     });
     it('normaliza y compone el enlace de restablecimiento', () => {
-      expect(loadConfig({ ...withMail, FRONTEND_BASE_URL: 'https://app.ejemplo.test/' }).frontend).toEqual({ baseUrl: 'https://app.ejemplo.test', resetLinkBase: 'https://app.ejemplo.test/reset-password' });
+      expect(loadConfig({ ...withMail, FRONTEND_BASE_URL: 'https://app.ejemplo.test/' }).frontend).toEqual({ baseUrl: 'https://app.ejemplo.test', resetLinkBase: 'https://app.ejemplo.test/reset-password', inviteLinkBase: 'https://app.ejemplo.test/accept-invite' });
       expect(loadConfig({ ...withMail, FRONTEND_BASE_URL: 'https://x.test/crm', RESET_LINK_PATH: '/auth/reset' }).frontend.resetLinkBase).toBe('https://x.test/crm/auth/reset');
     });
     it.each(['ftp://x.test', 'no-es-url', 'https://u:p@x.test', 'https://x.test/?a=1', 'https://x.test/#frag'])('rechaza FRONTEND_BASE_URL=%s', (v) => {
@@ -145,6 +145,15 @@ describe('configuración validada', () => {
     });
     it.each(['reset', '//evil.test', '/a/../b', '/a?x=1', '/a#b'])('rechaza RESET_LINK_PATH=%s', (v) => {
       expect(() => loadConfig({ ...good, RESET_LINK_PATH: v })).toThrow(/RESET_LINK_PATH/);
+    });
+    it('compone el enlace de invitación con INVITE_LINK_PATH y rechaza rutas inseguras', () => {
+      expect(loadConfig({ ...withMail, FRONTEND_BASE_URL: 'https://x.test/crm', INVITE_LINK_PATH: '/invitacion' }).frontend.inviteLinkBase).toBe('https://x.test/crm/invitacion');
+      for (const v of ['invitacion', '//evil.test', '/a/../b', '/a?x=1', '/a#b']) expect(() => loadConfig({ ...good, INVITE_LINK_PATH: v }), v).toThrow(/INVITE_LINK_PATH/);
+    });
+    it('invitaciones: 7 días de vigencia, 60 s de enfriamiento y 30 intentos por IP y hora por defecto; con límites estrictos', () => {
+      expect(loadConfig(good).invite).toEqual({ ttlMs: 7 * 86_400_000, resendCooldownMs: 60_000, attemptIpMaxPerHour: 30 });
+      expect(() => loadConfig({ ...good, INVITATION_TTL_DAYS: '0' })).toThrow(/INVITATION_TTL_DAYS/);
+      expect(() => loadConfig({ ...good, INVITATION_TTL_DAYS: '31' })).toThrow(/INVITATION_TTL_DAYS/);
     });
   });
   it('la configuración es inmutable (congelada en profundidad)', () => {

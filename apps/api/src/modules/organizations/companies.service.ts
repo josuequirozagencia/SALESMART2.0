@@ -7,7 +7,7 @@ import { APP_LOGGER } from '../../tokens';
 import { PlatformAuditService } from '../platform';
 import type { ListCompaniesQuery } from './plans.dto';
 
-export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended';
+export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited';
 
 export interface CompanyItem {
   id: string;
@@ -19,9 +19,12 @@ export interface CompanyItem {
   users: number;
   owner_email: string | null;
   timezone: string;
+  country: string | null;
   created_at: string;
   /** Fin de la prueba mientras la empresa siga en prueba (sin plan). */
   trial_ends_at: string | null;
+  /** Invitación pendiente del dueño (solo en estado `invited`, ADR-39). */
+  invitation: { email: string; expires_at: string; expired: boolean } | null;
 }
 
 export interface CompanyList {
@@ -39,8 +42,11 @@ type Row = {
   users: number;
   owner_email: string | null;
   timezone: string;
+  country: string | null;
   created_at: Date | string;
   trial_ends_at: Date | string | null;
+  inv_email: string | null;
+  inv_expires_at: Date | string | null;
 };
 
 const iso = (d: Date | string): string => new Date(d).toISOString();
@@ -72,18 +78,22 @@ export class CompaniesService {
     if (f.q) {
       const like = `%${likeEscape(f.q)}%`;
       where.push(
-        sql`(s.name ILIKE ${like} ESCAPE '!' OR EXISTS (SELECT 1 FROM organization_members m JOIN users u ON u.id = m.user_id WHERE m.organization_id = s.id AND m.revoked_at IS NULL AND u.email ILIKE ${like} ESCAPE '!'))`,
+        sql`(s.name ILIKE ${like} ESCAPE '!' OR EXISTS (SELECT 1 FROM organization_members m JOIN users u ON u.id = m.user_id WHERE m.organization_id = s.id AND m.revoked_at IS NULL AND u.email ILIKE ${like} ESCAPE '!') OR EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = s.id AND i.consumed_at IS NULL AND i.email ILIKE ${like} ESCAPE '!'))`,
       );
     }
     const rows = await this.db.withIdentity(async (tx) => {
       const res = await tx.execute<Row>(sql`
         SELECT * FROM (
-          SELECT o.id, o.name, o.kind, o.timezone, o.created_at, o.plan_id, p.name AS plan_name,
+          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.plan_id, p.name AS plan_name,
                  (SELECT count(*)::int FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL) AS users,
                  (SELECT u.email FROM organization_members m JOIN users u ON u.id = m.user_id
                    WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND m.role IN ('client_admin', 'agency') ORDER BY m.created_at, m.id LIMIT 1) AS owner_email,
+                 (SELECT i.email FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_email,
+                 (SELECT i.expires_at FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_expires_at,
                  CASE WHEN o.plan_id IS NULL AND t.id IS NOT NULL THEN t.ends_at END AS trial_ends_at,
                  CASE WHEN o.status <> 'active' THEN 'suspended'
+                      WHEN o.kind = 'client' AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
+                           AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                       WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'
                       WHEN t.status = 'expired' OR t.ends_at <= ${now} THEN 'trial_expired'
                       ELSE 'trial' END AS state
@@ -106,10 +116,12 @@ export class CompaniesService {
         state: r.state,
         plan: r.plan_id && r.plan_name ? { id: r.plan_id, name: r.plan_name } : null,
         users: Number(r.users),
-        owner_email: r.owner_email,
+        owner_email: r.owner_email ?? r.inv_email,
         timezone: r.timezone,
+        country: r.country,
         created_at: iso(r.created_at),
         trial_ends_at: r.trial_ends_at ? iso(r.trial_ends_at) : null,
+        invitation: r.state === 'invited' && r.inv_email && r.inv_expires_at ? { email: r.inv_email, expires_at: iso(r.inv_expires_at), expired: new Date(r.inv_expires_at).getTime() <= now.getTime() } : null,
       })),
       next_cursor: rows.length > f.limit ? (page[page.length - 1]?.id ?? null) : null,
     };
@@ -143,6 +155,8 @@ export class CompaniesService {
     const res = await this.db.withIdentity((tx) =>
       tx.execute<{ state: CompanyState }>(sql`
         SELECT CASE WHEN o.status <> 'active' THEN 'suspended'
+                    WHEN o.kind = 'client' AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
+                         AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                     WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'
                     WHEN t.status = 'expired' OR t.ends_at <= now() THEN 'trial_expired'
                     ELSE 'trial' END AS state

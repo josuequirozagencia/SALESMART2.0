@@ -71,6 +71,11 @@ export const envSchema = z.object({
   RESET_EMAIL_MAX_PER_HOUR: z.coerce.number().int().min(1).max(20).default(3),
   RESET_IP_MAX_PER_HOUR: z.coerce.number().int().min(1).max(200).default(10), // solicitudes «olvidé» por IP
   RESET_ATTEMPT_IP_MAX_PER_HOUR: z.coerce.number().int().min(5).max(500).default(30), // intentos de /reset por IP
+  // ── Invitaciones al dueño de una empresa nueva (M2.3, ADR-39). PROVISIONALES ──
+  INVITE_LINK_PATH: z.string().min(1).max(100).default('/accept-invite'),
+  INVITATION_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),
+  INVITATION_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(10).max(3600).default(60),
+  INVITATION_ATTEMPT_IP_MAX_PER_HOUR: z.coerce.number().int().min(5).max(500).default(30), // vista previa y aceptación por IP
   // ── Tareas periódicas (M1.5, ADR-33). JOBS_ENABLED omitido = activas salvo NODE_ENV=test; 'false' las apaga (p. ej. la API cuando exista un worker aparte) ──
   JOBS_ENABLED: z.enum(['true', 'false']).optional(),
   JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS: z.coerce.number().int().min(5).max(3600).default(60), // PROVISIONAL

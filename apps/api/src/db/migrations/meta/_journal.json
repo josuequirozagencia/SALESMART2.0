@@ -120,6 +120,20 @@
       "when": 1791804517767,
       "tag": "0016_plans_grants_permissions",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1791981726722,
+      "tag": "0017_invitations",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791981733011,
+      "tag": "0018_invitations_grants",
+      "breakpoints": true
     }
   ]
 }

@@ -23,11 +23,24 @@ export interface PasswordResetMail {
   expiresInMinutes: number;
 }
 
+export interface InvitationMail {
+  to: string;
+  /** Nombre de la empresa a la que se invita (se escapa en la plantilla). */
+  organizationName: string;
+  /**
+   * Enlace COMPLETO `<FRONTEND_BASE_URL><INVITE_LINK_PATH>#token=<token>` (mismo criterio que `resetUrl`: lo arma el servidor, el token va en
+   * el fragmento y existe en claro solo aquí y en el correo; la BD guarda su SHA-256; no se registra).
+   */
+  inviteUrl: string;
+  expiresInDays: number;
+}
+
 export interface MailProvider {
   /** false = no hay proveedor configurado: el registro responde 503 en lugar de fingir que envió. */
   readonly available: boolean;
   sendVerificationCode(mail: VerificationMail): Promise<void>;
   sendPasswordReset(mail: PasswordResetMail): Promise<void>;
+  sendInvitation(mail: InvitationMail): Promise<void>;
 }
 
 export interface CaptchaVerifier {

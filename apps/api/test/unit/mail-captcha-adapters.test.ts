@@ -1,7 +1,7 @@
 // Contract tests de los adaptadores reales (ADR-37): Resend (correo) y Turnstile (anti-bots), con un `fetch` simulado.
 import { describe, expect, it } from 'vitest';
 import { FakeCaptchaVerifier, MemoryMailProvider } from '../../src/modules/auth/signup/fakes';
-import { passwordResetMail, verificationMail } from '../../src/modules/auth/signup/mail-templates';
+import { invitationMail, passwordResetMail, verificationMail } from '../../src/modules/auth/signup/mail-templates';
 import type { CaptchaVerifier, MailProvider } from '../../src/modules/auth/signup/ports';
 import { ResendMailProvider } from '../../src/modules/auth/signup/resend-mail.provider';
 import { TurnstileVerifier } from '../../src/modules/auth/signup/turnstile.verifier';
@@ -52,6 +52,27 @@ describe('ResendMailProvider', () => {
     expect(body.text).toContain(url);
     expect(body.text).toContain('30 minutos');
     expect(body.subject).toMatch(/contraseña/i);
+  });
+
+  it('envía la invitación con el enlace entero, el nombre de la empresa escapado y la vigencia en días', async () => {
+    const { fn, seen } = fakeFetch(ok);
+    const url = 'https://app.growthconsulting.digital/accept-invite#token=0192f0aa-0000-7000-8000-000000000001.AbCdEf_-123';
+    await resend(fn).sendInvitation({ to: 'dueno@empresa.test', organizationName: 'Café <Norte> & Hijos', inviteUrl: url, expiresInDays: 7 });
+    const body = JSON.parse(String(seen[0]!.init.body)) as { to: string[]; html: string; text: string; subject: string };
+    expect(body.to).toEqual(['dueno@empresa.test']);
+    expect(body.html).toContain(`href="${url}"`);
+    expect(body.html).toContain('Café &lt;Norte&gt; &amp; Hijos');
+    expect(body.html).not.toContain('<Norte>');
+    expect(body.text).toContain(url);
+    expect(body.text).toContain('7 días');
+    expect(body.subject).toContain('Sales Smart');
+    expect(body.subject).not.toContain('token');
+  });
+
+  it('la invitación rechaza enlaces que no sean http(s) antes de llamar a Resend', async () => {
+    const { fn, seen } = fakeFetch(ok);
+    await expect(resend(fn).sendInvitation({ to: 'a@b.test', organizationName: 'X', inviteUrl: 'javascript:alert(1)', expiresInDays: 7 })).rejects.toThrow(/http\(s\)/);
+    expect(seen).toHaveLength(0);
   });
 
   it('escapa el HTML y rechaza enlaces que no sean http(s) ANTES de llamar a Resend', async () => {
@@ -144,6 +165,7 @@ describe('contrato de los puertos: el real y el fake cumplen la misma interfaz',
       expect(p.available).toBe(true);
       await expect(p.sendVerificationCode({ to: 'a@b.test', code: '123456', expiresInMinutes: 15 })).resolves.toBeUndefined();
       await expect(p.sendPasswordReset({ to: 'a@b.test', resetUrl: 'https://x.test/reset-password#token=t', expiresInMinutes: 30 })).resolves.toBeUndefined();
+      await expect(p.sendInvitation({ to: 'a@b.test', organizationName: 'Empresa', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 7 })).resolves.toBeUndefined();
     });
   }
   const captchas: Array<[string, CaptchaVerifier, string]> = [['FakeCaptchaVerifier', new FakeCaptchaVerifier(), 'fake-pass'], ['TurnstileVerifier', tvOk(), 'cualquier-token']];
@@ -166,6 +188,13 @@ describe('plantillas', () => {
     expect(v.html).not.toContain('a@b.test'); // el destinatario va en el encabezado, no en el cuerpo
     const r = passwordResetMail({ to: 'a@b.test', resetUrl: 'https://x.test/reset-password#token=t', expiresInMinutes: 30 });
     expect(r.html.match(/href="/g)).toHaveLength(1);
+  });
+  it('la invitación tiene un único enlace y no contiene el correo del destinatario en el cuerpo; 1 día en singular', () => {
+    const i = invitationMail({ to: 'dueno@empresa.test', organizationName: 'Empresa', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 1 });
+    expect(i.html.match(/href="/g)).toHaveLength(1);
+    expect(i.html).not.toContain('dueno@empresa.test');
+    expect(i.text).toContain('1 día');
+    expect(i.text).not.toContain('1 días');
   });
   it('minutos de vigencia: se redondean y nunca muestran 0', () => {
     expect(verificationMail({ to: 'a@b.test', code: '1', expiresInMinutes: 0.2 }).text).toContain('1 minutos');

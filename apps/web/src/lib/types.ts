@@ -69,7 +69,7 @@ export interface PlanList {
   feature_catalog: Array<{ key: string; label: string }>;
 }
 
-export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended';
+export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited';
 
 export interface Company {
   id: string;
@@ -80,8 +80,32 @@ export interface Company {
   users: number;
   owner_email: string | null;
   timezone: string;
+  country: string | null;
   created_at: string;
   trial_ends_at: string | null;
+  /** Invitación pendiente del dueño (solo en estado `invited`). */
+  invitation: { email: string; expires_at: string; expired: boolean } | null;
+}
+
+/** `sent` = el correo salió (el enlace NO viaja); si no, `invite_url` va solo al Súper Admin para entregarlo por otro medio (ADR-39). */
+export interface InvitationIssued {
+  email: string;
+  expires_at: string;
+  delivery: 'sent' | 'failed' | 'unavailable';
+  invite_url?: string;
+}
+
+export interface CompanyCreated {
+  company: { id: string; name: string; kind: 'client'; state: 'invited'; plan: { id: string; name: string } | null; timezone: string; country: string };
+  invitation: InvitationIssued;
+}
+
+export interface InvitationPreview {
+  organization_name: string;
+  email: string;
+  role: string;
+  expires_at: string;
+  account_exists: boolean;
 }
 
 export interface CompanyList {

@@ -84,12 +84,15 @@ export const organizations = identityTable(
     planId: uuid('plan_id').references(() => plans.id),
     status: text('status').notNull().default('active'),
     timezone: text('timezone').notNull(),
+    /** País (ISO 3166-1 alfa-2). NULL en las empresas del registro propio; el alta por invitación (M2.3, ADR-39) lo exige. */
+    country: text('country'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     deletedAt: ts('deleted_at'),
   },
   (t) => [
-    check('organizations_kind_valid', sql`${t.kind} IN ('platform', 'agency', 'client')`),
+    check('organizations_country_iso2', sql`${t.country} IS NULL OR ${t.country} ~ '^[A-Z]{2}$'`),
+    check('organizations_kind_valid',sql`${t.kind} IN ('platform', 'agency', 'client')`),
     check('organizations_platform_standalone', sql`${t.kind} <> 'platform' OR (${t.parentAgencyId} IS NULL AND ${t.createdByAgencyId} IS NULL)`),
     check('organizations_parent_only_client', sql`${t.parentAgencyId} IS NULL OR ${t.kind} = 'client'`),
     check('organizations_name_not_blank', sql`length(btrim(${t.name})) > 0`),
@@ -202,7 +205,7 @@ export const signupAttempts = identityTable(
     count: integer('count').notNull().default(0),
     windowStartedAt: ts('window_started_at').notNull().defaultNow(),
   },
-  (t) => [check('signup_attempts_key_shape', sql`${t.key} ~ '^[svmfrx]:[0-9a-f]{64}$'`), check('signup_attempts_count_nonneg', sql`${t.count} >= 0`)],
+  (t) => [check('signup_attempts_key_shape', sql`${t.key} ~ '^[svmfrxi]:[0-9a-f]{64}$'`), check('signup_attempts_count_nonneg', sql`${t.count} >= 0`)],
 );
 
 /** Dominios de correo desechable rechazados en el registro. Lista global gestionada por operación (fuente de la lista: pendiente de decisión). */
@@ -232,6 +235,38 @@ export const passwordResets = identityTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [check('password_resets_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`)],
+);
+
+/**
+ * Invitaciones a una organización (M2.3, ADR-39). UNA fila por (organización, correo): reenviar reemplaza el id y el token
+ * (el enlace anterior deja de existir). Token opaco `<id>.<secreto>` enviado por correo (en el fragmento del enlace); aquí solo su
+ * SHA-256. De un solo uso, con caducidad. `consumed_at` + `accepted_user_id` son el registro de la aceptación.
+ */
+export const invitations = identityTable(
+  'invitations',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    /** Siempre normalizado (minúsculas, sin espacios). */
+    email: text('email').notNull(),
+    role: text('role').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    expiresAt: ts('expires_at').notNull(),
+    consumedAt: ts('consumed_at'),
+    acceptedUserId: uuid('accepted_user_id').references(() => users.id),
+    invitedBy: uuid('invited_by').notNull().references(() => users.id),
+    sentCount: integer('sent_count').notNull().default(1),
+    lastSentAt: ts('last_sent_at').notNull().defaultNow(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('invitations_email_normalized', sql`${t.email} = lower(btrim(${t.email})) AND length(${t.email}) BETWEEN 3 AND 254`),
+    check('invitations_role_valid', sql`${t.role} IN ('client_admin', 'advisor')`),
+    check('invitations_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check('invitations_consumed_consistent', sql`(${t.consumedAt} IS NULL) = (${t.acceptedUserId} IS NULL)`),
+    uniqueIndex('invitations_org_email_uq').on(t.organizationId, t.email),
+    index('invitations_email_idx').on(t.email),
+  ],
 );
 
 /**

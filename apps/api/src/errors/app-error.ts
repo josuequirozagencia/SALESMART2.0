@@ -71,3 +71,15 @@ export class InvalidResetTokenError extends AppError {
     super(400, 'INVALID_TOKEN', 'Enlace inválido o vencido');
   }
 }
+/** 400 uniforme para un enlace de invitación inexistente, usado, de otra empresa o de una empresa no apta (ADR-39). */
+export class InvalidInvitationError extends AppError {
+  constructor() {
+    super(400, 'INVALID_INVITATION', 'La invitación no es válida');
+  }
+}
+/** Solo se responde cuando el token es auténtico y venció: quien lo tiene debe pedir un reenvío. */
+export class InvitationExpiredError extends AppError {
+  constructor() {
+    super(400, 'INVITATION_EXPIRED', 'La invitación venció. Pide que te la reenvíen');
+  }
+}

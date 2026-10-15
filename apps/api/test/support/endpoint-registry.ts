@@ -43,4 +43,10 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/platform/plans/:id/restore', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
   { route: 'GET /v1/platform/companies', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
   { route: 'PUT /v1/platform/companies/:id/plan', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  // «Nueva empresa» con invitación (M2.3, ADR-39). Pruebas: test/platform/invitations.test.ts (acceso, A↔B, un solo uso, caducidad, concurrencia, límites)
+  { route: 'POST /v1/platform/companies', kind: 'platform', test: '../../platform/invitations.test.ts' },
+  { route: 'POST /v1/platform/companies/:id/invitation/resend', kind: 'platform', test: '../../platform/invitations.test.ts' },
+  // Aceptación pública: el token de 256 bits es la credencial; límite por IP, errores uniformes. Pruebas: invitations.test.ts
+  { route: 'POST /v1/auth/invitations/preview', kind: 'public' },
+  { route: 'POST /v1/auth/invitations/accept', kind: 'public' },
 ];

@@ -40,6 +40,14 @@ export interface AppConfig {
     readonly baseUrl: string | undefined;
     /** Base del enlace de restablecimiento (baseUrl + RESET_LINK_PATH) o undefined. */
     readonly resetLinkBase: string | undefined;
+    /** Base del enlace de invitación (baseUrl + INVITE_LINK_PATH) o undefined. */
+    readonly inviteLinkBase: string | undefined;
+  };
+  readonly invite: {
+    /** PROVISIONAL (M2.3, ADR-39). */
+    readonly ttlMs: number;
+    readonly resendCooldownMs: number;
+    readonly attemptIpMaxPerHour: number;
   };
   readonly reset: {
     /** PROVISIONAL (M1.3). */
@@ -135,6 +143,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (e.CAPTCHA_PROVIDER === 'turnstile' && e.TURNSTILE_SECRET_KEY === undefined) issues.push('TURNSTILE_SECRET_KEY: obligatoria cuando CAPTCHA_PROVIDER es "turnstile"');
   if (e.MAIL_PROVIDER !== 'none' && e.FRONTEND_BASE_URL === undefined) issues.push('FRONTEND_BASE_URL: obligatoria cuando MAIL_PROVIDER no es "none" (los enlaces de los correos no se derivan de la petición)');
   if (!/^\/[A-Za-z0-9._~/-]*$/.test(e.RESET_LINK_PATH) || e.RESET_LINK_PATH.includes('//') || e.RESET_LINK_PATH.includes('..')) issues.push('RESET_LINK_PATH: debe empezar por "/" y contener solo caracteres de ruta seguros');
+  if (!/^\/[A-Za-z0-9._~/-]*$/.test(e.INVITE_LINK_PATH) || e.INVITE_LINK_PATH.includes('//') || e.INVITE_LINK_PATH.includes('..')) issues.push('INVITE_LINK_PATH: debe empezar por "/" y contener solo caracteres de ruta seguros');
   if (e.NODE_ENV === 'production') {
     if (e.MAIL_PROVIDER === 'console' || e.MAIL_PROVIDER === 'memory') issues.push(`MAIL_PROVIDER: "${e.MAIL_PROVIDER}" es solo para desarrollo/pruebas y no se permite en producción`);
     if (e.CAPTCHA_PROVIDER === 'fake') issues.push('CAPTCHA_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
@@ -169,7 +178,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY },
-    frontend: { baseUrl: frontendBase, resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH },
+    frontend: {
+      baseUrl: frontendBase,
+      resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH,
+      inviteLinkBase: frontendBase === undefined ? undefined : frontendBase + e.INVITE_LINK_PATH,
+    },
+    invite: { ttlMs: e.INVITATION_TTL_DAYS * 86_400_000, resendCooldownMs: e.INVITATION_RESEND_COOLDOWN_SECONDS * 1000, attemptIpMaxPerHour: e.INVITATION_ATTEMPT_IP_MAX_PER_HOUR },
     reset: {
       tokenTtlMs: e.RESET_TOKEN_TTL_MINUTES * 60_000,
       cooldownMs: e.RESET_COOLDOWN_SECONDS * 1000,

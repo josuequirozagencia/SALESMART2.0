@@ -1,4 +1,4 @@
-import type { PasswordResetMail, VerificationMail } from './ports';
+import type { InvitationMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface MailContent {
   subject: string;
@@ -47,4 +47,26 @@ export function passwordResetMail(m: PasswordResetMail): MailContent {
   );
   const text = `Crea una contraseña nueva — Sales Smart\n\nAbre este enlace para elegir una contraseña nueva (funciona una sola vez y vence en ${minutes} minutos):\n${m.resetUrl}\n\nSi no fuiste tú, ignora este correo: no se hará ningún cambio en tu cuenta.\n`;
   return { subject: 'Restablece tu contraseña de Sales Smart', html, text };
+}
+
+export function invitationMail(m: InvitationMail): MailContent {
+  if (!/^https?:\/\//i.test(m.inviteUrl)) throw new Error('inviteUrl debe ser http(s)');
+  const days = Math.max(1, Math.round(m.expiresInDays));
+  const url = esc(m.inviteUrl);
+  const org = esc(m.organizationName);
+  const html = frame(
+    'Te invitaron a Sales Smart',
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">Te invitaron a Sales Smart</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:18px;">Crearon la cuenta de <b>${org}</b> y te invitan a administrarla. Acepta la invitación para elegir tu contraseña. El enlace funciona una sola vez y vence en ${days} ${days === 1 ? 'día' : 'días'}.</td></tr>
+<tr><td align="center" style="padding-bottom:14px;"><a href="${url}" style="display:inline-block;background:#6a44f2;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;padding:12px 22px;">Aceptar la invitación</a></td></tr>
+<tr><td style="font-size:12px;line-height:1.5;color:#5f5a7a;word-break:break-all;">Si el botón no funciona, copia y pega este enlace en tu navegador:<br>${url}</td></tr>`,
+  );
+  const text = `Te invitaron a Sales Smart
+
+Crearon la cuenta de ${m.organizationName} y te invitan a administrarla. Abre este enlace para aceptar y elegir tu contraseña (funciona una sola vez y vence en ${days} ${days === 1 ? 'día' : 'días'}):
+${m.inviteUrl}
+
+Si no esperabas esta invitación, ignora este correo: no se hará ningún cambio.
+`;
+  return { subject: `Te invitaron a ${m.organizationName.slice(0, 60)} en Sales Smart`, html, text };
 }

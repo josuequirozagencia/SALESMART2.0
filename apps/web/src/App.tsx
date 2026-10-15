@@ -10,6 +10,7 @@ import { useSession } from './lib/session';
 import { ForgotScreen } from './screens/ForgotScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { AcceptInviteScreen } from './screens/AcceptInviteScreen';
 import { ResetScreen } from './screens/ResetScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
@@ -60,6 +61,7 @@ export function App() {
       <Route path="/forgot" element={<Public><ForgotScreen /></Public>} />
       {/* El enlace del correo se abre con o sin sesión: restablecer no depende de estar autenticado */}
       <Route path="/reset-password" element={<ResetScreen />} />
+      <Route path="/accept-invite" element={<AcceptInviteScreen />} />
       <Route path="/" element={<AppGate />} />
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/plans" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><PlansPage /></PlatformShell>}</PlatformGate>} />

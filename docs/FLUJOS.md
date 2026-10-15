@@ -14,6 +14,7 @@ Estado: **borrador para validar** contra el prototipo v8. Cada flujo indica acto
 - **Reglas:** el plan lo paga el cliente (ADR-11); organización vencida → solo lectura. Zona horaria obligatoria (el SLA depende de ella).
 - **Errores:** invitación caducada → reenvío; email ya existente en otra organización → se añade membresía, no se duplica el usuario.
 - **Datos/eventos:** `organizations`, `users`, `organization_members`, `invitations`, `email_verifications`; evento `org.created`.
+- **Implementación (M2.3, ADR-39):** «Nueva empresa» en Plataforma › Empresas (nombre, correo del dueño, país —obligatorio, Ecuador por defecto—, zona horaria, plan opcional) → invitación por correo (7 días, reenviable) → pantalla pública `/accept-invite` (cuenta nueva: nombre, WhatsApp y contraseña; cuenta existente: confirma con su contraseña y se añade la membresía). Sin plan, la prueba de 7 días empieza al aceptar. Si el correo no puede salir, el Súper Admin recibe el enlace para entregarlo por otro medio. El asistente de primer acceso (horario, cola, canal) todavía no está.
 - **Prototipo:** pantalla Plataforma (parcial); el asistente no está.
 
 ### F02. Agencia: registrar clientes y cambiar de contexto

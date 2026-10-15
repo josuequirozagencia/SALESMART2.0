@@ -1,9 +1,9 @@
 import { z } from 'zod';
 
-const email = z.string().trim().max(254).pipe(z.email()).transform((v) => v.toLowerCase());
+export const email = z.string().trim().max(254).pipe(z.email()).transform((v) => v.toLowerCase());
 const captcha = z.string().min(1).max(4096);
 
-const isValidTimezone = (tz: string): boolean => {
+export const isValidTimezone = (tz: string): boolean => {
   try {
     new Intl.DateTimeFormat('en', { timeZone: tz });
     return /^[A-Za-z0-9_+\-/]+$/.test(tz);
@@ -13,7 +13,7 @@ const isValidTimezone = (tz: string): boolean => {
 };
 
 /** Teléfono en E.164: «+» y de 8 a 15 dígitos, sin ceros iniciales tras el «+». La web arma el número con el prefijo del país. */
-const phoneE164 = z.string().trim().regex(/^\+[1-9]\d{7,14}$/, 'debe estar en formato internacional, por ejemplo +593987654321');
+export const phoneE164 = z.string().trim().regex(/^\+[1-9]\d{7,14}$/, 'debe estar en formato internacional, por ejemplo +593987654321');
 
 export const signupSchema = z
   .object({

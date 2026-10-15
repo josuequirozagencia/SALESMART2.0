@@ -677,3 +677,34 @@ Postmark (mejor entregabilidad, de pago desde el primer envío); Amazon SES (el 
 
 ### Impacto
 Migraciones `0015_plans` y `0016_plans_grants_permissions`; módulo `organizations` (`PlansService`, `CompaniesService`, controladores de plataforma); `SessionService` (la pausa ignora la prueba si hay plan); `TrialsService` (404 con plan, lista y resumen); consola web (pestañas Empresas y Planes; la consola abre en «Empresas»); Build Spec §4.2, §5.2, §6.2 y §7.
+
+---
+
+## ADR-39 — «Nueva empresa» con invitación al dueño (M2.3, flujo F01)
+**Estado: PROPUESTO (2026-10-14); los dos valores marcados «recomendado» (país obligatorio con Ecuador por defecto y caducidad de 7 días) los aprobó el responsable de producto el 2026-10-14. El resto lo revisa en la aprobación del hito.**
+
+### Decisión
+1. **`invitations` es una tabla de IDENTIDAD** (rol `app_identity`: `SELECT/INSERT/UPDATE`, sin `DELETE`; `app_rw` y `app_platform` sin acceso). Una fila por `(organización, correo)` normalizado (índice único): reenviar **reemplaza** el `id` y el token (el enlace anterior deja de existir) y suma `sent_count`. Columnas: `organization_id`, `email`, `role` (`client_admin` hoy; `advisor` cuando llegue «Invitar» de F-equipo), `token_hash` (SHA-256 del secreto), `expires_at`, `consumed_at`, `accepted_user_id`, `invited_by`, `sent_count`, `last_sent_at`. Mismo esquema de token que el restablecimiento de contraseña (ADR-28): opaco `<id>.<secreto de 32 bytes>`, de un solo uso, solo se guarda su hash.
+2. **Alta de empresa por el Súper Admin** (`POST /platform/companies`, permiso existente `platform.companies.manage`): nombre, **zona horaria** (IANA, obligatoria), **país** (ISO 3166-1 alfa-2, obligatorio; la web propone Ecuador), **plan opcional** y **correo del dueño**. Crea la organización `client` y la invitación en **una transacción**. `organizations.country` es nueva y admite NULL (las empresas del registro propio no lo capturan); la API lo exige solo en el alta por invitación.
+3. **Caducidad de la invitación: 7 días** (`INVITATION_TTL_DAYS`, PROVISIONAL, 1–30), reenviable (`POST /platform/companies/:id/invitation/resend`, enfriamiento de 60 s). Un enlace caducado responde `INVITATION_EXPIRED`; uno inválido, consumido o de otra empresa, `INVALID_INVITATION`.
+4. **Correo de invitación** (`MailProvider.sendInvitation`, adaptadores Resend / consola / memoria / sin proveedor). El enlace lo arma el servidor con `FRONTEND_BASE_URL` + `INVITE_LINK_PATH` (por defecto `/accept-invite`), con el token en el **fragmento** `#token=` (no llega a servidores, logs ni Referer), igual que el restablecimiento.
+5. **Si el correo no puede enviarse** (sin proveedor configurado, o el proveedor falla), la empresa y la invitación **se crean igual** y la respuesta al Súper Admin incluye `delivery: 'unavailable' | 'failed'` y el **enlace de invitación** (`invite_url`) para que lo entregue por otro medio. Solo en ese caso, solo a quien tiene `platform.companies.manage`, con `Cache-Control: no-store`, sin registrarlo en logs ni auditoría. Con `delivery: 'sent'` el enlace **no** se devuelve. Sin `FRONTEND_BASE_URL` no hay forma de armar el enlace: el alta responde 503 antes de crear nada.
+6. **Aceptación pública** (`POST /auth/invitations/preview` y `/accept`; sin CAPTCHA porque el token de 256 bits es la credencial; límite por IP, errores uniformes):
+   - **Cuenta nueva:** el dueño define nombre completo, WhatsApp (E.164, como el registro, ADR-34) y contraseña (mínimo 8). El correo queda **verificado** (recibió el enlace) y la cuenta, activa.
+   - **Cuenta existente** (el correo ya tiene usuario en otra organización): **no se duplica el usuario** ni se cambia su contraseña; debe **confirmar con su contraseña actual** (con el mismo bloqueo por intentos del acceso) y se **añade la membresía**.
+   - Si la empresa **no tiene plan**, **la prueba de 7 días empieza al aceptar** (ADR-23: nace al verificar el correo); con plan no hay prueba (ADR-38).
+   - Todo en una transacción con bloqueo de fila y consumo condicional (dos aceptaciones simultáneas: gana una).
+7. **Estado derivado `invited`** en la lista de empresas (no se guarda): organización cliente **sin miembros activos** y con invitación. La lista muestra el correo invitado y su caducidad; «Reenviar invitación» aparece solo en ese estado.
+8. **Auditoría** de plataforma (después del commit, como en ADR-33/38): `company.created` y `company.invitation_resent`, sin token ni enlace. La aceptación no escribe auditoría de plataforma (no hay actor de plataforma): queda en la propia fila (`consumed_at`, `accepted_user_id`) y en la membresía.
+
+### Fuera de alcance de M2.3
+Asistente de primer acceso (horario, cola, canal), «Invitar» a asesores (F-equipo), agencias que registran clientes (F02), cambio de contexto, suspender/reactivar, limpieza periódica de invitaciones caducadas (la tabla es acotada: una fila por organización y correo).
+
+### Alternativas
+Que el dueño se registre solo y luego se le asigne la empresa (rompe «el SA da de alta»); enlace con token en la query (se filtraría a logs y Referer); invitaciones sin límite de vida (riesgo si el correo se filtra); devolver siempre el enlace al SA (innecesario cuando el correo sale); cambiar la contraseña de una cuenta existente al aceptar (permite secuestro con un enlace reenviado); varias filas por reenvío (acumula tokens válidos).
+
+### Ventajas / desventajas
++ Un solo canal de alta con auditoría, sin tokens reutilizables, y utilizable **antes** de tener Resend (el SA entrega el enlace). − Devolver el enlace al SA cuando el correo falla amplía su superficie (acotada: permiso, `no-store`, un solo uso, 7 días); `has_account` en la vista previa revela a quien tiene el enlace si el correo ya tiene cuenta (solo a quien posee el token de ese correo).
+
+### Impacto
+Migraciones `0017_invitations` (tabla, `organizations.country`, clave `i` del limitador) y `0018_invitations_grants`; módulo `auth` (`InvitationsService`, controladores público y de plataforma), `organizations` (alta de empresa y estado `invited` en la lista), puerto `MailProvider` y sus adaptadores, configuración (`INVITATION_TTL_DAYS`, `INVITE_LINK_PATH`), consola web («Nueva empresa», «Reenviar invitación», pantalla pública `/accept-invite`), auditor de BD (identidad: `invitations`), Build Spec §6.1/§7 y FLUJOS F01.

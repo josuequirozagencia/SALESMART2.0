@@ -9,7 +9,7 @@ export const PASSWORD = 'Clave-E2E-Segura-1';
 export const state = (): E2EState => JSON.parse(readFileSync(STATE_FILE, 'utf8')) as E2EState;
 export const uniqueEmail = (tag = 'u'): string => `${tag}-${randomBytes(4).toString('hex')}@empresa-e2e.test`;
 
-interface LogLine { msg?: string; code?: string; resetUrl?: string }
+interface LogLine { msg?: string; code?: string; resetUrl?: string; inviteUrl?: string }
 function logLines(): LogLine[] {
   if (!existsSync(API_LOG)) return [];
   return readFileSync(API_LOG, 'utf8').split('\n').filter(Boolean).flatMap((l) => { try { return [JSON.parse(l) as LogLine]; } catch { return []; } });
@@ -18,10 +18,10 @@ function logLines(): LogLine[] {
 export const mailMark = (): number => logLines().length;
 
 /** Espera el siguiente correo fake del tipo indicado. El correo del destinatario viene redactado en el log; las pruebas corren en serie. */
-export async function nextMail(kind: 'verificación' | 'restablecimiento', since: number): Promise<{ code?: string; resetUrl?: string }> {
+export async function nextMail(kind: 'verificación' | 'restablecimiento' | 'invitación', since: number): Promise<{ code?: string; resetUrl?: string; inviteUrl?: string }> {
   for (let i = 0; i < 100; i++) {
     const hit = logLines().slice(since).find((l) => l.msg?.includes('DEV ONLY') && l.msg.includes(kind));
-    if (hit) return hit.code ? { code: hit.code } : hit.resetUrl ? { resetUrl: hit.resetUrl } : {};
+    if (hit) return hit.code ? { code: hit.code } : hit.resetUrl ? { resetUrl: hit.resetUrl } : hit.inviteUrl ? { inviteUrl: hit.inviteUrl } : {};
     await new Promise((r) => setTimeout(r, 100));
   }
   throw new Error(`no llegó el correo de ${kind}`);

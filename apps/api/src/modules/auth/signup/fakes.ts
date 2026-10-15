@@ -1,5 +1,5 @@
 import type { AppLogger } from '../../../logger';
-import type { CaptchaVerifier, MailProvider, PasswordResetMail, VerificationMail } from './ports';
+import type { CaptchaVerifier, InvitationMail, MailProvider, PasswordResetMail, VerificationMail } from './ports';
 
 /** Sin proveedor: el servicio informa que no está disponible. Es el valor por defecto (y el único válido hoy en producción). */
 export class UnavailableMailProvider implements MailProvider {
@@ -8,6 +8,9 @@ export class UnavailableMailProvider implements MailProvider {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
   sendPasswordReset(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
+  sendInvitation(): Promise<void> {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
 }
@@ -23,6 +26,7 @@ export class MemoryMailProvider implements MailProvider {
   readonly available = true;
   readonly outbox: VerificationMail[] = [];
   readonly resetOutbox: PasswordResetMail[] = [];
+  readonly inviteOutbox: InvitationMail[] = [];
   failNext = false;
   sendVerificationCode(mail: VerificationMail): Promise<void> {
     if (this.failNext) {
@@ -39,6 +43,22 @@ export class MemoryMailProvider implements MailProvider {
     }
     this.resetOutbox.push(mail);
     return Promise.resolve();
+  }
+  sendInvitation(mail: InvitationMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.inviteOutbox.push(mail);
+    return Promise.resolve();
+  }
+  lastInvitation(to: string): InvitationMail | undefined {
+    return [...this.inviteOutbox].reverse().find((m) => m.to === to);
+  }
+  /** Extrae el token del fragmento del enlace de invitación (solo pruebas). */
+  lastInvitationToken(to: string): string | undefined {
+    const url = this.lastInvitation(to)?.inviteUrl;
+    return url ? new URL(url).hash.replace(/^#token=/, '') : undefined;
   }
   lastReset(to: string): PasswordResetMail | undefined {
     return [...this.resetOutbox].reverse().find((m) => m.to === to);
@@ -63,6 +83,10 @@ export class ConsoleMailProvider implements MailProvider {
   }
   sendPasswordReset(mail: PasswordResetMail): Promise<void> {
     this.log.warn({ to: mail.to, resetUrl: mail.resetUrl }, 'DEV ONLY: correo de restablecimiento (no se envía)');
+    return Promise.resolve();
+  }
+  sendInvitation(mail: InvitationMail): Promise<void> {
+    this.log.warn({ to: mail.to, inviteUrl: mail.inviteUrl }, 'DEV ONLY: correo de invitación (no se envía)');
     return Promise.resolve();
   }
 }

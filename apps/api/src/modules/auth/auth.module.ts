@@ -20,17 +20,20 @@ import { ConsoleMailProvider, FakeCaptchaVerifier, MemoryMailProvider, Unavailab
 import { CAPTCHA_VERIFIER, MAIL_PROVIDER } from './signup/ports';
 import { ResendMailProvider } from './signup/resend-mail.provider';
 import { TurnstileVerifier } from './signup/turnstile.verifier';
+import { InvitationsController, PlatformInvitationsController } from './invitations/invitations.controller';
+import { InvitationsService } from './invitations/invitations.service';
 import { SignupController } from './signup/signup.controller';
 import { SignupLimiter } from './signup/signup-limiter';
 import { SignupService } from './signup/signup.service';
 
 @Module({
   imports: [AuditModule, PlatformModule, OrganizationsModule],
-  controllers: [AuthController, SignupController, PasswordController],
+  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController],
   providers: [
     AuthService,
     SignupService,
     PasswordService,
+    InvitationsService,
     PermissionService,
     SignupLimiter,
     // Proveedores reales (ADR-37): Resend y Turnstile. 'none' (503) o fakes de desarrollo/pruebas (la config los prohíbe en producción)

@@ -17,6 +17,11 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'EMAIL_DOMAIN_NOT_ALLOWED': return 'Usa un correo de trabajo o personal permanente, no uno temporal.';
     case 'INVALID_CODE': return 'Código inválido o vencido. Revisa los 6 dígitos o pide uno nuevo.';
     case 'INVALID_TOKEN': return 'El enlace es inválido o venció. Pide uno nuevo.';
+    case 'INVALID_INVITATION': return 'La invitación no es válida o ya se usó.';
+    case 'INVITATION_EXPIRED': return 'La invitación venció. Pide que te la reenvíen.';
+    case 'INVALID_PASSWORD': return 'La contraseña no es correcta.';
+    case 'INVITATIONS_UNAVAILABLE': return 'Las invitaciones no están disponibles: falta configurar la URL de la aplicación en el servidor.';
+    case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;
     case 'EXTENSION_NOT_PENDING': return 'Esta solicitud ya fue resuelta (quizá por otra persona). Se actualizó la lista.';

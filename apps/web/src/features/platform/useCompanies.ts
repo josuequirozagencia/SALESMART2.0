@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { CompanyList, CompanyState } from '../../lib/types';
+import type { CompanyCreated, CompanyList, CompanyState, InvitationIssued } from '../../lib/types';
 
 export interface CompanyFilters {
   q: string;
@@ -38,6 +38,32 @@ export function useAssignPlan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, planId }: { id: string; planId: string | null }) => api(`/platform/companies/${id}/plan`, { method: 'PUT', body: { plan_id: planId } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
+}
+
+export interface NewCompanyInput {
+  name: string;
+  owner_email: string;
+  timezone: string;
+  country: string;
+  plan_id: string | null;
+}
+
+/** «Nueva empresa» (F01): crea la empresa y la invitación del dueño. La lista y los planes (conteos) se refrescan. */
+export function useCreateCompany() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NewCompanyInput) => api<CompanyCreated>('/platform/companies', { method: 'POST', body: input }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
+}
+
+/** Reenvía la invitación pendiente (el enlace anterior deja de valer). */
+export function useResendInvitation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<InvitationIssued>(`/platform/companies/${id}/invitation/resend`, { method: 'POST' }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
   });
 }

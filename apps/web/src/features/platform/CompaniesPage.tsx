@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { shortDate } from '../../lib/format';
-import type { Company, CompanyState } from '../../lib/types';
+import type { Company, CompanyState, InvitationIssued } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { AssignPlanDialog } from './AssignPlanDialog';
-import { NO_FILTERS, useCompanies, type CompanyFilters } from './useCompanies';
+import { InviteResult } from './InviteResult';
+import { NewCompanyDialog } from './NewCompanyDialog';
+import { NO_FILTERS, useCompanies, useResendInvitation, type CompanyFilters } from './useCompanies';
 import { usePlans } from './usePlans';
 
 const STATE: Record<CompanyState, [PillKind, string]> = {
@@ -13,11 +16,12 @@ const STATE: Record<CompanyState, [PillKind, string]> = {
   trial_expired: ['crit', 'Prueba vencida'],
   active: ['ok', 'Activa'],
   suspended: ['warn', 'Suspendida'],
+  invited: ['accent', 'Invitación pendiente'],
 };
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 
-function Row({ c, onPlan }: { c: Company; onPlan: (c: Company) => void }) {
+function Row({ c, onPlan, onResend, resending }: { c: Company; onPlan: (c: Company) => void; onResend: (c: Company) => void; resending: boolean }) {
   const [kind, label] = STATE[c.state];
   return (
     <li className="grid gap-3 rounded-2xl border border-line bg-surface p-4 min-[900px]:grid-cols-[minmax(0,1.6fr)_minmax(0,1.3fr)_150px_80px_auto] min-[900px]:items-center">
@@ -28,11 +32,13 @@ function Row({ c, onPlan }: { c: Company; onPlan: (c: Company) => void }) {
       <div className="grid justify-items-start gap-1 text-[12.5px]">
         <Pill kind={kind}>{label}</Pill>
         {c.trial_ends_at ? <span className="text-muted">{c.state === 'trial_expired' ? 'Venció' : 'Vence'} el {shortDate(c.trial_ends_at)}</span> : null}
+        {c.invitation ? <span className="text-muted">{c.invitation.expired ? 'La invitación venció' : 'La invitación vence'} el {shortDate(c.invitation.expires_at)}</span> : null}
       </div>
       <div className="text-[13px]">{c.plan ? <b>{c.plan.name}</b> : <span className="text-muted">Sin plan</span>}</div>
       <div className="font-mono text-[13px]" aria-label={`${c.users} usuarios`}>{c.users} <span className="font-sans text-[11.5px] text-muted">usuarios</span></div>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar el plan de ${c.name}`} onClick={() => onPlan(c)}>{c.plan ? 'Cambiar plan' : 'Asignar plan'}</Button>
+        {c.state === 'invited' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Reenviar la invitación de ${c.name}`} loading={resending} onClick={() => onResend(c)}>Reenviar invitación</Button> : null}
       </div>
     </li>
   );
@@ -43,6 +49,10 @@ export function CompaniesPage() {
   const [text, setText] = useState('');
   const [filters, setFilters] = useState<CompanyFilters>(NO_FILTERS);
   const [target, setTarget] = useState<Company | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [resent, setResent] = useState<{ company: string; invitation: InvitationIssued }>();
+  const [resendError, setResendError] = useState<string>();
+  const resend = useResendInvitation();
 
   // Búsqueda con espera: no se consulta en cada tecla
   useEffect(() => {
@@ -56,8 +66,14 @@ export function CompaniesPage() {
   const set = <K extends keyof CompanyFilters>(k: K, v: CompanyFilters[K]) => setFilters((f) => ({ ...f, [k]: v }));
   const filtered = Boolean(filters.q || filters.kind || filters.state || filters.plan);
 
+  function resendInvitation(c: Company) {
+    setResendError(undefined);
+    resend.mutate(c.id, { onSuccess: (invitation) => setResent({ company: c.name, invitation }), onError: (e) => setResendError(friendlyError(e, 'No pudimos reenviar la invitación.')) });
+  }
+
   return (
     <div className="grid gap-4">
+      <div className="flex justify-end"><Button variant="primary" onClick={() => setCreating(true)}>Nueva empresa</Button></div>
       <div className="flex flex-wrap items-end gap-3">
         <label className="grid flex-1 gap-1 text-[12px] font-semibold min-[640px]:max-w-[320px]">Buscar
           <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Empresa o correo" className={`${selectCls} font-normal`} />
@@ -69,7 +85,7 @@ export function CompaniesPage() {
         </label>
         <label className="grid gap-1 text-[12px] font-semibold">Estado
           <select value={filters.state} onChange={(e) => set('state', e.target.value as CompanyFilters['state'])} className={`${selectCls} font-normal`}>
-            <option value="">Todos</option><option value="trial">En prueba</option><option value="trial_expired">Prueba vencida</option><option value="active">Activa</option><option value="suspended">Suspendida</option>
+            <option value="">Todos</option><option value="trial">En prueba</option><option value="trial_expired">Prueba vencida</option><option value="active">Activa</option><option value="suspended">Suspendida</option><option value="invited">Invitación pendiente</option>
           </select>
         </label>
         <label className="grid gap-1 text-[12px] font-semibold">Plan
@@ -86,10 +102,18 @@ export function CompaniesPage() {
       {q.isSuccess && items.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-line p-8 text-center text-[13.5px] text-muted">{filtered ? 'Ninguna empresa coincide con los filtros.' : 'Todavía no hay empresas.'}</p>
       ) : null}
-      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} />)}</ul> : null}
+      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onResend={resendInvitation} resending={resend.isPending && resend.variables === c.id} />)}</ul> : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
 
+      {resendError ? <Alert>{resendError}</Alert> : null}
       {target ? <AssignPlanDialog company={target} plans={plans.data?.items ?? []} onClose={() => setTarget(null)} /> : null}
+      {creating ? <NewCompanyDialog plans={plans.data?.items ?? []} onClose={() => setCreating(false)} /> : null}
+      {resent ? (
+        <Modal title={`Invitación de ${resent.company}`} onClose={() => setResent(undefined)}>
+          <InviteResult invitation={resent.invitation} />
+          <div className="flex justify-end"><Button variant="primary" onClick={() => setResent(undefined)}>Listo</Button></div>
+        </Modal>
+      ) : null}
     </div>
   );
 }
