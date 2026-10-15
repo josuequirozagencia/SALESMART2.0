@@ -11,7 +11,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 const NO_TRIALS = { items: [], next_cursor: null, pending_extensions: 0, summary: { active: 0, expiring_soon: 0, pending: 0, extension_days: 3 } };
 const PRO: Plan = { id: 'pro', name: 'Pro', description: null, max_users: null, max_connections: null, max_queues: null, features: {}, archived: false, created_at: new Date().toISOString(), companies: 0 } as Plan;
-const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'trial', plan: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', invitation: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
+const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'trial', plan: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', agency: null, invitation: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
 const INVITED = company({ id: 'inv', name: 'Café Origen', state: 'invited', users: 0, owner_email: 'dueno@cafe.test', invitation: { email: 'dueno@cafe.test', expires_at: new Date(Date.now() + 5 * 86_400_000).toISOString(), expired: false } });
 const EXPIRED = company({ id: 'exp', name: 'Taller Vega', state: 'invited', users: 0, owner_email: 'vega@taller.test', invitation: { email: 'vega@taller.test', expires_at: new Date(Date.now() - 86_400_000).toISOString(), expired: true } });
 const ACTIVE = company({ id: 'act', name: 'Barbería Norte', state: 'active' });

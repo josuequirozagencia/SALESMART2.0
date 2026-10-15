@@ -8,7 +8,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
 const CATALOG = [{ key: 'kanban', label: 'Kanban' }, { key: 'agenda', label: 'Agenda' }, { key: 'campaigns', label: 'Campañas' }, { key: 'ai_agents', label: 'Agentes IA' }];
 const plan = (over: Partial<Plan> & { id: string; name: string }): Plan => ({ description: null, max_users: null, max_connections: null, max_queues: null, features: {}, archived: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), companies: 0, ...over });
-const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'trial', plan: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', invitation: null, created_at: new Date().toISOString(), trial_ends_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), ...over });
+const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'trial', plan: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', agency: null, invitation: null, created_at: new Date().toISOString(), trial_ends_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), ...over });
 
 const PRO = plan({ id: 'pro', name: 'Pro', description: 'Para equipos', max_users: 10, max_connections: 5, features: { kanban: true, agenda: true, ai_agents: true }, companies: 2 });
 const BASICO = plan({ id: 'basico', name: 'Básico', max_users: 3, features: { kanban: true } });

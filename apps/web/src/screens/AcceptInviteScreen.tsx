@@ -111,7 +111,7 @@ export function AcceptInviteScreen() {
   return (
     <AuthShell>
       <form onSubmit={(e) => void submit(e)} noValidate className="grid gap-3.5" aria-label="Aceptar invitación">
-        <Title sub={<>Te invitaron a administrar <b>{inv.organization_name}</b> con <b>{inv.email}</b>.</>}>
+        <Title sub={<>Te invitaron a administrar {inv.role === 'agency' ? 'la agencia ' : ''}<b>{inv.organization_name}</b> con <b>{inv.email}</b>.</>}>
           {existing ? 'Confirma tu identidad' : 'Crea tu cuenta'}
         </Title>
         {existing ? (

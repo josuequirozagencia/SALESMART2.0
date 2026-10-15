@@ -1,7 +1,11 @@
 import { Module } from '@nestjs/common';
+import { MailModule } from '../../mail';
 import { AuditModule } from '../audit';
 import { PlatformModule } from '../platform';
+import { AgenciesService } from './agencies.service';
+import { AgencyAccessService } from './agency-access.service';
 import { CompaniesService } from './companies.service';
+import { PlatformAgenciesController } from './platform-agencies.controller';
 import { PlatformCompaniesController, PlatformPlansController } from './platform-companies.controller';
 import { PlatformTrialsController } from './platform-trials.controller';
 import { PlansService } from './plans.service';
@@ -11,9 +15,9 @@ import { TrialsService } from './trials.service';
 
 /** Organizaciones y pruebas gratuitas (M1.5). Usa `withIdentity` (ADR-25, lint P12 permite este módulo). */
 @Module({
-  imports: [AuditModule, PlatformModule],
-  controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController],
-  providers: [TrialsService, TrialExpiryJob, PlansService, CompaniesService],
-  exports: [TrialsService, TrialExpiryJob, PlansService, CompaniesService],
+  imports: [AuditModule, PlatformModule, MailModule],
+  controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController],
+  providers: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService],
+  exports: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService],
 })
 export class OrganizationsModule {}

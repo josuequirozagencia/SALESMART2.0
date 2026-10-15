@@ -105,6 +105,23 @@ export async function expireTrialOf(email: string): Promise<void> {
   }
 }
 
+/** ¿La persona de la agencia tiene una membresía `agency` VIGENTE en la empresa de ese cliente? (consulta directa a la BD del E2E) */
+export async function hasAgencyAccess(agencyOwnerEmail: string, clientOwnerEmail: string): Promise<boolean> {
+  const c = new pg.Client({ connectionString: state().adminDbUrl });
+  await c.connect();
+  try {
+    const r = await c.query(
+      `SELECT count(*)::int AS n FROM organization_members m JOIN users u ON u.id = m.user_id
+        WHERE u.email = $1 AND m.role = 'agency' AND m.revoked_at IS NULL
+          AND m.organization_id = (SELECT m2.organization_id FROM organization_members m2 JOIN users u2 ON u2.id = m2.user_id WHERE u2.email = $2 AND m2.role = 'client_admin' LIMIT 1)`,
+      [agencyOwnerEmail, clientOwnerEmail],
+    );
+    return (r.rows[0] as { n: number }).n === 1;
+  } finally {
+    await c.end();
+  }
+}
+
 export async function uiLogin(page: Page, email: string, password = PASSWORD): Promise<void> {
   await page.goto('/login');
   await page.getByLabel('Correo', { exact: true }).fill(email);

@@ -1,10 +1,10 @@
 import { Module } from '@nestjs/common';
+import { MailModule } from '../../mail';
 import { AuditModule } from '../audit';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import type { AppConfig } from '../../config';
-import type { AppLogger } from '../../logger';
-import { APP_CONFIG, APP_LOGGER } from '../../tokens';
+import { APP_CONFIG } from '../../tokens';
 import { Argon2idHasher } from '../../security';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
@@ -16,19 +16,18 @@ import { PermissionService } from './permission.service';
 import { PasswordController } from './password/password.controller';
 import { PasswordService } from './password/password.service';
 import { ThrottleService } from './throttle.service';
-import { ConsoleMailProvider, FakeCaptchaVerifier, MemoryMailProvider, UnavailableCaptchaVerifier, UnavailableMailProvider } from './signup/fakes';
-import { CAPTCHA_VERIFIER, MAIL_PROVIDER } from './signup/ports';
-import { ResendMailProvider } from './signup/resend-mail.provider';
+import { FakeCaptchaVerifier, UnavailableCaptchaVerifier } from './signup/fakes';
+import { CAPTCHA_VERIFIER } from './signup/ports';
 import { TurnstileVerifier } from './signup/turnstile.verifier';
-import { InvitationsController, PlatformInvitationsController } from './invitations/invitations.controller';
+import { InvitationsController, PlatformAgencyCreationController, PlatformInvitationsController } from './invitations/invitations.controller';
 import { InvitationsService } from './invitations/invitations.service';
 import { SignupController } from './signup/signup.controller';
 import { SignupLimiter } from './signup/signup-limiter';
 import { SignupService } from './signup/signup.service';
 
 @Module({
-  imports: [AuditModule, PlatformModule, OrganizationsModule],
-  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController],
+  imports: [AuditModule, PlatformModule, OrganizationsModule, MailModule],
+  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController],
   providers: [
     AuthService,
     SignupService,
@@ -36,19 +35,7 @@ import { SignupService } from './signup/signup.service';
     InvitationsService,
     PermissionService,
     SignupLimiter,
-    // Proveedores reales (ADR-37): Resend y Turnstile. 'none' (503) o fakes de desarrollo/pruebas (la config los prohíbe en producción)
-    {
-      provide: MAIL_PROVIDER,
-      useFactory: (cfg: AppConfig, log: AppLogger) => {
-        switch (cfg.signup.mailProvider) {
-          case 'resend': return new ResendMailProvider({ apiKey: cfg.providers.resendApiKey ?? '', from: cfg.providers.mailFrom ?? '' });
-          case 'memory': return new MemoryMailProvider();
-          case 'console': return new ConsoleMailProvider(log);
-          default: return new UnavailableMailProvider();
-        }
-      },
-      inject: [APP_CONFIG, APP_LOGGER],
-    },
+    // Anti-bots (ADR-37): Turnstile. 'none' (503) o fake de desarrollo/pruebas (la config lo prohíbe en producción). El correo vive en MailModule.
     {
       provide: CAPTCHA_VERIFIER,
       useFactory: (cfg: AppConfig) => {

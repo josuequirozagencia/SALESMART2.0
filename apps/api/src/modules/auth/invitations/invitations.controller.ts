@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { PlatformOnly, Public, ZodValidationPipe } from '../../../http';
 import { RequirePermission } from '../../../rbac';
-import { acceptInvitationSchema, createCompanySchema, invitationTokenSchema, type AcceptInvitationDto, type CreateCompanyDto, type InvitationTokenDto } from './invitations.dto';
+import { acceptInvitationSchema, createAgencySchema, createCompanySchema, invitationTokenSchema, type AcceptInvitationDto, type CreateAgencyDto, type CreateCompanyDto, type InvitationTokenDto } from './invitations.dto';
 import { InvitationsService } from './invitations.service';
 
 const uuidParam = new ZodValidationPipe(z.uuid());
@@ -31,6 +31,21 @@ export class PlatformInvitationsController {
   @Header('Cache-Control', 'no-store')
   resend(@Param('id', uuidParam) id: string) {
     return this.invitations.resend(id);
+  }
+}
+
+/** «Nueva agencia» (solo Súper Admin, ADR-40): crea la agencia y la invitación de su dueño. Mismo trato de `no-store` que las empresas. */
+@PlatformOnly()
+@RequirePermission('platform.agencies.manage')
+@Controller('platform/agencies')
+export class PlatformAgencyCreationController {
+  constructor(@Inject(InvitationsService) private readonly invitations: InvitationsService) {}
+
+  @Post()
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  create(@Body(new ZodValidationPipe(createAgencySchema)) b: CreateAgencyDto) {
+    return this.invitations.createAgency(b);
   }
 }
 

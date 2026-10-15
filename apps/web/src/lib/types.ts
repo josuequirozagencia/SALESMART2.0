@@ -77,6 +77,8 @@ export interface Company {
   kind: 'client' | 'agency';
   state: CompanyState;
   plan: { id: string; name: string } | null;
+  /** Agencia que administra al cliente (`null` = administración directa). */
+  agency: { id: string; name: string } | null;
   users: number;
   owner_email: string | null;
   timezone: string;
@@ -96,7 +98,7 @@ export interface InvitationIssued {
 }
 
 export interface CompanyCreated {
-  company: { id: string; name: string; kind: 'client'; state: 'invited'; plan: { id: string; name: string } | null; timezone: string; country: string };
+  company: { id: string; name: string; kind: 'client' | 'agency'; state: 'invited'; plan: { id: string; name: string } | null; timezone: string; country: string };
   invitation: InvitationIssued;
 }
 
@@ -111,4 +113,43 @@ export interface InvitationPreview {
 export interface CompanyList {
   items: Company[];
   next_cursor: string | null;
+}
+
+export type AgencyState = 'active' | 'suspended' | 'invited';
+
+export interface Agency {
+  id: string;
+  name: string;
+  state: AgencyState;
+  /** Dueño de la agencia o, mientras no acepte, el correo invitado. */
+  owner_email: string | null;
+  clients: number;
+  timezone: string;
+  country: string | null;
+  created_at: string;
+  invitation: { email: string; expires_at: string; expired: boolean } | null;
+}
+
+export interface AgencyList {
+  items: Agency[];
+  next_cursor: string | null;
+}
+
+export interface OwnershipHistoryItem {
+  id: string;
+  organization: { id: string; name: string };
+  from: { id: string; name: string } | null;
+  to: { id: string; name: string } | null;
+  reason: string | null;
+  notify_client: boolean;
+  changed_by: string | null;
+  changed_at: string;
+}
+
+export interface AssignAgencyResult {
+  id: string;
+  agency: { id: string; name: string } | null;
+  changed: boolean;
+  /** Avisos enviados al administrador del cliente. */
+  notified: number;
 }

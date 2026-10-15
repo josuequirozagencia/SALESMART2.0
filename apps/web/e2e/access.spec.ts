@@ -1,6 +1,6 @@
 // E2E del flujo de acceso (ADR-23) en un navegador real contra la API y la web COMPILADAS.
 import { expect, test } from '@playwright/test';
-import { apiLogin, createAccount, decide, expireTrialOf, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
+import { apiLogin, createAccount, decide, expireTrialOf, hasAgencyAccess, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
 
 const REASON = 'Aún estoy conectando mi WhatsApp y probando los agentes';
 
@@ -348,6 +348,79 @@ test('nueva empresa: el Súper Admin la crea e invita; el dueño abre el enlace,
   await uiLogin(page, s.rootEmail, s.rootPassword);
   await page.getByLabel('Buscar').fill(owner);
   await expect(page.getByRole('listitem').filter({ hasText: company })).toContainText('En prueba');
+});
+
+test('agencias y carteras: crea una agencia, su dueño acepta, el Súper Admin le asigna un cliente (acceso) y se lo quita (sin acceso)', async ({ page, request }) => {
+  const s = state();
+  const owner = uniqueEmail('agencia');
+  const clientEmail = await createAccount(request, uniqueEmail('cliente'));
+  const agencyName = `Agencia ${uniqueEmail('a').slice(2, 8)}`;
+
+  // 1) El Súper Admin crea la agencia (sin plan) y le llega la invitación al dueño
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  const since = mailMark();
+  await page.getByRole('link', { name: 'Agencias' }).click();
+  await page.getByRole('button', { name: 'Nueva agencia' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Nueva agencia' });
+  await expect(dlg.getByLabel('Plan')).toHaveCount(0);
+  await dlg.getByLabel('Nombre de la agencia').fill(agencyName);
+  await dlg.getByLabel('Correo del dueño').fill(owner);
+  await dlg.getByRole('button', { name: 'Crear e invitar' }).click();
+  await expect(page.getByRole('dialog', { name: 'Agencia creada' })).toContainText('Enviamos la invitación');
+  await page.getByRole('button', { name: 'Listo' }).click();
+  const row = page.getByRole('listitem').filter({ hasText: agencyName });
+  await expect(row).toContainText('Invitación pendiente');
+  const { inviteUrl } = await nextMail('invitación', since);
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 2) El dueño acepta y crea su cuenta
+  await page.goto(inviteUrl!);
+  await expect(page.getByText(`la agencia ${agencyName}`)).toBeVisible();
+  await page.getByLabel('Nombre completo').fill('Dueña Agencia');
+  await page.getByLabel('WhatsApp').fill('098 765 4321');
+  await page.getByLabel('Contraseña', { exact: true }).fill(PASSWORD);
+  await page.getByLabel('Repite la contraseña').fill(PASSWORD);
+  await page.getByRole('button', { name: 'Crear cuenta y entrar' }).click();
+  await expect(page.getByText('Cuenta lista.')).toBeVisible();
+
+  // 3) El Súper Admin asigna el cliente desde Empresas: la agencia recibe el acceso
+  expect(await hasAgencyAccess(owner, clientEmail)).toBe(false);
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByLabel('Buscar').fill(clientEmail);
+  const client = page.getByRole('listitem').filter({ hasText: clientEmail });
+  await expect(client).toContainText('Administración directa');
+  await client.getByRole('button', { name: /Cambiar la administración/ }).click();
+  const change = page.getByRole('dialog', { name: /Administración de/ });
+  await change.getByLabel('Administra', { exact: true }).selectOption({ label: agencyName });
+  await expect(change).toContainText('La agencia elegida recibe acceso a esta empresa');
+  await change.getByLabel('Motivo (opcional)').fill('Alta E2E');
+  await change.getByRole('button', { name: 'Guardar cambio' }).click();
+  await expect(client).toContainText(`Administrada por ${agencyName}`);
+  expect(await hasAgencyAccess(owner, clientEmail)).toBe(true);
+
+  // 4) La cartera lo muestra (con su historial) y «Quitar» corta el acceso
+  await page.getByRole('link', { name: 'Agencias' }).click();
+  const agencyRow = page.getByRole('listitem').filter({ hasText: agencyName });
+  await expect(agencyRow).toContainText('Activa');
+  await expect(agencyRow.getByLabel('1 cliente')).toBeVisible();
+  await agencyRow.getByRole('button', { name: `Cartera de ${agencyName}` }).click();
+  const cartera = page.getByRole('dialog', { name: `Cartera de ${agencyName}` });
+  await expect(cartera.getByRole('list', { name: 'Clientes' })).toContainText(clientEmail);
+  await cartera.getByRole('button', { name: 'Ver historial' }).click();
+  await expect(cartera.getByRole('list', { name: 'Cambios' })).toContainText('Alta E2E');
+  await cartera.getByRole('button', { name: /Quitar a .* de la cartera/ }).click();
+  await expect(cartera.getByText(/pasó a administración directa/)).toBeVisible();
+  expect(await hasAgencyAccess(owner, clientEmail)).toBe(false);
+  await cartera.getByRole('button', { name: 'Cerrar' }).click();
+  await expect(agencyRow.getByLabel('0 clientes')).toBeVisible();
+
+  // 5) Suspender y reactivar la agencia desde la consola
+  await agencyRow.getByRole('button', { name: `Suspender a ${agencyName}` }).click();
+  await page.getByRole('dialog', { name: `Suspender a ${agencyName}` }).getByRole('button', { name: 'Suspender' }).click();
+  await expect(agencyRow).toContainText('Suspendida');
+  await agencyRow.getByRole('button', { name: `Reactivar a ${agencyName}` }).click();
+  await page.getByRole('dialog', { name: `Reactivar a ${agencyName}` }).getByRole('button', { name: 'Reactivar' }).click();
+  await expect(agencyRow).toContainText('Activa');
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

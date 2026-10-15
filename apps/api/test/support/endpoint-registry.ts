@@ -46,6 +46,13 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // «Nueva empresa» con invitación (M2.3, ADR-39). Pruebas: test/platform/invitations.test.ts (acceso, A↔B, un solo uso, caducidad, concurrencia, límites)
   { route: 'POST /v1/platform/companies', kind: 'platform', test: '../../platform/invitations.test.ts' },
   { route: 'POST /v1/platform/companies/:id/invitation/resend', kind: 'platform', test: '../../platform/invitations.test.ts' },
+  // Agencias y carteras (M2.4, ADR-22/ADR-40). Pruebas: test/platform/agencies.test.ts (acceso, A↔B, acceso al instante, suspensión, historial, BD)
+  { route: 'GET /v1/platform/agencies', kind: 'platform', test: '../../platform/agencies.test.ts' },
+  { route: 'POST /v1/platform/agencies', kind: 'platform', test: '../../platform/agencies.test.ts' },
+  { route: 'POST /v1/platform/agencies/:id/suspend', kind: 'platform', test: '../../platform/agencies.test.ts' },
+  { route: 'POST /v1/platform/agencies/:id/reactivate', kind: 'platform', test: '../../platform/agencies.test.ts' },
+  { route: 'GET /v1/platform/agencies/:id/history', kind: 'platform', test: '../../platform/agencies.test.ts' },
+  { route: 'PUT /v1/platform/organizations/:id/agency', kind: 'platform', test: '../../platform/agencies.test.ts' },
   // Aceptación pública: el token de 256 bits es la credencial; límite por IP, errores uniformes. Pruebas: invitations.test.ts
   { route: 'POST /v1/auth/invitations/preview', kind: 'public' },
   { route: 'POST /v1/auth/invitations/accept', kind: 'public' },

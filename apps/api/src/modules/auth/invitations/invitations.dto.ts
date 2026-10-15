@@ -16,6 +16,10 @@ export const createCompanySchema = z
   .strict();
 export type CreateCompanyDto = z.infer<typeof createCompanySchema>;
 
+/** Alta de una agencia (ADR-40): igual que una empresa pero SIN plan (las agencias no pagan ni tienen prueba; el cliente paga su propio plan). */
+export const createAgencySchema = createCompanySchema.omit({ plan_id: true });
+export type CreateAgencyDto = z.infer<typeof createAgencySchema>;
+
 export const invitationTokenSchema = z.object({ token: z.string().min(1).max(200) }).strict();
 export type InvitationTokenDto = z.infer<typeof invitationTokenSchema>;
 

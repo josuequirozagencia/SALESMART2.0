@@ -134,6 +134,20 @@
       "when": 1791981733011,
       "tag": "0018_invitations_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792037608741,
+      "tag": "0019_agencies_carteras",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1792037613037,
+      "tag": "0020_agencies_grants_triggers",
+      "breakpoints": true
     }
   ]
 }

@@ -8,8 +8,10 @@ export interface CompanyFilters {
   state: '' | CompanyState;
   /** '' = todos · 'none' = sin plan · otro = id del plan */
   plan: string;
+  /** '' = todas · 'none' = administración directa · otro = id de la agencia (su cartera) */
+  agency: string;
 }
-export const NO_FILTERS: CompanyFilters = { q: '', kind: '', state: '', plan: '' };
+export const NO_FILTERS: CompanyFilters = { q: '', kind: '', state: '', plan: '', agency: '' };
 const PAGE = 25;
 
 export function companiesQuery(f: CompanyFilters, cursor?: string): string {
@@ -18,6 +20,7 @@ export function companiesQuery(f: CompanyFilters, cursor?: string): string {
   if (f.kind) p.set('kind', f.kind);
   if (f.state) p.set('state', f.state);
   if (f.plan) p.set('plan', f.plan);
+  if (f.agency) p.set('agency', f.agency);
   p.set('limit', String(PAGE));
   if (cursor) p.set('cursor', cursor);
   return p.toString();
@@ -51,10 +54,10 @@ export interface NewCompanyInput {
 }
 
 /** «Nueva empresa» (F01): crea la empresa y la invitación del dueño. La lista y los planes (conteos) se refrescan. */
-export function useCreateCompany() {
+export function useCreateCompany(kind: 'client' | 'agency' = 'client') {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: NewCompanyInput) => api<CompanyCreated>('/platform/companies', { method: 'POST', body: input }),
+    mutationFn: (input: NewCompanyInput) => api<CompanyCreated>(kind === 'agency' ? '/platform/agencies' : '/platform/companies', { method: 'POST', body: kind === 'agency' ? { name: input.name, owner_email: input.owner_email, timezone: input.timezone, country: input.country } : input }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
   });
 }

@@ -9,8 +9,8 @@ import { usePendingBadge } from './usePlatformTrials';
 const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`;
 
 /**
- * Marco de la consola de plataforma (Súper Admin). Pestañas: Empresas, Planes y Pruebas; el resto (agencias, carteras,
- * accesos, proveedores) llega con M2 y se suma a esta navegación.
+ * Marco de la consola de plataforma (Súper Admin). Pestañas: Empresas, Agencias, Planes y Pruebas; el resto (accesos,
+ * proveedores) llega con M2 y se suma a esta navegación.
  */
 export function PlatformShell({ me, onLogout, children }: { me: Me; onLogout: () => void; children: ReactNode }) {
   const pending = usePendingBadge();
@@ -31,6 +31,7 @@ export function PlatformShell({ me, onLogout, children }: { me: Me; onLogout: ()
         <h1 className="text-[22px] font-bold">Consola de plataforma</h1>
         <nav aria-label="Secciones de la consola" className="flex gap-1 border-b border-line">
           <NavLink to="/platform/companies" className={tab}>Empresas</NavLink>
+          <NavLink to="/platform/agencies" className={tab}>Agencias</NavLink>
           <NavLink to="/platform/plans" className={tab}>Planes</NavLink>
           <NavLink to="/platform/trials" className={tab}>
             Pruebas

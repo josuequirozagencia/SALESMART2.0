@@ -9,7 +9,7 @@ import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { CAPTCHA_VERIFIER, MAIL_PROVIDER } from '../../src/modules/auth/signup';
-import { ResendMailProvider } from '../../src/modules/auth/signup/resend-mail.provider';
+import { ResendMailProvider } from '../../src/mail/resend.provider';
 import { TurnstileVerifier } from '../../src/modules/auth/signup/turnstile.verifier';
 import { Argon2idHasher } from '../../src/security';
 import { TEST_AUTH_KEY } from '../support/constants';

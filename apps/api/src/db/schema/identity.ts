@@ -117,10 +117,37 @@ export const organizationMembers = identityTable(
   },
   (t) => [
     check('organization_members_role_valid', sql`${t.role} IN ('super_admin', 'agency', 'client_admin', 'advisor')`),
+    // Nivel de acceso de una agencia sobre un cliente (ADR-11; «sin acceso» = no hay membresía). NULL en el resto de roles
+    check('organization_members_access_level_valid', sql`${t.accessLevel} IS NULL OR ${t.accessLevel} IN ('read', 'advisor', 'admin')`),
     // Una sola membresía ACTIVA por usuario y organización
     uniqueIndex('organization_members_active_uq').on(t.userId, t.organizationId).where(sql`${t.revokedAt} IS NULL`),
     index('organization_members_org_idx').on(t.organizationId),
     index('organization_members_user_idx').on(t.userId),
+  ],
+);
+
+/**
+ * Historial de quién administra a cada cliente (M2.4, ADR-22/ADR-40): una fila por cambio de `parent_agency_id`. APPEND-ONLY: app_identity
+ * solo tiene SELECT/INSERT. `from`/`to` nulos = administración directa. `notify_client` registra si se avisó al administrador del cliente.
+ */
+export const organizationOwnershipHistory = identityTable(
+  'organization_ownership_history',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    fromAgencyId: uuid('from_agency_id').references(() => organizations.id),
+    toAgencyId: uuid('to_agency_id').references(() => organizations.id),
+    reason: text('reason'),
+    notifyClient: boolean('notify_client').notNull().default(true),
+    changedBy: uuid('changed_by').notNull().references(() => users.id),
+    changedAt: ts('changed_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('ownership_history_changed', sql`${t.fromAgencyId} IS DISTINCT FROM ${t.toAgencyId}`),
+    check('ownership_history_reason_len', sql`${t.reason} IS NULL OR length(btrim(${t.reason})) BETWEEN 1 AND 300`),
+    index('ownership_history_org_idx').on(t.organizationId, t.changedAt),
+    index('ownership_history_from_idx').on(t.fromAgencyId),
+    index('ownership_history_to_idx').on(t.toAgencyId),
   ],
 );
 
@@ -261,7 +288,7 @@ export const invitations = identityTable(
   },
   (t) => [
     check('invitations_email_normalized', sql`${t.email} = lower(btrim(${t.email})) AND length(${t.email}) BETWEEN 3 AND 254`),
-    check('invitations_role_valid', sql`${t.role} IN ('client_admin', 'advisor')`),
+    check('invitations_role_valid', sql`${t.role} IN ('client_admin', 'advisor', 'agency')`),
     check('invitations_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
     check('invitations_consumed_consistent', sql`(${t.consumedAt} IS NULL) = (${t.acceptedUserId} IS NULL)`),
     uniqueIndex('invitations_org_email_uq').on(t.organizationId, t.email),

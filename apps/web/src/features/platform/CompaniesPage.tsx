@@ -6,8 +6,10 @@ import { Alert, Button, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { AssignPlanDialog } from './AssignPlanDialog';
+import { ChangeAgencyDialog } from './ChangeAgencyDialog';
 import { InviteResult } from './InviteResult';
 import { NewCompanyDialog } from './NewCompanyDialog';
+import { useAgencyOptions } from './useAgencies';
 import { NO_FILTERS, useCompanies, useResendInvitation, type CompanyFilters } from './useCompanies';
 import { usePlans } from './usePlans';
 
@@ -21,13 +23,14 @@ const STATE: Record<CompanyState, [PillKind, string]> = {
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 
-function Row({ c, onPlan, onResend, resending }: { c: Company; onPlan: (c: Company) => void; onResend: (c: Company) => void; resending: boolean }) {
+function Row({ c, onPlan, onAgency, onResend, resending }: { c: Company; onPlan: (c: Company) => void; onAgency: (c: Company) => void; onResend: (c: Company) => void; resending: boolean }) {
   const [kind, label] = STATE[c.state];
   return (
     <li className="grid gap-3 rounded-2xl border border-line bg-surface p-4 min-[900px]:grid-cols-[minmax(0,1.6fr)_minmax(0,1.3fr)_150px_80px_auto] min-[900px]:items-center">
       <div className="min-w-0">
         <b className="block truncate text-[14px]">{c.name} {c.kind === 'agency' ? <Pill kind="accent">Agencia</Pill> : null}</b>
         <span className="block truncate text-[12px] text-muted">{c.owner_email ?? 'Sin responsable'} · creada el {shortDate(c.created_at)}</span>
+        {c.kind === 'client' ? <span className="block truncate text-[12px] text-muted">{c.agency ? `Administrada por ${c.agency.name}` : 'Administración directa'}</span> : null}
       </div>
       <div className="grid justify-items-start gap-1 text-[12.5px]">
         <Pill kind={kind}>{label}</Pill>
@@ -38,6 +41,7 @@ function Row({ c, onPlan, onResend, resending }: { c: Company; onPlan: (c: Compa
       <div className="font-mono text-[13px]" aria-label={`${c.users} usuarios`}>{c.users} <span className="font-sans text-[11.5px] text-muted">usuarios</span></div>
       <div className="flex flex-wrap gap-2">
         <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar el plan de ${c.name}`} onClick={() => onPlan(c)}>{c.plan ? 'Cambiar plan' : 'Asignar plan'}</Button>
+        {c.kind === 'client' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar la administración de ${c.name}`} onClick={() => onAgency(c)}>Administración</Button> : null}
         {c.state === 'invited' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Reenviar la invitación de ${c.name}`} loading={resending} onClick={() => onResend(c)}>Reenviar invitación</Button> : null}
       </div>
     </li>
@@ -50,6 +54,8 @@ export function CompaniesPage() {
   const [filters, setFilters] = useState<CompanyFilters>(NO_FILTERS);
   const [target, setTarget] = useState<Company | null>(null);
   const [creating, setCreating] = useState(false);
+  const [agencyTarget, setAgencyTarget] = useState<Company | null>(null);
+  const agencies = useAgencyOptions();
   const [resent, setResent] = useState<{ company: string; invitation: InvitationIssued }>();
   const [resendError, setResendError] = useState<string>();
   const resend = useResendInvitation();
@@ -64,7 +70,7 @@ export function CompaniesPage() {
   const plans = usePlans(false);
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const set = <K extends keyof CompanyFilters>(k: K, v: CompanyFilters[K]) => setFilters((f) => ({ ...f, [k]: v }));
-  const filtered = Boolean(filters.q || filters.kind || filters.state || filters.plan);
+  const filtered = Boolean(filters.q || filters.kind || filters.state || filters.plan || filters.agency);
 
   function resendInvitation(c: Company) {
     setResendError(undefined);
@@ -94,6 +100,12 @@ export function CompaniesPage() {
             {(plans.data?.items ?? []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
         </label>
+        <label className="grid gap-1 text-[12px] font-semibold">Administración
+          <select value={filters.agency} onChange={(e) => set('agency', e.target.value)} className={`${selectCls} font-normal`}>
+            <option value="">Todas</option><option value="none">Administración directa</option>
+            {(agencies.data?.items ?? []).map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+          </select>
+        </label>
         {filtered ? <Button variant="link" onClick={() => { setText(''); setFilters(NO_FILTERS); }}>Limpiar filtros</Button> : null}
       </div>
 
@@ -102,11 +114,12 @@ export function CompaniesPage() {
       {q.isSuccess && items.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-line p-8 text-center text-[13.5px] text-muted">{filtered ? 'Ninguna empresa coincide con los filtros.' : 'Todavía no hay empresas.'}</p>
       ) : null}
-      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onResend={resendInvitation} resending={resend.isPending && resend.variables === c.id} />)}</ul> : null}
+      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onAgency={setAgencyTarget} onResend={resendInvitation} resending={resend.isPending && resend.variables === c.id} />)}</ul> : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
 
       {resendError ? <Alert>{resendError}</Alert> : null}
       {target ? <AssignPlanDialog company={target} plans={plans.data?.items ?? []} onClose={() => setTarget(null)} /> : null}
+      {agencyTarget ? <ChangeAgencyDialog company={agencyTarget} agencies={agencies.data?.items ?? []} onClose={() => setAgencyTarget(null)} /> : null}
       {creating ? <NewCompanyDialog plans={plans.data?.items ?? []} onClose={() => setCreating(false)} /> : null}
       {resent ? (
         <Modal title={`Invitación de ${resent.company}`} onClose={() => setResent(undefined)}>

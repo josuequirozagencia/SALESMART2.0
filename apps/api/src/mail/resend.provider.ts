@@ -1,5 +1,5 @@
-import { invitationMail, passwordResetMail, verificationMail, type MailContent } from './mail-templates';
-import type { InvitationMail, MailProvider, PasswordResetMail, VerificationMail } from './ports';
+import { invitationMail, ownershipChangeMail, passwordResetMail, verificationMail, type MailContent } from './templates';
+import type { InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface ResendOptions {
   apiKey: string;
@@ -39,6 +39,10 @@ export class ResendMailProvider implements MailProvider {
 
   sendInvitation(mail: InvitationMail): Promise<void> {
     return this.send(mail.to, () => invitationMail(mail));
+  }
+
+  sendOwnershipChange(mail: OwnershipChangeMail): Promise<void> {
+    return this.send(mail.to, () => ownershipChangeMail(mail));
   }
 
   /** La plantilla se construye DENTRO de la función asíncrona: un error de plantilla es un rechazo, nunca una excepción síncrona. */

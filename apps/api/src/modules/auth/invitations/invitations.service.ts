@@ -9,14 +9,14 @@ import type { AppLogger } from '../../../logger';
 import type { PasswordHasher } from '../../../security';
 import { PlatformContext } from '../../../tenant';
 import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
-import { TrialsService } from '../../organizations';
+import { AgencyAccessService, TrialsService } from '../../organizations';
 import { PlatformAuditService } from '../../platform';
 import { PASSWORD_HASHER } from '../auth.tokens';
-import { MAIL_PROVIDER, type MailProvider } from '../signup/ports';
+import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
 import { SignupLimiter } from '../signup/signup-limiter';
 import { ThrottleService } from '../throttle.service';
 import { hashSecret, parseToken, sameHash } from '../tokens';
-import type { CreateCompanyDto } from './invitations.dto';
+import type { CreateAgencyDto, CreateCompanyDto } from './invitations.dto';
 
 export type InvitationDelivery = 'sent' | 'failed' | 'unavailable';
 
@@ -29,7 +29,7 @@ export interface InvitationIssued {
 }
 
 export interface CompanyCreated {
-  company: { id: string; name: string; kind: 'client'; state: 'invited'; plan: { id: string; name: string } | null; timezone: string; country: string };
+  company: { id: string; name: string; kind: 'client' | 'agency'; state: 'invited'; plan: { id: string; name: string } | null; timezone: string; country: string };
   invitation: InvitationIssued;
 }
 
@@ -72,13 +72,23 @@ export class InvitationsService {
     @Inject(SignupLimiter) private readonly limiter: SignupLimiter,
     @Inject(ThrottleService) private readonly throttle: ThrottleService,
     @Inject(TrialsService) private readonly trials: TrialsService,
+    @Inject(AgencyAccessService) private readonly agencyAccess: AgencyAccessService,
     @Inject(PlatformAuditService) private readonly audit: PlatformAuditService,
   ) {}
 
   // ── Súper Admin ───────────────────────────────────────────────────────────
 
   /** Crea la empresa (cliente) y la invitación del dueño en una transacción; luego intenta enviar el correo. */
-  async createCompany(input: CreateCompanyDto): Promise<CompanyCreated> {
+  createCompany(input: CreateCompanyDto): Promise<CompanyCreated> {
+    return this.create('client', input);
+  }
+
+  /** Crea una AGENCIA y la invitación de su dueño (ADR-40): sin plan ni prueba; la invitación lleva el rol `agency`. */
+  createAgency(input: CreateAgencyDto): Promise<CompanyCreated> {
+    return this.create('agency', { ...input, plan_id: null });
+  }
+
+  private async create(kind: 'client' | 'agency', input: CreateCompanyDto): Promise<CompanyCreated> {
     const linkBase = this.linkBase();
     const actor = PlatformContext.current().actorUserId;
     const planId = input.plan_id ?? null;
@@ -92,22 +102,23 @@ export class InvitationsService {
       }
       const [org] = await tx
         .insert(organizations)
-        .values({ kind: 'client', name: input.name, timezone: input.timezone, country: input.country, planId })
+        .values({ kind, name: input.name, timezone: input.timezone, country: input.country, planId })
         .returning({ id: organizations.id });
-      const issued = await this.issue(tx, { organizationId: org!.id, email: input.owner_email, role: 'client_admin', invitedBy: actor });
+      const issued = await this.issue(tx, { organizationId: org!.id, email: input.owner_email, role: kind === 'agency' ? 'agency' : 'client_admin', invitedBy: actor });
       return { orgId: org!.id, plan, issued };
     });
-    const invitation = await this.deliver(linkBase, input.owner_email, input.name, out.issued);
-    await this.safely('company.created', () =>
+    const invitation = await this.deliver(linkBase, input.owner_email, input.name, out.issued, kind);
+    const prefix = kind === 'agency' ? 'agency' : 'company';
+    await this.safely(`${prefix}.created`, () =>
       this.audit.record({
-        action: 'company.created',
+        action: `${prefix}.created`,
         entityType: 'organization',
         entityId: out.orgId,
         targetOrgId: out.orgId,
         details: { name: input.name, country: input.country, timezone: input.timezone, plan_id: planId, owner_email: input.owner_email, delivery: invitation.delivery },
       }),
     );
-    return { company: { id: out.orgId, name: input.name, kind: 'client', state: 'invited', plan: out.plan, timezone: input.timezone, country: input.country }, invitation };
+    return { company: { id: out.orgId, name: input.name, kind, state: 'invited', plan: out.plan, timezone: input.timezone, country: input.country }, invitation };
   }
 
   /** Reenvía la invitación pendiente de una empresa: reemplaza el token (el enlace anterior deja de valer). */
@@ -116,7 +127,7 @@ export class InvitationsService {
     const actor = PlatformContext.current().actorUserId;
     const out = await this.db.withIdentity(async (tx) => {
       const [row] = await tx
-        .select({ id: invitations.id, email: invitations.email, role: invitations.role, consumedAt: invitations.consumedAt, lastSentAt: invitations.lastSentAt, orgName: organizations.name, orgDeleted: organizations.deletedAt })
+        .select({ id: invitations.id, email: invitations.email, role: invitations.role, consumedAt: invitations.consumedAt, lastSentAt: invitations.lastSentAt, orgName: organizations.name, orgKind: organizations.kind, orgDeleted: organizations.deletedAt })
         .from(invitations)
         .innerJoin(organizations, eq(organizations.id, invitations.organizationId))
         .where(and(eq(invitations.organizationId, orgId), isNull(invitations.consumedAt)))
@@ -131,11 +142,12 @@ export class InvitationsService {
       const wait = this.cfg.invite.resendCooldownMs - (Date.now() - row.lastSentAt.getTime());
       if (wait > 0) throw new TooManyAttemptsError(Math.ceil(wait / 1000));
       const issued = await this.issue(tx, { organizationId: orgId, email: row.email, role: row.role, invitedBy: actor });
-      return { orgName: row.orgName, email: row.email, issued };
+      return { orgName: row.orgName, orgKind: row.orgKind === 'agency' ? ('agency' as const) : ('client' as const), email: row.email, issued };
     });
-    const invitation = await this.deliver(linkBase, out.email, out.orgName, out.issued);
-    await this.safely('company.invitation_resent', () =>
-      this.audit.record({ action: 'company.invitation_resent', entityType: 'organization', entityId: orgId, targetOrgId: orgId, details: { owner_email: out.email, delivery: invitation.delivery } }),
+    const invitation = await this.deliver(linkBase, out.email, out.orgName, out.issued, out.orgKind);
+    const prefix = out.orgKind === 'agency' ? 'agency' : 'company';
+    await this.safely(`${prefix}.invitation_resent`, () =>
+      this.audit.record({ action: `${prefix}.invitation_resent`, entityType: 'organization', entityId: orgId, targetOrgId: orgId, details: { owner_email: out.email, delivery: invitation.delivery } }),
     );
     return invitation;
   }
@@ -213,6 +225,8 @@ export class InvitationsService {
         .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.organizationId, inv.organizationId), isNull(organizationMembers.revokedAt)))
         .limit(1);
       if (!member) await tx.insert(organizationMembers).values({ userId, organizationId: inv.organizationId, role: inv.role, grantedBy: inv.invitedBy });
+      // Quien entra a una AGENCIA recibe acceso a los clientes que ya estén en su cartera (invariante de ADR-40)
+      if (inv.role === 'agency') await this.agencyAccess.reconcileAgency(tx, inv.organizationId, inv.invitedBy, now);
       // Sin plan, la prueba de 7 días empieza AL ACEPTAR (ADR-23 #2 / ADR-39): el dueño ya demostró el control del correo
       if (inv.role === 'client_admin' && inv.orgPlanId === null) {
         const [t] = await tx.select({ id: trials.id }).from(trials).where(eq(trials.organizationId, inv.organizationId)).limit(1);
@@ -292,12 +306,12 @@ export class InvitationsService {
   }
 
   /** Envía el correo (si hay proveedor) DESPUÉS de confirmar la transacción. El enlace solo se devuelve cuando el correo no salió. */
-  private async deliver(linkBase: string, to: string, orgName: string, issued: { token: string; expiresAt: Date }): Promise<InvitationIssued> {
+  private async deliver(linkBase: string, to: string, orgName: string, issued: { token: string; expiresAt: Date }, kind: 'client' | 'agency' = 'client'): Promise<InvitationIssued> {
     const inviteUrl = `${linkBase}#token=${issued.token}`;
     const base = { email: to, expires_at: issued.expiresAt.toISOString() };
     if (!this.mail.available) return { ...base, delivery: 'unavailable', invite_url: inviteUrl };
     try {
-      await this.mail.sendInvitation({ to, organizationName: orgName, inviteUrl, expiresInDays: Math.round(this.cfg.invite.ttlMs / 86_400_000) });
+      await this.mail.sendInvitation({ to, organizationName: orgName, kind, inviteUrl, expiresInDays: Math.round(this.cfg.invite.ttlMs / 86_400_000) });
       return { ...base, delivery: 'sent' };
     } catch (e) {
       this.log.error({ err: e instanceof Error ? e.message : 'desconocido' }, 'MailProvider falló al enviar la invitación');

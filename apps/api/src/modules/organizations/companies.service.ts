@@ -15,6 +15,8 @@ export interface CompanyItem {
   kind: 'client' | 'agency';
   state: CompanyState;
   plan: { id: string; name: string } | null;
+  /** Agencia que administra al cliente (`null` = administración directa; las agencias y la plataforma no tienen). */
+  agency: { id: string; name: string } | null;
   /** Miembros activos de la organización. */
   users: number;
   owner_email: string | null;
@@ -39,6 +41,8 @@ type Row = {
   state: CompanyState;
   plan_id: string | null;
   plan_name: string | null;
+  agency_id: string | null;
+  agency_name: string | null;
   users: number;
   owner_email: string | null;
   timezone: string;
@@ -73,6 +77,8 @@ export class CompaniesService {
     if (f.cursor) where.push(sql`s.id < ${f.cursor}`);
     if (f.kind) where.push(sql`s.kind = ${f.kind}`);
     if (f.state) where.push(sql`s.state = ${f.state}`);
+    if (f.agency === 'none') where.push(sql`s.kind = 'client' AND s.agency_id IS NULL`);
+    else if (f.agency) where.push(sql`s.agency_id = ${f.agency}`);
     if (f.plan === 'none') where.push(sql`s.plan_id IS NULL`);
     else if (f.plan) where.push(sql`s.plan_id = ${f.plan}`);
     if (f.q) {
@@ -84,7 +90,7 @@ export class CompaniesService {
     const rows = await this.db.withIdentity(async (tx) => {
       const res = await tx.execute<Row>(sql`
         SELECT * FROM (
-          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.plan_id, p.name AS plan_name,
+          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.plan_id, p.name AS plan_name, o.parent_agency_id AS agency_id, ag.name AS agency_name,
                  (SELECT count(*)::int FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL) AS users,
                  (SELECT u.email FROM organization_members m JOIN users u ON u.id = m.user_id
                    WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND m.role IN ('client_admin', 'agency') ORDER BY m.created_at, m.id LIMIT 1) AS owner_email,
@@ -92,13 +98,14 @@ export class CompaniesService {
                  (SELECT i.expires_at FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_expires_at,
                  CASE WHEN o.plan_id IS NULL AND t.id IS NOT NULL THEN t.ends_at END AS trial_ends_at,
                  CASE WHEN o.status <> 'active' THEN 'suspended'
-                      WHEN o.kind = 'client' AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
+                      WHEN o.kind IN ('client', 'agency') AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
                            AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                       WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'
                       WHEN t.status = 'expired' OR t.ends_at <= ${now} THEN 'trial_expired'
                       ELSE 'trial' END AS state
             FROM organizations o
             LEFT JOIN plans p ON p.id = o.plan_id
+            LEFT JOIN organizations ag ON ag.id = o.parent_agency_id
             LEFT JOIN trials t ON t.organization_id = o.id
            WHERE o.kind <> 'platform' AND o.deleted_at IS NULL
         ) s
@@ -115,6 +122,7 @@ export class CompaniesService {
         kind: r.kind,
         state: r.state,
         plan: r.plan_id && r.plan_name ? { id: r.plan_id, name: r.plan_name } : null,
+        agency: r.agency_id && r.agency_name ? { id: r.agency_id, name: r.agency_name } : null,
         users: Number(r.users),
         owner_email: r.owner_email ?? r.inv_email,
         timezone: r.timezone,
@@ -155,7 +163,7 @@ export class CompaniesService {
     const res = await this.db.withIdentity((tx) =>
       tx.execute<{ state: CompanyState }>(sql`
         SELECT CASE WHEN o.status <> 'active' THEN 'suspended'
-                    WHEN o.kind = 'client' AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
+                    WHEN o.kind IN ('client', 'agency') AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
                          AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                     WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'
                     WHEN t.status = 'expired' OR t.ends_at <= now() THEN 'trial_expired'

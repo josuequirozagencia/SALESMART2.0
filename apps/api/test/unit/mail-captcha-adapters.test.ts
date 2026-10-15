@@ -1,9 +1,11 @@
 // Contract tests de los adaptadores reales (ADR-37): Resend (correo) y Turnstile (anti-bots), con un `fetch` simulado.
 import { describe, expect, it } from 'vitest';
-import { FakeCaptchaVerifier, MemoryMailProvider } from '../../src/modules/auth/signup/fakes';
-import { invitationMail, passwordResetMail, verificationMail } from '../../src/modules/auth/signup/mail-templates';
-import type { CaptchaVerifier, MailProvider } from '../../src/modules/auth/signup/ports';
-import { ResendMailProvider } from '../../src/modules/auth/signup/resend-mail.provider';
+import { MemoryMailProvider } from '../../src/mail/fakes';
+import type { MailProvider } from '../../src/mail/ports';
+import { ResendMailProvider } from '../../src/mail/resend.provider';
+import { invitationMail, ownershipChangeMail, passwordResetMail, verificationMail } from '../../src/mail/templates';
+import { FakeCaptchaVerifier } from '../../src/modules/auth/signup/fakes';
+import type { CaptchaVerifier } from '../../src/modules/auth/signup/ports';
 import { TurnstileVerifier } from '../../src/modules/auth/signup/turnstile.verifier';
 
 const KEY = 're_test_1234567890abcdef';
@@ -166,6 +168,7 @@ describe('contrato de los puertos: el real y el fake cumplen la misma interfaz',
       await expect(p.sendVerificationCode({ to: 'a@b.test', code: '123456', expiresInMinutes: 15 })).resolves.toBeUndefined();
       await expect(p.sendPasswordReset({ to: 'a@b.test', resetUrl: 'https://x.test/reset-password#token=t', expiresInMinutes: 30 })).resolves.toBeUndefined();
       await expect(p.sendInvitation({ to: 'a@b.test', organizationName: 'Empresa', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 7 })).resolves.toBeUndefined();
+      await expect(p.sendOwnershipChange({ to: 'a@b.test', organizationName: 'Empresa', agencyName: 'Agencia', previousAgencyName: null })).resolves.toBeUndefined();
     });
   }
   const captchas: Array<[string, CaptchaVerifier, string]> = [['FakeCaptchaVerifier', new FakeCaptchaVerifier(), 'fake-pass'], ['TurnstileVerifier', tvOk(), 'cualquier-token']];
@@ -189,12 +192,34 @@ describe('plantillas', () => {
     const r = passwordResetMail({ to: 'a@b.test', resetUrl: 'https://x.test/reset-password#token=t', expiresInMinutes: 30 });
     expect(r.html.match(/href="/g)).toHaveLength(1);
   });
+  it('la invitación a una AGENCIA lo dice; la de una empresa no menciona agencias', () => {
+    const ag = invitationMail({ to: 'a@b.test', organizationName: 'Agencia Uno', kind: 'agency', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 7 });
+    expect(ag.html).toContain('Crearon la agencia');
+    expect(ag.text).toContain('Crearon la agencia Agencia Uno');
+    const co = invitationMail({ to: 'a@b.test', organizationName: 'Empresa', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 7 });
+    expect(co.html).toContain('Crearon la cuenta de');
+    expect(co.html).not.toContain('Crearon la agencia');
+  });
   it('la invitación tiene un único enlace y no contiene el correo del destinatario en el cuerpo; 1 día en singular', () => {
     const i = invitationMail({ to: 'dueno@empresa.test', organizationName: 'Empresa', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 1 });
     expect(i.html.match(/href="/g)).toHaveLength(1);
     expect(i.html).not.toContain('dueno@empresa.test');
     expect(i.text).toContain('1 día');
     expect(i.text).not.toContain('1 días');
+  });
+  it('el aviso de cambio de administración: nombra a la agencia nueva y a la anterior, o dice «directamente»; escapa el HTML y no lleva enlaces', () => {
+    const a = ownershipChangeMail({ to: 'a@b.test', organizationName: 'Café <Norte>', agencyName: 'Agencia & Co', previousAgencyName: 'Vieja' });
+    expect(a.html).toContain('Ahora Agencia &amp; Co administra tu cuenta');
+    expect(a.html).toContain('Café &lt;Norte&gt;');
+    expect(a.html).toContain('en lugar de <b>Vieja</b>');
+    expect(a.html).not.toMatch(/https?:\/\/|href=/);
+    expect(a.text).toContain('en lugar de Vieja');
+    expect(a.subject).toContain('Cambió la administración');
+    const d = ownershipChangeMail({ to: 'a@b.test', organizationName: 'Empresa', agencyName: null, previousAgencyName: 'Vieja' });
+    expect(d.html).toContain('Administras tu cuenta directamente');
+    expect(d.text).toContain('la administras tú directamente');
+    expect(d.subject).toContain('directamente');
+    expect(d.html).not.toContain('no se hará ningún cambio'); // el pie genérico de «si no fuiste tú» no aplica a un aviso de cambio
   });
   it('minutos de vigencia: se redondean y nunca muestran 0', () => {
     expect(verificationMail({ to: 'a@b.test', code: '1', expiresInMinutes: 0.2 }).text).toContain('1 minutos');

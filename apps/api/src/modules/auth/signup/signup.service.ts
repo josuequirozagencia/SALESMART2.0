@@ -9,7 +9,8 @@ import type { PasswordHasher } from '../../../security';
 import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
 import { TrialsService } from '../../organizations';
 import { PASSWORD_HASHER } from '../auth.tokens';
-import { CAPTCHA_VERIFIER, MAIL_PROVIDER, type CaptchaVerifier, type MailProvider } from './ports';
+import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
+import { CAPTCHA_VERIFIER, type CaptchaVerifier } from './ports';
 import { requireCaptcha } from './captcha-check';
 import { SignupLimiter } from './signup-limiter';
 
