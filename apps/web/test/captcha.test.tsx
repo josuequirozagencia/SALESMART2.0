@@ -187,6 +187,11 @@ describe('Turnstile mal configurado o inaccesible', () => {
     delete window.turnstile; // sin Turnstile: el cargador añade el <script> y lo hacemos fallar
     mockApi(anon());
     renderApp('/signup');
+    // El widget ya está montado y su efecto vació: el cargador enganchó sus manejadores a la promesa compartida. Sin esta espera,
+    // un <script> que dejó una prueba anterior (el cargador comparte la promesa entre pruebas) hacía fallar la prueba al azar:
+    // su `onerror` se disparaba ANTES de que el widget pidiera el script, reiniciaba la carga y el widget quedaba cargando para siempre.
+    await screen.findByTestId('turnstile');
+    await act(async () => { await Promise.resolve(); });
     await waitFor(() => expect(document.querySelector('script[src*="challenges.cloudflare.com"]')).not.toBeNull());
     const script = document.querySelector('script[src*="challenges.cloudflare.com"]') as HTMLScriptElement;
     expect(script.src).toContain('render=explicit');
