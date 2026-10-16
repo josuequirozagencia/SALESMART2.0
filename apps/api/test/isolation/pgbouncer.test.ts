@@ -78,7 +78,7 @@ describe.skipIf(!HAVE)('compatibilidad con PgBouncer (modo transacción, 2 conex
   it('sin contexto, a través del pooler, sigue fallando cerrado', async () => {
     const c = new Client({ connectionString: via('app_rw', TEST_PASSWORDS.rw) });
     await c.connect();
-    try { expect((await c.query('SELECT * FROM contacts')).rowCount).toBe(0); } finally { await c.end(); }
+    try { expect((await c.query('SELECT * FROM fx_contacts')).rowCount).toBe(0); } finally { await c.end(); }
   });
   it('withIdentity también funciona a través del pooler', async () => {
     await expect(db.withIdentity((tx) => tx.execute('SELECT 1' as never))).resolves.toBeDefined();

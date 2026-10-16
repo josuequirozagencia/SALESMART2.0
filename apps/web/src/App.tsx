@@ -1,6 +1,8 @@
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AgencyShell } from './features/agency/AgencyShell';
 import { ClientsPage } from './features/agency/ClientsPage';
+import { AppShell } from './features/app/AppShell';
+import { ContactsPage } from './features/contacts/ContactsPage';
 import { AccessPage } from './features/platform/AccessPage';
 import { AgenciesPage } from './features/platform/AgenciesPage';
 import { CompaniesPage } from './features/platform/CompaniesPage';
@@ -23,6 +25,12 @@ import { Spinner } from './ui/controls';
 
 function Splash() {
   return <div className="grid min-h-full place-items-center text-muted"><Spinner label="Cargando" /></div>;
+}
+
+/** Inicio de la empresa: la puerta (`AppGate`) ya garantizó que hay sesión de una empresa cliente. */
+function Home() {
+  const { state } = useSession();
+  return state.status === 'authed' ? <HomeScreen me={state.me} /> : null;
 }
 
 /** Rutas de acceso: si ya hay sesión, se va a la app. */
@@ -51,7 +59,10 @@ function AgencyGate({ children }: { children: (me: Me, logout: () => void) => Re
   return <>{children(state.me, () => void logout())}</>;
 }
 
-/** Puerta de la app: sin sesión → login; Súper Admin → consola; con la prueba vencida → pantalla de «vencida»; si no → inicio. */
+/**
+ * Puerta y marco de la empresa cliente: sin sesión → login; Súper Admin → consola; agencia → «Mis clientes»; con la prueba vencida → pantalla de
+ * «vencida»; si no, el marco (`AppShell`) con la sección elegida (inicio, contactos…).
+ */
 function AppGate() {
   const { state, logout } = useSession();
   const clientOrg = state.status === 'authed' && state.me.organization.kind === 'client';
@@ -65,7 +76,7 @@ function AppGate() {
   const out = () => void logout();
   // La pantalla de «vencida» es del propio cliente; una agencia o el Súper Admin que entra ve la empresa en SOLO LECTURA (con su banner)
   if (t?.status === 'expired' && !state.me.acting_as) return <TrialExpiredScreen trial={t} role={state.me.role} onLogout={out} />;
-  return <HomeScreen me={state.me} trial={t} onLogout={out} />;
+  return <AppShell me={state.me} trial={t} onLogout={out}><Outlet /></AppShell>;
 }
 
 export function App() {
@@ -78,7 +89,10 @@ export function App() {
       {/* El enlace del correo se abre con o sin sesión: restablecer no depende de estar autenticado */}
       <Route path="/reset-password" element={<ResetScreen />} />
       <Route path="/accept-invite" element={<AcceptInviteScreen />} />
-      <Route path="/" element={<AppGate />} />
+      <Route element={<AppGate />}>
+        <Route path="/" element={<Home />} />
+        <Route path="/contacts" element={<ContactsPage />} />
+      </Route>
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/agencies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AgenciesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/access" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AccessPage /></PlatformShell>}</PlatformGate>} />

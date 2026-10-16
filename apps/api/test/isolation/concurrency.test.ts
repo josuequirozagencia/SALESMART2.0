@@ -41,12 +41,12 @@ describe('concurrencia multiempresa', () => {
     const admin = new Client({ connectionString: rig.info.adminDbUrl });
     await admin.connect();
     try {
-      const rows = (await admin.query(`SELECT organization_id, name FROM contacts WHERE name LIKE 'conc-%'`)).rows as Array<{ organization_id: string; name: string }>;
+      const rows = (await admin.query(`SELECT organization_id, name FROM fx_contacts WHERE name LIKE 'conc-%'`)).rows as Array<{ organization_id: string; name: string }>;
       for (const r of rows) expect(r.organization_id, r.name).toBe(r.name.split('-')[1] === 'A' ? ORG_A : r.name.split('-')[1] === 'B' ? ORG_B : ORG_C);
       for (const o of orgs) expect(rows.filter((r) => r.organization_id === o).length).toBe(written[o]);
       expect(rows.length).toBe(Object.values(written).reduce((a, b) => a + b, 0));
       expect(rows.length).toBeGreaterThan(80);
-      await admin.query(`DELETE FROM contacts WHERE name LIKE 'conc-%'`);
+      await admin.query(`DELETE FROM fx_contacts WHERE name LIKE 'conc-%'`);
     } finally {
       await admin.end();
     }

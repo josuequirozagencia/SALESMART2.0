@@ -123,12 +123,12 @@ export default async function setup(project: TestProject): Promise<() => Promise
       await rw.query('COMMIT');
     };
     await seed(ORG_A, [
-      [`INSERT INTO contacts(id, name) VALUES ($1, 'Ana (A)'), ($2, 'Alberto (A)')`, [CONTACT_A1, CONTACT_A2]],
-      [`INSERT INTO deals(id, contact_id, amount) VALUES ($1, $2, 100.00)`, [DEAL_A1, CONTACT_A1]],
+      [`INSERT INTO fx_contacts(id, name) VALUES ($1, 'Ana (A)'), ($2, 'Alberto (A)')`, [CONTACT_A1, CONTACT_A2]],
+      [`INSERT INTO fx_deals(id, contact_id, amount) VALUES ($1, $2, 100.00)`, [DEAL_A1, CONTACT_A1]],
     ]);
     await seed(ORG_B, [
-      [`INSERT INTO contacts(id, name) VALUES ($1, 'Beto (B)')`, [CONTACT_B1]],
-      [`INSERT INTO deals(id, contact_id, amount) VALUES ($1, $2, 999.00)`, [DEAL_B1, CONTACT_B1]],
+      [`INSERT INTO fx_contacts(id, name) VALUES ($1, 'Beto (B)')`, [CONTACT_B1]],
+      [`INSERT INTO fx_deals(id, contact_id, amount) VALUES ($1, $2, 999.00)`, [DEAL_B1, CONTACT_B1]],
     ]);
   } finally {
     await rw.end();

@@ -1,0 +1,131 @@
+import { Injectable } from '@nestjs/common';
+import { and, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { contactPhones, contacts, type TenantTx } from '../../db';
+import { ValidationError } from '../../errors';
+import { likeEscape } from '../organizations';
+import type { ContactSort, ListContactsQuery } from './contacts.dto';
+
+export type ContactRow = typeof contacts.$inferSelect;
+export interface PhoneRow {
+  contactId: string;
+  e164: string;
+  isPrimary: boolean;
+}
+
+/**
+ * Alcance de visibilidad de quien consulta (ADR-32 #2 / ADR-43): con `viewAll` ve todos los contactos de su organización; sin él, solo los que tiene
+ * ASIGNADOS. Lo construye el controlador desde los permisos verificados y SE EXIGE en cada consulta: no hay forma de leer contactos sin pasarlo.
+ * El aislamiento entre ORGANIZACIONES no depende de esto: lo da la RLS de la BD.
+ */
+export interface Scope {
+  readonly userId: string;
+  readonly viewAll: boolean;
+}
+
+interface Cursor {
+  s: ContactSort;
+  o: 'asc' | 'desc';
+  k: string;
+  id: string;
+}
+const encodeCursor = (c: Cursor): string => Buffer.from(JSON.stringify(c)).toString('base64url');
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function decodeCursor(raw: string, sort: ContactSort, order: 'asc' | 'desc'): Cursor {
+  const bad = (): never => {
+    throw new ValidationError([{ path: 'cursor', code: 'invalid', message: 'Cursor inválido' }]);
+  };
+  let c: Partial<Cursor>;
+  try {
+    c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Partial<Cursor>;
+  } catch {
+    return bad();
+  }
+  if (c.s !== sort || c.o !== order || typeof c.k !== 'string' || c.k.length === 0 || c.k.length > 100 || typeof c.id !== 'string' || !UUID_RE.test(c.id)) return bad();
+  if (sort !== 'name' && Number.isNaN(Date.parse(c.k))) return bad();
+  return { s: sort, o: order, k: c.k, id: c.id };
+}
+
+/** Consultas de contactos. TODAS pasan por `withTenant` (el llamador abre la transacción): sin TenantContext no hay conexión. */
+@Injectable()
+export class ContactsRepository {
+  /** Contactos vigentes y visibles para este alcance. */
+  private visible(scope: Scope): SQL {
+    return scope.viewAll ? isNull(contacts.deletedAt) : (and(isNull(contacts.deletedAt), eq(contacts.ownerId, scope.userId)) as SQL);
+  }
+
+  /** Una página de contactos con su clave de orden (para el cursor) y, en la primera, el total. */
+  async page(tx: TenantTx, scope: Scope, f: ListContactsQuery): Promise<{ rows: ContactRow[]; next: string | null; total: number | null }> {
+    const where: SQL[] = [this.visible(scope)];
+    if (scope.viewAll && f.owner) {
+      if (f.owner === 'me') where.push(eq(contacts.ownerId, scope.userId));
+      else if (f.owner === 'none') where.push(isNull(contacts.ownerId));
+      else where.push(eq(contacts.ownerId, f.owner));
+    }
+    if (f.source) where.push(eq(contacts.source, f.source));
+    if (f.q) {
+      const like = `%${likeEscape(f.q)}%`;
+      const digits = f.q.replace(/\D/g, '');
+      const byPhone =
+        digits.length >= 3
+          ? exists(tx.select({ one: sql`1` }).from(contactPhones).where(and(eq(contactPhones.contactId, contacts.id), isNull(contactPhones.deletedAt), sql`${contactPhones.e164} LIKE ${`%${digits}%`}`)))
+          : undefined;
+      where.push(or(sql`${contacts.name} ILIKE ${like} ESCAPE '!'`, sql`${contacts.email} ILIKE ${like} ESCAPE '!'`, byPhone) as SQL);
+    }
+    const base = and(...where) as SQL;
+
+    const text = f.sort === 'name';
+    const key: SQL = f.sort === 'name' ? sql`lower(${contacts.name})` : f.sort === 'updated_at' ? sql`${contacts.updatedAt}` : sql`${contacts.createdAt}`;
+    const asc = f.order === 'asc';
+    let after: SQL | undefined;
+    if (f.cursor) {
+      const c = decodeCursor(f.cursor, f.sort, f.order);
+      if (text) after = asc ? sql`(${key}, ${contacts.id}) > (${c.k}::text, ${c.id}::uuid)` : sql`(${key}, ${contacts.id}) < (${c.k}::text, ${c.id}::uuid)`;
+      else after = asc ? sql`(${key}, ${contacts.id}) > (${c.k}::timestamptz, ${c.id}::uuid)` : sql`(${key}, ${contacts.id}) < (${c.k}::timestamptz, ${c.id}::uuid)`;
+    }
+    const rows = await tx
+      .select({ c: contacts, sortKey: sql<string>`(${key})::text` })
+      .from(contacts)
+      .where(after ? and(base, after) : base)
+      .orderBy(asc ? sql`${key} ASC` : sql`${key} DESC`, asc ? sql`${contacts.id} ASC` : sql`${contacts.id} DESC`)
+      .limit(f.limit + 1);
+    const page = rows.slice(0, f.limit);
+    const last = page[page.length - 1];
+    const next = rows.length > f.limit && last ? encodeCursor({ s: f.sort, o: f.order, k: last.sortKey, id: last.c.id }) : null;
+    let total: number | null = null;
+    if (!f.cursor) {
+      const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(contacts).where(base);
+      total = n?.n ?? 0;
+    }
+    return { rows: page.map((r) => r.c), next, total };
+  }
+
+  /** Un contacto visible para este alcance (con `lock`, bloquea la fila: dos ediciones del mismo contacto no se pisan). */
+  async byId(tx: TenantTx, scope: Scope, id: string, lock = false): Promise<ContactRow | undefined> {
+    const q = tx.select().from(contacts).where(and(eq(contacts.id, id), this.visible(scope)));
+    const [row] = await (lock ? q.for('update') : q).limit(1);
+    return row;
+  }
+
+  /** Teléfonos vigentes de varios contactos (el principal primero). */
+  async phonesOf(tx: TenantTx, ids: readonly string[]): Promise<Map<string, PhoneRow[]>> {
+    const out = new Map<string, PhoneRow[]>();
+    if (ids.length === 0) return out;
+    const rows = await tx
+      .select({ contactId: contactPhones.contactId, e164: contactPhones.e164, isPrimary: contactPhones.isPrimary })
+      .from(contactPhones)
+      .where(and(inArray(contactPhones.contactId, [...ids]), isNull(contactPhones.deletedAt)))
+      .orderBy(sql`${contactPhones.isPrimary} DESC`, contactPhones.createdAt, contactPhones.id);
+    for (const r of rows) out.set(r.contactId, [...(out.get(r.contactId) ?? []), r]);
+    return out;
+  }
+
+  /** ¿Cuáles de estos teléfonos ya están vigentes en la organización (en otro contacto)? */
+  async takenPhones(tx: TenantTx, e164s: readonly string[], exceptContactId?: string): Promise<Set<string>> {
+    if (e164s.length === 0) return new Set();
+    const rows = await tx
+      .select({ e164: contactPhones.e164 })
+      .from(contactPhones)
+      .where(and(inArray(contactPhones.e164, [...e164s]), isNull(contactPhones.deletedAt), exceptContactId ? sql`${contactPhones.contactId} <> ${exceptContactId}` : undefined));
+    return new Set(rows.map((r) => r.e164));
+  }
+}

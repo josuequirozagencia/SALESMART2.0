@@ -97,12 +97,12 @@ describe('cobertura de políticas RLS (auditoría del catálogo real)', () => {
 
   it('detecta vistas sin security_invoker y funciones SECURITY DEFINER', async () => {
     const v = await auditWith(owner, [
-      `CREATE VIEW bad10 AS SELECT * FROM contacts`,
+      `CREATE VIEW bad10 AS SELECT * FROM fx_contacts`,
       `CREATE FUNCTION bad_fn() RETURNS int LANGUAGE sql SECURITY DEFINER AS $$ SELECT 1 $$`,
     ]);
     expect(codes(v)).toEqual(expect.arrayContaining(['VIEW_NOT_INVOKER', 'SECURITY_DEFINER']));
     // control: la misma vista con security_invoker es aceptada
-    const ok = await auditWith(owner, [`CREATE VIEW ok10 WITH (security_invoker = true) AS SELECT * FROM contacts`]);
+    const ok = await auditWith(owner, [`CREATE VIEW ok10 WITH (security_invoker = true) AS SELECT * FROM fx_contacts`]);
     expect(codes(ok)).not.toContain('VIEW_NOT_INVOKER');
   });
 
@@ -132,14 +132,14 @@ describe('cobertura de políticas RLS (auditoría del catálogo real)', () => {
 
   it('detecta FK entre tablas tenant que no incluye organization_id', async () => {
     const v = await auditWith(owner, [
-      `ALTER TABLE contacts ADD CONSTRAINT contacts_id_uq UNIQUE (id)`,
-      `ALTER TABLE deals ADD CONSTRAINT bad_fk FOREIGN KEY (contact_id) REFERENCES contacts(id)`,
+      `ALTER TABLE fx_contacts ADD CONSTRAINT contacts_id_uq UNIQUE (id)`,
+      `ALTER TABLE fx_deals ADD CONSTRAINT bad_fk FOREIGN KEY (contact_id) REFERENCES fx_contacts(id)`,
     ]);
     expect(codes(v)).toContain('FK_CROSS_TENANT');
   });
 
   it('detecta objetos propiedad de un rol de la aplicación', async () => {
-    const v = await auditWith(admin, [`ALTER TABLE counters OWNER TO app_rw`]);
+    const v = await auditWith(admin, [`ALTER TABLE fx_counters OWNER TO app_rw`]);
     expect(codes(v)).toContain('OWNED_BY_APP_ROLE');
   });
 
@@ -163,7 +163,7 @@ describe('auditoría de tablas de identidad (ADR-25)', () => {
     ['app_identity con DELETE sobre users', `GRANT DELETE ON users TO app_identity`, 'GRANT_EXCESS'],
     ['app_identity con TRUNCATE sobre organization_members', `GRANT TRUNCATE ON organization_members TO app_identity`, 'GRANT_EXCESS'],
     ['app_identity sin SELECT sobre users', `REVOKE SELECT ON users FROM app_identity`, 'GRANT_MISSING'],
-    ['app_identity con acceso a una tabla de negocio', `GRANT SELECT ON contacts TO app_identity`, 'GRANT_IDENTITY_ON_NON_IDENTITY'],
+    ['app_identity con acceso a una tabla de negocio', `GRANT SELECT ON fx_contacts TO app_identity`, 'GRANT_IDENTITY_ON_NON_IDENTITY'],
     ['app_identity con acceso a una tabla de plataforma', `GRANT SELECT ON platform_settings TO app_identity`, 'GRANT_IDENTITY_ON_NON_IDENTITY'],
   ])('detecta: %s', async (_n, ddl, code) => {
     expect(codes(await auditWith(owner, [ddl]))).toContain(code);

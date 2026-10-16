@@ -236,3 +236,43 @@ export interface ProvidersList {
   vault: { available: boolean };
   services: ProviderService[];
 }
+
+// ── Contactos (M3.1, ADR-43) ──
+export type Consent = 'unknown' | 'granted' | 'revoked';
+
+export interface Contact {
+  id: string;
+  name: string;
+  email: string | null;
+  /** El primero es el principal. Números en E.164. */
+  phones: Array<{ e164: string; primary: boolean }>;
+  owner: { id: string; name: string } | null;
+  source: string;
+  consent: Consent;
+  consent_updated_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ContactList {
+  items: Contact[];
+  next_cursor: string | null;
+  /** Solo en la primera página. */
+  total: number | null;
+  /** Qué puede hacer quien consulta: la UI muestra u oculta acciones con esto (el servidor vuelve a verificar cada una). */
+  access: ContactAccess;
+}
+
+export interface ContactAccess {
+  view_all: boolean;
+  write: boolean;
+  delete: boolean;
+}
+
+/** Persona a la que se puede asignar un contacto (solo lo ve quien puede ver todos los contactos). */
+export interface OwnerOption {
+  id: string;
+  name: string;
+  email: string;
+  role: Role;
+}

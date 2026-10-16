@@ -20,10 +20,10 @@ describe('RLS — contrato de aislamiento', () => {
   });
 
   it('S1b sin contexto de BD (conexión cruda con el rol de la app): 0 filas y escrituras rechazadas', async () => {
-    const rows = await rig.appPool.query('SELECT * FROM contacts');
+    const rows = await rig.appPool.query('SELECT * FROM fx_contacts');
     expect(rows.rowCount).toBe(0);
-    await expect(rig.appPool.query(`INSERT INTO contacts(organization_id, name) VALUES ('${ORG_A}', 'x')`)).rejects.toThrow(/row-level security/);
-    await expect(rig.appPool.query(`INSERT INTO contacts(name) VALUES ('x')`)).rejects.toThrow(/null value|row-level security/);
+    await expect(rig.appPool.query(`INSERT INTO fx_contacts(organization_id, name) VALUES ('${ORG_A}', 'x')`)).rejects.toThrow(/row-level security/);
+    await expect(rig.appPool.query(`INSERT INTO fx_contacts(name) VALUES ('x')`)).rejects.toThrow(/null value|row-level security/);
   });
 
   it('S2 el contexto A solo ve datos de A', async () => {
@@ -58,7 +58,7 @@ describe('RLS — contrato de aislamiento', () => {
   });
 
   it('S7 SQL crudo dentro de la transacción respeta RLS (incluido OR 1=1)', async () => {
-    const r = await asOrg(ORG_A, () => db.withTenant((tx) => tx.execute(sql`SELECT name FROM contacts WHERE 1=1 OR true`)));
+    const r = await asOrg(ORG_A, () => db.withTenant((tx) => tx.execute(sql`SELECT name FROM fx_contacts WHERE 1=1 OR true`)));
     expect(r.rows).toHaveLength(2);
   });
 
@@ -76,7 +76,7 @@ describe('RLS — contrato de aislamiento', () => {
       const c = await one.appPool.connect();
       try {
         expect((await c.query(`SELECT current_setting('app.org_id', true) AS v`)).rows[0].v ?? '').toBe('');
-        expect((await c.query('SELECT * FROM contacts')).rowCount).toBe(0);
+        expect((await c.query('SELECT * FROM fx_contacts')).rowCount).toBe(0);
       } finally {
         c.release();
       }
@@ -103,7 +103,7 @@ describe('RLS — contrato de aislamiento', () => {
 
   it('S12 advisory lock de transacción serializa read-modify-write (y sin lock hay carrera)', async () => {
     const run = async (lock: boolean) => {
-      await asOrg(ORG_A, () => db.withTenant((tx) => tx.execute(sql`INSERT INTO counters(key, value) VALUES ('k', 0) ON CONFLICT (organization_id, key) DO UPDATE SET value = 0`)));
+      await asOrg(ORG_A, () => db.withTenant((tx) => tx.execute(sql`INSERT INTO fx_counters(key, value) VALUES ('k', 0) ON CONFLICT (organization_id, key) DO UPDATE SET value = 0`)));
       await Promise.all(
         Array.from({ length: 20 }, () =>
           asOrg(ORG_A, () =>

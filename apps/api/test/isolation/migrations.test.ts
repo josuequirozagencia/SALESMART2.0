@@ -104,8 +104,8 @@ CREATE POLICY "p" ON "y" AS PERMISSIVE FOR ALL TO public USING (organization_id 
       expect(sqlText, n).toMatch(new RegExp(`CREATE POLICY "${n}_tenant_isolation" ON "${n}" AS PERMISSIVE FOR ALL TO public USING \\(organization_id = app_org\\(\\)\\) WITH CHECK \\(organization_id = app_org\\(\\)\\)`));
       expect(sqlText, n).toMatch(new RegExp(`CREATE TABLE "${n}" \\(\\s*"organization_id" uuid DEFAULT app_org\\(\\) NOT NULL`));
     }
-    expect(sqlText).toMatch(/"contacts_org_id_uq" UNIQUE\("organization_id","id"\)/);
-    expect(sqlText).toMatch(/FOREIGN KEY \("organization_id","contact_id"\) REFERENCES "public"."contacts"\("organization_id","id"\)/);
+    expect(sqlText).toMatch(/"fx_contacts_org_id_uq" UNIQUE\("organization_id","id"\)/);
+    expect(sqlText).toMatch(/FOREIGN KEY \("organization_id","contact_id"\) REFERENCES "public"."fx_contacts"\("organization_id","id"\)/);
   });
 });
 

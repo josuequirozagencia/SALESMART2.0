@@ -26,7 +26,7 @@ describe('canario de conexión', () => {
     expect(await guc()).toBe('');
     await asOrg(ORG_A, () => rig.db.withTenant((tx) => tx.insert(contacts).values({ organizationId: ORG_B, name: 'x' }))).catch(() => undefined); // viola RLS
     expect(await guc()).toBe('');
-    await asOrg(ORG_A, () => rig.db.withTenant((tx) => tx.execute(sql`SELECT * FROM contacts WHERE 1=1 OR true`)));
+    await asOrg(ORG_A, () => rig.db.withTenant((tx) => tx.execute(sql`SELECT * FROM fx_contacts WHERE 1=1 OR true`)));
     expect(await guc()).toBe('');
     await asOrg(ORG_A, () => rig.db.withTenant((tx) => tx.execute(sql`SELECT bad syntax here`))).catch(() => undefined); // error de SQL en la tx
     expect(await guc()).toBe('');
@@ -47,7 +47,7 @@ describe('canario de conexión', () => {
     // y demuestra el riesgo: una consulta SIN contexto vería datos de B
     const c2 = await rig.appPool.connect();
     try {
-      expect((await c2.query('SELECT * FROM contacts')).rowCount).toBeGreaterThan(0);
+      expect((await c2.query('SELECT * FROM fx_contacts')).rowCount).toBeGreaterThan(0);
       await c2.query(`RESET app.org_id`);
     } finally {
       c2.release();

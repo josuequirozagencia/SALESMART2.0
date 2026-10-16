@@ -546,6 +546,84 @@ test('proveedores: el Súper Admin guarda un secreto (cifrado, jamás vuelve a v
   expect((await request.get(`${apiBase}/v1/platform/providers`, { headers: { authorization: `Bearer ${clientToken}` } })).status()).toBe(403);
 });
 
+test('contactos: crea, busca, edita y borra desde la interfaz; un teléfono repetido se marca en su fila; otra empresa no ve nada', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('contactos'));
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  await expect(page).toHaveURL(/\/contacts$/);
+  await expect(page.getByText(/Crea el primero con «Nuevo contacto»/)).toBeVisible();
+
+  const fill = async (name: string, phone: string) => {
+    await page.getByRole('button', { name: 'Nuevo contacto' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Nuevo contacto' });
+    await dlg.getByLabel('Nombre', { exact: true }).fill(name);
+    await dlg.getByLabel('Teléfono 1 (principal)').fill(phone);
+    return dlg;
+  };
+
+  // 1) Crear: el número nacional lleva el prefijo del país elegido (Ecuador) y se ve con formato
+  const dlg = await fill('Marta Salazar', '098 421 7730');
+  await dlg.getByLabel('Correo').fill('marta@correo.test');
+  await dlg.getByLabel('Consentimiento para escribirle').selectOption('granted');
+  await dlg.getByRole('button', { name: 'Crear contacto' }).click();
+  await expect(dlg).toBeHidden();
+  const marta = page.getByRole('button', { name: 'Abrir el contacto Marta Salazar' });
+  await expect(marta).toContainText('+593 98 421 7730');
+  await expect(marta).toContainText('Con consentimiento');
+  await expect(page.getByText('1 contacto', { exact: true })).toBeVisible();
+
+  // 2) El mismo teléfono en otro contacto: el servidor lo rechaza y el aviso queda en su fila; con otro número, se crea
+  const dup = await fill('Pedro Vera', '0984217730');
+  await dup.getByRole('button', { name: 'Crear contacto' }).click();
+  await expect(dup.getByText('Ya existe un contacto con este teléfono')).toBeVisible();
+  await expect(dup.getByLabel('Nombre', { exact: true })).toHaveValue('Pedro Vera'); // lo escrito se conserva
+  await dup.getByLabel('Teléfono 1 (principal)').fill('0991112233');
+  await dup.getByRole('button', { name: 'Crear contacto' }).click();
+  await expect(dup).toBeHidden();
+  await expect(page.getByText('2 contactos', { exact: true })).toBeVisible();
+
+  // 3) Buscar por nombre y por parte del teléfono
+  await page.getByLabel('Buscar').fill('pedro');
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Marta Salazar' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Pedro Vera' })).toBeVisible();
+  await page.getByLabel('Buscar').fill('421 77');
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Marta Salazar' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Pedro Vera' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Limpiar filtros' }).click();
+  await expect(page.getByText('2 contactos', { exact: true })).toBeVisible();
+
+  // 4) Editar
+  await marta.click();
+  const edit = page.getByRole('dialog', { name: 'Contacto' });
+  await expect(edit.getByLabel('Teléfono 1 (principal)')).toHaveValue('+593984217730');
+  await edit.getByLabel('Nombre', { exact: true }).fill('Marta Salazar Ruiz');
+  await edit.getByRole('button', { name: 'Guardar' }).click();
+  await expect(edit).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Marta Salazar Ruiz' })).toBeVisible();
+
+  // 5) Borrar pide confirmación
+  await page.getByRole('button', { name: 'Abrir el contacto Pedro Vera' }).click();
+  const del = page.getByRole('dialog', { name: 'Contacto' });
+  await del.getByRole('button', { name: 'Borrar contacto' }).click();
+  await expect(del.getByText('¿Borrar este contacto?')).toBeVisible();
+  await del.getByRole('button', { name: 'Sí, borrar' }).click();
+  await expect(del).toBeHidden();
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Pedro Vera' })).toHaveCount(0);
+  await expect(page.getByText('1 contacto', { exact: true })).toBeVisible();
+  await page.reload(); // lo guardado persiste
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Marta Salazar Ruiz' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Pedro Vera' })).toHaveCount(0);
+
+  // 6) Otra empresa no ve ni toca nada de esta (404 uniforme); la lista de la otra está vacía
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
+  const id = ((await (await request.get(`${apiBase}/v1/contacts`, { headers: mine })).json()) as { items: Array<{ id: string }> }).items[0]!.id;
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect(((await (await request.get(`${apiBase}/v1/contacts`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect((await request.get(`${apiBase}/v1/contacts/${id}`, { headers: other })).status()).toBe(404);
+  expect((await request.delete(`${apiBase}/v1/contacts/${id}`, { headers: other })).status()).toBe(404);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);
@@ -572,4 +650,22 @@ test.describe('móvil (390 px)', () => {
       expect(overflow).toBeLessThanOrEqual(0);
     });
   }
+
+  test('/contacts: con nombres y correos largos no hay desborde horizontal y se puede abrir y crear', async ({ page, request }) => {
+    const { apiBase } = state();
+    const email = await createAccount(request, uniqueEmail('movil'));
+    const token = await apiLogin(request, email);
+    const long = 'Nombre-muy-largo-sin-espacios-'.repeat(5).slice(0, 190);
+    const r = await request.post(`${apiBase}/v1/contacts`, { headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, data: { name: long, email: `${'correo-largo-'.repeat(8)}@dominio-largo-de-prueba.test`, phones: ['+593984217730', '+34612345678'] } });
+    expect(r.status()).toBe(201);
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible(); // la sesión ya está lista antes de navegar
+    await page.goto('/contacts');
+    await expect(page.getByRole('button', { name: `Abrir el contacto ${long}` })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await page.getByRole('button', { name: 'Nuevo contacto' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Nuevo contacto' });
+    await expect(dlg.getByRole('button', { name: 'Crear contacto' })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  });
 });

@@ -39,8 +39,8 @@ describe('privilegios de app_identity', () => {
   it.each([
     ['DELETE en users', `DELETE FROM users`],
     ['TRUNCATE users', `TRUNCATE users`],
-    ['leer contacts (negocio)', `SELECT * FROM contacts`],
-    ['escribir contacts', `INSERT INTO contacts(organization_id, name) VALUES (gen_random_uuid(), 'x')`],
+    ['leer contacts (negocio)', `SELECT * FROM fx_contacts`],
+    ['escribir contacts', `INSERT INTO fx_contacts(organization_id, name) VALUES (gen_random_uuid(), 'x')`],
     ['leer platform_settings', `SELECT * FROM platform_settings`],
     ['crear tablas', `CREATE TABLE evil (id int)`],
     ['cambiarse a app_owner', `SET ROLE app_owner`],
@@ -168,7 +168,7 @@ describe('bootstrap del super_admin', () => {
     expect(organizationMembers).toBeDefined();
   });
   it('withIdentity no puede consultar tablas de negocio aunque el código lo intente', async () => {
-    const e = await rejection(db.withIdentity((tx) => tx.execute('SELECT * FROM contacts' as never)));
+    const e = await rejection(db.withIdentity((tx) => tx.execute('SELECT * FROM fx_contacts' as never)));
     expect(msg(e)).toMatch(/permission denied/i);
   });
 });

@@ -1,0 +1,40 @@
+import type { ReactNode } from 'react';
+import { NavLink } from 'react-router-dom';
+import { ContextBanner } from '../context/ContextBanner';
+import { TrialBanner } from '../trial/TrialBanner';
+import { ROLE_LABEL } from '../../lib/format';
+import type { Me, Trial } from '../../lib/types';
+import { Logo } from '../../ui/AuthShell';
+import { Button } from '../../ui/controls';
+
+const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`;
+
+/**
+ * Marco de una empresa cliente (la propia o una que una agencia / el Súper Admin visita): banner de contexto, cabecera, estado de la prueba y las
+ * secciones de negocio. Las secciones nuevas de cada hito se añaden aquí (el menú completo sale del prototipo).
+ */
+export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Trial | null; onLogout: () => void; children: ReactNode }) {
+  return (
+    <div className="min-h-full bg-bg">
+      <ContextBanner me={me} />
+      <header className="flex items-center justify-between gap-3 border-b border-line bg-surface px-5 py-3">
+        <span className="text-fg [&_i]:text-[color:var(--on-grad)]"><Logo /></span>
+        <div className="flex items-center gap-3 text-[13px]">
+          <span className="hidden text-right min-[560px]:block">
+            <b className="block">{me.organization.name}</b>
+            <span className="text-muted">{me.user.full_name ?? me.user.email} · {ROLE_LABEL[me.role] ?? me.role}</span>
+          </span>
+          <Button onClick={onLogout}>Cerrar sesión</Button>
+        </div>
+      </header>
+      <div className="mx-auto grid max-w-[1100px] gap-4 p-5">
+        {trial ? <TrialBanner trial={trial} role={me.role} /> : null}
+        <nav aria-label="Secciones" className="flex gap-1 border-b border-line">
+          <NavLink to="/" end className={tab}>Inicio</NavLink>
+          <NavLink to="/contacts" className={tab}>Contactos</NavLink>
+        </nav>
+        <main>{children}</main>
+      </div>
+    </div>
+  );
+}

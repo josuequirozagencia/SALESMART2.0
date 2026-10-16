@@ -3,13 +3,13 @@
 import { foreignKey, integer, numeric, primaryKey, text, uuid } from 'drizzle-orm/pg-core';
 import { platformTable, tenantTable } from '../../src/db/schema/helpers';
 
-export const contacts = tenantTable('contacts', {
+export const contacts = tenantTable('fx_contacts', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
 });
 
 export const deals = tenantTable(
-  'deals',
+  'fx_deals',
   {
     id: uuid('id').primaryKey().defaultRandom(),
     contactId: uuid('contact_id').notNull(),
@@ -25,7 +25,7 @@ export const deals = tenantTable(
 );
 
 export const counters = tenantTable(
-  'counters',
+  'fx_counters',
   { key: text('key').notNull(), value: integer('value').notNull().default(0) },
   (t) => [primaryKey({ columns: [t['organizationId']!, t['key']!] })],
 );
