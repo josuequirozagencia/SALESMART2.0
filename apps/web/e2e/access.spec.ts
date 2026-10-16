@@ -400,7 +400,8 @@ test('agencias y carteras: crea una agencia, su dueño acepta, el Súper Admin l
 
   // 4) La cartera lo muestra (con su historial) y «Quitar» corta el acceso
   await page.getByRole('link', { name: 'Agencias' }).click();
-  const agencyRow = page.getByRole('listitem').filter({ hasText: agencyName });
+  await expect(page).toHaveURL(/\/platform\/agencies$/);
+  const agencyRow = page.getByRole('list', { name: 'Agencias' }).getByRole('listitem').filter({ hasText: agencyName });
   await expect(agencyRow).toContainText('Activa');
   await expect(agencyRow.getByLabel('1 cliente')).toBeVisible();
   await agencyRow.getByRole('button', { name: `Cartera de ${agencyName}` }).click();
@@ -494,6 +495,7 @@ test('contexto: la agencia registra un cliente, entra a uno y a otro sin cerrar 
   await expect(entries.filter({ hasText: 'Empresa E2E' })).toContainText('Pasó a otra cuenta');
 
   await page.getByRole('link', { name: 'Empresas' }).click();
+  await expect(page.getByRole('list', { name: 'Empresas' })).toBeVisible();
   await page.getByLabel('Buscar').fill(clientEmail);
   const company = page.getByRole('listitem').filter({ hasText: clientEmail });
   await company.getByRole('button', { name: /Entrar a .* \(soporte\)/ }).click();
