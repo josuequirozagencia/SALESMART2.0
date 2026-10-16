@@ -7,6 +7,7 @@ import { isEmail, normalizeEmail } from '../../lib/validation';
 import { Alert, Button, Field, Input } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { FieldInput } from '../custom-fields/FieldInput';
+import { AttributionSection, TagBadges } from './AttributionSection';
 import { parseRaw, toRaw, type RawValue } from '../custom-fields/fieldValues';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { useCreateContact, useDeleteContact, useUpdateContact, type ContactInput } from './useContacts';
@@ -131,6 +132,7 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
   return (
     <Modal title={editing ? 'Contacto' : 'Nuevo contacto'} onClose={onClose} wide>
       {readOnly ? <Alert kind="info">Estás en modo solo lectura: puedes ver este contacto, no cambiarlo.</Alert> : null}
+      {contact ? <TagBadges tags={contact.tags} /> : null}
       <form onSubmit={submit} noValidate className="grid gap-3" aria-label={editing ? 'Contacto' : 'Nuevo contacto'}>
         <Field label="Nombre" error={errors.name}>
           {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={200} autoComplete="off" disabled={disabled} autoFocus={!editing} />}
@@ -191,6 +193,8 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
             </div>
           </fieldset>
         ) : null}
+
+        {contact ? <AttributionSection contact={contact} /> : null}
 
         {formError ? <Alert>{formError}</Alert> : null}
         <div className="flex flex-wrap items-center justify-between gap-2">

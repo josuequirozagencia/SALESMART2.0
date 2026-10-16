@@ -6,6 +6,7 @@ import { AgenciesService } from './agencies.service';
 import { AgencyAccessService } from './agency-access.service';
 import { AgencyClientsController } from './agency-clients.controller';
 import { AgencyClientsService } from './agency-clients.service';
+import { AttributionEndpointsService } from './attribution-endpoints.service';
 import { OrgMembersService } from './org-members.service';
 import { CompaniesService } from './companies.service';
 import { PlatformAgenciesController } from './platform-agencies.controller';
@@ -20,7 +21,7 @@ import { TrialsService } from './trials.service';
 @Module({
   imports: [AuditModule, PlatformModule, MailModule],
   controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController, AgencyClientsController],
-  providers: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService],
-  exports: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService],
+  providers: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, AttributionEndpointsService],
+  exports: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, AttributionEndpointsService],
 })
 export class OrganizationsModule {}

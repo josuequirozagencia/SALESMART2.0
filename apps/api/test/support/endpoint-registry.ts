@@ -74,6 +74,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/contacts', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'PATCH /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'DELETE /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
+  // Etiquetas, atribución y salida de eventos (M3.3, ADR-45). Pruebas: test/attribution/attribution.test.ts. El webhook es público: su credencial es el par (id opaco, secreto).
+  { route: 'GET /v1/tags', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  { route: 'GET /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  { route: 'POST /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  { route: 'POST /v1/attribution/ctwa/:endpointId', kind: 'public' },
   // Campos personalizados (M3.2, ADR-44). Pruebas: test/custom-fields/custom-fields.test.ts (A↔B, permisos, tipos, obligatorios, archivado, valores en contactos, roles de BD)
   { route: 'GET /v1/custom-fields', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
   { route: 'POST /v1/custom-fields', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },

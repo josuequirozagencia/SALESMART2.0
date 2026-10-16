@@ -426,3 +426,25 @@ export const trials = identityTable(
     index('trials_ext_pending_idx').on(t.extRequestedAt).where(sql`${t.extStatus} = 'pending'`),
   ],
 );
+
+/**
+ * Punto de entrada de atribución de una empresa (M3.3, ADR-45). Tabla de IDENTIDAD: el webhook llega SIN sesión y hay que resolver la empresa a partir
+ * del identificador opaco de la URL (un v4 aleatorio, no secuencial) antes de que exista contexto de organización. Una fila por empresa (regenerar reemplaza
+ * el secreto). El secreto solo se guarda como hash SHA-256 y se muestra una vez.
+ */
+export const attributionEndpoints = identityTable(
+  'attribution_endpoints',
+  {
+    id: uuid('id').primaryKey(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    secretHash: text('secret_hash').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    rotatedAt: ts('rotated_at'),
+    lastUsedAt: ts('last_used_at'),
+  },
+  (t) => [
+    check('attribution_endpoints_secret_hash_hex', sql`${t.secretHash} ~ '^[0-9a-f]{64}$'`),
+    uniqueIndex('attribution_endpoints_org_uq').on(t.organizationId),
+  ],
+);

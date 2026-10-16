@@ -1,13 +1,12 @@
 import { useMemo, useState } from 'react';
-import { NavLink } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import type { CustomField } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
+import { SettingsNav } from '../app/SettingsNav';
 import { FieldDialog } from './FieldDialog';
 import { FIELD_TYPE_LABEL, useArchiveField, useCustomFields, useReorderFields, useUpdateField } from './useCustomFields';
 
-const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`;
 const small = '!px-3 !py-1.5 !text-[12.5px]';
 
 function Row({
@@ -109,12 +108,7 @@ export function CustomFieldsPage() {
 
   return (
     <div className="grid gap-4">
-      <div className="grid gap-3">
-        <h1 className="text-[22px] font-bold">Configuración</h1>
-        <nav aria-label="Secciones de configuración" className="flex gap-1 border-b border-line">
-          <NavLink to="/settings/fields" className={tab}>Campos personalizados</NavLink>
-        </nav>
-      </div>
+      <SettingsNav />
 
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-[640px] text-[13.5px] text-muted">

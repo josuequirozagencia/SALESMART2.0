@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { contactPhones, contacts, Database, type TenantTx } from '../../db';
 import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OrgMembersService, type OrgPerson } from '../organizations';
+import { SystemTagsService, type TagView } from '../tags';
 import type { CreateContactDto, ListContactsQuery, UpdateContactDto } from './contacts.dto';
 import { ContactsRepository, type ContactRow, type PhoneRow, type Scope } from './contacts.repository';
 
@@ -21,8 +22,40 @@ export interface ContactView {
   consent_updated_at: string | null;
   /** Campos personalizados (M3.2): `{ variable: valor }`, solo los no vacíos de campos no archivados. */
   custom_fields: CustomValues;
+  /** Etiquetas del contacto (M3.3): las del sistema las pone el sistema. */
+  tags: TagView[];
+  /** Origen del lead por Click-to-WhatsApp (M3.3, ADR-45); null si el contacto no llegó por un anuncio. */
+  attribution: ContactAttribution | null;
   created_at: string;
   updated_at: string;
+}
+export interface Touch {
+  at: string;
+  source: string | null;
+  campaign: string | null;
+  adset: string | null;
+  ad: string | null;
+}
+export interface ContactAttribution {
+  ctwa_cl_id: string | null;
+  first_touch: Touch | null;
+  last_touch: Touch | null;
+  /** Último evento Purchase hacia Meta (null si nunca se creó uno). */
+  capi: { status: string; sent_at: string | null } | null;
+}
+/** Datos de un clic de Click-to-WhatsApp (el webhook de atribución). */
+export interface TouchInput {
+  ctwaClId: string;
+  source: string;
+  campaign: string | null;
+  adset: string | null;
+  ad: string | null;
+  at: Date;
+}
+interface Extras {
+  custom: Map<string, CustomValues>;
+  tags: Map<string, TagView[]>;
+  capi: Map<string, { status: string; sentAt: Date | null }>;
 }
 export interface ContactList {
   items: ContactView[];
@@ -37,6 +70,16 @@ export interface ContactScope {
 }
 
 const iso = (d: Date): string => d.toISOString();
+const touchOf = (at: Date | null, source: string | null, campaign: string | null, adset: string | null, ad: string | null): Touch | null => (at ? { at: at.toISOString(), source, campaign, adset, ad } : null);
+const attributionOf = (r: ContactRow, capi: { status: string; sentAt: Date | null } | undefined): ContactAttribution | null =>
+  r.ctwaClId === null && r.firstTouchAt === null
+    ? null
+    : {
+        ctwa_cl_id: r.ctwaClId,
+        first_touch: touchOf(r.firstTouchAt, r.firstTouchSource, r.firstTouchCampaign, r.firstTouchAdset, r.firstTouchAd),
+        last_touch: touchOf(r.lastTouchAt, r.lastTouchSource, r.lastTouchCampaign, r.lastTouchAdset, r.lastTouchAd),
+        capi: capi ? { status: capi.status, sent_at: capi.sentAt ? capi.sentAt.toISOString() : null } : null,
+      };
 const asConsent = (v: string): ContactView['consent'] => (v === 'granted' || v === 'revoked' ? v : 'unknown');
 
 /**
@@ -54,6 +97,7 @@ export class ContactsService {
     @Inject(ContactsRepository) private readonly repo: ContactsRepository,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
+    @Inject(SystemTagsService) private readonly systemTags: SystemTagsService,
   ) {}
 
   async list(scope: ContactScope, q: ListContactsQuery): Promise<ContactList> {
@@ -61,19 +105,19 @@ export class ContactsService {
     const page = await this.db.withTenant(async (tx) => {
       const p = await this.repo.page(tx, sc, q);
       const ids = p.rows.map((r) => r.id);
-      return { ...p, phones: await this.repo.phonesOf(tx, ids), custom: await this.custom.valuesFor(tx, 'contact', ids) };
+      return { ...p, phones: await this.repo.phonesOf(tx, ids), extras: await this.extras(tx, ids) };
     });
-    return { items: await this.views(page.rows, page.phones, page.custom), next_cursor: page.next, total: page.total };
+    return { items: await this.views(page.rows, page.phones, page.extras), next_cursor: page.next, total: page.total };
   }
 
   async get(scope: ContactScope, id: string): Promise<ContactView> {
     const sc = this.scope(scope);
     const found = await this.db.withTenant(async (tx) => {
       const row = await this.repo.byId(tx, sc, id);
-      return row ? { row, phones: await this.repo.phonesOf(tx, [row.id]), custom: await this.custom.valuesFor(tx, 'contact', [row.id]) } : null;
+      return row ? { row, phones: await this.repo.phonesOf(tx, [row.id]), extras: await this.extras(tx, [row.id]) } : null;
     });
     if (!found) throw new NotFoundError();
-    return (await this.views([found.row], found.phones, found.custom))[0]!;
+    return (await this.views([found.row], found.phones, found.extras))[0]!;
   }
 
   async create(scope: ContactScope, input: CreateContactDto): Promise<ContactView> {
@@ -95,12 +139,12 @@ export class ContactsService {
       const customChanges = await this.custom.apply(tx, 'contact', c.id, input.custom_fields ?? {}, { creating: true });
       const customNew = Object.fromEntries(customChanges.map((x) => [x.key, x.newValue]));
       await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}) }, source: 'manual' });
-      return { row: c, phones: await this.repo.phonesOf(tx, [c.id]), custom: await this.custom.valuesFor(tx, 'contact', [c.id]) };
+      return { row: c, phones: await this.repo.phonesOf(tx, [c.id]), extras: await this.extras(tx, [c.id]) };
       })
       .catch((e: unknown) => {
         throw this.phoneRace(e, phones);
       });
-    return (await this.views([out.row], out.phones, out.custom))[0]!;
+    return (await this.views([out.row], out.phones, out.extras))[0]!;
   }
 
   async update(scope: ContactScope, id: string, input: UpdateContactDto): Promise<ContactView> {
@@ -142,16 +186,16 @@ export class ContactsService {
       if (input.custom_fields) {
         for (const c of await this.custom.apply(tx, 'contact', id, input.custom_fields, { creating: false })) changes.push({ field: `custom.${c.key}`, oldValue: c.oldValue, newValue: c.newValue });
       }
-      if (changes.length === 0) return { row, phones: current, custom: await this.custom.valuesFor(tx, 'contact', [id]) };
+      if (changes.length === 0) return { row, phones: current, extras: await this.extras(tx, [id]) };
       set.updatedAt = new Date();
       const [updated] = await tx.update(contacts).set(set).where(eq(contacts.id, id)).returning();
       for (const c of changes) await writeAudit(tx, { entityType: 'contact', entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
-      return { row: updated!, phones: await this.repo.phonesOf(tx, [id]), custom: await this.custom.valuesFor(tx, 'contact', [id]) };
+      return { row: updated!, phones: await this.repo.phonesOf(tx, [id]), extras: await this.extras(tx, [id]) };
       })
       .catch((e: unknown) => {
         throw this.phoneRace(e, input.phones ?? []);
       });
-    return (await this.views([out.row], out.phones, out.custom))[0]!;
+    return (await this.views([out.row], out.phones, out.extras))[0]!;
   }
 
   /** Borrado LÓGICO: el contacto y sus teléfonos quedan marcados y los números vuelven a estar libres. Los datos se conservan (auditoría, historial). */
@@ -172,6 +216,60 @@ export class ContactsService {
   /** Personas a las que se puede asignar un contacto (solo con `contacts.view_all`: lo exige el controlador). */
   async owners(): Promise<{ items: OrgPerson[] }> {
     return { items: await this.members.assignable() };
+  }
+
+  /**
+   * Para los canales de entrada (atribución): el contacto de la empresa activa con ese teléfono, o uno nuevo con el origen del canal, sin consentimiento y sin
+   * responsable. Serializa por teléfono para que dos llamadas simultáneas no creen dos contactos. Va DENTRO de la transacción del que llama.
+   */
+  async findOrCreateByPhone(tx: TenantTx, e164: string, source: string): Promise<{ id: string; created: boolean }> {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`contact_phone:${e164}`}::text || ':' || app_org()::text), 0))`);
+    const existing = await this.repo.idByPhone(tx, e164);
+    if (existing) return { id: existing, created: false };
+    const [c] = await tx.insert(contacts).values({ name: e164, source, consent: 'unknown', createdBy: null }).returning();
+    await tx.insert(contactPhones).values({ contactId: c!.id, e164, isPrimary: true });
+    await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: e164, source, consent: 'unknown', phones: [e164] }, source: 'meta' });
+    return { id: c!.id, created: true };
+  }
+
+  /**
+   * Registra un clic de Click-to-WhatsApp (ADR-45): el PRIMER toque nunca se sobrescribe; el último sí (salvo un clic más antiguo que el último registrado);
+   * el mismo `ctwa_cl_id` que ya es el último no cambia nada. Devuelve qué se tocó.
+   */
+  async applyTouch(tx: TenantTx, id: string, t: TouchInput): Promise<{ duplicate: boolean; firstSet: boolean; lastUpdated: boolean }> {
+    const row = await this.repo.lockById(tx, id);
+    if (!row) throw new NotFoundError();
+    if (row.ctwaClId === t.ctwaClId) return { duplicate: true, firstSet: false, lastUpdated: false };
+    const set: Partial<typeof contacts.$inferInsert> = {};
+    const firstSet = row.firstTouchAt === null;
+    if (firstSet) Object.assign(set, { firstTouchAt: t.at, firstTouchSource: t.source, firstTouchCampaign: t.campaign, firstTouchAdset: t.adset, firstTouchAd: t.ad });
+    const lastUpdated = row.lastTouchAt === null || t.at.getTime() >= row.lastTouchAt.getTime();
+    if (lastUpdated) Object.assign(set, { ctwaClId: t.ctwaClId, lastTouchAt: t.at, lastTouchSource: t.source, lastTouchCampaign: t.campaign, lastTouchAdset: t.adset, lastTouchAd: t.ad });
+    if (Object.keys(set).length > 0) {
+      set.updatedAt = new Date();
+      await tx.update(contacts).set(set).where(eq(contacts.id, id));
+      await writeAudit(tx, {
+        entityType: 'contact',
+        entityId: id,
+        field: 'attribution',
+        oldValue: row.lastTouchAt ? { at: row.lastTouchAt.toISOString(), campaign: row.lastTouchCampaign } : null,
+        newValue: { at: t.at.toISOString(), source: t.source, campaign: t.campaign, first: firstSet },
+        source: 'meta',
+      });
+    }
+    return { duplicate: false, firstSet, lastUpdated };
+  }
+
+  /** Teléfono principal y último clic de un contacto, para armar los eventos hacia Meta (sin alcance por persona: lo usa el sistema). */
+  async channelIdentity(tx: TenantTx, id: string): Promise<{ ctwaClId: string | null; primaryPhone: string | null } | null> {
+    const row = await this.repo.lockById(tx, id);
+    if (!row) return null;
+    const phones = (await this.repo.phonesOf(tx, [id])).get(id) ?? [];
+    return { ctwaClId: row.ctwaClId, primaryPhone: phones[0]?.e164 ?? null };
+  }
+
+  private async extras(tx: TenantTx, ids: readonly string[]): Promise<Extras> {
+    return { custom: await this.custom.valuesFor(tx, 'contact', ids), tags: await this.systemTags.forContacts(tx, ids), capi: await this.repo.lastPurchaseEvents(tx, ids) };
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -229,7 +327,7 @@ export class ContactsService {
     if (desired[0]) await tx.update(contactPhones).set({ isPrimary: true }).where(and(eq(contactPhones.contactId, contactId), eq(contactPhones.e164, desired[0]), isNull(contactPhones.deletedAt)));
   }
 
-  private async views(rows: readonly ContactRow[], phones: Map<string, PhoneRow[]>, custom: Map<string, CustomValues>): Promise<ContactView[]> {
+  private async views(rows: readonly ContactRow[], phones: Map<string, PhoneRow[]>, x: Extras): Promise<ContactView[]> {
     const labels = await this.members.labels(rows.flatMap((r) => (r.ownerId ? [r.ownerId] : [])));
     return rows.map((r) => ({
       id: r.id,
@@ -240,7 +338,9 @@ export class ContactsService {
       source: r.source,
       consent: asConsent(r.consent),
       consent_updated_at: r.consentUpdatedAt ? iso(r.consentUpdatedAt) : null,
-      custom_fields: custom.get(r.id) ?? {},
+      custom_fields: x.custom.get(r.id) ?? {},
+      tags: x.tags.get(r.id) ?? [],
+      attribution: attributionOf(r, x.capi.get(r.id)),
       created_at: iso(r.createdAt),
       updated_at: iso(r.updatedAt),
     }));

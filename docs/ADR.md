@@ -885,3 +885,10 @@ Construir todo el envío real a CAPI ahora (sin ventas ni credenciales por empre
 
 ### Impacto
 Migraciones 0029 (tablas `tags`, `contact_tags`, `meta_events`, columnas de atribución en `contacts`, etiquetas sembradas) y 0030 (privilegios y permisos); módulos `tags` y `attribution`; `contacts` devuelve `tags` y `attribution`; web: insignias de etiquetas y sección «Origen del lead»; Build Spec §6.3, §6.6, §7 y §14 y `CLAUDE.md`. Los números del plan (0027, ADR-44) quedan reemplazados por los de este ADR.
+
+### Precisiones al construir M3.3 (2026-10-16)
+- **Secreto del punto de entrada:** el ADR decía «firma HMAC» y «secreto guardado como hash»; las dos cosas no caben juntas (para verificar un HMAC hay que conocer el secreto). Se implementó lo segundo: cabecera `X-Webhook-Secret` comparada en tiempo constante contra su hash SHA-256, sobre TLS. El identificador de la URL es un UUID v4 aleatorio y estable; regenerar cambia solo el secreto. La tabla `attribution_endpoints` es de **identidad** (el webhook llega sin sesión y hay que saber la empresa antes de abrir contexto); `app_identity` no tiene DELETE.
+- **Contacto nuevo por clic:** nombre provisional = el teléfono (E.164), origen `meta_ctwa`, consentimiento `unknown`, sin responsable; si el teléfono ya existe solo se añade la atribución.
+- **Límite de peticiones:** 120 por minuto por (IP, punto de entrada), en memoria del proceso (por instancia). Identificador desconocido, secreto equivocado o ausente: el mismo 404.
+- **Tarea `capi-sender`:** cada 30 s recorre las empresas cliente activas y envía los pendientes de cada una bajo su propio contexto; sin proveedor configurado (hoy siempre) no hace nada. Con muchas empresas se cambiará por una cola de «empresas con pendientes» al llegar el proveedor real (M6).
+- **Quedó para M6:** adaptador real hacia Graph API, credenciales del pixel por empresa y los llamados a `onSaleTagSet`/`cancelPurchase` desde ventas (ya existen y están probados). El esquema Zod compartido de atribución del plan no se creó en `packages/shared`: los contactos no usan esquemas compartidos todavía.

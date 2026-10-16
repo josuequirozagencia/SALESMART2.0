@@ -5,9 +5,10 @@ import { HealthController } from './health/health.controller';
 import { HttpModule } from './http';
 import { JobsModule } from './jobs';
 import { AuthModule, LocalAccessResolver } from './modules/auth';
+import { AttributionModule } from './modules/attribution';
 import { ContactsModule } from './modules/contacts';
 import { CustomFieldsModule } from './modules/custom-fields';
 import { OrganizationsModule } from './modules/organizations';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

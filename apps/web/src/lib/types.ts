@@ -252,6 +252,10 @@ export interface Contact {
   consent_updated_at: string | null;
   /** Campos personalizados (M3.2): `{ variable: valor }`, solo los no vacíos de campos no archivados. */
   custom_fields: Record<string, CustomValue>;
+  /** Etiquetas del contacto (M3.3): las del sistema las pone el sistema. */
+  tags: ContactTag[];
+  /** Origen del lead por Click-to-WhatsApp (M3.3); null si no llegó por un anuncio. */
+  attribution: ContactAttribution | null;
   created_at: string;
   updated_at: string;
 }
@@ -303,4 +307,42 @@ export interface CustomFieldList {
   items: CustomField[];
   /** `manage`: puede crear, cambiar, archivar y ordenar campos (el servidor vuelve a verificar cada acción). */
   access: { manage: boolean };
+}
+
+// ── Etiquetas del sistema y atribución de Meta (M3.3, ADR-45) ──
+export interface ContactTag {
+  id: string;
+  name: string;
+  color: string;
+  system_key: 'lead' | 'appointment' | 'sale' | null;
+  is_system: boolean;
+}
+export interface ContactTouch {
+  at: string;
+  source: string | null;
+  campaign: string | null;
+  adset: string | null;
+  ad: string | null;
+}
+export interface ContactAttribution {
+  ctwa_cl_id: string | null;
+  first_touch: ContactTouch | null;
+  last_touch: ContactTouch | null;
+  /** Último evento Purchase hacia Meta (null si nunca hubo uno). */
+  capi: { status: string; sent_at: string | null } | null;
+}
+export interface AttributionEndpoint {
+  configured: boolean;
+  id: string | null;
+  path: string | null;
+  created_at: string | null;
+  rotated_at: string | null;
+  last_used_at: string | null;
+}
+/** Respuesta de generar o regenerar: el secreto viene SOLO aquí. */
+export interface AttributionEndpointIssued {
+  id: string;
+  secret: string;
+  rotated: boolean;
+  path: string;
 }

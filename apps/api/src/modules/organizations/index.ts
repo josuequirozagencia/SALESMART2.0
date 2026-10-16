@@ -8,3 +8,4 @@ export { AgencyAccessService, AGENCY_DEFAULT_ACCESS_LEVEL, type ReconcileResult 
 export { PLAN_FEATURES, PLAN_FEATURE_KEYS, normalizeFeatures, type PlanFeatureKey } from './plan-features';
 export { TrialExpiryJob, TRIAL_EXPIRY_BATCH } from './trial-expiry.job';
 export { isTrialExpired, extendedEnd, canRequestExtension, type ExtensionStatus, type TrialStatus } from './trial.domain';
+export { AttributionEndpointsService, type EndpointStatus } from './attribution-endpoints.service';

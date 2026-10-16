@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { and, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { contactPhones, contacts, type TenantTx } from '../../db';
+import { and, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { contactPhones, contacts, metaEvents, type TenantTx } from '../../db';
 import { ValidationError } from '../../errors';
 import { likeEscape } from '../organizations';
 import type { ContactSort, ListContactsQuery } from './contacts.dto';
@@ -104,6 +104,36 @@ export class ContactsRepository {
     const q = tx.select().from(contacts).where(and(eq(contacts.id, id), this.visible(scope)));
     const [row] = await (lock ? q.for('update') : q).limit(1);
     return row;
+  }
+
+  /** Contacto (vigente) de la empresa activa que tiene ese teléfono. Para los canales de entrada, que no tienen alcance por persona. */
+  async idByPhone(tx: TenantTx, e164: string): Promise<string | undefined> {
+    const [r] = await tx
+      .select({ id: contacts.id })
+      .from(contactPhones)
+      .innerJoin(contacts, and(eq(contacts.organizationId, contactPhones.organizationId), eq(contacts.id, contactPhones.contactId)))
+      .where(and(eq(contactPhones.e164, e164), isNull(contactPhones.deletedAt), isNull(contacts.deletedAt)))
+      .limit(1);
+    return r?.id;
+  }
+
+  /** Bloquea la fila de un contacto vigente (sin alcance por persona: lo usa el sistema, no una persona). */
+  async lockById(tx: TenantTx, id: string): Promise<ContactRow | undefined> {
+    const [row] = await tx.select().from(contacts).where(and(eq(contacts.id, id), isNull(contacts.deletedAt))).for('update').limit(1);
+    return row;
+  }
+
+  /** Estado del último evento Purchase de cada contacto (para mostrar en la ficha). */
+  async lastPurchaseEvents(tx: TenantTx, ids: readonly string[]): Promise<Map<string, { status: string; sentAt: Date | null }>> {
+    const out = new Map<string, { status: string; sentAt: Date | null }>();
+    if (ids.length === 0) return out;
+    const rows = await tx
+      .select({ contactId: metaEvents.contactId, status: metaEvents.status, sentAt: metaEvents.sentAt })
+      .from(metaEvents)
+      .where(and(inArray(metaEvents.contactId, [...ids]), eq(metaEvents.type, 'Purchase')))
+      .orderBy(desc(metaEvents.createdAt), desc(metaEvents.id));
+    for (const r of rows) if (!out.has(r.contactId)) out.set(r.contactId, { status: r.status, sentAt: r.sentAt });
+    return out;
   }
 
   /** Teléfonos vigentes de varios contactos (el principal primero). */

@@ -19,7 +19,7 @@ const contact = (id: string, name: string, over: Partial<Contact> = {}): Contact
   source: 'manual',
   consent: 'unknown',
   consent_updated_at: null,
-  custom_fields: {},
+  custom_fields: {}, tags: [], attribution: null,
   created_at: '2026-10-10T15:00:00.000Z',
   updated_at: '2026-10-10T15:00:00.000Z',
   ...over,

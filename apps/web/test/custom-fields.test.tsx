@@ -261,7 +261,7 @@ const ALL: ContactAccess = { view_all: true, write: true, delete: true };
 const READ: ContactAccess = { view_all: true, write: false, delete: false };
 const contact = (over: Partial<Contact> = {}): Contact => ({
   id: 'c1', name: 'Ana Torres', email: null, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null,
-  custom_fields: {}, created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,
+  custom_fields: {}, tags: [], attribution: null, created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,
 });
 
 const DEFS: CustomField[] = [

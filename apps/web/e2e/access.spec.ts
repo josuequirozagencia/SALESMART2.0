@@ -699,6 +699,68 @@ test('campos personalizados: el administrador define campos, el formulario de co
   expect((await request.post(`${apiBase}/v1/custom-fields/${id}/archive`, { headers: other })).status()).toBe(404);
 });
 
+test('atribución: el administrador genera el punto de entrada, GoHighLevel avisa de un clic y el contacto queda con Lead y su origen; repetir no duplica; regenerar invalida el secreto', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('atrib'));
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await page.getByRole('link', { name: 'Atribución de Meta' }).click();
+  await expect(page).toHaveURL(/\/settings\/attribution$/);
+  await page.getByRole('button', { name: 'Generar punto de entrada' }).click();
+  const card = page.getByRole('region', { name: 'Datos del punto de entrada' });
+  await expect(card).toContainText('no se volverá a mostrar');
+  const url = new URL(await card.getByLabel('URL del punto de entrada', { exact: true }).inputValue());
+  const secret = await card.getByLabel('Secreto', { exact: true }).inputValue();
+  expect(secret).toMatch(/^ssw_/);
+  await card.getByRole('button', { name: 'Ya lo guardé' }).click();
+  await expect(page.getByLabel('Secreto', { exact: true })).toHaveCount(0); // el secreto no vuelve a verse
+  await expect(page.locator('body')).not.toContainText(secret);
+
+  // GoHighLevel avisa del clic (se llama al webhook por la API): secreto equivocado = 404; el correcto crea el contacto; repetir no duplica
+  const hook = (s: string, body: Record<string, unknown>) => request.post(`${apiBase}${url.pathname}`, { headers: { 'content-type': 'application/json', 'x-webhook-secret': s }, data: body });
+  const click = { phone: '+593984217730', ctwa_cl_id: 'CLID-E2E-1', campaign_name: 'Cursos octubre', adset_name: 'Conjunto A', ad_name: 'Anuncio 1' };
+  expect((await hook('ssw_incorrecto', click)).status()).toBe(404);
+  expect((await hook(secret, click)).status()).toBe(200);
+  expect((await hook(secret, click)).status()).toBe(200);
+
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  await expect(page.getByText('1 contacto', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Abrir el contacto +593984217730' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Contacto' });
+  await expect(dlg.getByRole('list', { name: 'Etiquetas' })).toContainText('Lead');
+  const origin = dlg.getByRole('region', { name: 'Origen del lead' });
+  await expect(origin).toContainText('Click to WhatsApp');
+  await expect(origin).toContainText('Cursos octubre');
+  await expect(origin).toContainText('Anuncio 1');
+  await origin.getByRole('button', { name: 'Origen del lead' }).click(); // colapsa
+  await expect(origin).not.toContainText('Anuncio 1');
+  await dlg.getByRole('button', { name: 'Cancelar' }).click();
+
+  // Un segundo clic distinto: el primero se conserva y el último cambia
+  expect((await hook(secret, { ...click, ctwa_cl_id: 'CLID-E2E-2', campaign_name: 'Barbería', ad_name: 'Anuncio 2' })).status()).toBe(200);
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
+  const list = (await (await request.get(`${apiBase}/v1/contacts`, { headers: mine })).json()) as { items: Array<{ attribution: { first_touch: { campaign: string }; last_touch: { campaign: string } }; tags: Array<{ system_key: string }> }> };
+  expect(list.items).toHaveLength(1);
+  expect(list.items[0]!.attribution).toMatchObject({ first_touch: { campaign: 'Cursos octubre' }, last_touch: { campaign: 'Barbería' } });
+  expect(list.items[0]!.tags.map((t) => t.system_key)).toEqual(['lead']);
+
+  // Regenerar invalida el secreto anterior
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await page.getByRole('link', { name: 'Atribución de Meta' }).click();
+  await page.getByRole('button', { name: 'Regenerar secreto' }).click();
+  await page.getByRole('button', { name: 'Sí, regenerar' }).click();
+  const secret2 = await page.getByRole('region', { name: 'Datos del punto de entrada' }).getByLabel('Secreto', { exact: true }).inputValue();
+  expect(secret2).not.toBe(secret);
+  expect((await hook(secret, click)).status()).toBe(404);
+  expect((await hook(secret2, click)).status()).toBe(200);
+
+  // Otra empresa no puede usar este punto de entrada ni ve el contacto
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect((await request.post(`${apiBase}${url.pathname}`, { headers: { 'content-type': 'application/json', 'x-webhook-secret': 'ssw_ajeno' }, data: click })).status()).toBe(404);
+  const theirs = (await (await request.get(`${apiBase}/v1/contacts`, { headers: other })).json()) as { items: unknown[] };
+  expect(theirs.items).toEqual([]);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);
