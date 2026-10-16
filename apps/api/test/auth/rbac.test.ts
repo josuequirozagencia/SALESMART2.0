@@ -70,7 +70,7 @@ const call = (method: string, path: string, t?: string, extra: Record<string, st
 
 describe('catálogo y matriz', () => {
   it('el catálogo contiene exactamente los permisos canónicos del Build Spec §5.2', () => {
-    const spec = ['inbox.view_all', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'contacts.import', 'contacts.export', 'opportunities.read', 'opportunities.write', 'pipelines.manage', 'sales.create', 'sales.cancel', 'appointments.manage', 'queues.manage', 'tags.manage', 'agents.manage', 'agents.test', 'knowledge.manage', 'channels.manage', 'integrations.manage', 'forms.manage', 'automations.manage', 'commissions.view', 'commissions.manage', 'analytics.view', 'export', 'team.manage', 'billing.manage', 'platform.providers.manage', 'platform.agencies.manage', 'platform.trials.manage', 'platform.plans.manage', 'platform.companies.manage', 'platform.access_log.read'];
+    const spec = ['agency.clients.create', 'agency.clients.read', 'inbox.view_all', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'contacts.import', 'contacts.export', 'opportunities.read', 'opportunities.write', 'pipelines.manage', 'sales.create', 'sales.cancel', 'appointments.manage', 'queues.manage', 'tags.manage', 'agents.manage', 'agents.test', 'knowledge.manage', 'channels.manage', 'integrations.manage', 'forms.manage', 'automations.manage', 'commissions.view', 'commissions.manage', 'analytics.view', 'export', 'team.manage', 'billing.manage', 'platform.providers.manage', 'platform.agencies.manage', 'platform.trials.manage', 'platform.plans.manage', 'platform.companies.manage', 'platform.access_log.read'];
     expect([...PERMISSION_KEYS].sort()).toEqual([...spec].sort());
   });
 
@@ -84,15 +84,17 @@ describe('catálogo y matriz', () => {
     expect(rp).toEqual(expected);
   });
 
-  it('invariantes: plataforma solo para super_admin; client_admin = todos los de organización; asesor sin inbox.view_all ni gestión; agencia sin permisos propios en M1', () => {
+  it('invariantes: plataforma solo para super_admin; client_admin = todos los de organización salvo la consola de agencia; asesor sin inbox.view_all ni gestión; agencia = solo su consola', () => {
     const tenant = PERMISSION_KEYS.filter((k) => PERMISSIONS[k] === 'tenant');
     const platform = PERMISSION_KEYS.filter((k) => PERMISSIONS[k] === 'platform');
     expect([...ROLE_PERMISSIONS.super_admin].sort()).toEqual([...platform].sort());
-    expect([...ROLE_PERMISSIONS.client_admin].sort()).toEqual([...tenant].sort());
+    expect([...ROLE_PERMISSIONS.client_admin].sort()).toEqual(tenant.filter((k) => !k.startsWith('agency.')).sort());
     for (const r of ['agency', 'client_admin', 'advisor'] as const) for (const p of ROLE_PERMISSIONS[r]) expect(PERMISSIONS[p]).toBe('tenant');
     expect(ROLE_PERMISSIONS.advisor).not.toContain('inbox.view_all');
     expect(ROLE_PERMISSIONS.advisor.filter((p) => p.endsWith('.manage') || p === 'export' || p.startsWith('platform.'))).toEqual([]);
-    expect(ROLE_PERMISSIONS.agency).toEqual([]);
+    expect([...ROLE_PERMISSIONS.agency].sort()).toEqual(['agency.clients.create', 'agency.clients.read']);
+    // Los permisos de la consola de agencia no los tiene nadie más (ni el administrador de un cliente ni el asesor)
+    for (const r of ['client_admin', 'advisor'] as const) expect(ROLE_PERMISSIONS[r].filter((p) => p.startsWith('agency.'))).toEqual([]);
   });
 
   it('permisos de BD: app_identity solo lee; app_rw y app_platform no tocan roles/permisos', async () => {
@@ -145,7 +147,7 @@ describe('guard central de permisos', () => {
     expect(await r.json()).toMatchObject({ error: { code: 'CONTEXT_REQUIRED' } });
   });
 
-  it('agencia: sin permisos propios en M1 (todo permiso exigido se deniega)', async () => {
+  it('agencia en un cliente SIN nivel de acceso (dato corrupto): ningún permiso, falla cerrada (todo permiso exigido se deniega)', async () => {
     const t = await token('agency');
     expect((await call('GET', '/probe/contacts', t)).status).toBe(403);
     expect((await call('GET', '/probe/open', t)).status).toBe(200);

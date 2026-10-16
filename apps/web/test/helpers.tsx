@@ -36,9 +36,17 @@ export function mockApi(routes: Record<string, Handler>): { calls: Call[]; count
 
 export const err = (status: number, code: string, message = 'x', extra: Partial<Reply> = {}): Reply => ({ status, body: { error: { code, message, request_id: 'req_1', details: [] } }, ...extra });
 
-export const ME_ADMIN: Me = { user: { id: 'u1', email: 'ana@empresa.test', full_name: 'Ana Pérez' }, organization: { id: 'o1', name: 'Mi Empresa SA', kind: 'client' }, role: 'client_admin' };
+const NOT_ACTING = { acting_as: null, read_only: false, access_level: null } as const;
+export const ME_ADMIN: Me = { user: { id: 'u1', email: 'ana@empresa.test', full_name: 'Ana Pérez' }, organization: { id: 'o1', name: 'Mi Empresa SA', kind: 'client' }, role: 'client_admin', home: { id: 'o1', name: 'Mi Empresa SA', kind: 'client' }, ...NOT_ACTING };
 export const ME_ADVISOR: Me = { ...ME_ADMIN, user: { id: 'u2', email: 'luis@empresa.test', full_name: 'Luis Navas' }, role: 'advisor' };
-export const ME_ROOT: Me = { user: { id: 'u0', email: 'root@plataforma.test', full_name: null }, organization: { id: 'p1', name: 'Plataforma', kind: 'platform' }, role: 'super_admin' };
+export const ME_ROOT: Me = { user: { id: 'u0', email: 'root@plataforma.test', full_name: null }, organization: { id: 'p1', name: 'Plataforma', kind: 'platform' }, role: 'super_admin', home: { id: 'p1', name: 'Plataforma', kind: 'platform' }, ...NOT_ACTING };
+
+/** Persona de una agencia en su propia agencia. */
+export const ME_AGENCY: Me = { user: { id: 'u5', email: 'dave@agencia.test', full_name: 'Dave Agencia' }, organization: { id: 'ag1', name: 'Agencia Uno', kind: 'agency' }, role: 'agency', home: { id: 'ag1', name: 'Agencia Uno', kind: 'agency' }, ...NOT_ACTING };
+/** La misma persona DENTRO de un cliente de su cartera. */
+export const ME_AGENCY_IN_CLIENT: Me = { ...ME_AGENCY, organization: { id: 'c1', name: 'Barbería Norte', kind: 'client' }, acting_as: 'agency', access_level: 'admin' };
+/** El Súper Admin dentro de una empresa (soporte). */
+export const ME_ROOT_IN_CLIENT: Me = { ...ME_ROOT, organization: { id: 'c1', name: 'Barbería Norte', kind: 'client' }, acting_as: 'super_admin' };
 
 export const trial = (over: Partial<Trial> = {}, ext: Partial<Trial['extension']> = {}): Trial => ({
   status: 'active',

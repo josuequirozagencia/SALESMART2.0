@@ -88,8 +88,8 @@ async function sessionIn(userId: string, orgId: string): Promise<string> {
   const rsecret = randomBytes(32).toString('base64url');
   const sha = (s: string) => createHash('sha256').update(s).digest('hex');
   await admin.query(
-    `INSERT INTO sessions(id, user_id, active_org_id, user_session_version, access_hash, access_expires_at, refresh_hash, refresh_expires_at, absolute_expires_at)
-     VALUES ($1,$2,$3,1,$4, now() + interval '1 hour', $5, now() + interval '1 day', now() + interval '2 days')`,
+    `INSERT INTO sessions(id, user_id, active_org_id, home_org_id, user_session_version, access_hash, access_expires_at, refresh_hash, refresh_expires_at, absolute_expires_at)
+     VALUES ($1,$2,$3,$3,1,$4, now() + interval '1 hour', $5, now() + interval '1 day', now() + interval '2 days')`,
     [id, userId, orgId, sha(secret), sha(rsecret)],
   );
   return `${id}.${secret}`;

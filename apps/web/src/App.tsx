@@ -1,4 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { AgencyShell } from './features/agency/AgencyShell';
+import { ClientsPage } from './features/agency/ClientsPage';
+import { AccessPage } from './features/platform/AccessPage';
 import { AgenciesPage } from './features/platform/AgenciesPage';
 import { CompaniesPage } from './features/platform/CompaniesPage';
 import { PlansPage } from './features/platform/PlansPage';
@@ -29,12 +32,21 @@ function Public({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/** Consola de plataforma: solo el Súper Admin; cualquier otra persona vuelve al inicio. */
+/** Consola de plataforma: solo el Súper Admin EN la plataforma (dentro de una empresa, en soporte, no es la consola); cualquier otra persona vuelve al inicio. */
 function PlatformGate({ children }: { children: (me: Me, logout: () => void) => React.ReactNode }) {
   const { state, logout } = useSession();
   if (state.status === 'loading') return <Splash />;
   if (state.status === 'anon') return <Navigate to="/login" replace />;
-  if (state.me.role !== 'super_admin') return <Navigate to="/" replace />;
+  if (state.me.role !== 'super_admin' || state.me.organization.kind !== 'platform') return <Navigate to="/" replace />;
+  return <>{children(state.me, () => void logout())}</>;
+}
+
+/** «Mis clientes»: la organización activa es una agencia (la propia, o la que el Súper Admin visita en soporte). */
+function AgencyGate({ children }: { children: (me: Me, logout: () => void) => React.ReactNode }) {
+  const { state, logout } = useSession();
+  if (state.status === 'loading') return <Splash />;
+  if (state.status === 'anon') return <Navigate to="/login" replace />;
+  if (state.me.organization.kind !== 'agency') return <Navigate to="/" replace />;
   return <>{children(state.me, () => void logout())}</>;
 }
 
@@ -45,11 +57,13 @@ function AppGate() {
   const trial = useTrial(clientOrg);
   if (state.status === 'loading') return <Splash />;
   if (state.status === 'anon') return <Navigate to="/login" replace />;
-  if (state.me.role === 'super_admin') return <Navigate to="/platform/companies" replace />;
+  if (state.me.role === 'super_admin' && state.me.organization.kind === 'platform') return <Navigate to="/platform/companies" replace />;
+  if (state.me.organization.kind === 'agency') return <Navigate to="/agency/clients" replace />;
   if (clientOrg && trial.isPending) return <Splash />;
   const t = trial.data ?? null;
   const out = () => void logout();
-  if (t?.status === 'expired') return <TrialExpiredScreen trial={t} role={state.me.role} onLogout={out} />;
+  // La pantalla de «vencida» es del propio cliente; una agencia o el Súper Admin que entra ve la empresa en SOLO LECTURA (con su banner)
+  if (t?.status === 'expired' && !state.me.acting_as) return <TrialExpiredScreen trial={t} role={state.me.role} onLogout={out} />;
   return <HomeScreen me={state.me} trial={t} onLogout={out} />;
 }
 
@@ -66,6 +80,8 @@ export function App() {
       <Route path="/" element={<AppGate />} />
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/agencies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AgenciesPage /></PlatformShell>}</PlatformGate>} />
+      <Route path="/platform/access" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AccessPage /></PlatformShell>}</PlatformGate>} />
+      <Route path="/agency/clients" element={<AgencyGate>{(me, out) => <AgencyShell me={me} onLogout={out}><ClientsPage /></AgencyShell>}</AgencyGate>} />
       <Route path="/platform/plans" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><PlansPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/trials" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><TrialsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />

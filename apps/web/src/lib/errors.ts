@@ -21,7 +21,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'INVITATION_EXPIRED': return 'La invitación venció. Pide que te la reenvíen.';
     case 'INVALID_PASSWORD': return 'La contraseña no es correcta.';
     case 'INVITATIONS_UNAVAILABLE': return 'Las invitaciones no están disponibles: falta configurar la URL de la aplicación en el servidor.';
-    case 'AGENCY_NOT_FOUND': case 'AGENCY_SUSPENDED': return e.message;
+    case 'AGENCY_NOT_FOUND': case 'AGENCY_SUSPENDED': case 'NO_AGENCY': return e.message;
     case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;

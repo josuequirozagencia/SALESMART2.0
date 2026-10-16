@@ -86,11 +86,14 @@ export const organizations = identityTable(
     timezone: text('timezone').notNull(),
     /** País (ISO 3166-1 alfa-2). NULL en las empresas del registro propio; el alta por invitación (M2.3, ADR-39) lo exige. */
     country: text('country'),
+    /** Nivel con el que el personal de la agencia entra a ESTE cliente (M2.5, ADR-41): read | advisor | admin. Solo tiene efecto si hay `parent_agency_id`. */
+    agencyAccessLevel: text('agency_access_level').notNull().default('admin'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     deletedAt: ts('deleted_at'),
   },
   (t) => [
+    check('organizations_agency_access_level_valid', sql`${t.agencyAccessLevel} IN ('read', 'advisor', 'admin')`),
     check('organizations_country_iso2', sql`${t.country} IS NULL OR ${t.country} ~ '^[A-Z]{2}$'`),
     check('organizations_kind_valid',sql`${t.kind} IN ('platform', 'agency', 'client')`),
     check('organizations_platform_standalone', sql`${t.kind} <> 'platform' OR (${t.parentAgencyId} IS NULL AND ${t.createdByAgencyId} IS NULL)`),
@@ -152,6 +155,38 @@ export const organizationOwnershipHistory = identityTable(
 );
 
 /**
+ * Historial de accesos (M2.5, ADR-22/ADR-41): una fila por cada vez que un Súper Admin o una persona de agencia ENTRA al contexto de otra
+ * organización. Solo la lee el Súper Admin (permiso `platform.access_log.read`; ni la agencia ni el cliente). `session_id` NO es clave foránea
+ * a propósito: la limpieza de sesiones (ADR-35) no debe borrar la historia. `ended_at`/`end_reason` se escriben una sola vez (UPDATE solo de esas dos columnas).
+ */
+export const accessSessions = identityTable(
+  'access_sessions',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    sessionId: uuid('session_id').notNull(),
+    actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+    actorRole: text('actor_role').notNull(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    startedAt: ts('started_at').notNull().defaultNow(),
+    endedAt: ts('ended_at'),
+    endReason: text('end_reason'),
+    /** HMAC de la IP (nunca la IP en claro). */
+    ipHash: text('ip_hash'),
+  },
+  (t) => [
+    check('access_sessions_actor_role_valid', sql`${t.actorRole} IN ('super_admin', 'agency')`),
+    check('access_sessions_end_reason_valid', sql`${t.endReason} IS NULL OR ${t.endReason} IN ('switch', 'return', 'access_removed', 'session_ended')`),
+    check('access_sessions_end_consistent', sql`(${t.endedAt} IS NULL) = (${t.endReason} IS NULL) AND (${t.endedAt} IS NULL OR ${t.endedAt} >= ${t.startedAt})`),
+    check('access_sessions_ip_hash_hex', sql`${t.ipHash} IS NULL OR ${t.ipHash} ~ '^[0-9a-f]{64}$'`),
+    index('access_sessions_org_idx').on(t.organizationId, t.startedAt),
+    index('access_sessions_actor_idx').on(t.actorUserId, t.startedAt),
+    index('access_sessions_started_idx').on(t.startedAt, t.id),
+    // Las filas ABIERTAS de una sesión (se cierran al cambiar de contexto) y las abiertas en general (limpieza de sesiones muertas)
+    index('access_sessions_open_idx').on(t.sessionId).where(sql`${t.endedAt} IS NULL`),
+  ],
+);
+
+/**
  * Sesión = un inicio de sesión (dispositivo). Los tokens son opacos (`<sessionId>.<secreto>`) y aquí solo se guarda
  * su hash SHA-256. El refresh rota en cada uso; presentar un refresh que no coincide revoca la sesión (ADR-26).
  */
@@ -162,6 +197,8 @@ export const sessions = identityTable(
     userId: uuid('user_id').notNull().references(() => users.id),
     /** Organización activa de la sesión (la valida el resolvedor en cada petición contra organization_members). */
     activeOrgId: uuid('active_org_id').notNull().references(() => organizations.id),
+    /** Organización con la que se inició la sesión (M2.5, ADR-41): a ella vuelve «Volver a mi agencia» y el origen de `acting_org_id`. */
+    homeOrgId: uuid('home_org_id').notNull().references(() => organizations.id),
     /** Copia de users.session_version al crearla: si difiere del actual, la sesión ya no vale. */
     userSessionVersion: integer('user_session_version').notNull(),
     accessHash: text('access_hash').notNull(),

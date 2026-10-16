@@ -3,7 +3,7 @@ import type { Request } from 'express';
 import { z } from 'zod';
 import { PlatformOnly, Public, ZodValidationPipe } from '../../../http';
 import { RequirePermission } from '../../../rbac';
-import { acceptInvitationSchema, createAgencySchema, createCompanySchema, invitationTokenSchema, type AcceptInvitationDto, type CreateAgencyDto, type CreateCompanyDto, type InvitationTokenDto } from './invitations.dto';
+import { acceptInvitationSchema, createAgencySchema, createCompanySchema, invitationTokenSchema, registerClientSchema, type AcceptInvitationDto, type CreateAgencyDto, type CreateCompanyDto, type InvitationTokenDto, type RegisterClientDto } from './invitations.dto';
 import { InvitationsService } from './invitations.service';
 
 const uuidParam = new ZodValidationPipe(z.uuid());
@@ -46,6 +46,30 @@ export class PlatformAgencyCreationController {
   @Header('Cache-Control', 'no-store')
   create(@Body(new ZodValidationPipe(createAgencySchema)) b: CreateAgencyDto) {
     return this.invitations.createAgency(b);
+  }
+}
+
+/**
+ * «Registrar cliente» de la AGENCIA (F02, ADR-41). Tenant: la agencia sale del contexto verificado, nunca de la petición. El id de la ruta es el del
+ * CLIENTE (debe estar en la cartera de esa agencia; si no, 404). `no-store` por el mismo motivo que arriba: el enlace puede ir en la respuesta.
+ */
+@RequirePermission('agency.clients.create')
+@Controller('agency/clients')
+export class AgencyClientRegistrationController {
+  constructor(@Inject(InvitationsService) private readonly invitations: InvitationsService) {}
+
+  @Post()
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  register(@Body(new ZodValidationPipe(registerClientSchema)) b: RegisterClientDto) {
+    return this.invitations.registerClient(b);
+  }
+
+  @Post(':id/invitation/resend')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  resend(@Param('id', uuidParam) id: string) {
+    return this.invitations.resendForAgency(id);
   }
 }
 

@@ -7,6 +7,7 @@ import type { CompanyCreated, Plan } from '../../lib/types';
 import { Alert, Button, Field, Input } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { InviteResult } from './InviteResult';
+import { useRegisterClient } from '../agency/useAgencyClients';
 import { useCreateCompany } from './useCompanies';
 
 type Errors = { name?: string; email?: string; country?: string; timezone?: string };
@@ -15,9 +16,11 @@ const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[
 /**
  * «Nueva empresa» (F01): nombre, correo del dueño, país, zona horaria (el SLA depende de ella) y plan opcional. Al crearla, el dueño recibe una
  * invitación por correo; si el correo no puede salir, aquí se muestra el enlace para entregarlo por otro medio.
+ * `viaAgency` = «Registrar cliente» (F02): lo hace una AGENCIA para su cartera; no hay plan (el cliente paga el suyo) y se usa otra ruta del servidor.
  */
-export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: Plan[]; kind?: 'client' | 'agency'; onClose: () => void }) {
+export function NewCompanyDialog({ plans, kind = 'client', viaAgency = false, onClose }: { plans: Plan[]; kind?: 'client' | 'agency'; viaAgency?: boolean; onClose: () => void }) {
   const agency = kind === 'agency';
+  const title = viaAgency ? 'Registrar cliente' : agency ? 'Nueva agencia' : 'Nueva empresa';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [country, setCountry] = useState(DEFAULT_COUNTRY);
@@ -26,7 +29,9 @@ export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: P
   const [errors, setErrors] = useState<Errors>({});
   const [formError, setFormError] = useState<string>();
   const [created, setCreated] = useState<CompanyCreated>();
-  const create = useCreateCompany(kind);
+  const platformCreate = useCreateCompany(kind);
+  const agencyRegister = useRegisterClient();
+  const create = viaAgency ? agencyRegister : platformCreate;
   // Las ~850 opciones (países y zonas) se crean UNA vez: sin esto cada tecla en los campos de texto las re-renderizaba todas
   const countryItems = useMemo(() => countryOptions().map((c) => <option key={c.code} value={c.code}>{c.name}</option>), []);
   const zones = useMemo(() => timezones(), []);
@@ -59,7 +64,7 @@ export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: P
             const paths = err.details.map((d) => d.path);
             setErrors({ ...(paths.includes('owner_email') ? { email: 'Escribe un correo válido' } : {}), ...(paths.includes('country') ? { country: 'Elige un país válido' } : {}), ...(paths.includes('timezone') ? { timezone: 'Elige una zona horaria válida' } : {}), ...(paths.includes('name') ? { name: 'Revisa el nombre' } : {}) });
           }
-          setFormError(friendlyError(err, 'No pudimos crear la empresa. Inténtalo de nuevo.'));
+          setFormError(friendlyError(err, viaAgency ? 'No pudimos registrar al cliente. Inténtalo de nuevo.' : 'No pudimos crear la empresa. Inténtalo de nuevo.'));
         },
       },
     );
@@ -67,7 +72,7 @@ export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: P
 
   if (created) {
     return (
-      <Modal title={agency ? 'Agencia creada' : 'Empresa creada'} onClose={onClose}>
+      <Modal title={viaAgency ? 'Cliente registrado' : agency ? 'Agencia creada' : 'Empresa creada'} onClose={onClose}>
         <p className="text-[13.5px]"><b>{created.company.name}</b> quedó {agency ? 'creada' : 'creada'}{created.company.plan ? <> con el plan <b>{created.company.plan.name}</b></> : null}.</p>
         <InviteResult invitation={created.invitation} />
         <div className="flex justify-end"><Button variant="primary" onClick={onClose}>Listo</Button></div>
@@ -76,9 +81,9 @@ export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: P
   }
 
   return (
-    <Modal title={agency ? 'Nueva agencia' : 'Nueva empresa'} onClose={onClose}>
-      <form onSubmit={submit} noValidate className="grid gap-3" aria-label={agency ? 'Nueva agencia' : 'Nueva empresa'}>
-        <Field label={agency ? 'Nombre de la agencia' : 'Nombre de la empresa'} error={errors.name}>
+    <Modal title={title} onClose={onClose}>
+      <form onSubmit={submit} noValidate className="grid gap-3" aria-label={title}>
+        <Field label={viaAgency ? 'Nombre del cliente' : agency ? 'Nombre de la agencia' : 'Nombre de la empresa'} error={errors.name}>
           {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} autoComplete="off" placeholder={agency ? 'Agencia Digital Sur' : 'Barbería Norte'} />}
         </Field>
         <Field label="Correo del dueño" error={errors.email} hint={agency ? 'Le enviaremos una invitación para elegir su contraseña y administrar la agencia. Vence en 7 días.' : 'Le enviaremos una invitación para elegir su contraseña. Vence en 7 días.'}>
@@ -101,7 +106,7 @@ export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: P
             )}
           </Field>
         </div>
-        {agency ? null : <Field label="Plan" hint={planId ? 'Con plan no hay prueba gratuita. El cobro es manual hasta definir la pasarela de pagos.' : 'Sin plan, la prueba de 7 días empieza cuando el dueño acepte la invitación.'}>
+        {agency || viaAgency ? null : <Field label="Plan" hint={planId ? 'Con plan no hay prueba gratuita. El cobro es manual hasta definir la pasarela de pagos.' : 'Sin plan, la prueba de 7 días empieza cuando el dueño acepte la invitación.'}>
           {(p) => (
             <select {...p} value={planId} onChange={(e) => setPlanId(e.target.value)} className={selectCls}>
               <option value="">Sin plan (prueba de 7 días)</option>
@@ -112,7 +117,7 @@ export function NewCompanyDialog({ plans, kind = 'client', onClose }: { plans: P
         {formError ? <Alert>{formError}</Alert> : null}
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose}>Cancelar</Button>
-          <Button type="submit" variant="primary" loading={create.isPending}>Crear e invitar</Button>
+          <Button type="submit" variant="primary" loading={create.isPending}>{viaAgency ? 'Registrar e invitar' : 'Crear e invitar'}</Button>
         </div>
       </form>
     </Modal>

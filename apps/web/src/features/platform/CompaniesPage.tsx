@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import { shortDate } from '../../lib/format';
+import { useSession } from '../../lib/session';
 import type { Company, CompanyState, InvitationIssued } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
@@ -23,7 +25,7 @@ const STATE: Record<CompanyState, [PillKind, string]> = {
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 
-function Row({ c, onPlan, onAgency, onResend, resending }: { c: Company; onPlan: (c: Company) => void; onAgency: (c: Company) => void; onResend: (c: Company) => void; resending: boolean }) {
+function Row({ c, onPlan, onAgency, onResend, onEnter, resending, entering }: { c: Company; onPlan: (c: Company) => void; onAgency: (c: Company) => void; onResend: (c: Company) => void; onEnter: (c: Company) => void; resending: boolean; entering: boolean }) {
   const [kind, label] = STATE[c.state];
   return (
     <li className="grid gap-3 rounded-2xl border border-line bg-surface p-4 min-[900px]:grid-cols-[minmax(0,1.6fr)_minmax(0,1.3fr)_150px_80px_auto] min-[900px]:items-center">
@@ -40,6 +42,7 @@ function Row({ c, onPlan, onAgency, onResend, resending }: { c: Company; onPlan:
       <div className="text-[13px]">{c.plan ? <b>{c.plan.name}</b> : <span className="text-muted">Sin plan</span>}</div>
       <div className="font-mono text-[13px]" aria-label={`${c.users} usuarios`}>{c.users} <span className="font-sans text-[11.5px] text-muted">usuarios</span></div>
       <div className="flex flex-wrap gap-2">
+        {c.state !== 'suspended' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Entrar a ${c.name} (soporte)`} loading={entering} onClick={() => onEnter(c)}>Entrar</Button> : null}
         <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar el plan de ${c.name}`} onClick={() => onPlan(c)}>{c.plan ? 'Cambiar plan' : 'Asignar plan'}</Button>
         {c.kind === 'client' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar la administración de ${c.name}`} onClick={() => onAgency(c)}>Administración</Button> : null}
         {c.state === 'invited' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Reenviar la invitación de ${c.name}`} loading={resending} onClick={() => onResend(c)}>Reenviar invitación</Button> : null}
@@ -57,6 +60,10 @@ export function CompaniesPage() {
   const [agencyTarget, setAgencyTarget] = useState<Company | null>(null);
   const agencies = useAgencyOptions();
   const [resent, setResent] = useState<{ company: string; invitation: InvitationIssued }>();
+  const { switchContext } = useSession();
+  const navigate = useNavigate();
+  const [entering, setEntering] = useState<string>();
+  const [enterError, setEnterError] = useState<string>();
   const [resendError, setResendError] = useState<string>();
   const resend = useResendInvitation();
 
@@ -71,6 +78,19 @@ export function CompaniesPage() {
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const set = <K extends keyof CompanyFilters>(k: K, v: CompanyFilters[K]) => setFilters((f) => ({ ...f, [k]: v }));
   const filtered = Boolean(filters.q || filters.kind || filters.state || filters.plan || filters.agency);
+
+  /** Soporte (ADR-21/41): el Súper Admin entra a la empresa sin cerrar sesión; queda anotado en «Accesos» y marcado en la auditoría de la empresa. */
+  async function enter(c: Company) {
+    setEnterError(undefined);
+    setEntering(c.id);
+    try {
+      await switchContext(c.id);
+      navigate('/');
+    } catch (e) {
+      setEnterError(friendlyError(e, 'No pudimos entrar a esa cuenta. Actualiza la lista e inténtalo de nuevo.'));
+      setEntering(undefined);
+    }
+  }
 
   function resendInvitation(c: Company) {
     setResendError(undefined);
@@ -114,10 +134,11 @@ export function CompaniesPage() {
       {q.isSuccess && items.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-line p-8 text-center text-[13.5px] text-muted">{filtered ? 'Ninguna empresa coincide con los filtros.' : 'Todavía no hay empresas.'}</p>
       ) : null}
-      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onAgency={setAgencyTarget} onResend={resendInvitation} resending={resend.isPending && resend.variables === c.id} />)}</ul> : null}
+      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onAgency={setAgencyTarget} onResend={resendInvitation} onEnter={(x) => void enter(x)} resending={resend.isPending && resend.variables === c.id} entering={entering === c.id} />)}</ul> : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
 
       {resendError ? <Alert>{resendError}</Alert> : null}
+      {enterError ? <Alert>{enterError}</Alert> : null}
       {target ? <AssignPlanDialog company={target} plans={plans.data?.items ?? []} onClose={() => setTarget(null)} /> : null}
       {agencyTarget ? <ChangeAgencyDialog company={agencyTarget} agencies={agencies.data?.items ?? []} onClose={() => setAgencyTarget(null)} /> : null}
       {creating ? <NewCompanyDialog plans={plans.data?.items ?? []} onClose={() => setCreating(false)} /> : null}

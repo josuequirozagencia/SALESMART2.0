@@ -8,7 +8,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
 const NO_TRIALS = { items: [], next_cursor: null, pending_extensions: 0, summary: { active: 0, expiring_soon: 0, pending: 0, extension_days: 3 } };
 const agency = (over: Partial<Agency> & { id: string; name: string }): Agency => ({ state: 'active', owner_email: `${over.id}@agencia.test`, clients: 0, timezone: 'UTC', country: 'EC', created_at: new Date().toISOString(), invitation: null, ...over });
-const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, agency: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', invitation: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
+const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, agency: null, agency_access_level: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', invitation: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
 
 const UNO = agency({ id: 'uno', name: 'Agencia Uno', clients: 2 });
 const DOS = agency({ id: 'dos', name: 'Agencia Dos', state: 'suspended', clients: 1 });

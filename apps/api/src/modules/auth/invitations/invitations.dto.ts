@@ -20,6 +20,10 @@ export type CreateCompanyDto = z.infer<typeof createCompanySchema>;
 export const createAgencySchema = createCompanySchema.omit({ plan_id: true });
 export type CreateAgencyDto = z.infer<typeof createAgencySchema>;
 
+/** «Registrar cliente» (F02): la agencia crea la empresa de un cliente nuevo en su cartera. Sin plan: el cliente paga el suyo y su prueba empieza al aceptar. */
+export const registerClientSchema = createCompanySchema.omit({ plan_id: true });
+export type RegisterClientDto = z.infer<typeof registerClientSchema>;
+
 export const invitationTokenSchema = z.object({ token: z.string().min(1).max(200) }).strict();
 export type InvitationTokenDto = z.infer<typeof invitationTokenSchema>;
 

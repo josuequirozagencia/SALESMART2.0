@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { AgencyList, AgencyState, AssignAgencyResult, OwnershipHistoryItem } from '../../lib/types';
+import type { AccessLevel, AgencyList, AgencyState, AssignAgencyResult, OwnershipHistoryItem } from '../../lib/types';
 
 export interface AgencyFilters {
   q: string;
@@ -58,6 +58,15 @@ export interface AssignAgencyInput {
   agencyId: string | null;
   reason?: string;
   notifyClient: boolean;
+}
+
+/** Nivel con el que la agencia entra a UN cliente (ADR-41). Rige en la siguiente petición de cada persona de la agencia. */
+export function useSetAgencyAccess() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, level }: { id: string; level: AccessLevel }) => api<{ id: string; level: AccessLevel; changed: boolean }>(`/platform/organizations/${id}/agency-access`, { method: 'PUT', body: { level } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
 }
 
 /** Cambiar quién administra a un cliente (una agencia o administración directa). Refresca empresas, agencias e historiales. */

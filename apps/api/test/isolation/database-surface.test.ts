@@ -111,6 +111,6 @@ describe('superficie pública', () => {
   });
 
   it('el barrel de db/ exporta solo la API prevista (nada de pools, guarded-client, auditoría ni migraciones)', () => {
-    expect(Object.keys(dbModule).sort()).toEqual(['DB_ROLES', 'Database', 'DatabaseContextMismatchError', 'DbModule', 'LeakedTransactionError', 'identityTable', 'authThrottle', 'disposableDomains', 'emailVerifications', 'signupAttempts', 'passwordResets', 'roles', 'permissions', 'rolePermissions', 'trials', 'trialConfig', 'plans', 'invitations', 'organizationOwnershipHistory', 'auditLogs', 'platformAudit', 'organizationMembers', 'organizations', 'platformTable', 'sessions', 'tenantTable', 'users'].sort());
+    expect(Object.keys(dbModule).sort()).toEqual(['DB_ROLES', 'Database', 'DatabaseContextMismatchError', 'DbModule', 'LeakedTransactionError', 'identityTable', 'authThrottle', 'disposableDomains', 'emailVerifications', 'signupAttempts', 'passwordResets', 'roles', 'permissions', 'rolePermissions', 'trials', 'trialConfig', 'plans', 'invitations', 'organizationOwnershipHistory', 'accessSessions', 'auditLogs', 'platformAudit', 'organizationMembers', 'organizations', 'platformTable', 'sessions', 'tenantTable', 'users'].sort());
   });
 });

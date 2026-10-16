@@ -4,6 +4,8 @@ import { AuditModule } from '../audit';
 import { PlatformModule } from '../platform';
 import { AgenciesService } from './agencies.service';
 import { AgencyAccessService } from './agency-access.service';
+import { AgencyClientsController } from './agency-clients.controller';
+import { AgencyClientsService } from './agency-clients.service';
 import { CompaniesService } from './companies.service';
 import { PlatformAgenciesController } from './platform-agencies.controller';
 import { PlatformCompaniesController, PlatformPlansController } from './platform-companies.controller';
@@ -16,8 +18,8 @@ import { TrialsService } from './trials.service';
 /** Organizaciones y pruebas gratuitas (M1.5). Usa `withIdentity` (ADR-25, lint P12 permite este módulo). */
 @Module({
   imports: [AuditModule, PlatformModule, MailModule],
-  controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController],
-  providers: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService],
+  controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController, AgencyClientsController],
+  providers: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService],
   exports: [TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService],
 })
 export class OrganizationsModule {}

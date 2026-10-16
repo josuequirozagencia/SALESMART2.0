@@ -2,12 +2,12 @@ import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
-import { shortDate } from '../../lib/format';
-import type { Agency, CompanyList, CompanyState } from '../../lib/types';
+import { ACCESS_LEVEL_LABEL, shortDate } from '../../lib/format';
+import type { AccessLevel, Agency, CompanyList, CompanyState } from '../../lib/types';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
-import { useAgencyHistory, useAssignAgency } from './useAgencies';
+import { useAgencyHistory, useAssignAgency, useSetAgencyAccess } from './useAgencies';
 
 const STATE: Record<CompanyState, [PillKind, string]> = {
   trial: ['info', 'En prueba'],
@@ -30,6 +30,7 @@ export function CarteraDialog({ agency, onClose }: { agency: Agency; onClose: ()
   const clients = useClients();
   const history = useAgencyHistory(agency.id);
   const assign = useAssignAgency();
+  const setAccess = useSetAgencyAccess();
   const [pick, setPick] = useState('');
   const [reason, setReason] = useState('');
   const [notify, setNotify] = useState(true);
@@ -40,6 +41,17 @@ export function CarteraDialog({ agency, onClose }: { agency: Agency; onClose: ()
   const mine = useMemo(() => all.filter((c) => c.agency?.id === agency.id), [all, agency.id]);
   const addable = useMemo(() => all.filter((c) => c.agency?.id !== agency.id), [all, agency.id]);
   const suspended = agency.state === 'suspended';
+
+  function changeLevel(clientId: string, clientName: string, level: AccessLevel) {
+    setMessage(undefined);
+    setAccess.mutate(
+      { id: clientId, level },
+      {
+        onSuccess: (r) => setMessage({ kind: 'ok', text: r.changed ? `${agency.name} ahora entra a ${clientName} con el nivel «${ACCESS_LEVEL_LABEL[level]}». Rige desde su próxima acción.` : 'Ya estaba así: no se cambió nada.' }),
+        onError: (e) => setMessage({ kind: 'error', text: friendlyError(e, 'No pudimos cambiar el nivel de acceso.') }),
+      },
+    );
+  }
 
   function run(clientId: string, clientName: string, agencyId: string | null) {
     setMessage(undefined);
@@ -75,8 +87,13 @@ export function CarteraDialog({ agency, onClose }: { agency: Agency; onClose: ()
                     <b className="block truncate text-[13.5px]">{c.name}</b>
                     <span className="block truncate text-[12px] text-muted">{c.owner_email ?? 'Sin responsable'}</span>
                   </span>
-                  <span className="flex items-center gap-2">
+                  <span className="flex flex-wrap items-center gap-2">
                     <Pill kind={kind}>{label}</Pill>
+                    <select aria-label={`Nivel de acceso de la agencia a ${c.name}`} value={c.agency_access_level ?? 'admin'} disabled={setAccess.isPending && setAccess.variables?.id === c.id} onChange={(e) => changeLevel(c.id, c.name, e.target.value as AccessLevel)} className="rounded-[10px] border border-line bg-surface px-2 py-1.5 text-[12.5px]">
+                      <option value="admin">{ACCESS_LEVEL_LABEL.admin}</option>
+                      <option value="advisor">{ACCESS_LEVEL_LABEL.advisor}</option>
+                      <option value="read">{ACCESS_LEVEL_LABEL.read}</option>
+                    </select>
                     <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Quitar a ${c.name} de la cartera`} loading={assign.isPending && assign.variables?.id === c.id} onClick={() => run(c.id, c.name, null)}>Quitar</Button>
                   </span>
                 </li>

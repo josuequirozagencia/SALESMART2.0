@@ -9,6 +9,7 @@ import { APP_LOGGER } from '../../tokens';
 import { PlatformAuditService } from '../platform';
 import { AgencyAccessService } from './agency-access.service';
 import type { AssignAgencyDto, ListAgenciesQuery } from './agencies.dto';
+import type { AccessLevel } from '../../rbac';
 
 export type AgencyState = 'active' | 'suspended' | 'invited';
 
@@ -212,6 +213,28 @@ export class AgenciesService {
     );
     const notified = await this.notify(out.admins, out.org.name, out.target?.name ?? null, out.previous?.name ?? null);
     return { id: orgId, agency: out.target, changed: true, notified };
+  }
+
+  /**
+   * Fija el nivel de acceso de la agencia a UN cliente (ADR-41). Cambia el valor del cliente y el de las membresías de agencia vigentes en la MISMA
+   * transacción: como el nivel se lee de la membresía en cada petición, rige al instante. Sin agencia no hay nivel que fijar (409).
+   */
+  async setAccessLevel(orgId: string, level: AccessLevel): Promise<{ id: string; level: AccessLevel; changed: boolean }> {
+    const out = await this.db.withIdentity(async (tx) => {
+      const [org] = await tx.select({ kind: organizations.kind, parent: organizations.parentAgencyId, level: organizations.agencyAccessLevel, deletedAt: organizations.deletedAt }).from(organizations).where(eq(organizations.id, orgId)).for('update').limit(1);
+      if (!org || org.kind !== 'client' || org.deletedAt) throw new NotFoundError();
+      if (!org.parent) throw new ConflictError('NO_AGENCY', 'La empresa no tiene una agencia que administre su acceso');
+      const now = new Date();
+      await tx.update(organizations).set({ agencyAccessLevel: level, updatedAt: now }).where(eq(organizations.id, orgId));
+      await tx.update(organizationMembers).set({ accessLevel: level }).where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.role, 'agency'), isNull(organizationMembers.revokedAt)));
+      return { changed: org.level !== level, previous: org.level, agencyId: org.parent };
+    });
+    if (out.changed) {
+      await this.safely('client.agency_access_changed', () =>
+        this.audit.record({ action: 'client.agency_access_changed', entityType: 'organization', entityId: orgId, targetOrgId: orgId, details: { agency_id: out.agencyId, from: out.previous, to: level } }),
+      );
+    }
+    return { id: orgId, level, changed: out.changed };
   }
 
   /** Historial de cambios de administración donde la agencia fue origen o destino (más reciente primero, hasta 100). */

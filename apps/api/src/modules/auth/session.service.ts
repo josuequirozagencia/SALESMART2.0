@@ -1,20 +1,44 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
-import { Database, type IdentityTx, organizationMembers, organizations, sessions, trials, users } from '../../db';
+import { Database, type IdentityTx, organizations, sessions, trials, users } from '../../db';
 import type { AppConfig } from '../../config';
+import { isAccessLevel, type AccessLevel } from '../../rbac';
 import { APP_CONFIG } from '../../tokens';
 import { isTrialExpired } from '../organizations';
 import { newToken, parseToken, sameHash } from './tokens';
 
+/** Quién actúa dentro de una organización que no es la suya (ADR-41): el Súper Admin (soporte) o una persona de agencia en un cliente de su cartera. */
+export type ActingAs = 'super_admin' | 'agency';
+
+/**
+ * ¿Quien tiene este rol, dentro de una organización de este tipo, está ACTUANDO en el contexto de otra? Se deriva siempre del rol verificado
+ * y del tipo de organización (no se guarda ni se acepta del cliente): el Súper Admin fuera de la plataforma, y la agencia dentro de un cliente.
+ */
+export function actingFor(role: string, orgKind: string): ActingAs | null {
+  if (role === 'super_admin' && orgKind !== 'platform') return 'super_admin';
+  if (role === 'agency' && orgKind === 'client') return 'agency';
+  return null;
+}
+
 export interface AuthContext {
   sessionId: string;
   userId: string;
+  user: { email: string; fullName: string | null };
   organizationId: string;
+  orgName: string;
   orgKind: 'platform' | 'agency' | 'client';
   role: string;
+  /** Nivel de acceso de la membresía (solo las de agencia en un cliente lo tienen). */
+  accessLevel: AccessLevel | null;
+  /** Contexto de otra organización (ADR-41): el rol efectivo es el de la membresía (agencia) o el de soporte (Súper Admin, sin membresía). */
+  actingAs: ActingAs | null;
+  /** Organización con la que empezó la sesión: a ella se vuelve y de ella sale `acting_org_id`. */
+  home: { id: string; name: string; kind: 'platform' | 'agency' | 'client' };
   /** Prueba gratuita vencida (por la hora, no por el estado materializado): la cuenta está en pausa (ADR-23 #5). */
   trialExpired: boolean;
+  /** Quien actúa en una empresa en pausa o con nivel «lectura» solo puede ver (ADR-41). */
+  readOnly: boolean;
 }
 export interface IssuedTokens {
   accessToken: string;
@@ -50,6 +74,7 @@ export class SessionService {
         id,
         userId: input.userId,
         activeOrgId: input.organizationId,
+        homeOrgId: input.organizationId,
         userSessionVersion: input.sessionVersion,
         accessHash: access.hash,
         accessExpiresAt,
@@ -113,6 +138,17 @@ export class SessionService {
     });
   }
 
+  /** Contexto VERIFICADO de una sesión (misma validación que cada petición) o null. Para `/auth/me`. */
+  async contextOf(sessionId: string, now = new Date()): Promise<AuthContext | null> {
+    return this.db.withIdentity((tx) => this.contextIn(tx, sessionId, now));
+  }
+
+  /** Igual que `contextOf` dentro de una transacción de identidad ya abierta (el cambio de contexto lo relee tras escribir). */
+  async contextIn(tx: IdentityTx, sessionId: string, now = new Date()): Promise<AuthContext | null> {
+    const row = await this.loadIn(tx, sessionId);
+    return row && this.validState(row, now) ? this.ctx(row, now) : null;
+  }
+
   private load(sessionId: string) {
     return this.db.withIdentity((tx) => this.loadIn(tx, sessionId));
   }
@@ -121,15 +157,24 @@ export class SessionService {
     const [r] = await tx
       .select({
         s: sessions,
+        userEmail: users.email,
+        userFullName: users.fullName,
         userStatus: users.status,
         userDeletedAt: users.deletedAt,
         userVersion: users.sessionVersion,
         orgStatus: organizations.status,
         orgDeletedAt: organizations.deletedAt,
         orgKind: organizations.kind,
+        orgName: organizations.name,
         orgPlanId: organizations.planId,
-        role: organizationMembers.role,
         // Subconsultas correlacionadas (una sola ida a la BD): drizzle tipa como never el leftJoin sobre IdentityTx.
+        // Membresía VIGENTE en la organización activa: si se revoca, la sesión deja de valer al instante (ADR-40).
+        memberRole: sql<string | null>`(SELECT m.role FROM organization_members m WHERE m.user_id = ${sessions.userId} AND m.organization_id = ${sessions.activeOrgId} AND m.revoked_at IS NULL LIMIT 1)`,
+        memberLevel: sql<string | null>`(SELECT m.access_level FROM organization_members m WHERE m.user_id = ${sessions.userId} AND m.organization_id = ${sessions.activeOrgId} AND m.revoked_at IS NULL LIMIT 1)`,
+        // Soporte (ADR-41): el Súper Admin entra a otra organización SIN membresía en ella; su derecho es la membresía `super_admin` VIGENTE en la plataforma.
+        isSuperAdmin: sql<boolean>`EXISTS (SELECT 1 FROM organization_members m JOIN organizations po ON po.id = m.organization_id WHERE m.user_id = ${sessions.userId} AND m.role = 'super_admin' AND m.revoked_at IS NULL AND po.kind = 'platform' AND po.status = 'active' AND po.deleted_at IS NULL)`,
+        homeName: sql<string | null>`(SELECT h.name FROM organizations h WHERE h.id = ${sessions.homeOrgId})`,
+        homeKind: sql<string | null>`(SELECT h.kind FROM organizations h WHERE h.id = ${sessions.homeOrgId})`,
         // Organizaciones sin prueba (plataforma, agencia, clientes de pago futuros) → null → nunca están en pausa.
         trialStatus: sql<string | null>`(SELECT ${trials.status} FROM ${trials} WHERE ${trials.organizationId} = ${sessions.activeOrgId})`,
         trialEndsAt: sql<Date | null>`(SELECT ${trials.endsAt} FROM ${trials} WHERE ${trials.organizationId} = ${sessions.activeOrgId})`.mapWith((v: string | Date | null) => (v === null ? null : new Date(v))),
@@ -137,18 +182,17 @@ export class SessionService {
       .from(sessions)
       .innerJoin(users, eq(users.id, sessions.userId))
       .innerJoin(organizations, eq(organizations.id, sessions.activeOrgId))
-      // INNER JOIN a la membresía VIGENTE: si se revoca, la sesión deja de valer al instante
-      .innerJoin(
-        organizationMembers,
-        and(eq(organizationMembers.userId, sessions.userId), eq(organizationMembers.organizationId, sessions.activeOrgId), isNull(organizationMembers.revokedAt)),
-      )
       .where(eq(sessions.id, sessionId))
       .limit(1);
-    return r;
+    if (!r) return undefined;
+    // Rol efectivo: el de la membresía vigente; sin membresía, solo el Súper Admin vigente entra (soporte), y nunca «a» la plataforma sin membresía
+    const role = r.memberRole ?? (r.isSuperAdmin && r.orgKind !== 'platform' ? 'super_admin' : null);
+    return { ...r, role };
   }
 
-  private validState(r: NonNullable<Awaited<ReturnType<SessionService['load']>>>, now: Date): boolean {
+  private validState(r: NonNullable<Awaited<ReturnType<SessionService['load']>>>, now: Date): r is typeof r & { role: string } {
     return (
+      r.role !== null &&
       r.s.revokedAt === null &&
       r.s.absoluteExpiresAt > now &&
       r.userStatus === 'active' &&
@@ -159,9 +203,26 @@ export class SessionService {
     );
   }
 
-  private ctx(r: NonNullable<Awaited<ReturnType<SessionService['load']>>>, now: Date): AuthContext {
+  private ctx(r: NonNullable<Awaited<ReturnType<SessionService['load']>>> & { role: string }, now: Date): AuthContext {
     // Con un plan asignado la empresa ya no depende de la prueba (ADR-38): no se pausa aunque su prueba haya vencido
     const trialExpired = r.orgPlanId === null && r.trialStatus !== null && r.trialEndsAt !== null && isTrialExpired({ status: r.trialStatus, endsAt: r.trialEndsAt }, now);
-    return { sessionId: r.s.id, userId: r.s.userId, organizationId: r.s.activeOrgId, orgKind: r.orgKind as AuthContext['orgKind'], role: r.role, trialExpired };
+    const actingAs = actingFor(r.role, r.orgKind);
+    const accessLevel = isAccessLevel(r.memberLevel) ? r.memberLevel : null;
+    // Quien actúa solo lee si su nivel es «lectura» (un nivel desconocido se trata como lectura: falla hacia lo seguro) o si la empresa está en pausa
+    const readOnly = actingAs === 'agency' ? accessLevel === null || accessLevel === 'read' || trialExpired : actingAs === 'super_admin' ? r.orgKind === 'client' && trialExpired : false;
+    return {
+      sessionId: r.s.id,
+      userId: r.s.userId,
+      user: { email: r.userEmail, fullName: r.userFullName },
+      organizationId: r.s.activeOrgId,
+      orgName: r.orgName,
+      orgKind: r.orgKind as AuthContext['orgKind'],
+      role: r.role,
+      accessLevel,
+      actingAs,
+      home: { id: r.s.homeOrgId, name: r.homeName ?? '', kind: (r.homeKind ?? 'client') as AuthContext['home']['kind'] },
+      trialExpired,
+      readOnly,
+    };
   }
 }

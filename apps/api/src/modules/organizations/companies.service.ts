@@ -17,6 +17,8 @@ export interface CompanyItem {
   plan: { id: string; name: string } | null;
   /** Agencia que administra al cliente (`null` = administración directa; las agencias y la plataforma no tienen). */
   agency: { id: string; name: string } | null;
+  /** Nivel con el que esa agencia entra al cliente (ADR-41); `null` si no tiene agencia. */
+  agency_access_level: 'read' | 'advisor' | 'admin' | null;
   /** Miembros activos de la organización. */
   users: number;
   owner_email: string | null;
@@ -43,6 +45,7 @@ type Row = {
   plan_name: string | null;
   agency_id: string | null;
   agency_name: string | null;
+  agency_access_level: 'read' | 'advisor' | 'admin';
   users: number;
   owner_email: string | null;
   timezone: string;
@@ -55,7 +58,7 @@ type Row = {
 
 const iso = (d: Date | string): string => new Date(d).toISOString();
 /** Escapa % y _ (y el propio escape) para un ILIKE literal; el carácter de escape es «!», sin barras invertidas. */
-const likeEscape = (s: string): string => s.replace(/[!%_]/g, (c) => `!${c}`);
+export const likeEscape = (s: string): string => s.replace(/[!%_]/g, (c) => `!${c}`);
 
 /**
  * Empresas de la plataforma (M2.2, ADR-38): lista para el Súper Admin y asignación de plan.
@@ -72,13 +75,20 @@ export class CompaniesService {
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
-  async list(f: ListCompaniesQuery, now = new Date()): Promise<CompanyList> {
+  /**
+   * `scope`: la lista de «Mis clientes» de una agencia (ADR-41): SOLO su cartera, fijada por el servidor desde el contexto verificado; el filtro `agency`
+   * y `kind` de la consulta se ignoran. Sin `scope` es la lista de la plataforma (Súper Admin).
+   */
+  async list(f: ListCompaniesQuery, now = new Date(), scope?: { agencyId: string }): Promise<CompanyList> {
     const where: SQL[] = [sql`s.id IS NOT NULL`];
     if (f.cursor) where.push(sql`s.id < ${f.cursor}`);
-    if (f.kind) where.push(sql`s.kind = ${f.kind}`);
     if (f.state) where.push(sql`s.state = ${f.state}`);
-    if (f.agency === 'none') where.push(sql`s.kind = 'client' AND s.agency_id IS NULL`);
-    else if (f.agency) where.push(sql`s.agency_id = ${f.agency}`);
+    if (scope) where.push(sql`s.kind = 'client' AND s.agency_id = ${scope.agencyId}`);
+    else {
+      if (f.kind) where.push(sql`s.kind = ${f.kind}`);
+      if (f.agency === 'none') where.push(sql`s.kind = 'client' AND s.agency_id IS NULL`);
+      else if (f.agency) where.push(sql`s.agency_id = ${f.agency}`);
+    }
     if (f.plan === 'none') where.push(sql`s.plan_id IS NULL`);
     else if (f.plan) where.push(sql`s.plan_id = ${f.plan}`);
     if (f.q) {
@@ -90,15 +100,15 @@ export class CompaniesService {
     const rows = await this.db.withIdentity(async (tx) => {
       const res = await tx.execute<Row>(sql`
         SELECT * FROM (
-          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.plan_id, p.name AS plan_name, o.parent_agency_id AS agency_id, ag.name AS agency_name,
-                 (SELECT count(*)::int FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL) AS users,
+          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.plan_id, p.name AS plan_name, o.parent_agency_id AS agency_id, ag.name AS agency_name, o.agency_access_level,
+                 (SELECT count(*)::int FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND (o.kind = 'agency' OR m.role <> 'agency')) AS users,
                  (SELECT u.email FROM organization_members m JOIN users u ON u.id = m.user_id
-                   WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND m.role IN ('client_admin', 'agency') ORDER BY m.created_at, m.id LIMIT 1) AS owner_email,
+                   WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND m.role IN ('client_admin', 'agency') AND (o.kind = 'agency' OR m.role = 'client_admin') ORDER BY m.created_at, m.id LIMIT 1) AS owner_email,
                  (SELECT i.email FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_email,
                  (SELECT i.expires_at FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_expires_at,
                  CASE WHEN o.plan_id IS NULL AND t.id IS NOT NULL THEN t.ends_at END AS trial_ends_at,
                  CASE WHEN o.status <> 'active' THEN 'suspended'
-                      WHEN o.kind IN ('client', 'agency') AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
+                      WHEN o.kind IN ('client', 'agency') AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND (o.kind = 'agency' OR m.role <> 'agency'))
                            AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                       WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'
                       WHEN t.status = 'expired' OR t.ends_at <= ${now} THEN 'trial_expired'
@@ -123,6 +133,7 @@ export class CompaniesService {
         state: r.state,
         plan: r.plan_id && r.plan_name ? { id: r.plan_id, name: r.plan_name } : null,
         agency: r.agency_id && r.agency_name ? { id: r.agency_id, name: r.agency_name } : null,
+        agency_access_level: r.agency_id ? r.agency_access_level : null,
         users: Number(r.users),
         owner_email: r.owner_email ?? r.inv_email,
         timezone: r.timezone,

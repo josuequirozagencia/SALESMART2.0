@@ -1,7 +1,7 @@
 import { Body, Controller, Get, HttpCode, Inject, Param, Post, Put, Query } from '@nestjs/common';
 import { PlatformOnly, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
-import { assignAgencySchema, listAgenciesQuerySchema, type AssignAgencyDto, type ListAgenciesQuery } from './agencies.dto';
+import { assignAgencySchema, listAgenciesQuerySchema, setAgencyAccessSchema, type AssignAgencyDto, type ListAgenciesQuery, type SetAgencyAccessDto } from './agencies.dto';
 import { AgenciesService } from './agencies.service';
 import { uuidParam } from './plans.dto';
 
@@ -41,5 +41,11 @@ export class PlatformAgenciesController {
   @Put('organizations/:id/agency')
   assign(@Param('id', new ZodValidationPipe(uuidParam)) id: string, @Body(new ZodValidationPipe(assignAgencySchema)) b: AssignAgencyDto) {
     return this.agencies.assignAgency(id, b);
+  }
+
+  /** Nivel de acceso de la agencia a ESTE cliente. Surte efecto en la siguiente petición de cada persona de la agencia (ADR-41). */
+  @Put('organizations/:id/agency-access')
+  setAccess(@Param('id', new ZodValidationPipe(uuidParam)) id: string, @Body(new ZodValidationPipe(setAgencyAccessSchema)) b: SetAgencyAccessDto) {
+    return this.agencies.setAccessLevel(id, b.level);
   }
 }

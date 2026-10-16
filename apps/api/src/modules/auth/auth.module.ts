@@ -7,6 +7,9 @@ import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { Argon2idHasher } from '../../security';
 import { AuthController } from './auth.controller';
+import { AccessSessionsService } from './context/access-sessions.service';
+import { ContextController, PlatformAccessSessionsController } from './context/context.controller';
+import { ContextService } from './context/context.service';
 import { AuthService } from './auth.service';
 import { PASSWORD_HASHER } from './auth.tokens';
 import { IdentityCleanupJob } from './identity-cleanup.job';
@@ -19,7 +22,7 @@ import { ThrottleService } from './throttle.service';
 import { FakeCaptchaVerifier, UnavailableCaptchaVerifier } from './signup/fakes';
 import { CAPTCHA_VERIFIER } from './signup/ports';
 import { TurnstileVerifier } from './signup/turnstile.verifier';
-import { InvitationsController, PlatformAgencyCreationController, PlatformInvitationsController } from './invitations/invitations.controller';
+import { AgencyClientRegistrationController, InvitationsController, PlatformAgencyCreationController, PlatformInvitationsController } from './invitations/invitations.controller';
 import { InvitationsService } from './invitations/invitations.service';
 import { SignupController } from './signup/signup.controller';
 import { SignupLimiter } from './signup/signup-limiter';
@@ -27,12 +30,14 @@ import { SignupService } from './signup/signup.service';
 
 @Module({
   imports: [AuditModule, PlatformModule, OrganizationsModule, MailModule],
-  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController],
+  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController, AgencyClientRegistrationController, ContextController, PlatformAccessSessionsController],
   providers: [
     AuthService,
     SignupService,
     PasswordService,
     InvitationsService,
+    ContextService,
+    AccessSessionsService,
     PermissionService,
     SignupLimiter,
     // Anti-bots (ADR-37): Turnstile. 'none' (503) o fake de desarrollo/pruebas (la config lo prohíbe en producción). El correo vive en MailModule.

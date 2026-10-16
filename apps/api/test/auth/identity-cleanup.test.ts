@@ -41,8 +41,8 @@ const ago = (interval: string) => `now() - interval '${interval}'`;
 async function session(opts: { absolute: string; revoked?: string }): Promise<void> {
   const u = await user();
   await admin.query(
-    `INSERT INTO sessions(id,user_id,active_org_id,user_session_version,access_hash,access_expires_at,refresh_hash,refresh_expires_at,absolute_expires_at,revoked_at,revoke_reason)
-     VALUES (gen_random_uuid(),$1,$2,1,$3,now(),$3,now(),${opts.absolute},${opts.revoked ?? 'NULL'},${opts.revoked ? "'logout'" : 'NULL'})`,
+    `INSERT INTO sessions(id,user_id,active_org_id,home_org_id,user_session_version,access_hash,access_expires_at,refresh_hash,refresh_expires_at,absolute_expires_at,revoked_at,revoke_reason)
+     VALUES (gen_random_uuid(),$1,$2,$2,1,$3,now(),$3,now(),${opts.absolute},${opts.revoked ?? 'NULL'},${opts.revoked ? "'logout'" : 'NULL'})`,
     [u, ORG, HEX],
   );
 }

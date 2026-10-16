@@ -9,6 +9,8 @@ interface SessionApi {
   state: AuthState;
   login(email: string, password: string): Promise<Me>;
   logout(): Promise<void>;
+  /** Entra a otra organización (o vuelve al origen con `null`) sin cerrar sesión. El servidor decide si hay derecho (404 si no). */
+  switchContext(target: string | null): Promise<Me>;
 }
 
 const Ctx = createContext<SessionApi | null>(null);
@@ -57,7 +59,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string): Promise<Me> => {
     const r = await api<LoginResponse>('/auth/login', { method: 'POST', auth: false, body: { email, password } });
     tokens.set(r.access_token);
-    const me: Me = { user: r.user, organization: r.organization, role: r.role };
+    const me: Me = { user: r.user, organization: r.organization, role: r.role, home: r.home, acting_as: r.acting_as, read_only: r.read_only, access_level: r.access_level };
     qc.clear(); // nada de datos de una sesión anterior
     setState({ status: 'authed', me });
     return me;
@@ -75,7 +77,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setState({ status: 'anon' });
   }, [qc]);
 
-  const value = useMemo(() => ({ state, login, logout }), [state, login, logout]);
+  const switchContext = useCallback(async (target: string | null): Promise<Me> => {
+    const me = await api<Me>('/context/switch', { method: 'POST', body: { target } });
+    qc.clear(); // los datos de un contexto jamás se muestran en otro
+    setState({ status: 'authed', me });
+    return me;
+  }, [qc]);
+
+  const value = useMemo(() => ({ state, login, logout, switchContext }), [state, login, logout, switchContext]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

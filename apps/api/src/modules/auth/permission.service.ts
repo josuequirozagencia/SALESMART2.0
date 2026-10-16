@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { Database, permissions, rolePermissions, roles } from '../../db';
-import { isPermissionKey, type PermissionKey } from '../../rbac';
+import { accessLevelPermissions, isPermissionKey, type AccessLevel, type PermissionKey } from '../../rbac';
+import type { ActingAs } from './session.service';
 
 const TTL_MS = 60_000;
 
@@ -20,6 +21,23 @@ export class PermissionService {
     if (!role) return new Set();
     if (!this.cache || now - this.cache.at > TTL_MS) this.cache = { at: now, byRole: await this.load() };
     return this.cache.byRole.get(role) ?? new Set();
+  }
+
+  /**
+   * Permisos de la sesión en su contexto ACTUAL (ADR-41). En su propia organización: los de su rol. Actuando en otra:
+   *  - agencia en un cliente → según el nivel de acceso de ESE cliente (sin nivel, ningún permiso);
+   *  - Súper Admin (soporte) en una empresa → los del administrador del cliente; en una agencia → los de la agencia;
+   *  - con la empresa en pausa (prueba vencida) → solo los de lectura, para ambos.
+   * Nunca se incluyen permisos de plataforma ni de la consola de agencia dentro de un cliente.
+   */
+  async forContext(c: { role: string; orgKind: string; accessLevel: AccessLevel | null; actingAs: ActingAs | null; trialExpired: boolean }, now = Date.now()): Promise<ReadonlySet<PermissionKey>> {
+    if (!c.actingAs) return this.forRole(c.role, now);
+    // Falla cerrada: una membresía de agencia en un cliente SIN nivel de acceso (dato corrupto) no puede nada
+    if (c.actingAs === 'agency' && c.accessLevel === null) return new Set();
+    if (c.actingAs === 'super_admin' && c.orgKind === 'agency') return this.forRole('agency', now);
+    const base = { clientAdmin: await this.forRole('client_admin', now), advisor: await this.forRole('advisor', now) };
+    const level: AccessLevel = c.actingAs === 'agency' ? (c.accessLevel as AccessLevel) : 'admin';
+    return accessLevelPermissions(level, base, c.trialExpired);
   }
 
   invalidate(): void {

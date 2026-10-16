@@ -41,9 +41,7 @@ export class AuthController {
       token_type: 'Bearer',
       expires_in: Math.floor((r.tokens.accessExpiresAt.getTime() - Date.now()) / 1000),
       ...(viaBody ? { refresh_token: r.tokens.refreshToken } : {}),
-      user: r.user,
-      organization: r.organization,
-      role: r.role,
+      ...r.me,
     };
   }
 

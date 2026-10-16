@@ -1,10 +1,24 @@
 /** Contratos de la API que consume la web (ver apps/api: auth, trials). Snake_case tal como los envía el servidor. */
 export type Role = 'super_admin' | 'agency' | 'client_admin' | 'advisor';
 
+/** Nivel con el que una agencia entra a un cliente (ADR-11/41). «Sin acceso» = no está en su cartera. */
+export type AccessLevel = 'read' | 'advisor' | 'admin';
+/** Quién actúa dentro de una organización que no es la suya: el Súper Admin (soporte) o una agencia en un cliente. */
+export type ActingAs = 'super_admin' | 'agency';
+export type OrgKind = 'platform' | 'agency' | 'client';
+
+/**
+ * Quién soy y en qué contexto estoy. La web solo lo PINTA (banner, solo lectura): el servidor vuelve a verificar todo en cada petición.
+ * `home` es la organización con la que empezó la sesión («Volver a mi agencia»).
+ */
 export interface Me {
   user: { id: string; email: string; full_name: string | null };
-  organization: { id: string; name: string; kind: 'platform' | 'agency' | 'client' };
+  organization: { id: string; name: string; kind: OrgKind };
   role: Role;
+  home: { id: string; name: string; kind: OrgKind };
+  acting_as: ActingAs | null;
+  read_only: boolean;
+  access_level: AccessLevel | null;
 }
 
 export interface LoginResponse extends Me {
@@ -79,6 +93,8 @@ export interface Company {
   plan: { id: string; name: string } | null;
   /** Agencia que administra al cliente (`null` = administración directa). */
   agency: { id: string; name: string } | null;
+  /** Nivel con el que esa agencia entra al cliente (`null` si no tiene agencia). */
+  agency_access_level: AccessLevel | null;
   users: number;
   owner_email: string | null;
   timezone: string;
@@ -152,4 +168,32 @@ export interface AssignAgencyResult {
   changed: boolean;
   /** Avisos enviados al administrador del cliente. */
   notified: number;
+}
+
+/** Cliente al que la persona puede entrar con una membresía vigente (el selector «Cambiar de cliente»). */
+export interface ContextOption {
+  id: string;
+  name: string;
+  role: Role;
+  access_level: AccessLevel | null;
+}
+
+export type AccessEndReason = 'switch' | 'return' | 'access_removed' | 'session_ended';
+
+/** Una entrada de un Súper Admin o una agencia a otra organización (solo la ve el Súper Admin). */
+export interface AccessSession {
+  id: string;
+  actor: { email: string; name: string | null };
+  actor_role: 'super_admin' | 'agency';
+  organization: { id: string; name: string; kind: OrgKind };
+  started_at: string;
+  ended_at: string | null;
+  end_reason: AccessEndReason | null;
+  open: boolean;
+  duration_seconds: number;
+}
+
+export interface AccessSessionList {
+  items: AccessSession[];
+  next_cursor: string | null;
 }

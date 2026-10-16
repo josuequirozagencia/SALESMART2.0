@@ -3,12 +3,13 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
 import type { AppConfig } from '../../../config';
-import { Database, invitations, organizationMembers, organizations, plans, trials, users, type IdentityTx } from '../../../db';
-import { AppError, ConflictError, type ErrorDetail, InvalidInvitationError, InvitationExpiredError, NotFoundError, ServiceUnavailableError, TooManyAttemptsError, ValidationError } from '../../../errors';
+import { Database, invitations, organizationMembers, organizationOwnershipHistory, organizations, plans, trials, users, type IdentityTx } from '../../../db';
+import { AppError, ConflictError, type ErrorDetail, ForbiddenError, InvalidInvitationError, InvitationExpiredError, NotFoundError, ServiceUnavailableError, TooManyAttemptsError, ValidationError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
 import type { PasswordHasher } from '../../../security';
-import { PlatformContext } from '../../../tenant';
+import { PlatformContext, TenantContext } from '../../../tenant';
 import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
+import { AuditService } from '../../audit';
 import { AgencyAccessService, TrialsService } from '../../organizations';
 import { PlatformAuditService } from '../../platform';
 import { PASSWORD_HASHER } from '../auth.tokens';
@@ -16,7 +17,7 @@ import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
 import { SignupLimiter } from '../signup/signup-limiter';
 import { ThrottleService } from '../throttle.service';
 import { hashSecret, parseToken, sameHash } from '../tokens';
-import type { CreateAgencyDto, CreateCompanyDto } from './invitations.dto';
+import type { CreateAgencyDto, CreateCompanyDto, RegisterClientDto } from './invitations.dto';
 
 export type InvitationDelivery = 'sent' | 'failed' | 'unavailable';
 
@@ -41,6 +42,17 @@ export interface InvitationPreview {
   /** Si el correo ya tiene cuenta: la web pide su contraseña actual en lugar de crear una. */
   account_exists: boolean;
 }
+
+/** Quién crea o reenvía: el Súper Admin (plataforma) o una agencia que registra a un cliente de su cartera (ADR-41). */
+type Origin = { by: 'platform'; actor: string } | { by: 'agency'; actor: string; agencyId: string };
+
+const platformOrigin = (): Origin => ({ by: 'platform', actor: PlatformContext.current().actorUserId });
+/** El origen sale SIEMPRE del contexto verificado (nunca de la petición): la agencia es la organización del principal. */
+const agencyOrigin = (): Origin => {
+  const c = TenantContext.current();
+  if (!c.userId) throw new ForbiddenError();
+  return { by: 'agency', actor: c.userId, agencyId: c.organizationId };
+};
 
 type Loaded = {
   id: string;
@@ -74,25 +86,40 @@ export class InvitationsService {
     @Inject(TrialsService) private readonly trials: TrialsService,
     @Inject(AgencyAccessService) private readonly agencyAccess: AgencyAccessService,
     @Inject(PlatformAuditService) private readonly audit: PlatformAuditService,
+    @Inject(AuditService) private readonly clientAudit: AuditService,
   ) {}
 
   // ── Súper Admin ───────────────────────────────────────────────────────────
 
   /** Crea la empresa (cliente) y la invitación del dueño en una transacción; luego intenta enviar el correo. */
   createCompany(input: CreateCompanyDto): Promise<CompanyCreated> {
-    return this.create('client', input);
+    return this.create('client', input, platformOrigin());
+  }
+
+  /**
+   * «Registrar cliente» (F02, ADR-41): la AGENCIA crea la empresa de un cliente en su cartera (`parent_agency_id` y `created_by_agency_id` = la agencia del
+   * contexto) e invita a su dueño. Sin plan: el cliente paga el suyo y su prueba de 7 días empieza al aceptar. La agencia y su personal reciben acceso al
+   * cliente en la misma transacción (con el nivel por defecto) y el alta queda en el historial de la cartera.
+   */
+  registerClient(input: RegisterClientDto): Promise<CompanyCreated> {
+    return this.create('client', { ...input, plan_id: null }, agencyOrigin());
   }
 
   /** Crea una AGENCIA y la invitación de su dueño (ADR-40): sin plan ni prueba; la invitación lleva el rol `agency`. */
   createAgency(input: CreateAgencyDto): Promise<CompanyCreated> {
-    return this.create('agency', { ...input, plan_id: null });
+    return this.create('agency', { ...input, plan_id: null }, platformOrigin());
   }
 
-  private async create(kind: 'client' | 'agency', input: CreateCompanyDto): Promise<CompanyCreated> {
+  private async create(kind: 'client' | 'agency', input: CreateCompanyDto, origin: Origin): Promise<CompanyCreated> {
     const linkBase = this.linkBase();
-    const actor = PlatformContext.current().actorUserId;
+    const actor = origin.actor;
     const planId = input.plan_id ?? null;
     const out = await this.db.withIdentity(async (tx) => {
+      if (origin.by === 'agency') {
+        // Defensa en profundidad: quien registra debe ser una AGENCIA activa (el permiso ya lo restringe al rol `agency` en su organización)
+        const [ag] = await tx.select({ kind: organizations.kind, status: organizations.status, deletedAt: organizations.deletedAt }).from(organizations).where(eq(organizations.id, origin.agencyId)).limit(1);
+        if (!ag || ag.kind !== 'agency' || ag.status !== 'active' || ag.deletedAt !== null) throw new ForbiddenError();
+      }
       let plan: { id: string; name: string } | null = null;
       if (planId) {
         const [p] = await tx.select({ id: plans.id, name: plans.name, archivedAt: plans.archivedAt }).from(plans).where(eq(plans.id, planId)).for('share').limit(1);
@@ -102,30 +129,54 @@ export class InvitationsService {
       }
       const [org] = await tx
         .insert(organizations)
-        .values({ kind, name: input.name, timezone: input.timezone, country: input.country, planId })
+        .values({ kind, name: input.name, timezone: input.timezone, country: input.country, planId, ...(origin.by === 'agency' ? { parentAgencyId: origin.agencyId, createdByAgencyId: origin.agencyId } : {}) })
         .returning({ id: organizations.id });
       const issued = await this.issue(tx, { organizationId: org!.id, email: input.owner_email, role: kind === 'agency' ? 'agency' : 'client_admin', invitedBy: actor });
+      if (origin.by === 'agency') {
+        await tx.insert(organizationOwnershipHistory).values({ organizationId: org!.id, fromAgencyId: null, toAgencyId: origin.agencyId, reason: 'Registrado por la agencia', notifyClient: false, changedBy: actor });
+        await this.agencyAccess.reconcileClient(tx, org!.id, actor);
+      }
       return { orgId: org!.id, plan, issued };
     });
     const invitation = await this.deliver(linkBase, input.owner_email, input.name, out.issued, kind);
     const prefix = kind === 'agency' ? 'agency' : 'company';
-    await this.safely(`${prefix}.created`, () =>
-      this.audit.record({
-        action: `${prefix}.created`,
-        entityType: 'organization',
-        entityId: out.orgId,
-        targetOrgId: out.orgId,
-        details: { name: input.name, country: input.country, timezone: input.timezone, plan_id: planId, owner_email: input.owner_email, delivery: invitation.delivery },
-      }),
-    );
+    if (origin.by === 'agency') {
+      // Auditoría de la AGENCIA (su contexto de organización): quién registró a qué cliente
+      await this.safely('client.registered', () =>
+        this.clientAudit.record({ entityType: 'organization', entityId: out.orgId, newValue: { name: input.name, country: input.country, timezone: input.timezone, owner_email: input.owner_email, delivery: invitation.delivery } }),
+      );
+    } else {
+      await this.safely(`${prefix}.created`, () =>
+        this.audit.record({
+          action: `${prefix}.created`,
+          entityType: 'organization',
+          entityId: out.orgId,
+          targetOrgId: out.orgId,
+          details: { name: input.name, country: input.country, timezone: input.timezone, plan_id: planId, owner_email: input.owner_email, delivery: invitation.delivery },
+        }),
+      );
+    }
     return { company: { id: out.orgId, name: input.name, kind, state: 'invited', plan: out.plan, timezone: input.timezone, country: input.country }, invitation };
   }
 
   /** Reenvía la invitación pendiente de una empresa: reemplaza el token (el enlace anterior deja de valer). */
-  async resend(orgId: string): Promise<InvitationIssued> {
+  resend(orgId: string): Promise<InvitationIssued> {
+    return this.resendFor(orgId, platformOrigin());
+  }
+
+  /** Igual, pero a un cliente de la CARTERA de la agencia del contexto. Un cliente ajeno es un 404 como si no existiera. */
+  resendForAgency(clientId: string): Promise<InvitationIssued> {
+    return this.resendFor(clientId, agencyOrigin());
+  }
+
+  private async resendFor(orgId: string, origin: Origin): Promise<InvitationIssued> {
     const linkBase = this.linkBase();
-    const actor = PlatformContext.current().actorUserId;
+    const actor = origin.actor;
     const out = await this.db.withIdentity(async (tx) => {
+      if (origin.by === 'agency') {
+        const [own] = await tx.select({ id: organizations.id }).from(organizations).where(and(eq(organizations.id, orgId), eq(organizations.parentAgencyId, origin.agencyId), eq(organizations.kind, 'client'))).limit(1);
+        if (!own) throw new NotFoundError();
+      }
       const [row] = await tx
         .select({ id: invitations.id, email: invitations.email, role: invitations.role, consumedAt: invitations.consumedAt, lastSentAt: invitations.lastSentAt, orgName: organizations.name, orgKind: organizations.kind, orgDeleted: organizations.deletedAt })
         .from(invitations)
@@ -146,9 +197,15 @@ export class InvitationsService {
     });
     const invitation = await this.deliver(linkBase, out.email, out.orgName, out.issued, out.orgKind);
     const prefix = out.orgKind === 'agency' ? 'agency' : 'company';
-    await this.safely(`${prefix}.invitation_resent`, () =>
-      this.audit.record({ action: `${prefix}.invitation_resent`, entityType: 'organization', entityId: orgId, targetOrgId: orgId, details: { owner_email: out.email, delivery: invitation.delivery } }),
-    );
+    if (origin.by === 'agency') {
+      await this.safely('client.invitation_resent', () =>
+        this.clientAudit.record({ entityType: 'organization', entityId: orgId, field: 'invitation', newValue: { event: 'resent', owner_email: out.email, delivery: invitation.delivery } }),
+      );
+    } else {
+      await this.safely(`${prefix}.invitation_resent`, () =>
+        this.audit.record({ action: `${prefix}.invitation_resent`, entityType: 'organization', entityId: orgId, targetOrgId: orgId, details: { owner_email: out.email, delivery: invitation.delivery } }),
+      );
+    }
     return invitation;
   }
 

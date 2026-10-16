@@ -1,6 +1,6 @@
 // E2E del flujo de acceso (ADR-23) en un navegador real contra la API y la web COMPILADAS.
 import { expect, test } from '@playwright/test';
-import { apiLogin, createAccount, decide, expireTrialOf, hasAgencyAccess, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
+import { adminToken, apiLogin, createAccount, decide, expireTrialOf, hasAgencyAccess, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
 
 const REASON = 'Aún estoy conectando mi WhatsApp y probando los agentes';
 
@@ -421,6 +421,91 @@ test('agencias y carteras: crea una agencia, su dueño acepta, el Súper Admin l
   await agencyRow.getByRole('button', { name: `Reactivar a ${agencyName}` }).click();
   await page.getByRole('dialog', { name: `Reactivar a ${agencyName}` }).getByRole('button', { name: 'Reactivar' }).click();
   await expect(agencyRow).toContainText('Activa');
+});
+
+test('contexto: la agencia registra un cliente, entra a uno y a otro sin cerrar sesión y vuelve; el Súper Admin lo ve en Accesos y entra en soporte', async ({ page, request }) => {
+  const s = state();
+  const { apiBase } = s;
+  const JSON_HEADERS = { 'content-type': 'application/json' };
+  const owner = uniqueEmail('agencia-ctx');
+  const clientEmail = await createAccount(request, uniqueEmail('cliente-ctx'));
+  const foreignEmail = await createAccount(request, uniqueEmail('ajeno-ctx'));
+  const agencyName = `Agencia ${uniqueEmail('c').slice(2, 8)}`;
+  const registered = `Panadería ${uniqueEmail('p').slice(2, 8)}`;
+  const admin = await adminToken(request);
+  const auth = { ...JSON_HEADERS, authorization: `Bearer ${admin}` };
+  const companyIdOf = async (email: string): Promise<string> => ((await (await request.get(`${apiBase}/v1/platform/companies?q=${encodeURIComponent(email)}`, { headers: auth })).json()) as { items: Array<{ id: string }> }).items[0]!.id;
+
+  // Preparación por la API: una agencia con su dueño y un cliente existente en su cartera
+  const since = mailMark();
+  const created = await request.post(`${apiBase}/v1/platform/agencies`, { headers: auth, data: { name: agencyName, owner_email: owner, timezone: 'America/Guayaquil', country: 'EC' } });
+  expect(created.status()).toBe(201);
+  const agencyId = ((await created.json()) as { company: { id: string } }).company.id;
+  const { inviteUrl } = await nextMail('invitación', since);
+  const token = new URL(inviteUrl ?? '').hash.replace(/^#token=/, '');
+  expect((await request.post(`${apiBase}/v1/auth/invitations/accept`, { headers: JSON_HEADERS, data: { token, password: PASSWORD, full_name: 'Dueña Agencia', phone: '+593987654321' } })).status()).toBe(200);
+  const clientId = await companyIdOf(clientEmail);
+  const foreignId = await companyIdOf(foreignEmail);
+  expect((await request.put(`${apiBase}/v1/platform/organizations/${clientId}/agency`, { headers: auth, data: { agency_id: agencyId } })).status()).toBe(200);
+
+  // Un cliente AJENO a su cartera no se puede entrar: 404 (no revela si existe)
+  const agencyToken = await apiLogin(request, owner);
+  const denied = await request.post(`${apiBase}/v1/context/switch`, { headers: { ...JSON_HEADERS, authorization: `Bearer ${agencyToken}` }, data: { target: foreignId } });
+  expect(denied.status()).toBe(404);
+
+  // 1) La agencia aterriza en «Mis clientes» y registra un cliente nuevo (sin plan)
+  await uiLogin(page, owner);
+  await expect(page.getByRole('heading', { name: 'Mis clientes' })).toBeVisible();
+  const clients = page.getByRole('list', { name: 'Clientes' });
+  await expect(clients.getByRole('listitem')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Registrar cliente' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Registrar cliente' });
+  await expect(dlg.getByLabel('Plan')).toHaveCount(0);
+  await dlg.getByLabel('Nombre del cliente').fill(registered);
+  await dlg.getByLabel('Correo del dueño').fill(uniqueEmail('dueno'));
+  await dlg.getByRole('button', { name: 'Registrar e invitar' }).click();
+  await expect(page.getByRole('dialog', { name: 'Cliente registrado' })).toContainText('Enviamos la invitación');
+  await page.getByRole('button', { name: 'Listo' }).click();
+  await expect(clients.getByRole('listitem')).toHaveCount(2);
+  await expect(clients.getByRole('listitem').filter({ hasText: registered })).toContainText('Invitación pendiente');
+
+  // 2) Entra al cliente existente (banner, misma sesión), cambia al nuevo con el selector, recarga (el contexto se conserva) y vuelve
+  await clients.getByRole('listitem').filter({ hasText: 'Empresa E2E' }).getByRole('button', { name: /Entrar a/ }).click();
+  const banner = page.getByRole('region', { name: 'Contexto de acceso' });
+  await expect(banner).toContainText('Administrando Empresa E2E');
+  await expect(banner).toContainText('Administrador');
+  await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+  await banner.getByRole('button', { name: 'Cambiar de cliente' }).click();
+  await page.getByRole('dialog', { name: 'Cambiar de cliente' }).getByRole('button', { name: `Entrar a ${registered}` }).click();
+  await expect(banner).toContainText(`Administrando ${registered}`);
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'Contexto de acceso' })).toContainText(`Administrando ${registered}`);
+  await page.getByRole('button', { name: 'Volver a mi agencia' }).click();
+  await expect(page.getByRole('heading', { name: 'Mis clientes' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Contexto de acceso' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Cerrar sesión' }).click();
+
+  // 3) El Súper Admin ve las dos entradas en «Accesos» y entra en soporte a la empresa
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByRole('link', { name: 'Accesos' }).click();
+  const entries = page.getByRole('list', { name: 'Accesos' }).getByRole('listitem').filter({ hasText: owner });
+  await expect(entries).toHaveCount(2);
+  await expect(entries.filter({ hasText: registered })).toContainText('Volvió a su cuenta');
+  await expect(entries.filter({ hasText: 'Empresa E2E' })).toContainText('Pasó a otra cuenta');
+
+  await page.getByRole('link', { name: 'Empresas' }).click();
+  await page.getByLabel('Buscar').fill(clientEmail);
+  const company = page.getByRole('listitem').filter({ hasText: clientEmail });
+  await company.getByRole('button', { name: /Entrar a .* \(soporte\)/ }).click();
+  const support = page.getByRole('region', { name: 'Contexto de acceso' });
+  await expect(support).toContainText('Soporte: estás dentro de Empresa E2E');
+  await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+  await page.goto('/platform/companies'); // dentro de una empresa la consola de plataforma no se muestra
+  await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Volver a la plataforma' }).click();
+  await expect(page.getByRole('heading', { name: 'Consola de plataforma' })).toBeVisible();
+  await page.getByRole('link', { name: 'Accesos' }).click();
+  await expect(page.getByRole('list', { name: 'Accesos' }).getByRole('listitem').filter({ hasText: s.rootEmail }).first()).toContainText('Volvió a su cuenta');
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

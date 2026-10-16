@@ -303,9 +303,9 @@ describe('GET /v1/auth/me (@SelfService)', () => {
     const a = await login('alice@a.test');
     const r = await get('/auth/me', a.access_token);
     expect(r.status).toBe(200);
-    expect(await r.json()).toEqual({ user: { id: IDS.alice, email: 'alice@a.test', full_name: null }, organization: { id: ORG_A, name: 'Empresa A', kind: 'client' }, role: 'client_admin' });
+    expect(await r.json()).toEqual({ user: { id: IDS.alice, email: 'alice@a.test', full_name: null }, organization: { id: ORG_A, name: 'Empresa A', kind: 'client' }, role: 'client_admin', home: { id: ORG_A, name: 'Empresa A', kind: 'client' }, acting_as: null, read_only: false, access_level: null });
     const root = await login('root@plat.test');
-    expect(await (await get('/auth/me', root.access_token)).json()).toEqual({ user: { id: IDS.root, email: 'root@plat.test', full_name: null }, organization: { id: IDS.platformOrg, name: 'Plataforma', kind: 'platform' }, role: 'super_admin' });
+    expect(await (await get('/auth/me', root.access_token)).json()).toEqual({ user: { id: IDS.root, email: 'root@plat.test', full_name: null }, organization: { id: IDS.platformOrg, name: 'Plataforma', kind: 'platform' }, role: 'super_admin', home: { id: IDS.platformOrg, name: 'Plataforma', kind: 'platform' }, acting_as: null, read_only: false, access_level: null });
   });
   it('login y /me devuelven la MISMA identidad (la web usa una u otra según recargue o no)', async () => {
     await admin.query(`UPDATE users SET full_name = 'Alicia Torres' WHERE id = '${IDS.alice}'`);

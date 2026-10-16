@@ -1,17 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, isNull } from 'drizzle-orm';
-import { Database, organizationMembers, organizations, sessions, users } from '../../db';
+import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { Database, organizationMembers, organizations, users } from '../../db';
 import { TooManyAttemptsError, UnauthorizedError } from '../../errors';
 import type { PasswordHasher } from '../../security';
 import { PASSWORD_HASHER } from './auth.tokens';
+import { homeView, toMeView, type MeView } from './me-view';
 import { SessionService, type AuthContext, type IssuedTokens } from './session.service';
 import { ThrottleService } from './throttle.service';
 
 export interface LoginResult {
   tokens: IssuedTokens;
-  user: { id: string; email: string; full_name: string | null };
-  organization: { id: string; name: string; kind: string };
-  role: string;
+  me: MeView;
 }
 
 /** Credencial inválida: mismo error para correo inexistente, contraseña errónea, usuario inactivo o sin organización. */
@@ -45,7 +44,8 @@ export class AuthService {
         .from(organizationMembers)
         .innerJoin(organizations, eq(organizations.id, organizationMembers.organizationId))
         .where(and(eq(organizationMembers.userId, u.id), isNull(organizationMembers.revokedAt), eq(organizations.status, 'active'), isNull(organizations.deletedAt)))
-        .orderBy(asc(organizationMembers.createdAt))
+        // La sesión empieza en la organización PROPIA (plataforma o agencia) antes que en un cliente al que solo se tiene acceso (ADR-41)
+        .orderBy(sql`(${organizations.kind} = 'client')`, asc(organizationMembers.createdAt))
         .limit(1);
       return { u, m };
     });
@@ -62,7 +62,7 @@ export class AuthService {
     const { u, m } = found as NonNullable<typeof found> & { m: NonNullable<NonNullable<typeof found>['m']> };
     await this.throttle.reset(eKey);
     const tokens = await this.sessions.create({ userId: u.id, organizationId: m.orgId, sessionVersion: u.sessionVersion, userAgent: input.userAgent });
-    return { tokens, user: { id: u.id, email: u.email, full_name: u.fullName }, organization: { id: m.orgId, name: m.name, kind: m.kind }, role: m.role };
+    return { tokens, me: homeView({ id: u.id, email: u.email, fullName: u.fullName }, { id: m.orgId, name: m.name, kind: m.kind }, m.role) };
   }
 
   async refresh(rawRefresh: string | undefined): Promise<{ tokens: IssuedTokens; ctx: AuthContext }> {
@@ -71,20 +71,11 @@ export class AuthService {
     return { tokens: r.tokens, ctx: r.ctx };
   }
 
-  /** Identidad de la sesión VERIFICADA (la web la necesita tras recargar: el refresh no devuelve usuario ni organización). */
-  async me(sessionId: string): Promise<{ user: { id: string; email: string; full_name: string | null }; organization: { id: string; name: string; kind: string }; role: string }> {
-    const [r] = await this.db.withIdentity((tx) =>
-      tx
-        .select({ uid: users.id, email: users.email, fullName: users.fullName, oid: organizations.id, oname: organizations.name, okind: organizations.kind, role: organizationMembers.role })
-        .from(sessions)
-        .innerJoin(users, eq(users.id, sessions.userId))
-        .innerJoin(organizations, eq(organizations.id, sessions.activeOrgId))
-        .innerJoin(organizationMembers, and(eq(organizationMembers.userId, sessions.userId), eq(organizationMembers.organizationId, sessions.activeOrgId), isNull(organizationMembers.revokedAt)))
-        .where(eq(sessions.id, sessionId))
-        .limit(1),
-    );
-    if (!r) throw new UnauthorizedError();
-    return { user: { id: r.uid, email: r.email, full_name: r.fullName }, organization: { id: r.oid, name: r.oname, kind: r.okind }, role: r.role };
+  /** Identidad y contexto de la sesión VERIFICADA (la web los necesita tras recargar: el refresh no devuelve usuario ni organización). */
+  async me(sessionId: string): Promise<MeView> {
+    const c = await this.sessions.contextOf(sessionId);
+    if (!c) throw new UnauthorizedError();
+    return toMeView(c);
   }
 
   logout(raw: string | undefined): Promise<void> {

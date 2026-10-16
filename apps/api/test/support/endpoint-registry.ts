@@ -53,6 +53,15 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/platform/agencies/:id/reactivate', kind: 'platform', test: '../../platform/agencies.test.ts' },
   { route: 'GET /v1/platform/agencies/:id/history', kind: 'platform', test: '../../platform/agencies.test.ts' },
   { route: 'PUT /v1/platform/organizations/:id/agency', kind: 'platform', test: '../../platform/agencies.test.ts' },
+  // Cambio de contexto, soporte del Súper Admin y registro de accesos (M2.5, ADR-41). Pruebas: test/platform/context.test.ts
+  // (agencia solo entra a su cartera, 404 uniforme, acceso al instante, Súper Admin en soporte, marca acting_as, access_sessions solo para el Súper Admin, A↔B)
+  { route: 'POST /v1/context/switch', kind: 'self', test: '../../platform/context.test.ts' },
+  { route: 'GET /v1/context/options', kind: 'self', test: '../../platform/context.test.ts' },
+  { route: 'GET /v1/platform/access-sessions', kind: 'platform', test: '../../platform/context.test.ts' },
+  { route: 'PUT /v1/platform/organizations/:id/agency-access', kind: 'platform', test: '../../platform/context.test.ts' },
+  { route: 'GET /v1/agency/clients', kind: 'tenant', isolationTest: '../../platform/context.test.ts' },
+  { route: 'POST /v1/agency/clients', kind: 'tenant', isolationTest: '../../platform/context.test.ts' },
+  { route: 'POST /v1/agency/clients/:id/invitation/resend', kind: 'tenant', isolationTest: '../../platform/context.test.ts' },
   // Aceptación pública: el token de 256 bits es la credencial; límite por IP, errores uniformes. Pruebas: invitations.test.ts
   { route: 'POST /v1/auth/invitations/preview', kind: 'public' },
   { route: 'POST /v1/auth/invitations/accept', kind: 'public' },

@@ -23,10 +23,13 @@ export class LocalAccessResolver extends AccessResolver {
     const ctx = await this.sessions.authenticate(m[1]);
     if (!ctx) return null;
     // Súper Admin en la organización de plataforma → principal de plataforma; el resto → tenant
-    const permissions = await this.perms.forRole(ctx.role);
+    const permissions = await this.perms.forContext(ctx);
     if (ctx.orgKind === 'platform') {
       return ctx.role === 'super_admin' ? { kind: 'platform', userId: ctx.userId, role: ctx.role, permissions, sessionId: ctx.sessionId } : null;
     }
-    return { kind: 'tenant', userId: ctx.userId, organizationId: ctx.organizationId, role: ctx.role, permissions, sessionId: ctx.sessionId, ...(ctx.trialExpired ? { paused: true } : {}) };
+    // Actuando en otra organización (ADR-41): queda marcado para la auditoría del cliente y la cuenta en pausa NO la bloquea (permisos de solo lectura).
+    // En su propia organización, con la prueba vencida, la cuenta queda en pausa (ADR-23 #5).
+    const context = ctx.actingAs ? { actingAs: ctx.actingAs, actingOrgId: ctx.home.id } : ctx.trialExpired ? { paused: true as const } : {};
+    return { kind: 'tenant', userId: ctx.userId, organizationId: ctx.organizationId, role: ctx.role, permissions, sessionId: ctx.sessionId, ...context };
   }
 }

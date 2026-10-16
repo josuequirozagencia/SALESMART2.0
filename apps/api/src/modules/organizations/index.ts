@@ -1,7 +1,7 @@
 export { OrganizationsModule } from './organizations.module';
 export { TrialsService, type TrialView, type PlatformTrialList } from './trials.service';
 export { PlansService, type PlanView } from './plans.service';
-export { CompaniesService } from './companies.service';
+export { CompaniesService, likeEscape } from './companies.service';
 export { AgenciesService, type AgencyItem, type AgencyList, type OwnershipHistoryItem, type AssignAgencyResult } from './agencies.service';
 export { AgencyAccessService, AGENCY_DEFAULT_ACCESS_LEVEL, type ReconcileResult } from './agency-access.service';
 export { PLAN_FEATURES, PLAN_FEATURE_KEYS, normalizeFeatures, type PlanFeatureKey } from './plan-features';
