@@ -71,6 +71,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     DATABASE_URL_PLATFORM: urlFor(adminUrl, 'app_platform', pw.platform, name),
     DATABASE_URL_IDENTITY: urlFor(adminUrl, 'app_identity', pw.identity, name),
     AUTH_THROTTLE_KEY: rnd(40),
+    // Bóveda de credenciales de proveedores (ADR-42): 32 bytes aleatorios por ejecución
+    PROVIDER_CREDENTIALS_KEY: randomBytes(32).toString('base64'),
     // Solo E2E: el código de verificación se imprime en el log (la prueba lo lee) y el CAPTCHA acepta «fake-pass»
     MAIL_PROVIDER: 'console',
     CAPTCHA_PROVIDER: 'fake',

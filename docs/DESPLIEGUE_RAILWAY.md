@@ -47,6 +47,7 @@ Con el PostgreSQL de Railway creado, desde tu equipo (usa la URL pública/TCP pr
 | `CAPTCHA_PROVIDER` | `turnstile` |
 | `TURNSTILE_SECRET_KEY` | clave **secreta** del sitio de Turnstile |
 | `VITE_CAPTCHA_PROVIDER` y `VITE_TURNSTILE_SITE_KEY` | `turnstile` y la clave de **sitio** (pública). Son variables de **compilación** (Vite las incrusta al construir la web): deben existir cuando corre `pnpm build`, y cambiarlas exige volver a construir |
+| `PROVIDER_CREDENTIALS_KEY` | *(opcional por ahora, obligatoria antes de abrir a usuarios reales)* clave maestra que cifra las credenciales de los proveedores (ADR-42): **32 bytes en base64**, generada con `openssl rand -base64 32`, distinta de cualquier otra clave. Sin ella la API arranca (en producción avisa en el registro), pero «Proveedores» no puede guardar credenciales (responde 503). Para rotarla: la nueva pasa a esta variable con `PROVIDER_CREDENTIALS_KEY_VERSION` mayor y la anterior a `PROVIDER_CREDENTIALS_KEY_PREVIOUS` + `PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION`. **Guárdala en un gestor de secretos aparte**: si se pierde, los secretos guardados no se pueden recuperar |
 | `LOG_LEVEL` | `info` (opcional) |
 | `JOBS_ENABLED` | omitir (encendido) — cuando exista un worker aparte, `false` en la API |
 
@@ -66,3 +67,4 @@ Desde tu equipo, con las tres URLs de la app y `AUTH_THROTTLE_KEY` en el entorno
 4. Recuperar contraseña: llega el enlace y funciona una sola vez.
 5. Cinco intentos fallidos con una cuenta bloquean **solo a esa cuenta**; otro usuario desde otra red puede entrar (valida `TRUST_PROXY_HOPS=2`). Si se cambia de hosting o Railway altera su cadena de proxies, repetir la prueba: 26+ fallos desde una IP deben dar 429 aunque el cliente envíe `X-Forwarded-For` falsos distintos.
 6. `pnpm db:audit` contra la base de Railway sin violaciones.
+7. **Antes de abrir a usuarios reales:** `PROVIDER_CREDENTIALS_KEY` definida (32 bytes en base64; una copia guardada en un gestor de secretos aparte) y en la pestaña «Proveedores» del Súper Admin ya no aparece el aviso de falta de clave.

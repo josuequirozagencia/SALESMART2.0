@@ -5,6 +5,7 @@ import { AccessPage } from './features/platform/AccessPage';
 import { AgenciesPage } from './features/platform/AgenciesPage';
 import { CompaniesPage } from './features/platform/CompaniesPage';
 import { PlansPage } from './features/platform/PlansPage';
+import { ProvidersPage } from './features/platform/ProvidersPage';
 import { PlatformShell } from './features/platform/PlatformShell';
 import { TrialsPage } from './features/platform/TrialsPage';
 import { TrialExpiredScreen } from './features/trial/TrialExpiredScreen';
@@ -82,6 +83,7 @@ export function App() {
       <Route path="/platform/agencies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AgenciesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/access" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AccessPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/agency/clients" element={<AgencyGate>{(me, out) => <AgencyShell me={me} onLogout={out}><ClientsPage /></AgencyShell>}</AgencyGate>} />
+      <Route path="/platform/providers" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><ProvidersPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/plans" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><PlansPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/trials" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><TrialsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />

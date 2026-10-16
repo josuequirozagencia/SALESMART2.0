@@ -197,3 +197,42 @@ export interface AccessSessionList {
   items: AccessSession[];
   next_cursor: string | null;
 }
+
+// ── Proveedores de la plataforma (M2.6, ADR-42; solo Súper Admin) ──
+export type ProviderManaged = 'platform' | 'env' | 'client' | 'fixed';
+export type ProviderMaturity = 'planned' | 'reserved' | 'candidate';
+
+/** Un dato de un proveedor. NINGÚN valor llega jamás (ni claves ni URL): solo si existe y su final (últimos 4). `masked` = se teclea oculto. */
+export interface ProviderField {
+  key: string;
+  label: string;
+  masked: boolean;
+  required: boolean;
+  hint: string | null;
+  set: boolean;
+  last4: string | null;
+}
+export interface ProviderItem {
+  key: string;
+  label: string;
+  maturity: ProviderMaturity;
+  note: string | null;
+  configured: boolean;
+  fields: ProviderField[];
+  updated_at: string | null;
+}
+export interface ProviderService {
+  key: string;
+  label: string;
+  adapter: string;
+  managed: ProviderManaged;
+  note: string;
+  active: string | null;
+  /** Solo los servicios gestionados por variables de entorno (correo, anti-bots): su modo actual. */
+  mode: string | null;
+  providers: ProviderItem[];
+}
+export interface ProvidersList {
+  vault: { available: boolean };
+  services: ProviderService[];
+}

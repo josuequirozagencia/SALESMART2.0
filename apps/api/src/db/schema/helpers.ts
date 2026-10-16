@@ -53,6 +53,10 @@ export function identityTable<TCols extends Record<string, PgColumnBuilderBase>>
  * Tabla de plataforma (sin organization_id; solo accesible por el rol app_platform vía GRANT).
  * Debe registrarse en PLATFORM_TABLES (db/audit/catalog.ts); sin eso `db:audit` falla.
  */
-export function platformTable<TCols extends Record<string, PgColumnBuilderBase>>(name: string, columns: TCols) {
-  return pgTable(name, columns);
+export function platformTable<TCols extends Record<string, PgColumnBuilderBase>>(
+  name: string,
+  columns: TCols,
+  extra?: (t: { [K in keyof TCols]: AnyPgColumn }) => unknown[],
+) {
+  return pgTable(name, columns, extra as never);
 }

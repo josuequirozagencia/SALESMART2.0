@@ -510,6 +510,42 @@ test('contexto: la agencia registra un cliente, entra a uno y a otro sin cerrar 
   await expect(page.getByRole('list', { name: 'Accesos' }).getByRole('listitem').filter({ hasText: s.rootEmail }).first()).toContainText('Volvió a su cuenta');
 });
 
+test('proveedores: el Súper Admin guarda un secreto (cifrado, jamás vuelve a verse), activa el proveedor y nadie más lo ve', async ({ page, request }) => {
+  const s = state();
+  const { apiBase } = s;
+  const SECRET = 'sk-e2e-ABCDEF1234567890wxyz';
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByRole('link', { name: 'Proveedores' }).click();
+  await expect(page).toHaveURL(/\/platform\/providers$/);
+  const ai = page.getByRole('region', { name: 'IA de texto' });
+  await expect(ai).toBeVisible();
+  await expect(ai.getByText('Sin proveedor en uso')).toBeVisible();
+  await expect(ai.getByRole('button', { name: 'Usar OpenAI' })).toBeDisabled(); // sin credenciales no se activa
+
+  await ai.getByRole('button', { name: 'Configurar OpenAI' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Credenciales de OpenAI' });
+  await dlg.getByLabel('Clave de API').fill(SECRET);
+  await dlg.getByRole('button', { name: 'Guardar' }).click();
+  await expect(dlg.getByText('Guardado.')).toBeVisible();
+  await expect(dlg.getByText(/termina en wxyz/)).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(SECRET);
+  await dlg.getByRole('button', { name: 'Cerrar' }).click();
+
+  await ai.getByRole('button', { name: 'Usar OpenAI' }).click();
+  await expect(ai.getByText('En uso: OpenAI')).toBeVisible();
+  await page.reload(); // lo guardado persiste y el secreto no vuelve
+  await expect(page.getByRole('region', { name: 'IA de texto' }).getByText('En uso: OpenAI')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(SECRET);
+
+  // La API tampoco lo devuelve (ni al Súper Admin), y un cliente recibe 403
+  const raw = await (await request.get(`${apiBase}/v1/platform/providers`, { headers: { authorization: `Bearer ${await adminToken(request)}` } })).text();
+  expect(raw).not.toContain(SECRET);
+  expect(raw).toContain('wxyz');
+  const client = await createAccount(request, uniqueEmail('proveedores'));
+  const clientToken = await apiLogin(request, client);
+  expect((await request.get(`${apiBase}/v1/platform/providers`, { headers: { authorization: `Bearer ${clientToken}` } })).status()).toBe(403);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

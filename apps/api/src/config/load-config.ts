@@ -34,6 +34,8 @@ export interface AppConfig {
     readonly resendApiKey: string | undefined;
     readonly mailFrom: string | undefined;
     readonly turnstileSecret: string | undefined;
+    /** Llavero de la bóveda de credenciales de proveedores (ADR-42): claves en base64 (el decodificado lo hace la bóveda). Undefined = sin bóveda. */
+    readonly credentialsKeys: { readonly current: { readonly version: number; readonly key: string }; readonly previous: { readonly version: number; readonly key: string } | undefined } | undefined;
   };
   readonly frontend: {
     /** Base explícita (sin barra final) o undefined si no se configuró. Nunca se deriva de la petición. */
@@ -148,6 +150,24 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.MAIL_PROVIDER === 'console' || e.MAIL_PROVIDER === 'memory') issues.push(`MAIL_PROVIDER: "${e.MAIL_PROVIDER}" es solo para desarrollo/pruebas y no se permite en producción`);
     if (e.CAPTCHA_PROVIDER === 'fake') issues.push('CAPTCHA_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
   }
+  // Bóveda de credenciales de proveedores (ADR-42): 32 bytes exactos, distinta de la clave de intentos; la anterior (rotación) exige su versión menor
+  let credentialsKeys: AppConfig['providers']['credentialsKeys'];
+  if (e.PROVIDER_CREDENTIALS_KEY !== undefined) {
+    const len = (k: string): number => Buffer.from(k, 'base64').length;
+    if (len(e.PROVIDER_CREDENTIALS_KEY) !== 32) issues.push('PROVIDER_CREDENTIALS_KEY: debe decodificar a exactamente 32 bytes');
+    if (e.PROVIDER_CREDENTIALS_KEY === e.AUTH_THROTTLE_KEY) issues.push('PROVIDER_CREDENTIALS_KEY: no puede reutilizar AUTH_THROTTLE_KEY (claves separadas, Build Spec §11.2)');
+    let previous: { version: number; key: string } | undefined;
+    if (e.PROVIDER_CREDENTIALS_KEY_PREVIOUS !== undefined) {
+      if (e.PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION === undefined) issues.push('PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION: obligatoria cuando se define PROVIDER_CREDENTIALS_KEY_PREVIOUS');
+      else if (e.PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION >= e.PROVIDER_CREDENTIALS_KEY_VERSION) issues.push('PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION: debe ser menor que PROVIDER_CREDENTIALS_KEY_VERSION');
+      else previous = { version: e.PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION, key: e.PROVIDER_CREDENTIALS_KEY_PREVIOUS };
+      if (len(e.PROVIDER_CREDENTIALS_KEY_PREVIOUS) !== 32) issues.push('PROVIDER_CREDENTIALS_KEY_PREVIOUS: debe decodificar a exactamente 32 bytes');
+      if (e.PROVIDER_CREDENTIALS_KEY_PREVIOUS === e.PROVIDER_CREDENTIALS_KEY) issues.push('PROVIDER_CREDENTIALS_KEY_PREVIOUS: debe ser distinta de PROVIDER_CREDENTIALS_KEY');
+    }
+    credentialsKeys = { current: { version: e.PROVIDER_CREDENTIALS_KEY_VERSION, key: e.PROVIDER_CREDENTIALS_KEY }, previous };
+  } else if (e.PROVIDER_CREDENTIALS_KEY_PREVIOUS !== undefined) {
+    issues.push('PROVIDER_CREDENTIALS_KEY_PREVIOUS: requiere PROVIDER_CREDENTIALS_KEY (la clave vigente)');
+  }
   if (issues.length > 0) throw new ConfigError(issues);
 
   return deepFreeze({
@@ -177,7 +197,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       verifyIpMaxPerHour: e.SIGNUP_VERIFY_IP_MAX_PER_HOUR,
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
-    providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY },
+    providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, credentialsKeys },
     frontend: {
       baseUrl: frontendBase,
       resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH,

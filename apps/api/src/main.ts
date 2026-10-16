@@ -13,6 +13,10 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
   await app.listen(cfg.httpPort);
   log.info({ config: describeConfig(cfg) }, 'API iniciada');
+  // ADR-42: sin la clave maestra la pantalla de proveedores no puede guardar credenciales. Es opcional en staging, pero obligatoria antes de abrir a usuarios reales.
+  if (cfg.nodeEnv === 'production' && cfg.providers.credentialsKeys === undefined) {
+    log.warn('PROVIDER_CREDENTIALS_KEY no está configurada: «Proveedores» no puede guardar credenciales. Es obligatoria antes de abrir a usuarios reales (ADR-42).');
+  }
 }
 
 bootstrap().catch((e: unknown) => {

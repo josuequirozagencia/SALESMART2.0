@@ -70,7 +70,46 @@ describe('configuración validada', () => {
     it('por defecto no hay proveedor real (503 en el registro) y los secretos no tienen valor por defecto', () => {
       const c = loadConfig(good);
       expect(c.signup).toMatchObject({ mailProvider: 'none', captchaProvider: 'none' });
-      expect(c.providers).toEqual({ resendApiKey: undefined, mailFrom: undefined, turnstileSecret: undefined });
+      expect(c.providers).toEqual({ resendApiKey: undefined, mailFrom: undefined, turnstileSecret: undefined, credentialsKeys: undefined });
+    });
+  });
+
+  describe('bóveda de credenciales de proveedores (ADR-42)', () => {
+    const k1 = Buffer.alloc(32, 7).toString('base64');
+    const k0 = Buffer.alloc(32, 9).toString('base64');
+    it('es opcional: sin clave la API arranca y no hay bóveda (guardar secretos responde 503)', () => {
+      expect(loadConfig(good).providers.credentialsKeys).toBeUndefined();
+    });
+    it('acepta una clave de 32 bytes en base64 (versión 1 por defecto) y la guarda tal cual', () => {
+      const c = loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: k1 });
+      expect(c.providers.credentialsKeys).toEqual({ current: { version: 1, key: k1 }, previous: undefined });
+    });
+    it('rechaza claves que no son de 32 bytes o no son base64, sin mostrar el valor', () => {
+      for (const bad of [Buffer.alloc(16, 1).toString('base64'), Buffer.alloc(33, 1).toString('base64'), 'no-es-base64!', 'a'.repeat(43) + '==']) {
+        let msg = '';
+        try {
+          loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: bad });
+        } catch (e) {
+          msg = (e as Error).message;
+        }
+        expect(msg).toMatch(/PROVIDER_CREDENTIALS_KEY/);
+        expect(msg).not.toContain(bad);
+      }
+    });
+    it('claves separadas: no puede ser la misma que AUTH_THROTTLE_KEY', () => {
+      expect(() => loadConfig({ ...good, AUTH_THROTTLE_KEY: k1, PROVIDER_CREDENTIALS_KEY: k1 })).toThrow(/AUTH_THROTTLE_KEY/);
+    });
+    it('rotación: la clave anterior exige su versión (menor que la vigente), ser distinta y que exista la vigente', () => {
+      const ok = loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: k1, PROVIDER_CREDENTIALS_KEY_VERSION: '2', PROVIDER_CREDENTIALS_KEY_PREVIOUS: k0, PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION: '1' });
+      expect(ok.providers.credentialsKeys).toEqual({ current: { version: 2, key: k1 }, previous: { version: 1, key: k0 } });
+      expect(() => loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: k1, PROVIDER_CREDENTIALS_KEY_PREVIOUS: k0 })).toThrow(/PREVIOUS_VERSION/);
+      expect(() => loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: k1, PROVIDER_CREDENTIALS_KEY_VERSION: '2', PROVIDER_CREDENTIALS_KEY_PREVIOUS: k0, PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION: '2' })).toThrow(/menor/);
+      expect(() => loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: k1, PROVIDER_CREDENTIALS_KEY_VERSION: '2', PROVIDER_CREDENTIALS_KEY_PREVIOUS: k1, PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION: '1' })).toThrow(/distinta/);
+      expect(() => loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY_PREVIOUS: k0, PROVIDER_CREDENTIALS_KEY_PREVIOUS_VERSION: '1' })).toThrow(/requiere PROVIDER_CREDENTIALS_KEY/);
+    });
+    it('las claves NO salen en describeConfig (lo que se registra al arrancar)', () => {
+      const text = JSON.stringify(describeConfig(loadConfig({ ...good, PROVIDER_CREDENTIALS_KEY: k1 })));
+      expect(text).not.toContain(k1);
     });
   });
 

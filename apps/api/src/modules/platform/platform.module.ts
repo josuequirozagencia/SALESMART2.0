@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PlatformAuditService } from './platform-audit.service';
+import { ProvidersController } from './providers/providers.controller';
+import { ProvidersService } from './providers/providers.service';
 
-/** Módulo de plataforma (único autorizado a usar withPlatform, lint P10). M1.4 solo aporta la auditoría; M2 añade la consola. */
-@Module({ providers: [PlatformAuditService], exports: [PlatformAuditService] })
+/** Módulo de plataforma (único autorizado a usar withPlatform, lint P10): auditoría de plataforma y proveedores (M2.6, ADR-42). */
+@Module({ controllers: [ProvidersController], providers: [PlatformAuditService, ProvidersService], exports: [PlatformAuditService, ProvidersService] })
 export class PlatformModule {}

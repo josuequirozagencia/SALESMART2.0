@@ -62,6 +62,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/agency/clients', kind: 'tenant', isolationTest: '../../platform/context.test.ts' },
   { route: 'POST /v1/agency/clients', kind: 'tenant', isolationTest: '../../platform/context.test.ts' },
   { route: 'POST /v1/agency/clients/:id/invitation/resend', kind: 'tenant', isolationTest: '../../platform/context.test.ts' },
+  // Proveedores de la plataforma (M2.6, ADR-21/ADR-42). Pruebas: test/platform/providers.test.ts (acceso solo Súper Admin, secretos cifrados y nunca devueltos, activación, BD)
+  { route: 'GET /v1/platform/providers', kind: 'platform', test: '../../platform/providers.test.ts' },
+  { route: 'PUT /v1/platform/providers/:service/active', kind: 'platform', test: '../../platform/providers.test.ts' },
+  { route: 'PUT /v1/platform/providers/:service/:provider/credentials', kind: 'platform', test: '../../platform/providers.test.ts' },
+  { route: 'DELETE /v1/platform/providers/:service/:provider/credentials', kind: 'platform', test: '../../platform/providers.test.ts' },
   // Aceptación pública: el token de 256 bits es la credencial; límite por IP, errores uniformes. Pruebas: invitations.test.ts
   { route: 'POST /v1/auth/invitations/preview', kind: 'public' },
   { route: 'POST /v1/auth/invitations/accept', kind: 'public' },

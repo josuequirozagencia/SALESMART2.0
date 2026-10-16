@@ -3,3 +3,4 @@
 export { tenantTable, platformTable, identityTable } from './helpers';
 export { users, organizations, organizationMembers, sessions, authThrottle, emailVerifications, signupAttempts, disposableDomains, passwordResets, roles, permissions, rolePermissions, trials, trialConfig, plans, invitations, organizationOwnershipHistory, accessSessions } from './identity';
 export { auditLogs, platformAudit } from './audit';
+export { providerCredentials, providerSelection } from './providers';
