@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { Consent, Contact, ContactList, OwnerOption } from '../../lib/types';
+import type { Consent, Contact, ContactList, CustomValue, OwnerOption } from '../../lib/types';
 
 export type SortKey = 'recent' | 'oldest' | 'az' | 'za';
 export interface ContactFilters {
@@ -66,6 +66,8 @@ export interface ContactInput {
   consent: Consent;
   /** Solo se envía si la persona puede asignar (si no, el servidor lo asigna a quien lo crea). */
   owner_id?: string | null;
+  /** Campos personalizados (ADR-44): solo las variables que cambian; `null` vacía el valor. */
+  custom_fields?: Record<string, CustomValue | null>;
 }
 
 export function useCreateContact() {

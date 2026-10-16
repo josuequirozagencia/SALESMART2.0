@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { customFieldValuesSchema } from '../custom-fields';
 
 const name = z.string().trim().min(1).max(200).refine((v) => !/\p{Cc}/u.test(v), 'caracteres no permitidos');
 const email = z.string().trim().max(254).pipe(z.email()).transform((v) => v.toLowerCase());
@@ -19,6 +20,8 @@ export const createContactSchema = z
     phones: phones.optional(),
     owner_id: z.uuid().nullable().optional(),
     consent: consent.optional(),
+    /** Campos personalizados (M3.2, ADR-44): `{ variable: valor }`. Se validan contra la definición de cada campo; los obligatorios deben venir. */
+    custom_fields: customFieldValuesSchema.optional(),
   })
   .strict();
 export type CreateContactDto = z.infer<typeof createContactSchema>;
@@ -31,6 +34,8 @@ export const updateContactSchema = z
     phones: phones.optional(),
     owner_id: z.uuid().nullable().optional(),
     consent: consent.optional(),
+    /** Solo se tocan las variables enviadas; `null` vacía el valor. */
+    custom_fields: customFieldValuesSchema.optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });

@@ -90,4 +90,6 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   'POST /auth/refresh': () => ({ body: { access_token: 'acc-2', token_type: 'Bearer', expires_in: 900 } }),
   'GET /auth/me': () => ({ body: me }),
   'GET /trials/me': () => (t ? { body: t } : err(404, 'NOT_FOUND')),
+  // El marco de la empresa pregunta si hay que mostrar «Configuración» (campos personalizados)
+  'GET /custom-fields': () => ({ body: { items: [], access: { manage: false } } }),
 });

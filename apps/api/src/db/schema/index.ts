@@ -5,3 +5,4 @@ export { users, organizations, organizationMembers, sessions, authThrottle, emai
 export { auditLogs, platformAudit } from './audit';
 export { providerCredentials, providerSelection } from './providers';
 export { contacts, contactPhones } from './crm';
+export { customFieldDefinitions, customFieldValues } from './custom-fields';

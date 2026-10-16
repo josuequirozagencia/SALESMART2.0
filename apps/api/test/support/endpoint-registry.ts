@@ -74,6 +74,13 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/contacts', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'PATCH /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'DELETE /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
+  // Campos personalizados (M3.2, ADR-44). Pruebas: test/custom-fields/custom-fields.test.ts (A↔B, permisos, tipos, obligatorios, archivado, valores en contactos, roles de BD)
+  { route: 'GET /v1/custom-fields', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
+  { route: 'POST /v1/custom-fields', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
+  { route: 'PUT /v1/custom-fields/order', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
+  { route: 'PATCH /v1/custom-fields/:id', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
+  { route: 'POST /v1/custom-fields/:id/archive', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
+  { route: 'POST /v1/custom-fields/:id/restore', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
   // Aceptación pública: el token de 256 bits es la credencial; límite por IP, errores uniformes. Pruebas: invitations.test.ts
   { route: 'POST /v1/auth/invitations/preview', kind: 'public' },
   { route: 'POST /v1/auth/invitations/accept', kind: 'public' },

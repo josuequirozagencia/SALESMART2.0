@@ -2,10 +2,13 @@ import { useState, type FormEvent } from 'react';
 import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import { COUNTRIES, normalizePhone } from '../../lib/phone';
-import type { Consent, Contact, OwnerOption } from '../../lib/types';
+import type { Consent, Contact, CustomValue, OwnerOption } from '../../lib/types';
 import { isEmail, normalizeEmail } from '../../lib/validation';
 import { Alert, Button, Field, Input } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
+import { FieldInput } from '../custom-fields/FieldInput';
+import { parseRaw, toRaw, type RawValue } from '../custom-fields/fieldValues';
+import { useCustomFields } from '../custom-fields/useCustomFields';
 import { useCreateContact, useDeleteContact, useUpdateContact, type ContactInput } from './useContacts';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal';
@@ -17,6 +20,8 @@ interface Errors {
   email?: string;
   owner?: string;
   phones: Record<number, string>;
+  /** Por variable del campo personalizado. */
+  custom: Record<string, string>;
 }
 
 /**
@@ -32,7 +37,10 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
   const [prefix, setPrefix] = useState<string>(COUNTRIES[0].code);
   const [ownerId, setOwnerId] = useState(contact?.owner?.id ?? '');
   const [consent, setConsent] = useState<Consent>(contact?.consent ?? 'unknown');
-  const [errors, setErrors] = useState<Errors>({ phones: {} });
+  const [errors, setErrors] = useState<Errors>({ phones: {}, custom: {} });
+  // Campos personalizados que se muestran en el formulario; `edits` guarda solo lo que la persona tocó (lo demás sale del contacto)
+  const defs = (useCustomFields().data?.items ?? []).filter((f) => f.show_in_form && f.archived_at === null);
+  const [edits, setEdits] = useState<Record<string, RawValue>>({});
   const [formError, setFormError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const create = useCreateContact();
@@ -40,12 +48,16 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
   const remove = useDeleteContact();
   const busy = create.isPending || update.isPending;
 
+  const rawOf = (key: string): RawValue => {
+    const def = defs.find((d) => d.key === key)!;
+    return edits[key] ?? toRaw(def, contact?.custom_fields[key]);
+  };
   const setPhone = (i: number, v: string) => setPhones((p) => p.map((x, j) => (j === i ? v : x)));
 
   function submit(e: FormEvent) {
     e.preventDefault();
     setFormError(undefined);
-    const next: Errors = { phones: {} };
+    const next: Errors = { phones: {}, custom: {} };
     const n = name.trim();
     if (n.length < 1) next.name = 'Escribe el nombre';
     else if (n.length > 200) next.name = 'Usa como máximo 200 caracteres';
@@ -59,18 +71,39 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
       else if (normalized.includes(e164)) next.phones[i] = 'Este número está repetido';
       else normalized.push(e164);
     });
+    // Campos personalizados: al crear se envían los que tienen valor; al editar, solo los que la persona cambió (un obligatorio no se puede vaciar)
+    const custom: Record<string, CustomValue | null> = {};
+    for (const def of defs) {
+      const raw = rawOf(def.key);
+      const p = parseRaw(def, raw, prefix);
+      if (!p.ok) {
+        next.custom[def.key] = p.error;
+        continue;
+      }
+      if (editing && JSON.stringify(raw) === JSON.stringify(toRaw(def, contact?.custom_fields[def.key]))) continue;
+      if (p.value === null) {
+        if (def.required) next.custom[def.key] = 'Este campo es obligatorio';
+        else if (editing) custom[def.key] = null;
+        continue;
+      }
+      custom[def.key] = p.value;
+    }
     setErrors(next);
-    if (next.name || next.email || Object.keys(next.phones).length > 0) return;
+    if (next.name || next.email || Object.keys(next.phones).length > 0 || Object.keys(next.custom).length > 0) return;
 
     const base: ContactInput = { name: n, email: em === '' ? null : em, phones: normalized, consent };
-    const input: ContactInput = canAssign ? { ...base, owner_id: ownerId === '' ? null : ownerId } : base;
+    const withOwner: ContactInput = canAssign ? { ...base, owner_id: ownerId === '' ? null : ownerId } : base;
+    const input: ContactInput = Object.keys(custom).length > 0 ? { ...withOwner, custom_fields: custom } : withOwner;
     const handlers = {
       onSuccess: onClose,
       onError: (err: unknown) => {
         if (err instanceof ApiError && (err.code === 'PHONE_TAKEN' || err.code === 'VALIDATION_ERROR')) {
           const byIndex: Record<number, string> = {};
           let owner: string | undefined;
+          const customErrors: Record<string, string> = {};
           for (const d of err.details) {
+            const cf = /^custom_fields\.(.+)$/.exec(d.path);
+            if (cf) customErrors[cf[1]!] = d.message;
             const m = /^phones\.(\d+)$/.exec(d.path);
             if (m) byIndex[Number(m[1])] = d.code === 'duplicate' ? 'Ya existe un contacto con este teléfono' : 'Número no válido';
             if (d.path === 'owner_id') owner = 'Esa persona no puede recibir contactos';
@@ -79,7 +112,7 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
           const rows = phones.map((p, i) => [p, i] as const).filter(([p]) => p.trim() !== '').map(([, i]) => i);
           const mapped: Record<number, string> = {};
           for (const [k, v] of Object.entries(byIndex)) mapped[rows[Number(k)] ?? Number(k)] = v;
-          setErrors((cur) => ({ ...cur, phones: mapped, ...(owner ? { owner } : {}) }));
+          setErrors((cur) => ({ ...cur, phones: mapped, custom: customErrors, ...(owner ? { owner } : {}) }));
         }
         setFormError(friendlyError(err, editing ? 'No pudimos guardar los cambios.' : 'No pudimos crear el contacto.'));
       },
@@ -145,6 +178,19 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
             </select>
           )}
         </Field>
+
+        {defs.length > 0 ? (
+          <fieldset className="grid gap-3" disabled={disabled}>
+            <legend className="text-[12.5px] font-semibold">Campos adicionales</legend>
+            <div className="grid gap-3 min-[520px]:grid-cols-2">
+              {defs.map((def) => (
+                <div key={def.id} className={def.type === 'long_text' || def.type === 'multiselect' ? 'min-[520px]:col-span-2' : ''}>
+                  <FieldInput def={def} value={rawOf(def.key)} onChange={(v) => setEdits((cur) => ({ ...cur, [def.key]: v }))} error={errors.custom[def.key]} disabled={disabled} />
+                </div>
+              ))}
+            </div>
+          </fieldset>
+        ) : null}
 
         {formError ? <Alert>{formError}</Alert> : null}
         <div className="flex flex-wrap items-center justify-between gap-2">

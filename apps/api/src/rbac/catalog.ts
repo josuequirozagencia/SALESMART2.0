@@ -17,6 +17,8 @@ export const PERMISSIONS = {
   // M3.1 (ADR-43): sin `contacts.view_all` el alcance es PROPIO (contactos asignados a la persona); con él, todos los de la organización.
   'contacts.view_all': 'tenant',
   'contacts.delete': 'tenant',
+  // M3.2 (ADR-44): definir los campos personalizados del contacto (tipo, opciones, obligatorio, visible en el formulario). Leerlos va con `contacts.read`.
+  'custom_fields.manage': 'tenant',
   'opportunities.read': 'tenant',
   'opportunities.write': 'tenant',
   'pipelines.manage': 'tenant',

@@ -250,6 +250,8 @@ export interface Contact {
   source: string;
   consent: Consent;
   consent_updated_at: string | null;
+  /** Campos personalizados (M3.2): `{ variable: valor }`, solo los no vacíos de campos no archivados. */
+  custom_fields: Record<string, CustomValue>;
   created_at: string;
   updated_at: string;
 }
@@ -275,4 +277,30 @@ export interface OwnerOption {
   name: string;
   email: string;
   role: Role;
+}
+
+// ── Campos personalizados (M3.2, ADR-44) ──
+export type CustomFieldType = 'text' | 'long_text' | 'number' | 'currency' | 'percent' | 'date' | 'datetime' | 'boolean' | 'email' | 'phone' | 'url' | 'select' | 'multiselect';
+/** Valor tal como lo manda y lo devuelve la API: texto, número, Sí/No o lista (selección múltiple). */
+export type CustomValue = string | number | boolean | string[];
+
+export interface CustomField {
+  id: string;
+  entity: 'contact';
+  name: string;
+  /** Variable de plantillas y automatizaciones: `{{contact.<key>}}`. No cambia nunca. */
+  key: string;
+  type: CustomFieldType;
+  options: string[] | null;
+  required: boolean;
+  show_in_form: boolean;
+  position: number;
+  archived_at: string | null;
+  created_at: string;
+}
+
+export interface CustomFieldList {
+  items: CustomField[];
+  /** `manage`: puede crear, cambiar, archivar y ordenar campos (el servidor vuelve a verificar cada acción). */
+  access: { manage: boolean };
 }

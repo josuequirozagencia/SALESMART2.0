@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { ContextBanner } from '../context/ContextBanner';
+import { useCustomFields } from '../custom-fields/useCustomFields';
 import { TrialBanner } from '../trial/TrialBanner';
 import { ROLE_LABEL } from '../../lib/format';
 import type { Me, Trial } from '../../lib/types';
@@ -14,6 +15,8 @@ const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex
  * secciones de negocio. Las secciones nuevas de cada hito se añaden aquí (el menú completo sale del prototipo).
  */
 export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Trial | null; onLogout: () => void; children: ReactNode }) {
+  // «Configuración» solo para quien puede administrar los campos (el servidor lo dice; no se replica la matriz de permisos aquí)
+  const manageFields = useCustomFields().data?.access.manage === true;
   return (
     <div className="min-h-full bg-bg">
       <ContextBanner me={me} />
@@ -32,6 +35,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         <nav aria-label="Secciones" className="flex gap-1 border-b border-line">
           <NavLink to="/" end className={tab}>Inicio</NavLink>
           <NavLink to="/contacts" className={tab}>Contactos</NavLink>
+          {manageFields ? <NavLink to="/settings/fields" className={tab}>Configuración</NavLink> : null}
         </nav>
         <main>{children}</main>
       </div>

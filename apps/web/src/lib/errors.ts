@@ -27,6 +27,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Contactos (ADR-43): el servidor ya redacta el motivo para la persona
     case 'PHONE_TAKEN': return 'Uno de los teléfonos ya pertenece a otro contacto de tu empresa.';
     case 'OWNER_NOT_ALLOWED': return e.message;
+    // Campos personalizados (ADR-44): el servidor ya redacta el motivo
+    case 'CUSTOM_FIELD_EXISTS': case 'CUSTOM_FIELD_KEY_RESERVED': case 'CUSTOM_FIELD_LIMIT': case 'CUSTOM_FIELD_ARCHIVED': case 'CUSTOM_FIELD_ORDER_STALE': return e.message;
     case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;

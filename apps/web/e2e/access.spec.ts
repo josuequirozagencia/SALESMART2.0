@@ -624,6 +624,81 @@ test('contactos: crea, busca, edita y borra desde la interfaz; un teléfono repe
   expect((await request.delete(`${apiBase}/v1/contacts/${id}`, { headers: other })).status()).toBe(404);
 });
 
+test('campos personalizados: el administrador define campos, el formulario de contacto los exige y los guarda, archivar los oculta y otra empresa no los ve', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('campos'));
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await expect(page).toHaveURL(/\/settings\/fields$/);
+  await expect(page.getByText(/Crea el primero con «Nuevo campo»/)).toBeVisible();
+
+  const create = async (name: string, type: string | null, options: string | null, required = false) => {
+    await page.getByRole('button', { name: 'Nuevo campo' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Nuevo campo' });
+    await dlg.getByLabel('Nombre', { exact: true }).fill(name);
+    if (type) await dlg.getByLabel('Tipo').selectOption({ label: type });
+    if (options) await dlg.getByLabel('Opciones').fill(options);
+    if (required) await dlg.getByLabel('Obligatorio').check();
+    await dlg.getByRole('button', { name: 'Crear campo' }).click();
+    await expect(dlg).toBeHidden();
+  };
+  await create('Cédula', null, null, true);
+  await create('Interés', 'Selección única', 'Uñas\nBarbería');
+  await create('Horarios', 'Selección múltiple', 'Mañana\nTarde');
+  const list = page.getByRole('list', { name: 'Campos' });
+  await expect(list.getByRole('listitem').filter({ hasText: 'Cédula' })).toContainText('{{contact.cedula}}');
+  await expect(list.getByRole('listitem').filter({ hasText: 'Interés' })).toContainText('Uñas · Barbería');
+
+  // Reordenar: bajar «Cédula» la deja en segundo lugar
+  await page.getByRole('button', { name: 'Bajar Cédula' }).click();
+  await expect(list.getByRole('listitem').nth(1)).toContainText('Cédula');
+
+  // El formulario de contacto exige el obligatorio y guarda todos los valores
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('button', { name: 'Nuevo contacto' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Nuevo contacto' });
+  await dlg.getByLabel('Nombre', { exact: true }).fill('Marta Salazar');
+  await dlg.getByRole('button', { name: 'Crear contacto' }).click();
+  await expect(dlg.getByText('Este campo es obligatorio')).toBeVisible();
+  await dlg.getByLabel(/Cédula/).fill('0912345678');
+  await dlg.getByLabel('Interés').selectOption('Barbería');
+  await dlg.getByLabel('Tarde').check();
+  await dlg.getByRole('button', { name: 'Crear contacto' }).click();
+  await expect(dlg).toBeHidden();
+
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
+  const contacts = async () => ((await (await request.get(`${apiBase}/v1/contacts`, { headers: mine })).json()) as { items: Array<{ id: string; custom_fields: Record<string, unknown> }> }).items;
+  expect((await contacts())[0]!.custom_fields).toEqual({ cedula: '0912345678', interes: 'Barbería', horarios: ['Tarde'] });
+
+  // Reabrir muestra lo guardado; editar cambia solo lo tocado
+  await page.getByRole('button', { name: 'Abrir el contacto Marta Salazar' }).click();
+  const edit = page.getByRole('dialog', { name: 'Contacto' });
+  await expect(edit.getByLabel(/Cédula/)).toHaveValue('0912345678');
+  await expect(edit.getByLabel('Interés')).toHaveValue('Barbería');
+  await expect(edit.getByLabel('Tarde')).toBeChecked();
+  await edit.getByLabel('Interés').selectOption('Uñas');
+  await edit.getByRole('button', { name: 'Guardar' }).click();
+  await expect(edit).toBeHidden();
+  expect((await contacts())[0]!.custom_fields).toMatchObject({ interes: 'Uñas', cedula: '0912345678' });
+
+  // Archivar «Interés» lo quita del formulario y de la respuesta; restaurarlo devuelve el valor
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await page.getByRole('button', { name: 'Archivar Interés' }).click();
+  await expect(page.getByLabel('Ver archivados (1)')).toBeVisible();
+  expect((await contacts())[0]!.custom_fields).not.toHaveProperty('interes');
+  await page.getByLabel('Ver archivados (1)').check();
+  await page.getByRole('button', { name: 'Restaurar Interés' }).click();
+  await expect(page.getByRole('list', { name: 'Campos' }).getByRole('listitem').filter({ hasText: 'Interés' })).toBeVisible();
+  expect((await contacts())[0]!.custom_fields).toMatchObject({ interes: 'Uñas' });
+
+  // Otra empresa no ve los campos ni puede tocarlos
+  const fieldsOf = async (headers: Record<string, string>) => ((await (await request.get(`${apiBase}/v1/custom-fields?archived=include`, { headers })).json()) as { items: Array<{ id: string }> }).items;
+  const id = (await fieldsOf(mine))[0]!.id;
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect(await fieldsOf(other)).toEqual([]);
+  expect((await request.post(`${apiBase}/v1/custom-fields/${id}/archive`, { headers: other })).status()).toBe(404);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);
@@ -667,5 +742,23 @@ test.describe('móvil (390 px)', () => {
     const dlg = page.getByRole('dialog', { name: 'Nuevo contacto' });
     await expect(dlg.getByRole('button', { name: 'Crear contacto' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  });
+
+  test('/settings/fields: con un campo de nombre y opciones largos no hay desborde horizontal y se puede crear', async ({ page, request }) => {
+    const { apiBase } = state();
+    const email = await createAccount(request, uniqueEmail('movilcf'));
+    const token = await apiLogin(request, email);
+    const name = 'Nombre-de-campo-muy-largo-sin-espacios-'.repeat(2).slice(0, 78);
+    const r = await request.post(`${apiBase}/v1/custom-fields`, { headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, data: { name, type: 'select', options: ['Opcion-larga-'.repeat(7).slice(0, 99), 'Otra'] } });
+    expect(r.status()).toBe(201);
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible(); // la sesión ya está lista antes de navegar
+    await page.goto('/settings/fields');
+    await expect(page.getByRole('button', { name: `Editar ${name}` })).toBeVisible();
+    const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.getByRole('button', { name: 'Nuevo campo' }).click();
+    await expect(page.getByRole('dialog', { name: 'Nuevo campo' }).getByRole('button', { name: 'Crear campo' })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
   });
 });

@@ -3,6 +3,7 @@ import { AgencyShell } from './features/agency/AgencyShell';
 import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
 import { ContactsPage } from './features/contacts/ContactsPage';
+import { CustomFieldsPage } from './features/custom-fields/CustomFieldsPage';
 import { AccessPage } from './features/platform/AccessPage';
 import { AgenciesPage } from './features/platform/AgenciesPage';
 import { CompaniesPage } from './features/platform/CompaniesPage';
@@ -92,6 +93,7 @@ export function App() {
       <Route element={<AppGate />}>
         <Route path="/" element={<Home />} />
         <Route path="/contacts" element={<ContactsPage />} />
+        <Route path="/settings/fields" element={<CustomFieldsPage />} />
       </Route>
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/agencies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AgenciesPage /></PlatformShell>}</PlatformGate>} />

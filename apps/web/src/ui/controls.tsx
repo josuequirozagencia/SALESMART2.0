@@ -26,12 +26,12 @@ export function Spinner({ label }: { label?: string }) {
 }
 
 /** Campo con etiqueta, ayuda y error asociados (aria-describedby / aria-invalid). */
-export function Field({ label, error, hint, children }: { label: string; error?: string | undefined; hint?: string; children: (p: { id: string; 'aria-invalid'?: true; 'aria-describedby'?: string }) => ReactNode }) {
+export function Field({ label, error, hint, required, children }: { label: string; error?: string | undefined; hint?: string; required?: boolean; children: (p: { id: string; 'aria-invalid'?: true; 'aria-describedby'?: string }) => ReactNode }) {
   const id = useId();
   const msgId = `${id}-msg`;
   return (
     <div className="grid gap-[5px] text-[12.5px] font-semibold">
-      <label htmlFor={id}>{label}</label>
+      <label htmlFor={id}>{label}{required ? <span aria-hidden="true" className="ml-0.5 text-crit">*</span> : null}</label>
       {children({ id, ...(error ? { 'aria-invalid': true as const } : {}), ...(error || hint ? { 'aria-describedby': msgId } : {}) })}
       {error ? <span id={msgId} role="alert" className="text-[12px] font-medium text-crit">{error}</span> : hint ? <span id={msgId} className="text-[12px] font-normal text-muted">{hint}</span> : null}
     </div>

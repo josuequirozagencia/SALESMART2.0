@@ -4,6 +4,7 @@ import { contactPhones, contacts, Database, type TenantTx } from '../../db';
 import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
+import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OrgMembersService, type OrgPerson } from '../organizations';
 import type { CreateContactDto, ListContactsQuery, UpdateContactDto } from './contacts.dto';
 import { ContactsRepository, type ContactRow, type PhoneRow, type Scope } from './contacts.repository';
@@ -18,6 +19,8 @@ export interface ContactView {
   source: string;
   consent: 'unknown' | 'granted' | 'revoked';
   consent_updated_at: string | null;
+  /** Campos personalizados (M3.2): `{ variable: valor }`, solo los no vacíos de campos no archivados. */
+  custom_fields: CustomValues;
   created_at: string;
   updated_at: string;
 }
@@ -50,25 +53,27 @@ export class ContactsService {
     @Inject(Database) private readonly db: Database,
     @Inject(ContactsRepository) private readonly repo: ContactsRepository,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
+    @Inject(CustomValuesService) private readonly custom: CustomValuesService,
   ) {}
 
   async list(scope: ContactScope, q: ListContactsQuery): Promise<ContactList> {
     const sc = this.scope(scope);
     const page = await this.db.withTenant(async (tx) => {
       const p = await this.repo.page(tx, sc, q);
-      return { ...p, phones: await this.repo.phonesOf(tx, p.rows.map((r) => r.id)) };
+      const ids = p.rows.map((r) => r.id);
+      return { ...p, phones: await this.repo.phonesOf(tx, ids), custom: await this.custom.valuesFor(tx, 'contact', ids) };
     });
-    return { items: await this.views(page.rows, page.phones), next_cursor: page.next, total: page.total };
+    return { items: await this.views(page.rows, page.phones, page.custom), next_cursor: page.next, total: page.total };
   }
 
   async get(scope: ContactScope, id: string): Promise<ContactView> {
     const sc = this.scope(scope);
     const found = await this.db.withTenant(async (tx) => {
       const row = await this.repo.byId(tx, sc, id);
-      return row ? { row, phones: await this.repo.phonesOf(tx, [row.id]) } : null;
+      return row ? { row, phones: await this.repo.phonesOf(tx, [row.id]), custom: await this.custom.valuesFor(tx, 'contact', [row.id]) } : null;
     });
     if (!found) throw new NotFoundError();
-    return (await this.views([found.row], found.phones))[0]!;
+    return (await this.views([found.row], found.phones, found.custom))[0]!;
   }
 
   async create(scope: ContactScope, input: CreateContactDto): Promise<ContactView> {
@@ -86,13 +91,16 @@ export class ContactsService {
         .returning();
       const c = row!;
       if (phones.length > 0) await tx.insert(contactPhones).values(phones.map((e164, i) => ({ contactId: c.id, e164, isPrimary: i === 0 })));
-      await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source }, source: 'manual' });
-      return { row: c, phones: await this.repo.phonesOf(tx, [c.id]) };
+      // Campos personalizados: valida todo (obligatorios incluidos) y, si algo falla, la transacción entera se revierte
+      const customChanges = await this.custom.apply(tx, 'contact', c.id, input.custom_fields ?? {}, { creating: true });
+      const customNew = Object.fromEntries(customChanges.map((x) => [x.key, x.newValue]));
+      await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}) }, source: 'manual' });
+      return { row: c, phones: await this.repo.phonesOf(tx, [c.id]), custom: await this.custom.valuesFor(tx, 'contact', [c.id]) };
       })
       .catch((e: unknown) => {
         throw this.phoneRace(e, phones);
       });
-    return (await this.views([out.row], out.phones))[0]!;
+    return (await this.views([out.row], out.phones, out.custom))[0]!;
   }
 
   async update(scope: ContactScope, id: string, input: UpdateContactDto): Promise<ContactView> {
@@ -130,16 +138,20 @@ export class ContactsService {
         await this.replacePhones(tx, id, current.get(id) ?? [], input.phones);
         changes.push({ field: 'phones', oldValue: before, newValue: input.phones });
       }
-      if (changes.length === 0) return { row, phones: current };
+      // Campos personalizados: una fila de auditoría por campo cambiado (`custom.<variable>`)
+      if (input.custom_fields) {
+        for (const c of await this.custom.apply(tx, 'contact', id, input.custom_fields, { creating: false })) changes.push({ field: `custom.${c.key}`, oldValue: c.oldValue, newValue: c.newValue });
+      }
+      if (changes.length === 0) return { row, phones: current, custom: await this.custom.valuesFor(tx, 'contact', [id]) };
       set.updatedAt = new Date();
       const [updated] = await tx.update(contacts).set(set).where(eq(contacts.id, id)).returning();
       for (const c of changes) await writeAudit(tx, { entityType: 'contact', entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
-      return { row: updated!, phones: await this.repo.phonesOf(tx, [id]) };
+      return { row: updated!, phones: await this.repo.phonesOf(tx, [id]), custom: await this.custom.valuesFor(tx, 'contact', [id]) };
       })
       .catch((e: unknown) => {
         throw this.phoneRace(e, input.phones ?? []);
       });
-    return (await this.views([out.row], out.phones))[0]!;
+    return (await this.views([out.row], out.phones, out.custom))[0]!;
   }
 
   /** Borrado LÓGICO: el contacto y sus teléfonos quedan marcados y los números vuelven a estar libres. Los datos se conservan (auditoría, historial). */
@@ -217,7 +229,7 @@ export class ContactsService {
     if (desired[0]) await tx.update(contactPhones).set({ isPrimary: true }).where(and(eq(contactPhones.contactId, contactId), eq(contactPhones.e164, desired[0]), isNull(contactPhones.deletedAt)));
   }
 
-  private async views(rows: readonly ContactRow[], phones: Map<string, PhoneRow[]>): Promise<ContactView[]> {
+  private async views(rows: readonly ContactRow[], phones: Map<string, PhoneRow[]>, custom: Map<string, CustomValues>): Promise<ContactView[]> {
     const labels = await this.members.labels(rows.flatMap((r) => (r.ownerId ? [r.ownerId] : [])));
     return rows.map((r) => ({
       id: r.id,
@@ -228,6 +240,7 @@ export class ContactsService {
       source: r.source,
       consent: asConsent(r.consent),
       consent_updated_at: r.consentUpdatedAt ? iso(r.consentUpdatedAt) : null,
+      custom_fields: custom.get(r.id) ?? {},
       created_at: iso(r.createdAt),
       updated_at: iso(r.updatedAt),
     }));
