@@ -275,7 +275,9 @@ describe('altas y ediciones', () => {
     expect(v).toMatchObject({ name: 'Ana María', email: null, consent: 'revoked', phones: [{ e164: P1, primary: true }] });
     expect(new Date(v.updated_at).getTime()).toBeGreaterThanOrEqual(new Date(c.updated_at).getTime());
     const a = (await audits(c.id)).slice(1);
-    expect(a.map((x) => [x.field, x.old_value, x.new_value])).toEqual([['name', 'Ana', 'Ana María'], ['email', 'ana@a.test', null], ['consent', 'unknown', 'revoked']]);
+    // Las filas de una misma transacción comparten `at` y su desempate por id no es el orden de escritura: se compara sin depender del orden
+    const byField = (x: { field: string | null }, y: { field: string | null }): number => (x.field ?? '').localeCompare(y.field ?? '');
+    expect([...a].sort(byField).map((x) => [x.field, x.old_value, x.new_value])).toEqual([['consent', 'unknown', 'revoked'], ['email', 'ana@a.test', null], ['name', 'Ana', 'Ana María']]);
 
     const before = (await audits(c.id)).length;
     expect((await call('PATCH', `/contacts/${c.id}`, T.alice, { name: 'Ana María', phones: [P1] })).status).toBe(200); // sin cambios reales
