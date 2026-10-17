@@ -200,3 +200,67 @@ export const contactListMembers = tenantTable(
     index('contact_list_members_contact_idx').on(t['organizationId']!, t['contactId']!),
   ],
 );
+
+/**
+ * Importación de contactos desde CSV (M3.5, ADR-47). El navegador lee el archivo y sube las filas por lotes a `contact_import_rows`; la vista previa y el
+ * proceso real salen de esas filas. La misma huella de archivo no se importa dos veces en la empresa (salvo si se canceló). Sin DELETE.
+ */
+export const contactImports = tenantTable(
+  'contact_imports',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    fileName: text('file_name').notNull(),
+    fileHash: text('file_hash').notNull(),
+    status: text('status').notNull().default('staging'),
+    totalRows: integer('total_rows').notNull(),
+    headers: jsonb('headers').$type<string[]>().notNull(),
+    /** Destino de cada columna: `ignore`, `name`, `phone`, `email` o `cf:<variable>`. Misma longitud que `headers`. */
+    mapping: jsonb('mapping').$type<string[]>().notNull(),
+    options: jsonb('options').$type<Record<string, unknown>>().notNull(),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    legalBasisAt: ts('legal_basis_at'),
+    createdCount: integer('created_count').notNull().default(0),
+    updatedCount: integer('updated_count').notNull().default(0),
+    skippedCount: integer('skipped_count').notNull().default(0),
+    rejectedCount: integer('rejected_count').notNull().default(0),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    startedAt: ts('started_at'),
+    finishedAt: ts('finished_at'),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('contact_imports_status_valid', sql`${t['status']!} IN ('staging', 'ready', 'running', 'done', 'cancelled')`),
+    check('contact_imports_rows_valid', sql`${t['totalRows']!} BETWEEN 1 AND 5000`),
+    check('contact_imports_hash_hex', sql`${t['fileHash']!} ~ '^[0-9a-f]{64}$'`),
+    check('contact_imports_name_shape', sql`length(btrim(${t['fileName']!})) BETWEEN 1 AND 200`),
+    check('contact_imports_counts_valid', sql`${t['createdCount']!} >= 0 AND ${t['updatedCount']!} >= 0 AND ${t['skippedCount']!} >= 0 AND ${t['rejectedCount']!} >= 0`),
+    check('contact_imports_arrays', sql`jsonb_typeof(${t['headers']!}) = 'array' AND jsonb_typeof(${t['mapping']!}) = 'array' AND jsonb_array_length(${t['headers']!}) = jsonb_array_length(${t['mapping']!})`),
+    uniqueIndex('contact_imports_org_hash_uq').on(t['organizationId']!, t['fileHash']!).where(sql`${t['status']!} <> 'cancelled'`),
+    index('contact_imports_org_created_idx').on(t['organizationId']!, t['createdAt']!),
+  ],
+);
+
+/**
+ * Fila preparada de una importación. `data` = celdas originales del CSV (para la vista previa, el proceso y el reporte); al terminar se borra en las filas
+ * creadas o actualizadas (minimización de datos) y se conserva en las rechazadas y omitidas.
+ */
+export const contactImportRows = tenantTable(
+  'contact_import_rows',
+  {
+    importId: uuid('import_id').notNull(),
+    rowNo: integer('row_no').notNull(),
+    data: jsonb('data').$type<string[]>(),
+    status: text('status').notNull().default('pending'),
+    reason: text('reason'),
+    contactId: uuid('contact_id'),
+  },
+  (t) => [
+    primaryKey({ name: 'contact_import_rows_pk', columns: [t['organizationId']!, t['importId']!, t['rowNo']!] }),
+    foreignKey({ name: 'contact_import_rows_import_fk', columns: [t['organizationId']!, t['importId']!], foreignColumns: [contactImports.organizationId, contactImports.id] }),
+    foreignKey({ name: 'contact_import_rows_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('contact_import_rows_status_valid', sql`${t['status']!} IN ('pending', 'created', 'updated', 'skipped', 'rejected')`),
+    check('contact_import_rows_no_valid', sql`${t['rowNo']!} >= 1`),
+    check('contact_import_rows_reason_len', sql`${t['reason']!} IS NULL OR length(${t['reason']!}) <= 300`),
+    index('contact_import_rows_status_idx').on(t['organizationId']!, t['importId']!, t['status']!, t['rowNo']!),
+  ],
+);

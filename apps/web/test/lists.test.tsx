@@ -6,9 +6,9 @@ import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, renderApp, resetWorld, type
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); window.localStorage.clear(); });
 
-const ALL: ContactAccess = { view_all: true, write: true, delete: true };
-const OWN: ContactAccess = { view_all: false, write: true, delete: false };
-const READ: ContactAccess = { view_all: true, write: false, delete: false };
+const ALL: ContactAccess = { view_all: true, write: true, delete: true, import: true, export: true };
+const OWN: ContactAccess = { view_all: false, write: true, delete: false, import: false, export: false };
+const READ: ContactAccess = { view_all: true, write: false, delete: false, import: false, export: false };
 
 const tag = (id: string, name: string, over: Partial<ContactTag> = {}): ContactTag => ({ id, name, color: '#6a44f2', system_key: null, is_system: false, ...over });
 const LEAD = tag('t-lead', 'Lead', { system_key: 'lead', is_system: true, color: '#2563eb' });

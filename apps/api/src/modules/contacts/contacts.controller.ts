@@ -15,9 +15,9 @@ const scopeOf = (req: AuthedRequest): ContactScope => ({ viewAll: req.principal?
  * Qué puede hacer quien consulta, para que la UI muestre u oculte acciones SIN replicar la matriz de permisos. Es solo ayuda de presentación:
  * cada ruta vuelve a verificar su permiso en el servidor.
  */
-const accessOf = (req: AuthedRequest): { view_all: boolean; write: boolean; delete: boolean } => {
-  const has = (k: 'contacts.view_all' | 'contacts.write' | 'contacts.delete'): boolean => req.principal?.permissions?.has(k) === true;
-  return { view_all: has('contacts.view_all'), write: has('contacts.write'), delete: has('contacts.delete') };
+const accessOf = (req: AuthedRequest): { view_all: boolean; write: boolean; delete: boolean; import: boolean; export: boolean } => {
+  const has = (k: 'contacts.view_all' | 'contacts.write' | 'contacts.delete' | 'contacts.import' | 'contacts.export'): boolean => req.principal?.permissions?.has(k) === true;
+  return { view_all: has('contacts.view_all'), write: has('contacts.write'), delete: has('contacts.delete'), import: has('contacts.import'), export: has('contacts.export') };
 };
 
 /**

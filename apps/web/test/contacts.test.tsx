@@ -6,9 +6,9 @@ import { authed, err, ME_ADMIN, ME_ADVISOR, ME_AGENCY_IN_CLIENT, mockApi, render
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
-const ALL: ContactAccess = { view_all: true, write: true, delete: true };
-const OWN: ContactAccess = { view_all: false, write: true, delete: false };
-const READ: ContactAccess = { view_all: true, write: false, delete: false };
+const ALL: ContactAccess = { view_all: true, write: true, delete: true, import: true, export: true };
+const OWN: ContactAccess = { view_all: false, write: true, delete: false, import: false, export: false };
+const READ: ContactAccess = { view_all: true, write: false, delete: false, import: false, export: false };
 
 const contact = (id: string, name: string, over: Partial<Contact> = {}): Contact => ({
   id,

@@ -27,6 +27,31 @@ export class CustomValuesService {
     return new Map((await this.repo.list(tx, entity, false)).map((d) => [d.varKey, { id: d.id, type: d.type }]));
   }
 
+  /** Nombre y tipo de los campos activos (para rotular columnas y convertir valores de un archivo). */
+  async labels(tx: TenantTx, entity: CustomEntity): Promise<Array<{ key: string; name: string; type: FieldType }>> {
+    return (await this.repo.list(tx, entity, false)).map((d) => ({ key: d.varKey, name: d.name, type: d.type as FieldType }));
+  }
+
+  /**
+   * Un validador de valores con las definiciones cargadas UNA vez (importaciones: miles de filas, una sola lectura). Valida SIN escribir; los obligatorios no
+   * se exigen aquí. Devuelve los errores de una fila (vacío = válida).
+   */
+  async validator(tx: TenantTx, entity: CustomEntity): Promise<(input: Readonly<Record<string, unknown>>) => ErrorDetail[]> {
+    const byKey = new Map((await this.repo.list(tx, entity, false)).map((d) => [d.varKey, d]));
+    return (input) => {
+      const errors: ErrorDetail[] = [];
+      for (const [key, raw] of Object.entries(input)) {
+        const def = byKey.get(key);
+        if (!def) errors.push({ path: path(key), code: 'unknown_field', message: 'Ese campo no existe o está archivado' });
+        else {
+          const r = coerceValue(def.type as FieldType, def.options, raw);
+          if (!r.ok) errors.push({ path: path(key), code: r.code, message: `${def.name}: ${r.message}` });
+        }
+      }
+      return errors;
+    };
+  }
+
   /** Valores NO vacíos de campos NO archivados, por id de entidad y por variable. */
   async valuesFor(tx: TenantTx, entity: CustomEntity, ids: readonly string[]): Promise<Map<string, CustomValues>> {
     const out = new Map<string, CustomValues>();

@@ -94,7 +94,41 @@ export interface RequestOptions {
   headers?: Record<string, string>;
 }
 
+export interface Download {
+  blob: Blob;
+  filename: string;
+  /** Filas que trae el archivo (cabecera `X-Export-Count`), si el servidor la informa. */
+  count: number | null;
+}
+
+/** Pide un archivo al servidor (exportación o reporte). Mismas reglas de sesión que `api`; el nombre sale de `Content-Disposition`. */
+export async function apiDownload(path: string, opts: RequestOptions & { fallbackName: string }): Promise<Download> {
+  const res = await rawRequest(path, opts);
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1];
+  const count = Number(res.headers.get('x-export-count'));
+  return { blob: await res.blob(), filename: name ?? opts.fallbackName, count: res.headers.has('x-export-count') && Number.isFinite(count) ? count : null };
+}
+
+/** Inicia la descarga de un archivo en memoria. */
+export function saveBlob(d: Download): void {
+  const url = URL.createObjectURL(d.blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = d.filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T> {
+  const res = await rawRequest(path, opts);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+/** Envía la petición con el access token; ante un 401 refresca la sesión y repite una vez. Lanza `ApiError` si la respuesta no es correcta. */
+async function rawRequest(path: string, opts: RequestOptions): Promise<Response> {
   const auth = opts.auth ?? true;
   const send = async (): Promise<Response> => {
     const headers: Record<string, string> = { ...(opts.body !== undefined ? { 'content-type': 'application/json' } : {}), ...opts.headers };
@@ -112,6 +146,5 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     else for (const l of lostListeners) l();
   }
   if (!res.ok) throw await toApiError(res);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return res;
 }

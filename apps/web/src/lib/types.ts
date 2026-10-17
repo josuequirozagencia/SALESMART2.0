@@ -273,6 +273,42 @@ export interface ContactAccess {
   view_all: boolean;
   write: boolean;
   delete: boolean;
+  /** Importar y exportar CSV (M3.5): solo el administrador. */
+  import: boolean;
+  export: boolean;
+}
+
+export type ImportStatus = 'staging' | 'ready' | 'running' | 'done' | 'cancelled';
+export interface ImportOptions {
+  duplicates: 'skip' | 'update_empty';
+  country_prefix: string;
+  consent: 'unknown' | 'granted';
+  tag_id: string | null;
+  owner_id: string | null;
+}
+/** Una importación de contactos desde CSV (M3.5, ADR-47). */
+export interface ContactImport {
+  id: string;
+  file_name: string;
+  status: ImportStatus;
+  total_rows: number;
+  staged_rows: number;
+  headers: string[];
+  mapping: string[];
+  options: ImportOptions;
+  counts: { created: number; updated: number; skipped: number; rejected: number; pending: number };
+  legal_basis_at: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+export interface ImportPreview {
+  total: number;
+  new: number;
+  duplicates_existing: number;
+  duplicates_in_file: number;
+  invalid: number;
+  samples: Array<{ row_no: number; reasons: string[] }>;
 }
 
 /** Persona a la que se puede asignar un contacto (solo lo ve quien puede ver todos los contactos). */

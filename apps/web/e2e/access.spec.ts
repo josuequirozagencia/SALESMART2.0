@@ -1,5 +1,6 @@
 // E2E del flujo de acceso (ADR-23) en un navegador real contra la API y la web COMPILADAS.
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 import { adminToken, apiLogin, createAccount, decide, expireTrialOf, hasAgencyAccess, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
 
 const REASON = 'Aún estoy conectando mi WhatsApp y probando los agentes';
@@ -866,6 +867,74 @@ test('listas: etiquetas, filtros, columnas, lista dinámica y lista fija con la 
   const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
   expect(((await (await request.get(`${apiBase}/v1/contact-lists`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
   expect((await request.get(`${apiBase}/v1/contacts?list=${lists.items[0]!.id}`, { headers: other })).status()).toBe(404);
+});
+
+test('importar y exportar: el administrador sube un CSV, revisa, importa y descarga el reporte; exporta; repetir el archivo se rechaza; otra empresa no ve nada', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('import'));
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}`, 'content-type': 'application/json' };
+  expect((await request.post(`${apiBase}/v1/custom-fields`, { headers: mine, data: { name: 'Ciudad', type: 'text' } })).status()).toBe(201);
+  expect((await request.post(`${apiBase}/v1/contacts`, { headers: mine, data: { name: 'Ya Existía', phones: ['+593991112233'] } })).status()).toBe(201);
+
+  const csv = 'Nombre;Celular;Correo;Ciudad;Notas\r\nAna Torres;098 421 7730;ana@correo.test;Quito;x\r\nBeto;0991112233;;Cuenca;y\r\nSin Teléfono;;;Lima;z\r\n=Evil;0987654321;;Lima;w\r\n';
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('button', { name: 'Importar' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Importar contactos' });
+  await dlg.getByLabel('Archivo CSV').setInputFiles({ name: 'clientes.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+  await expect(dlg.getByText(/4 filas · 5 columnas/)).toBeVisible();
+  await expect(dlg.getByRole('combobox', { name: 'Destino de «Ciudad»' })).toHaveValue('cf:ciudad');
+  await dlg.getByRole('button', { name: 'Revisar' }).click();
+
+  // Revisión: Ana y «=Evil» son nuevas; Beto ya existe (teléfono); la fila sin teléfono tiene error
+  await expect(dlg.getByRole('button', { name: /Importar 2 contactos/ })).toBeVisible();
+  await expect(dlg.getByRole('listitem').filter({ hasText: 'con errores' })).toContainText('1');
+  await dlg.getByText('Ver filas con errores').click();
+  await expect(dlg.getByText('Fila 4: Falta el teléfono')).toBeVisible();
+  await dlg.getByRole('button', { name: /Importar 2 contactos/ }).click();
+  await expect(dlg.getByText('Importación terminada.')).toBeVisible();
+  await expect(dlg.getByRole('listitem').filter({ hasText: 'creados' })).toContainText('2');
+  const [reportDl] = await Promise.all([page.waitForEvent('download'), dlg.getByRole('button', { name: 'Descargar reporte de omitidos y rechazados' }).click()]);
+  expect(reportDl.suggestedFilename()).toBe('clientes-reporte.csv');
+  const report = (await readFile((await reportDl.path())!, 'utf8')).replace(/^\uFEFF/, '');
+  expect(report).toContain('Beto');
+  expect(report).toContain('Omitida');
+  expect(report).toContain('Sin Teléfono');
+  expect(report).toContain('Falta el teléfono');
+
+  // El mismo archivo no se importa dos veces
+  await dlg.getByRole('button', { name: 'Listo' }).click();
+  await page.getByRole('button', { name: 'Importar' }).click();
+  await page.getByRole('dialog', { name: 'Importar contactos' }).getByLabel('Archivo CSV').setInputFiles({ name: 'clientes-copia.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+  await page.getByRole('dialog', { name: 'Importar contactos' }).getByRole('button', { name: 'Revisar' }).click();
+  await expect(page.getByText(/Este archivo ya se importó/)).toBeVisible();
+  await page.getByRole('dialog', { name: 'Importar contactos' }).getByRole('button', { name: 'Cambiar archivo' }).click();
+  await page.getByRole('dialog', { name: 'Importar contactos' }).getByRole('button', { name: 'Cerrar' }).click();
+
+  // Los contactos importados están en la tabla, con origen «import»
+  await expect(page.getByRole('button', { name: 'Abrir el contacto Ana Torres' })).toBeVisible();
+  const listed = (await (await request.get(`${apiBase}/v1/contacts?limit=50`, { headers: mine })).json()) as { items: Array<{ name: string; source: string; custom_fields: Record<string, unknown> }> };
+  expect(listed.items.map((c) => c.name).sort()).toEqual(['=Evil', 'Ana Torres', 'Ya Existía'].sort());
+  expect(listed.items.find((c) => c.name === 'Ana Torres')).toMatchObject({ source: 'import', custom_fields: { ciudad: 'Quito' } });
+
+  // Exportar la vista: se descarga un CSV con BOM, el nombre del archivo y la fórmula neutralizada
+  await page.getByRole('button', { name: 'Exportar' }).click();
+  const exp = page.getByRole('dialog', { name: 'Exportar contactos' });
+  await exp.getByRole('radio', { name: 'Todas las columnas' }).click();
+  const [fileDl] = await Promise.all([page.waitForEvent('download'), exp.getByRole('button', { name: 'Exportar' }).click()]);
+  expect(fileDl.suggestedFilename()).toMatch(/^contactos-\d{4}-\d{2}-\d{2}\.csv$/);
+  const raw = await readFile((await fileDl.path())!, 'utf8');
+  expect(raw.charCodeAt(0)).toBe(0xfeff);
+  expect(raw).toContain('Nombre,Teléfono,Correo,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad');
+  expect(raw).toContain('Ana Torres');
+  expect(raw).toContain("'+593984217730");
+  await expect(exp.getByText(/se descargó el archivo con 3 contactos/)).toBeVisible();
+
+  // Otra empresa no ve nada de esto
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect(((await (await request.get(`${apiBase}/v1/contacts`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect(((await (await request.get(`${apiBase}/v1/contact-imports`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect((await request.get(`${apiBase}/v1/contact-imports`, { headers: { authorization: 'Bearer x' } })).status()).toBe(401);
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

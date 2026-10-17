@@ -118,12 +118,12 @@ describe('acceso', () => {
 
   it('el listado informa qué puede hacer quien consulta (ayuda para la UI): administrador todo, asesor solo lo suyo, la agencia en «lectura» solo ve', async () => {
     const access = async (t: string) => (await json<Page & { access: { view_all: boolean; write: boolean; delete: boolean } }>(await call('GET', '/contacts', t))).access;
-    expect(await access(T.alice)).toEqual({ view_all: true, write: true, delete: true });
-    expect(await access(T.carol)).toEqual({ view_all: false, write: true, delete: false });
+    expect(await access(T.alice)).toEqual({ view_all: true, write: true, delete: true, import: true, export: true });
+    expect(await access(T.carol)).toEqual({ view_all: false, write: true, delete: false, import: false, export: false });
     expect((await call('POST', '/context/switch', T.dave, { target: ORG_A })).status).toBe(200);
-    expect(await access(T.dave)).toEqual({ view_all: true, write: true, delete: true });
+    expect(await access(T.dave)).toEqual({ view_all: true, write: true, delete: true, import: true, export: true });
     await admin.query(`UPDATE organization_members SET access_level = 'read' WHERE user_id = $1 AND organization_id = $2`, [IDS.dave, ORG_A]);
-    expect(await access(T.dave)).toEqual({ view_all: true, write: false, delete: false });
+    expect(await access(T.dave)).toEqual({ view_all: true, write: false, delete: false, import: false, export: false });
   });
 
   it('una id mal formada es 400 y una inexistente 404', async () => {

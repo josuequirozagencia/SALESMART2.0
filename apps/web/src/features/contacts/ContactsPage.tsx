@@ -8,14 +8,16 @@ import { ColumnMenu } from './ColumnMenu';
 import { catalogOf, loadColumns, normalizeColumns, saveColumns } from './columns';
 import { ContactDialog } from './ContactDialog';
 import { ContactsTable } from './ContactsTable';
+import { ExportDialog } from './ExportDialog';
 import { FilterBar } from './FilterBar';
+import { ImportDialog } from './ImportDialog';
 import { ListDialog, type ListMode } from './ListDialog';
 import { NO_CONTACT_FILTERS, SORT_LABEL, SORT_PARAMS, hasFilters, useContacts, useOwners, type ContactFilters, type SortKey } from './useContacts';
 import { useAddMembers, useLists, useUpdateList } from './useLists';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 // Mientras llega la primera página no se sabe qué puede hacer la persona: no se ofrece nada
-const NO_ACCESS: ContactAccess = { view_all: false, write: false, delete: false };
+const NO_ACCESS: ContactAccess = { view_all: false, write: false, delete: false, import: false, export: false };
 
 const sortKeyOf = (s: { key: string; order: string } | null): SortKey => (Object.keys(SORT_PARAMS) as SortKey[]).find((k) => SORT_PARAMS[k].sort === s?.key && SORT_PARAMS[k].order === s.order) ?? 'recent';
 const sortOf = (k: SortKey) => ({ key: SORT_PARAMS[k].sort, order: SORT_PARAMS[k].order });
@@ -48,6 +50,8 @@ export function ContactsPage() {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [dialog, setDialog] = useState<{ contact?: Contact } | null>(null);
   const [listDialog, setListDialog] = useState<ListMode | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [target, setTarget] = useState('');
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string }>();
 
@@ -142,6 +146,8 @@ export function ContactsPage() {
         <h1 className="text-[22px] font-bold">Contactos</h1>
         <div className="flex flex-wrap items-center gap-2">
           <ColumnMenu catalog={catalog} selected={columns} onChange={changeColumns} />
+          {access.export ? <Button onClick={() => setExporting(true)}>Exportar</Button> : null}
+          {access.import ? <Button onClick={() => setImporting(true)}>Importar</Button> : null}
           {access.write ? <Button variant="primary" onClick={() => setDialog({})}>Nuevo contacto</Button> : null}
         </div>
       </div>
@@ -231,6 +237,18 @@ export function ContactsPage() {
       ) : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
 
+      {importing ? <ImportDialog onClose={() => setImporting(false)} /> : null}
+      {exporting ? (
+        <ExportDialog
+          selectedIds={[...selected]}
+          filters={filters}
+          listId={active?.kind === 'fixed' ? active.id : undefined}
+          listName={active?.name}
+          visibleColumns={columns}
+          total={total}
+          onClose={() => setExporting(false)}
+        />
+      ) : null}
       {dialog ? (
         <ContactDialog
           {...(dialog.contact ? { contact: dialog.contact } : {})}

@@ -11,7 +11,7 @@ import { resetBootstrapForTests, SessionProvider } from '../src/lib/session';
 import type { Me, Trial } from '../src/lib/types';
 
 export interface Call { method: string; path: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
-export interface Reply { status?: number; body?: unknown; headers?: Record<string, string> }
+export interface Reply { status?: number; body?: unknown; /** Cuerpo de texto tal cual (descargas CSV): en vez de `body`, no se serializa como JSON. */ text?: string; headers?: Record<string, string> }
 export type Handler = (call: Call) => Reply | Promise<Reply>;
 
 /** Sustituye `fetch` por un servidor simulado. Una ruta sin manejador FALLA la prueba (no se silencia). */
@@ -28,7 +28,7 @@ export function mockApi(routes: Record<string, Handler>): { calls: Call[]; count
     if (!h) throw new Error(`Ruta sin manejador en la prueba: ${method} ${path}`);
     const r = await h(call);
     const status = r.status ?? 200;
-    return new Response(status === 204 ? null : JSON.stringify(r.body ?? {}), { status, headers: { 'content-type': 'application/json', ...r.headers } });
+    return new Response(status === 204 ? null : r.text !== undefined ? r.text : JSON.stringify(r.body ?? {}), { status, headers: { 'content-type': r.text !== undefined ? 'text/csv; charset=utf-8' : 'application/json', ...r.headers } });
   });
   const key = (c: Call) => `${c.method} ${c.path}`;
   return { calls, count: (k) => calls.filter((c) => key(c) === k).length, last: (k) => [...calls].reverse().find((c) => key(c) === k) };

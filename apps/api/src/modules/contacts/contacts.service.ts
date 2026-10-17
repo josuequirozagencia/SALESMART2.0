@@ -8,6 +8,7 @@ import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OrgMembersService, type OrgPerson } from '../organizations';
 import { ContactTaggingService, SystemTagsService, type TagView } from '../tags';
 import { checkCfValue, mergeFilters, parseCf, type ContactFilters, type ResolvedCf } from './contact-filters';
+import { MAX_EXPORT_ROWS, type ExportDto } from './contact-export';
 import { ContactListsRepository } from './contact-lists.repository';
 import { savedFilters } from './contact-lists.service';
 import type { CreateContactDto, ListContactsQuery, UpdateContactDto } from './contacts.dto';
@@ -59,6 +60,12 @@ interface Extras {
   custom: Map<string, CustomValues>;
   tags: Map<string, TagView[]>;
   capi: Map<string, { status: string; sentAt: Date | null }>;
+}
+/** Lo leído para una exportación, aún sin los nombres de los responsables (esos viven en identidad y se resuelven FUERA de la transacción del tenant). */
+export interface ExportBundle {
+  rows: ContactRow[];
+  phones: Map<string, PhoneRow[]>;
+  extras: Extras;
 }
 export interface ContactList {
   items: ContactView[];
@@ -276,6 +283,52 @@ export class ContactsService {
     if (!row) return null;
     const phones = (await this.repo.phonesOf(tx, [id])).get(id) ?? [];
     return { ctwaClId: row.ctwaClId, primaryPhone: phones[0]?.e164 ?? null };
+  }
+
+  /**
+   * Los contactos de una exportación (ADR-47 #8), dentro de la transacción del que llama (que también audita). Respeta el alcance de la persona y, en «vista»,
+   * los mismos filtros y la lista abierta del listado; en «todos» ignora filtros. Más de `MAX_EXPORT_ROWS` es un 400: hay que filtrar.
+   */
+  async exportRowsIn(tx: TenantTx, scope: ContactScope, q: ExportDto): Promise<ExportBundle> {
+    const sc = this.scope(scope);
+    const out: ExportBundle = { rows: [], phones: new Map(), extras: { custom: new Map(), tags: new Map(), capi: new Map() } };
+    const push = async (rows: ContactRow[]) => {
+      const ids = rows.map((r) => r.id);
+      const phones = await this.repo.phonesOf(tx, ids);
+      const x = await this.extras(tx, ids);
+      out.rows.push(...rows);
+      for (const [k, v] of phones) out.phones.set(k, v);
+      for (const [k, v] of x.custom) out.extras.custom.set(k, v);
+      for (const [k, v] of x.tags) out.extras.tags.set(k, v);
+      for (const [k, v] of x.capi) out.extras.capi.set(k, v);
+    };
+    if (q.scope === 'selection') {
+      const visible = await this.repo.visibleIds(tx, sc, q.ids ?? []);
+      for (let i = 0; i < visible.length; i += 500) await push(await this.repo.byIds(tx, visible.slice(i, i + 500)));
+      return out;
+    }
+    const filters = q.scope === 'all' ? {} : {
+      ...(q.q ? { q: q.q } : {}),
+      ...(q.owner ? { owner: q.owner } : {}),
+      ...(q.source ? { source: q.source } : {}),
+      ...(q.consent ? { consent: q.consent } : {}),
+      ...(q.tag && q.tag.length > 0 ? { tag: q.tag } : {}),
+      ...(q.cf && q.cf.length > 0 ? { cf: q.cf } : {}),
+      ...(q.list ? { list: q.list } : {}),
+    };
+    let cursor: string | undefined;
+    for (;;) {
+      const p = await this.pageFor(tx, sc, { ...filters, sort: q.sort, order: q.order, limit: 100, ...(cursor ? { cursor } : {}) });
+      await push(p.rows);
+      if (out.rows.length > MAX_EXPORT_ROWS) throw new AppError(400, 'EXPORT_TOO_LARGE', `Son más de ${MAX_EXPORT_ROWS} contactos: aplica filtros o elige una lista para exportar menos`);
+      if (!p.next) return out;
+      cursor = p.next;
+    }
+  }
+
+  /** Convierte lo leído en vistas de contacto (resuelve responsables en identidad; llamar FUERA de la transacción del tenant). */
+  exportViews(b: ExportBundle): Promise<ContactView[]> {
+    return this.views(b.rows, b.phones, b.extras);
   }
 
   /** Una página del listado: mezcla los filtros de la petición con los de la lista guardada (si la hay) y resuelve los filtros por campo personalizado. */

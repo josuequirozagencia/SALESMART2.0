@@ -104,7 +104,7 @@ describe('Configuración › Campos personalizados', () => {
 
   it('quien no administra (asesor, agencia en lectura) no ve el menú ni las acciones, solo la lista y un aviso', async () => {
     const s = fieldsServer([fld('ciudad', 'Ciudad', 'text')], false);
-    mockApi({ ...authed(ME_ADVISOR), ...s.routes, 'GET /contacts': () => ({ body: { items: [], next_cursor: null, total: 0, access: { view_all: false, write: true, delete: false } } }) });
+    mockApi({ ...authed(ME_ADVISOR), ...s.routes, 'GET /contacts': () => ({ body: { items: [], next_cursor: null, total: 0, access: { view_all: false, write: true, delete: false, import: false, export: false } } }) });
     settings('/contacts');
     await screen.findByRole('link', { name: 'Contactos' });
     expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument();
@@ -235,7 +235,7 @@ describe('Configuración › Campos personalizados', () => {
 
   it('archivar saca el campo de la lista (no se borra); en «Ver archivados» se puede restaurar', async () => {
     const s = fieldsServer([fld('ciudad', 'Ciudad', 'text'), fld('interes', 'Interés', 'text')]);
-    mockApi({ ...authed(ME_ADMIN), ...s.routes, 'GET /contacts': () => ({ body: { items: [], next_cursor: null, total: 0, access: { view_all: true, write: true, delete: true } } }) });
+    mockApi({ ...authed(ME_ADMIN), ...s.routes, 'GET /contacts': () => ({ body: { items: [], next_cursor: null, total: 0, access: { view_all: true, write: true, delete: true, import: true, export: true } } }) });
     settings();
     await rowOf('Ciudad');
     expect(screen.queryByLabelText(/Ver archivados/)).not.toBeInTheDocument();
@@ -257,8 +257,8 @@ describe('Configuración › Campos personalizados', () => {
 
 // ── El formulario de contacto con campos personalizados ──
 
-const ALL: ContactAccess = { view_all: true, write: true, delete: true };
-const READ: ContactAccess = { view_all: true, write: false, delete: false };
+const ALL: ContactAccess = { view_all: true, write: true, delete: true, import: true, export: true };
+const READ: ContactAccess = { view_all: true, write: false, delete: false, import: false, export: false };
 const contact = (over: Partial<Contact> = {}): Contact => ({
   id: 'c1', name: 'Ana Torres', email: null, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null,
   custom_fields: {}, tags: [], attribution: null, created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,

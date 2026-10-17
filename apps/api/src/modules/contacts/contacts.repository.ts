@@ -154,6 +154,12 @@ export class ContactsRepository {
     return rows.map((r) => r.id);
   }
 
+  /** Contactos vigentes por id (ya filtrados por alcance), del más reciente al más antiguo. */
+  byIds(tx: TenantTx, ids: readonly string[]): Promise<ContactRow[]> {
+    if (ids.length === 0) return Promise.resolve([]);
+    return tx.select().from(contacts).where(and(inArray(contacts.id, [...ids]), isNull(contacts.deletedAt))).orderBy(sql`${contacts.createdAt} DESC`, sql`${contacts.id} DESC`);
+  }
+
   /** Contacto (vigente) de la empresa activa que tiene ese teléfono. Para los canales de entrada, que no tienen alcance por persona. */
   async idByPhone(tx: TenantTx, e164: string): Promise<string | undefined> {
     const [r] = await tx

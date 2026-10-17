@@ -9,6 +9,20 @@ import { ValidationError } from '../../errors';
  */
 @Injectable()
 export class ContactTaggingService {
+  /** AGREGA etiquetas personalizadas a un contacto sin quitar ninguna (importaciones). Devuelve cuántas puso de verdad. Los ids ya se validaron al configurar la importación. */
+  async addCustom(tx: TenantTx, contactId: string, tagIds: readonly string[]): Promise<number> {
+    if (tagIds.length === 0) return 0;
+    const rows = await tx.insert(contactTags).values(tagIds.map((tagId) => ({ contactId, tagId, setBy: 'user' }))).onConflictDoNothing().returning({ tagId: contactTags.tagId });
+    return rows.length;
+  }
+
+  /** ¿Son todas etiquetas personalizadas vigentes de esta empresa? */
+  async allCustom(tx: TenantTx, tagIds: readonly string[]): Promise<boolean> {
+    if (tagIds.length === 0) return true;
+    const rows = await tx.select({ id: tags.id }).from(tags).where(and(inArray(tags.id, [...tagIds]), eq(tags.isSystem, false), isNull(tags.deletedAt)));
+    return rows.length === new Set(tagIds).size;
+  }
+
   /** Devuelve los nombres antes y después, o null si no cambió nada. */
   async setCustom(tx: TenantTx, contactId: string, tagIds: readonly string[]): Promise<{ before: string[]; after: string[] } | null> {
     const wanted = tagIds.length === 0 ? [] : await tx.select().from(tags).where(and(inArray(tags.id, [...tagIds]), isNull(tags.deletedAt)));

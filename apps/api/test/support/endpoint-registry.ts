@@ -79,6 +79,18 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/ctwa/:endpointId', kind: 'public' },
+  // Importar y exportar contactos (M3.5, ADR-47). Pruebas: test/imports/imports.test.ts
+  { route: 'POST /v1/contacts/export', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'GET /v1/contact-imports', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'POST /v1/contact-imports', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'GET /v1/contact-imports/:id', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'PATCH /v1/contact-imports/:id', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'POST /v1/contact-imports/:id/rows', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'GET /v1/contact-imports/:id/preview', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'POST /v1/contact-imports/:id/start', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'POST /v1/contact-imports/:id/process', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'POST /v1/contact-imports/:id/cancel', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
+  { route: 'GET /v1/contact-imports/:id/report', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
