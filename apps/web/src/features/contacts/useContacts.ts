@@ -7,11 +7,16 @@ export interface ContactFilters {
   q: string;
   /** '' = todos · 'me' = míos · 'none' = sin asignar · otro = id de la persona (solo quien ve todos los contactos). */
   owner: string;
+  consent: '' | Consent;
+  /** Ids de etiquetas: el contacto debe tener TODAS. */
+  tags: string[];
+  /** Filtros de campos personalizados, `variable:operador[:valor]`. */
+  cf: string[];
   sort: SortKey;
 }
-export const NO_CONTACT_FILTERS: ContactFilters = { q: '', owner: '', sort: 'recent' };
+export const NO_CONTACT_FILTERS: ContactFilters = { q: '', owner: '', consent: '', tags: [], cf: [], sort: 'recent' };
 export const SORT_LABEL: Record<SortKey, string> = { recent: 'Más recientes', oldest: 'Más antiguos', az: 'Nombre (A–Z)', za: 'Nombre (Z–A)' };
-const SORT_PARAMS: Record<SortKey, { sort: string; order: string }> = {
+export const SORT_PARAMS: Record<SortKey, { sort: 'created_at' | 'updated_at' | 'name'; order: 'asc' | 'desc' }> = {
   recent: { sort: 'created_at', order: 'desc' },
   oldest: { sort: 'created_at', order: 'asc' },
   az: { sort: 'name', order: 'asc' },
@@ -19,10 +24,17 @@ const SORT_PARAMS: Record<SortKey, { sort: string; order: string }> = {
 };
 const PAGE = 25;
 
-export function contactsQuery(f: ContactFilters, cursor?: string): string {
+/** ¿Hay algún filtro puesto? (el orden no cuenta). */
+export const hasFilters = (f: ContactFilters): boolean => f.q.trim() !== '' || f.owner !== '' || f.consent !== '' || f.tags.length > 0 || f.cf.length > 0;
+
+export function contactsQuery(f: ContactFilters, cursor?: string, list?: string): string {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set('q', f.q.trim());
   if (f.owner) p.set('owner', f.owner);
+  if (f.consent) p.set('consent', f.consent);
+  for (const t of f.tags) p.append('tag', t);
+  for (const c of f.cf) p.append('cf', c);
+  if (list) p.set('list', list);
   const s = SORT_PARAMS[f.sort];
   p.set('sort', s.sort);
   p.set('order', s.order);
@@ -32,11 +44,11 @@ export function contactsQuery(f: ContactFilters, cursor?: string): string {
 }
 
 /** Contactos de la organización activa. El servidor decide cuáles ve la persona (los suyos, o todos con `contacts.view_all`). */
-export function useContacts(f: ContactFilters) {
+export function useContacts(f: ContactFilters, list?: string) {
   return useInfiniteQuery({
-    queryKey: ['contacts', 'list', f],
+    queryKey: ['contacts', 'list', f, list ?? null],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api<ContactList>(`/contacts?${contactsQuery(f, pageParam)}`),
+    queryFn: ({ pageParam }) => api<ContactList>(`/contacts?${contactsQuery(f, pageParam, list)}`),
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     placeholderData: keepPreviousData,
   });
@@ -68,6 +80,8 @@ export interface ContactInput {
   owner_id?: string | null;
   /** Campos personalizados (ADR-44): solo las variables que cambian; `null` vacía el valor. */
   custom_fields?: Record<string, CustomValue | null>;
+  /** Etiquetas PERSONALIZADAS (ADR-46): reemplaza el conjunto; las del sistema no se tocan. */
+  tag_ids?: string[];
 }
 
 export function useCreateContact() {

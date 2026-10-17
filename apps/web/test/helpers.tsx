@@ -92,4 +92,7 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   'GET /trials/me': () => (t ? { body: t } : err(404, 'NOT_FOUND')),
   // El marco de la empresa pregunta si hay que mostrar «Configuración» (campos personalizados)
   'GET /custom-fields': () => ({ body: { items: [], access: { manage: false } } }),
+  // La pantalla de contactos pide además las etiquetas y las listas guardadas
+  'GET /tags': () => ({ body: { items: [], access: { manage: false } } }),
+  'GET /contact-lists': () => ({ body: { items: [] } }),
 });

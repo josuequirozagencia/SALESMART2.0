@@ -17,13 +17,13 @@ export interface TagView {
   id: string;
   name: string;
   color: string;
-  /** null en las etiquetas personalizadas (llegan en M3.4). */
+  /** null en las etiquetas personalizadas (M3.4). */
   system_key: SystemTagKey | null;
   is_system: boolean;
 }
 
 type TagRow = typeof tags.$inferSelect;
-const view = (r: TagRow): TagView => ({ id: r.id, name: r.name, color: r.color, system_key: (r.systemKey as SystemTagKey | null) ?? null, is_system: r.isSystem });
+export const toTagView = (r: TagRow): TagView => ({ id: r.id, name: r.name, color: r.color, system_key: (r.systemKey as SystemTagKey | null) ?? null, is_system: r.isSystem });
 
 /**
  * Etiquetas del SISTEMA (M3.3, ADR-45): `Lead`, `Cita agendada` y `Venta`. Solo el sistema las pone (atribución, citas, ventas): ninguna ruta HTTP lo permite
@@ -66,7 +66,7 @@ export class SystemTagsService {
       .innerJoin(tags, and(eq(tags.organizationId, contactTags.organizationId), eq(tags.id, contactTags.tagId)))
       .where(and(inArray(contactTags.contactId, [...ids]), isNull(tags.deletedAt)))
       .orderBy(asc(tags.name));
-    for (const r of rows) out.set(r.contactId, [...(out.get(r.contactId) ?? []), view(r.tag)]);
+    for (const r of rows) out.set(r.contactId, [...(out.get(r.contactId) ?? []), toTagView(r.tag)]);
     return out;
   }
 
@@ -75,7 +75,7 @@ export class SystemTagsService {
     return this.db.withTenant(async (tx) => {
       await this.ensure(tx);
       const rows = await tx.select().from(tags).where(isNull(tags.deletedAt)).orderBy(asc(tags.name));
-      return { items: rows.map(view) };
+      return { items: rows.map(toTagView) };
     });
   }
 }

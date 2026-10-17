@@ -79,6 +79,16 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/ctwa/:endpointId', kind: 'public' },
+  // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
+  { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'DELETE /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'GET /v1/contact-lists', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'POST /v1/contact-lists', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'PATCH /v1/contact-lists/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'DELETE /v1/contact-lists/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'POST /v1/contact-lists/:id/members', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
+  { route: 'POST /v1/contact-lists/:id/members/remove', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   // Campos personalizados (M3.2, ADR-44). Pruebas: test/custom-fields/custom-fields.test.ts (A↔B, permisos, tipos, obligatorios, archivado, valores en contactos, roles de BD)
   { route: 'GET /v1/custom-fields', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },
   { route: 'POST /v1/custom-fields', kind: 'tenant', isolationTest: '../../custom-fields/custom-fields.test.ts' },

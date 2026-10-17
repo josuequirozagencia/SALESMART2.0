@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { contactPhones, contacts, metaEvents, type TenantTx } from '../../db';
+import { contactListMembers, contactPhones, contactTags, contacts, customFieldValues, metaEvents, type TenantTx } from '../../db';
 import { ValidationError } from '../../errors';
 import { likeEscape } from '../organizations';
+import type { ResolvedCf } from './contact-filters';
 import type { ContactSort, ListContactsQuery } from './contacts.dto';
 
 export type ContactRow = typeof contacts.$inferSelect;
@@ -45,6 +46,42 @@ function decodeCursor(raw: string, sort: ContactSort, order: 'asc' | 'desc'): Cu
   return { s: sort, o: order, k: c.k, id: c.id };
 }
 
+/** Lo que el listado necesita: orden, página y los filtros ya mezclados con los de la lista (si la hay). */
+export type PageFilter = Pick<ListContactsQuery, 'sort' | 'order' | 'limit'> & {
+  cursor?: string | undefined;
+  q?: string | undefined;
+  owner?: string | undefined;
+  source?: string | undefined;
+  consent?: string | undefined;
+  tag?: readonly string[] | undefined;
+};
+export interface PageExtras {
+  /** Filtros por campo personalizado ya resueltos contra sus definiciones. */
+  cf: readonly ResolvedCf[];
+  /** Lista FIJA: solo sus miembros. */
+  memberOf?: string | undefined;
+}
+
+const SET_ROW = sql`num_nonnulls(${customFieldValues.valueText}, ${customFieldValues.valueNumber}, ${customFieldValues.valueBool}, ${customFieldValues.valueDate}, ${customFieldValues.valueDatetime}, ${customFieldValues.valueJson}) = 1`;
+const TEXTLIKE = new Set(['text', 'long_text', 'email', 'phone', 'url']);
+
+/** Condición «este contacto cumple el filtro de campo personalizado» (subconsulta correlacionada; la RLS acota por empresa). */
+function cfCondition(tx: TenantTx, r: ResolvedCf): SQL {
+  const v = customFieldValues;
+  const mine = and(eq(v.entity, 'contact'), eq(v.entityId, contacts.id), eq(v.definitionId, r.definitionId)) as SQL;
+  const some = (extra?: SQL): SQL => exists(tx.select({ one: sql`1` }).from(v).where(extra ? (and(mine, SET_ROW, extra)) : (and(mine, SET_ROW))));
+  if (r.op === 'is_set') return some();
+  if (r.op === 'is_empty') return sql`NOT ${some()}`;
+  const val = r.value ?? '';
+  if (r.type === 'multiselect') return some(sql`${v.valueJson} @> ${JSON.stringify([val])}::jsonb`);
+  if (r.type === 'boolean') return some(eq(v.valueBool, val === 'true'));
+  if (r.type === 'number' || r.type === 'currency' || r.type === 'percent') return some(r.op === 'eq' ? sql`${v.valueNumber} = ${val}::numeric` : r.op === 'gte' ? sql`${v.valueNumber} >= ${val}::numeric` : sql`${v.valueNumber} <= ${val}::numeric`);
+  if (r.type === 'date') return some(r.op === 'eq' ? sql`${v.valueDate} = ${val}::date` : r.op === 'gte' ? sql`${v.valueDate} >= ${val}::date` : sql`${v.valueDate} <= ${val}::date`);
+  if (r.type === 'datetime') return some(r.op === 'gte' ? sql`${v.valueDatetime} >= ${val}::timestamptz` : sql`${v.valueDatetime} <= ${val}::timestamptz`);
+  if (r.op === 'contains') return some(sql`${v.valueText} ILIKE ${`%${likeEscape(val)}%`} ESCAPE '!'`);
+  return some(TEXTLIKE.has(r.type) ? sql`lower(${v.valueText}) = lower(${val})` : eq(v.valueText, val)); // select: exacto
+}
+
 /** Consultas de contactos. TODAS pasan por `withTenant` (el llamador abre la transacción): sin TenantContext no hay conexión. */
 @Injectable()
 export class ContactsRepository {
@@ -54,7 +91,7 @@ export class ContactsRepository {
   }
 
   /** Una página de contactos con su clave de orden (para el cursor) y, en la primera, el total. */
-  async page(tx: TenantTx, scope: Scope, f: ListContactsQuery): Promise<{ rows: ContactRow[]; next: string | null; total: number | null }> {
+  async page(tx: TenantTx, scope: Scope, f: PageFilter, x: PageExtras = { cf: [] }): Promise<{ rows: ContactRow[]; next: string | null; total: number | null }> {
     const where: SQL[] = [this.visible(scope)];
     if (scope.viewAll && f.owner) {
       if (f.owner === 'me') where.push(eq(contacts.ownerId, scope.userId));
@@ -62,6 +99,10 @@ export class ContactsRepository {
       else where.push(eq(contacts.ownerId, f.owner));
     }
     if (f.source) where.push(eq(contacts.source, f.source));
+    if (f.consent) where.push(eq(contacts.consent, f.consent));
+    for (const t of f.tag ?? []) where.push(exists(tx.select({ one: sql`1` }).from(contactTags).where(and(eq(contactTags.contactId, contacts.id), eq(contactTags.tagId, t)))));
+    for (const c of x.cf) where.push(cfCondition(tx, c));
+    if (x.memberOf) where.push(exists(tx.select({ one: sql`1` }).from(contactListMembers).where(and(eq(contactListMembers.listId, x.memberOf), eq(contactListMembers.contactId, contacts.id)))));
     if (f.q) {
       const like = `%${likeEscape(f.q)}%`;
       const digits = f.q.replace(/\D/g, '');
@@ -104,6 +145,13 @@ export class ContactsRepository {
     const q = tx.select().from(contacts).where(and(eq(contacts.id, id), this.visible(scope)));
     const [row] = await (lock ? q.for('update') : q).limit(1);
     return row;
+  }
+
+  /** De estos ids, los contactos vigentes que este alcance puede ver (los demás se ignoran). */
+  async visibleIds(tx: TenantTx, scope: Scope, ids: readonly string[]): Promise<string[]> {
+    if (ids.length === 0) return [];
+    const rows = await tx.select({ id: contacts.id }).from(contacts).where(and(inArray(contacts.id, [...ids]), this.visible(scope)));
+    return rows.map((r) => r.id);
   }
 
   /** Contacto (vigente) de la empresa activa que tiene ese teléfono. Para los canales de entrada, que no tienen alcance por persona. */

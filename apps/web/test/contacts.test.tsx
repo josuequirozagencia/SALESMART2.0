@@ -86,22 +86,21 @@ const open = async (name: string) => userEvent.click(await screen.findByRole('bu
 const dialog = async () => screen.findByRole('dialog');
 
 describe('Contactos · lista', () => {
-  it('el menú tiene «Contactos»; la lista muestra nombre, correo, teléfonos con formato, responsable, consentimiento y el total', async () => {
+  it('el menú tiene «Contactos»; la tabla muestra nombre, teléfonos con formato, responsable, consentimiento y el total', async () => {
     const s = server(ME_ADMIN, ALL);
     mockApi(s.routes);
     renderApp('/contacts');
     expect(await screen.findByRole('link', { name: 'Contactos' })).toHaveAttribute('href', '/contacts');
-    const list = await screen.findByRole('list', { name: 'Contactos' });
-    const ana = within(within(list).getByRole('button', { name: 'Abrir el contacto Ana Torres' }));
-    expect(ana.getByText('ana@correo.test')).toBeInTheDocument();
+    const table = await screen.findByRole('table', { name: 'Contactos' });
+    const row = (name: string) => within(within(table).getByRole('button', { name: `Abrir el contacto ${name}` }).closest('tr')!);
+    const ana = row('Ana Torres');
     expect(ana.getByText(/\+593 98 421 7730/)).toBeInTheDocument();
     expect(ana.getByText(/\+1 más/)).toBeInTheDocument();
     expect(ana.getByText('Luis Navas')).toBeInTheDocument();
     expect(ana.getByText('Con consentimiento')).toBeInTheDocument();
-    const beto = within(within(list).getByRole('button', { name: 'Abrir el contacto Beto Luna' }));
+    const beto = row('Beto Luna');
     expect(beto.getByText('Sin asignar')).toBeInTheDocument();
     expect(beto.getByText('Sin consentimiento')).toBeInTheDocument();
-    expect(beto.getByText('Sin correo')).toBeInTheDocument();
     expect(await screen.findByText('2 contactos')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Nuevo contacto' })).toBeInTheDocument();
   });

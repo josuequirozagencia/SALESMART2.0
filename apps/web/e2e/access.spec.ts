@@ -569,8 +569,9 @@ test('contactos: crea, busca, edita y borra desde la interfaz; un teléfono repe
   await dlg.getByRole('button', { name: 'Crear contacto' }).click();
   await expect(dlg).toBeHidden();
   const marta = page.getByRole('button', { name: 'Abrir el contacto Marta Salazar' });
-  await expect(marta).toContainText('+593 98 421 7730');
-  await expect(marta).toContainText('Con consentimiento');
+  const martaRow = page.getByRole('row').filter({ has: marta });
+  await expect(martaRow).toContainText('+593 98 421 7730');
+  await expect(martaRow).toContainText('Con consentimiento');
   await expect(page.getByText('1 contacto', { exact: true })).toBeVisible();
 
   // 2) El mismo teléfono en otro contacto: el servidor lo rechaza y el aviso queda en su fila; con otro número, se crea
@@ -759,6 +760,112 @@ test('atribución: el administrador genera el punto de entrada, GoHighLevel avis
   expect((await request.post(`${apiBase}${url.pathname}`, { headers: { 'content-type': 'application/json', 'x-webhook-secret': 'ssw_ajeno' }, data: click })).status()).toBe(404);
   const theirs = (await (await request.get(`${apiBase}/v1/contacts`, { headers: other })).json()) as { items: unknown[] };
   expect(theirs.items).toEqual([]);
+});
+
+test('listas: etiquetas, filtros, columnas, lista dinámica y lista fija con la selección; otra empresa no las ve', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('listas'));
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}`, 'content-type': 'application/json' };
+  const post = async (path: string, data: unknown) => {
+    const r = await request.post(`${apiBase}/v1${path}`, { headers: mine, data });
+    expect(r.status(), path).toBe(201);
+    return (await r.json()) as { id: string };
+  };
+  await post('/custom-fields', { name: 'Ciudad', type: 'text' });
+
+  // Etiqueta personalizada creada desde Configuración
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await page.getByRole('link', { name: 'Etiquetas' }).click();
+  await expect(page.getByRole('region', { name: 'Etiquetas del sistema' })).toContainText('Venta');
+  await page.getByRole('button', { name: 'Nueva etiqueta' }).click();
+  const tagDlg = page.getByRole('dialog', { name: 'Nueva etiqueta' });
+  await tagDlg.getByLabel('Nombre').fill('VIP');
+  await tagDlg.getByRole('button', { name: 'Crear etiqueta' }).click();
+  await expect(tagDlg).toBeHidden();
+  await expect(page.getByRole('list', { name: 'Etiquetas' })).toContainText('VIP');
+
+  // Tres contactos con sus datos (por la API, que es rápido; la interfaz de alta ya se probó aparte)
+  await post('/contacts', { name: 'Ana Quito', consent: 'granted', phones: ['+593984217730'], custom_fields: { ciudad: 'Quito' } });
+  await post('/contacts', { name: 'Beto Cuenca', phones: ['+593991112233'], custom_fields: { ciudad: 'Cuenca' } });
+  await post('/contacts', { name: 'Carla Quito', phones: ['+34612345678'], custom_fields: { ciudad: 'Quito' } });
+
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  const table = page.getByRole('table', { name: 'Contactos' });
+  await expect(table.getByRole('row')).toHaveCount(4); // encabezado + 3
+  const open = (name: string) => table.getByRole('button', { name: `Abrir el contacto ${name}` });
+
+  // Etiquetar desde la ficha y filtrar por etiqueta
+  await open('Carla Quito').click();
+  const dlg = page.getByRole('dialog', { name: 'Contacto' });
+  await dlg.getByRole('group', { name: 'Etiquetas' }).getByLabel('VIP').check();
+  await dlg.getByRole('button', { name: 'Guardar' }).click();
+  await expect(dlg).toBeHidden();
+  await page.getByLabel('Etiqueta', { exact: true }).selectOption({ label: 'VIP' });
+  await expect(table.getByRole('row')).toHaveCount(2);
+  await expect(open('Carla Quito')).toBeVisible();
+  await page.getByRole('button', { name: 'Limpiar filtros' }).click();
+  await expect(table.getByRole('row')).toHaveCount(4);
+
+  // Filtro por consentimiento y por campo personalizado
+  await page.getByLabel('Consentimiento', { exact: true }).selectOption('granted');
+  await expect(table.getByRole('row')).toHaveCount(2);
+  await expect(open('Ana Quito')).toBeVisible();
+  await page.getByRole('button', { name: 'Limpiar filtros' }).click();
+  await page.getByRole('button', { name: 'Filtrar por campo' }).click();
+  const cf = page.getByRole('form', { name: 'Filtrar por campo' });
+  await cf.getByLabel('Condición').selectOption({ label: 'contiene' });
+  await cf.getByLabel('Valor del filtro').fill('quito');
+  await cf.getByRole('button', { name: 'Agregar filtro' }).click();
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await expect(open('Beto Cuenca')).toHaveCount(0);
+
+  // Columna de Ciudad (queda en el navegador) y lista dinámica con los filtros actuales
+  await page.getByRole('button', { name: /^Columnas/ }).click();
+  await page.getByRole('group', { name: 'Columnas de la tabla' }).getByLabel('Ciudad', { exact: true }).check();
+  await page.getByRole('button', { name: /^Columnas/ }).click();
+  await expect(table.getByRole('columnheader', { name: 'Ciudad' })).toBeVisible();
+  await expect(table.getByRole('row').filter({ hasText: 'Ana Quito' })).toContainText('Quito');
+  await page.getByRole('button', { name: '+ Nueva lista' }).click();
+  const listDlg = page.getByRole('dialog', { name: 'Nueva lista' });
+  await listDlg.getByLabel('Nombre de la lista').fill('Quiteños');
+  await listDlg.getByRole('button', { name: 'Crear lista' }).click();
+  await expect(page.getByRole('tab', { name: /Quiteños/ })).toHaveAttribute('aria-selected', 'true');
+
+  // Al recargar, la lista sigue ahí con sus filtros y columnas
+  await page.reload();
+  await page.getByRole('tab', { name: /Quiteños/ }).click();
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await expect(page.getByRole('list', { name: 'Filtros activos' })).toContainText('Ciudad contiene quito');
+  await expect(table.getByRole('columnheader', { name: 'Ciudad' })).toBeVisible();
+
+  // Lista fija con la selección (Ana y Beto)
+  await page.getByRole('tab', { name: 'Todos' }).click();
+  await expect(table.getByRole('row')).toHaveCount(4);
+  await page.getByRole('checkbox', { name: 'Seleccionar a Ana Quito' }).check();
+  await page.getByRole('checkbox', { name: 'Seleccionar a Beto Cuenca' }).check();
+  await page.getByRole('button', { name: 'Crear lista con la selección' }).click();
+  const fixedDlg = page.getByRole('dialog', { name: 'Nueva lista' });
+  await fixedDlg.getByLabel('Nombre de la lista').fill('Mi selección');
+  await fixedDlg.getByRole('button', { name: 'Crear lista' }).click();
+  await expect(page.getByRole('tab', { name: /Mi selección/ })).toHaveAttribute('aria-selected', 'true');
+  await expect(table.getByRole('row')).toHaveCount(3);
+  await expect(open('Carla Quito')).toHaveCount(0);
+
+  // Renombrar y borrar la lista (los contactos siguen)
+  await page.getByRole('button', { name: 'Editar la lista Mi selección' }).click();
+  const edit = page.getByRole('dialog', { name: 'Editar lista' });
+  await edit.getByRole('button', { name: 'Eliminar lista' }).click();
+  await edit.getByRole('button', { name: 'Sí, borrar' }).click();
+  await expect(page.getByRole('tab', { name: /Mi selección/ })).toHaveCount(0);
+  await expect(table.getByRole('row')).toHaveCount(4);
+
+  // Otra empresa no ve nada de esto
+  const lists = (await (await request.get(`${apiBase}/v1/contact-lists`, { headers: mine })).json()) as { items: Array<{ id: string; name: string }> };
+  expect(lists.items.map((l) => l.name)).toEqual(['Quiteños']);
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect(((await (await request.get(`${apiBase}/v1/contact-lists`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect((await request.get(`${apiBase}/v1/contacts?list=${lists.items[0]!.id}`, { headers: other })).status()).toBe(404);
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

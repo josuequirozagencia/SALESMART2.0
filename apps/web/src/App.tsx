@@ -5,6 +5,7 @@ import { AppShell } from './features/app/AppShell';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { ContactsPage } from './features/contacts/ContactsPage';
 import { CustomFieldsPage } from './features/custom-fields/CustomFieldsPage';
+import { TagsPage } from './features/tags/TagsPage';
 import { AccessPage } from './features/platform/AccessPage';
 import { AgenciesPage } from './features/platform/AgenciesPage';
 import { CompaniesPage } from './features/platform/CompaniesPage';
@@ -95,6 +96,7 @@ export function App() {
         <Route path="/" element={<Home />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/settings/fields" element={<CustomFieldsPage />} />
+        <Route path="/settings/tags" element={<TagsPage />} />
         <Route path="/settings/attribution" element={<AttributionPage />} />
       </Route>
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />

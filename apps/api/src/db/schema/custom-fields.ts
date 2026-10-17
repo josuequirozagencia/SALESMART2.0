@@ -80,6 +80,11 @@ export const customFieldValues = tenantTable(
     }),
     uniqueIndex('custom_field_values_org_entity_def_uq').on(t['organizationId']!, t['entity']!, t['entityId']!, t['definitionId']!),
     index('custom_field_values_org_def_idx').on(t['organizationId']!, t['definitionId']!),
+    // Índices por tipo para filtrar contactos por campo personalizado (ADR-46). El texto usa el índice por campo: un btree no admite textos largos.
+    index('custom_field_values_number_idx').on(t['organizationId']!, t['definitionId']!, t['valueNumber']!).where(sql`${t['valueNumber']!} IS NOT NULL`),
+    index('custom_field_values_date_idx').on(t['organizationId']!, t['definitionId']!, t['valueDate']!).where(sql`${t['valueDate']!} IS NOT NULL`),
+    index('custom_field_values_bool_idx').on(t['organizationId']!, t['definitionId']!, t['valueBool']!).where(sql`${t['valueBool']!} IS NOT NULL`),
+    index('custom_field_values_json_idx').using('gin', t['valueJson']!),
     check('custom_field_values_entity_valid', sql`${t['entity']!} IN ('contact', 'opportunity', 'company')`),
     check(
       'custom_field_values_at_most_one',

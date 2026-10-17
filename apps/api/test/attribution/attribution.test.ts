@@ -299,7 +299,7 @@ describe('webhook de atribución', () => {
 });
 
 describe('etiquetas del sistema', () => {
-  it('cada empresa recibe sus tres etiquetas al primer uso (idempotente) y ninguna ruta permite ponerlas, quitarlas ni borrarlas a mano', async () => {
+  it('cada empresa recibe sus tres etiquetas al primer uso (idempotente) y ninguna ruta permite renombrarlas, borrarlas ni ponerlas a mano', async () => {
     const first = await json<{ items: Array<{ id: string; name: string; system_key: string; is_system: boolean; color: string }> }>(await call('GET', '/tags', T.alice));
     expect(first.items.map((t) => [t.name, t.system_key, t.is_system]).sort()).toEqual([['Cita agendada', 'appointment', true], ['Lead', 'lead', true], ['Venta', 'sale', true]]);
     expect(first.items.every((t) => /^#[0-9a-f]{6}$/i.test(t.color))).toBe(true);
@@ -307,7 +307,11 @@ describe('etiquetas del sistema', () => {
     expect(second.items.map((t) => t.id).sort()).toEqual(first.items.map((t) => t.id).sort());
     expect((await admin.query('SELECT count(*)::int AS n FROM tags WHERE organization_id = $1', [ORG_A])).rows[0].n).toBe(3);
     const id = first.items[0]!.id;
-    for (const [m, p] of [['POST', '/tags'], ['PATCH', `/tags/${id}`], ['DELETE', `/tags/${id}`], ['PUT', `/tags/${id}`], ['POST', `/contacts/${id}/tags`]] as const) {
+    for (const [m, p] of [['PATCH', `/tags/${id}`], ['DELETE', `/tags/${id}`]] as const) {
+      const r = await call(m, p, T.alice, { name: 'Otra' });
+      expect(r.status, `${m} ${p}`).toBe(409); // TAG_SYSTEM
+    }
+    for (const [m, p] of [['PUT', `/tags/${id}`], ['POST', `/contacts/${id}/tags`]] as const) {
       expect([404, 405], `${m} ${p}`).toContain((await call(m, p, T.alice, {})).status);
     }
     // un contacto no acepta etiquetas desde la API de contactos
@@ -498,7 +502,7 @@ describe('base de datos: roles y restricciones', () => {
 
   it('app_rw no puede borrar ni vaciar; app_platform y app_identity no ven las tablas de negocio; attribution_endpoints es solo de identidad', async () => {
     for (const t of ['tags', 'contact_tags', 'meta_events']) {
-      await expect(as(info.rwUrl, `DELETE FROM ${t}`), `rw DELETE ${t}`).rejects.toThrow(/permission denied/);
+      if (t !== 'contact_tags') await expect(as(info.rwUrl, `DELETE FROM ${t}`), `rw DELETE ${t}`).rejects.toThrow(/permission denied/); // contact_tags es pivote con DELETE desde M3.4 (ADR-46)
       await expect(as(info.rwUrl, `TRUNCATE ${t}`), `rw TRUNCATE ${t}`).rejects.toThrow(/permission denied/);
       for (const url of [info.platformUrl, info.identityUrl]) await expect(as(url, `SELECT 1 FROM ${t}`), t).rejects.toThrow(/permission denied/);
     }

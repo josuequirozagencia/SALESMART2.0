@@ -29,6 +29,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'OWNER_NOT_ALLOWED': return e.message;
     // Campos personalizados (ADR-44): el servidor ya redacta el motivo
     case 'CUSTOM_FIELD_EXISTS': case 'CUSTOM_FIELD_KEY_RESERVED': case 'CUSTOM_FIELD_LIMIT': case 'CUSTOM_FIELD_ARCHIVED': case 'CUSTOM_FIELD_ORDER_STALE': return e.message;
+    // Etiquetas y listas (ADR-46): el servidor ya redacta el motivo
+    case 'TAG_EXISTS': case 'TAG_SYSTEM': case 'TAG_LIMIT': case 'LIST_EXISTS': case 'LIST_LIMIT': case 'LIST_FULL': case 'LIST_NOT_FIXED': case 'LIST_NOT_DYNAMIC': case 'LIST_NOT_YOURS': case 'LIST_SHARE_NOT_ALLOWED': return e.message;
     case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;

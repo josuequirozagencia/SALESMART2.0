@@ -153,3 +153,50 @@ export const metaEvents = tenantTable(
     index('meta_events_contact_idx').on(t['organizationId']!, t['contactId']!, t['type']!, t['createdAt']!),
   ],
 );
+
+/**
+ * Lista de contactos (M3.4, ADR-46): una noción para «vistas» y «listas». `dynamic` guarda filtros (se recalcula sola) y `fixed` guarda contactos elegidos
+ * (`contact_list_members`); ambas pueden guardar columnas y orden. Personal por defecto (`shared` la abre a toda la empresa). Borrado lógico.
+ */
+export const contactLists = tenantTable(
+  'contact_lists',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    name: text('name').notNull(),
+    kind: text('kind').notNull(),
+    filters: jsonb('filters').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    columns: jsonb('columns').$type<string[]>(),
+    sort: jsonb('sort').$type<{ key: string; order: 'asc' | 'desc' }>(),
+    ownerId: uuid('owner_id').notNull().references(() => users.id),
+    shared: boolean('shared').notNull().default(false),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => [
+    check('contact_lists_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 60`),
+    check('contact_lists_kind_valid', sql`${t['kind']!} IN ('dynamic', 'fixed')`),
+    check('contact_lists_filters_object', sql`jsonb_typeof(${t['filters']!}) = 'object'`),
+    check('contact_lists_columns_array', sql`${t['columns']!} IS NULL OR (jsonb_typeof(${t['columns']!}) = 'array' AND jsonb_array_length(${t['columns']!}) BETWEEN 1 AND 40)`),
+    check('contact_lists_sort_object', sql`${t['sort']!} IS NULL OR jsonb_typeof(${t['sort']!}) = 'object'`),
+    uniqueIndex('contact_lists_org_owner_name_uq').on(t['organizationId']!, t['ownerId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
+    index('contact_lists_org_idx').on(t['organizationId']!, t['ownerId']!).where(sql`${t['deletedAt']!} IS NULL`),
+  ],
+);
+
+/** Contactos de una lista FIJA. Pivote sin valor propio: quitar un contacto borra la fila (el historial queda en la auditoría). */
+export const contactListMembers = tenantTable(
+  'contact_list_members',
+  {
+    listId: uuid('list_id').notNull(),
+    contactId: uuid('contact_id').notNull(),
+    addedBy: uuid('added_by').references(() => users.id),
+    addedAt: ts('added_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'contact_list_members_pk', columns: [t['organizationId']!, t['listId']!, t['contactId']!] }),
+    foreignKey({ name: 'contact_list_members_list_fk', columns: [t['organizationId']!, t['listId']!], foreignColumns: [contactLists.organizationId, contactLists.id] }),
+    foreignKey({ name: 'contact_list_members_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    index('contact_list_members_contact_idx').on(t['organizationId']!, t['contactId']!),
+  ],
+);

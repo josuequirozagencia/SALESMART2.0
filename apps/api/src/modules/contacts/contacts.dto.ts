@@ -1,5 +1,7 @@
 import { z } from 'zod';
 import { customFieldValuesSchema } from '../custom-fields';
+import { tagIdsSchema } from '../tags';
+import { contactFiltersShape } from './contact-filters';
 
 const name = z.string().trim().min(1).max(200).refine((v) => !/\p{Cc}/u.test(v), 'caracteres no permitidos');
 const email = z.string().trim().max(254).pipe(z.email()).transform((v) => v.toLowerCase());
@@ -22,6 +24,8 @@ export const createContactSchema = z
     consent: consent.optional(),
     /** Campos personalizados (M3.2, ADR-44): `{ variable: valor }`. Se validan contra la definición de cada campo; los obligatorios deben venir. */
     custom_fields: customFieldValuesSchema.optional(),
+    /** Etiquetas PERSONALIZADAS del contacto (M3.4); las del sistema las pone el sistema. */
+    tag_ids: tagIdsSchema.optional(),
   })
   .strict();
 export type CreateContactDto = z.infer<typeof createContactSchema>;
@@ -36,6 +40,8 @@ export const updateContactSchema = z
     consent: consent.optional(),
     /** Solo se tocan las variables enviadas; `null` vacía el valor. */
     custom_fields: customFieldValuesSchema.optional(),
+    /** Reemplaza el conjunto de etiquetas personalizadas del contacto. */
+    tag_ids: tagIdsSchema.optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });
@@ -47,9 +53,9 @@ export type ContactSort = (typeof SORTS)[number];
 /** `owner`: «me» (míos), «none» (sin asignar) o el id de una persona. Sin `contacts.view_all` se ignora: el alcance ya es propio. */
 export const listContactsQuerySchema = z
   .object({
-    q: z.string().trim().min(1).max(100).optional(),
-    owner: z.union([z.literal('me'), z.literal('none'), z.uuid()]).optional(),
-    source: z.string().regex(/^[a-z][a-z0-9_]{1,31}$/).optional(),
+    ...contactFiltersShape,
+    /** Lista guardada (ADR-46): la dinámica suma sus filtros; la fija limita a sus miembros. */
+    list: z.uuid().optional(),
     sort: z.enum(SORTS).default('created_at'),
     order: z.enum(['asc', 'desc']).default('desc'),
     limit: z.coerce.number().int().min(1).max(100).default(25),

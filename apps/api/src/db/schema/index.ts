@@ -4,5 +4,5 @@ export { tenantTable, platformTable, identityTable } from './helpers';
 export { users, organizations, organizationMembers, sessions, authThrottle, emailVerifications, signupAttempts, disposableDomains, passwordResets, roles, permissions, rolePermissions, trials, trialConfig, plans, invitations, organizationOwnershipHistory, accessSessions, attributionEndpoints } from './identity';
 export { auditLogs, platformAudit } from './audit';
 export { providerCredentials, providerSelection } from './providers';
-export { contacts, contactPhones, tags, contactTags, metaEvents } from './crm';
+export { contacts, contactPhones, tags, contactTags, metaEvents, contactLists, contactListMembers } from './crm';
 export { customFieldDefinitions, customFieldValues } from './custom-fields';

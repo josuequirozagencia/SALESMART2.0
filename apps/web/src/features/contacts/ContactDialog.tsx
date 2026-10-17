@@ -10,6 +10,7 @@ import { FieldInput } from '../custom-fields/FieldInput';
 import { AttributionSection, TagBadges } from './AttributionSection';
 import { parseRaw, toRaw, type RawValue } from '../custom-fields/fieldValues';
 import { useCustomFields } from '../custom-fields/useCustomFields';
+import { useTags } from '../tags/useTags';
 import { useCreateContact, useDeleteContact, useUpdateContact, type ContactInput } from './useContacts';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal';
@@ -42,6 +43,10 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
   // Campos personalizados que se muestran en el formulario; `edits` guarda solo lo que la persona tocó (lo demás sale del contacto)
   const defs = (useCustomFields().data?.items ?? []).filter((f) => f.show_in_form && f.archived_at === null);
   const [edits, setEdits] = useState<Record<string, RawValue>>({});
+  // Etiquetas PERSONALIZADAS (ADR-46): las del sistema las pone el sistema y no se eligen aquí
+  const customTags = (useTags().data?.items ?? []).filter((t) => !t.is_system);
+  const initialTags = (contact?.tags ?? []).filter((t) => !t.is_system).map((t) => t.id);
+  const [tagIds, setTagIds] = useState<string[]>(initialTags);
   const [formError, setFormError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const create = useCreateContact();
@@ -94,7 +99,9 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
 
     const base: ContactInput = { name: n, email: em === '' ? null : em, phones: normalized, consent };
     const withOwner: ContactInput = canAssign ? { ...base, owner_id: ownerId === '' ? null : ownerId } : base;
-    const input: ContactInput = Object.keys(custom).length > 0 ? { ...withOwner, custom_fields: custom } : withOwner;
+    const withCustom: ContactInput = Object.keys(custom).length > 0 ? { ...withOwner, custom_fields: custom } : withOwner;
+    const tagsChanged = [...tagIds].sort().join() !== [...initialTags].sort().join();
+    const input: ContactInput = tagsChanged ? { ...withCustom, tag_ids: tagIds } : withCustom;
     const handlers = {
       onSuccess: onClose,
       onError: (err: unknown) => {
@@ -180,6 +187,24 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
             </select>
           )}
         </Field>
+
+        {customTags.length > 0 ? (
+          <fieldset className="grid gap-1.5" disabled={disabled}>
+            <legend className="text-[12.5px] font-semibold">Etiquetas</legend>
+            <div className="flex flex-wrap gap-2">
+              {customTags.map((t) => {
+                const on = tagIds.includes(t.id);
+                return (
+                  <label key={t.id} className="inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[13px] has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                    <input type="checkbox" checked={on} onChange={() => setTagIds((cur) => (on ? cur.filter((x) => x !== t.id) : [...cur, t.id]))} />
+                    <span aria-hidden="true" className="size-2.5 rounded-full" style={{ backgroundColor: t.color }} />
+                    {t.name}
+                  </label>
+                );
+              })}
+            </div>
+          </fieldset>
+        ) : null}
 
         {defs.length > 0 ? (
           <fieldset className="grid gap-3" disabled={disabled}>

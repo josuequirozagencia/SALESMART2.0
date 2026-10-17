@@ -9,6 +9,7 @@ export function SettingsNav() {
       <h1 className="text-[22px] font-bold">Configuración</h1>
       <nav aria-label="Secciones de configuración" className="flex flex-wrap gap-1 border-b border-line">
         <NavLink to="/settings/fields" className={tab}>Campos personalizados</NavLink>
+        <NavLink to="/settings/tags" className={tab}>Etiquetas</NavLink>
         <NavLink to="/settings/attribution" className={tab}>Atribución de Meta</NavLink>
       </nav>
     </div>

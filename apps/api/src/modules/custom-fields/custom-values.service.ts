@@ -22,6 +22,11 @@ const path = (key: string): string => `custom_fields.${key}`;
 export class CustomValuesService {
   constructor(@Inject(CustomFieldsRepository) private readonly repo: CustomFieldsRepository) {}
 
+  /** Campos activos de una entidad por variable (para resolver filtros por campo personalizado). */
+  async definitionsByKey(tx: TenantTx, entity: CustomEntity): Promise<Map<string, { id: string; type: string }>> {
+    return new Map((await this.repo.list(tx, entity, false)).map((d) => [d.varKey, { id: d.id, type: d.type }]));
+  }
+
   /** Valores NO vacíos de campos NO archivados, por id de entidad y por variable. */
   async valuesFor(tx: TenantTx, entity: CustomEntity, ids: readonly string[]): Promise<Map<string, CustomValues>> {
     const out = new Map<string, CustomValues>();

@@ -346,3 +346,34 @@ export interface AttributionEndpointIssued {
   rotated: boolean;
   path: string;
 }
+
+// ── Etiquetas personalizadas, listas y filtros (M3.4, ADR-46) ──
+export interface TagList {
+  items: ContactTag[];
+  /** `manage`: puede crear, renombrar y borrar etiquetas personalizadas. */
+  access: { manage: boolean };
+}
+/** Filtros guardados de una lista dinámica (los mismos que acepta el listado). */
+export interface SavedFilters {
+  q?: string;
+  owner?: string;
+  source?: string;
+  consent?: Consent;
+  tag?: string[];
+  cf?: string[];
+}
+export interface SavedList {
+  id: string;
+  name: string;
+  kind: 'dynamic' | 'fixed';
+  filters: SavedFilters;
+  columns: string[] | null;
+  sort: { key: 'created_at' | 'updated_at' | 'name'; order: 'asc' | 'desc' } | null;
+  shared: boolean;
+  /** ¿Es mía? Si no, otra persona la compartió. */
+  mine: boolean;
+  /** Contactos de una lista fija que YO puedo ver; null en las dinámicas. */
+  member_count: number | null;
+  created_at: string;
+  updated_at: string;
+}

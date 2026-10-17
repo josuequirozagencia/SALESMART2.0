@@ -6,7 +6,10 @@ import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OrgMembersService, type OrgPerson } from '../organizations';
-import { SystemTagsService, type TagView } from '../tags';
+import { ContactTaggingService, SystemTagsService, type TagView } from '../tags';
+import { checkCfValue, mergeFilters, parseCf, type ContactFilters, type ResolvedCf } from './contact-filters';
+import { ContactListsRepository } from './contact-lists.repository';
+import { savedFilters } from './contact-lists.service';
 import type { CreateContactDto, ListContactsQuery, UpdateContactDto } from './contacts.dto';
 import { ContactsRepository, type ContactRow, type PhoneRow, type Scope } from './contacts.repository';
 
@@ -98,12 +101,14 @@ export class ContactsService {
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
     @Inject(SystemTagsService) private readonly systemTags: SystemTagsService,
+    @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
+    @Inject(ContactListsRepository) private readonly lists: ContactListsRepository,
   ) {}
 
   async list(scope: ContactScope, q: ListContactsQuery): Promise<ContactList> {
     const sc = this.scope(scope);
     const page = await this.db.withTenant(async (tx) => {
-      const p = await this.repo.page(tx, sc, q);
+      const p = await this.pageFor(tx, sc, q);
       const ids = p.rows.map((r) => r.id);
       return { ...p, phones: await this.repo.phonesOf(tx, ids), extras: await this.extras(tx, ids) };
     });
@@ -138,7 +143,8 @@ export class ContactsService {
       // Campos personalizados: valida todo (obligatorios incluidos) y, si algo falla, la transacción entera se revierte
       const customChanges = await this.custom.apply(tx, 'contact', c.id, input.custom_fields ?? {}, { creating: true });
       const customNew = Object.fromEntries(customChanges.map((x) => [x.key, x.newValue]));
-      await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}) }, source: 'manual' });
+      const tagChange = input.tag_ids && input.tag_ids.length > 0 ? await this.tagging.setCustom(tx, c.id, input.tag_ids) : null;
+      await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}), ...(tagChange ? { tags: tagChange.after } : {}) }, source: 'manual' });
       return { row: c, phones: await this.repo.phonesOf(tx, [c.id]), extras: await this.extras(tx, [c.id]) };
       })
       .catch((e: unknown) => {
@@ -185,6 +191,10 @@ export class ContactsService {
       // Campos personalizados: una fila de auditoría por campo cambiado (`custom.<variable>`)
       if (input.custom_fields) {
         for (const c of await this.custom.apply(tx, 'contact', id, input.custom_fields, { creating: false })) changes.push({ field: `custom.${c.key}`, oldValue: c.oldValue, newValue: c.newValue });
+      }
+      if (input.tag_ids !== undefined) {
+        const t = await this.tagging.setCustom(tx, id, input.tag_ids);
+        if (t) changes.push({ field: 'tags', oldValue: t.before, newValue: t.after });
       }
       if (changes.length === 0) return { row, phones: current, extras: await this.extras(tx, [id]) };
       set.updatedAt = new Date();
@@ -266,6 +276,42 @@ export class ContactsService {
     if (!row) return null;
     const phones = (await this.repo.phonesOf(tx, [id])).get(id) ?? [];
     return { ctwaClId: row.ctwaClId, primaryPhone: phones[0]?.e164 ?? null };
+  }
+
+  /** Una página del listado: mezcla los filtros de la petición con los de la lista guardada (si la hay) y resuelve los filtros por campo personalizado. */
+  private async pageFor(tx: TenantTx, sc: Scope, q: ListContactsQuery) {
+    let filters: ContactFilters = {
+      ...(q.q ? { q: q.q } : {}),
+      ...(q.owner ? { owner: q.owner } : {}),
+      ...(q.source ? { source: q.source } : {}),
+      ...(q.consent ? { consent: q.consent } : {}),
+      ...(q.tag && q.tag.length > 0 ? { tag: q.tag } : {}),
+      ...(q.cf && q.cf.length > 0 ? { cf: q.cf } : {}),
+    };
+    let memberOf: string | undefined;
+    if (q.list) {
+      const l = await this.lists.visibleById(tx, sc.userId, q.list);
+      if (!l) throw new NotFoundError();
+      if (l.kind === 'fixed') memberOf = l.id;
+      else filters = mergeFilters(savedFilters(l), filters);
+    }
+    const cf = await this.resolveCf(tx, filters.cf ?? []);
+    return this.repo.page(tx, sc, { sort: q.sort, order: q.order, limit: q.limit, cursor: q.cursor, q: filters.q, owner: filters.owner, source: filters.source, consent: filters.consent, tag: filters.tag }, { cf, memberOf });
+  }
+
+  /** `variable:operador[:valor]` → filtro contra la definición del campo. Un campo que no existe o un operador que no corresponde al tipo es un 400. */
+  private async resolveCf(tx: TenantTx, raw: readonly string[]): Promise<ResolvedCf[]> {
+    if (raw.length === 0) return [];
+    const defs = await this.custom.definitionsByKey(tx, 'contact');
+    return raw.map((r) => {
+      const f = parseCf(r);
+      if (!f) throw new ValidationError([{ path: 'cf', code: 'invalid', message: `Filtro de campo no válido: «${r.slice(0, 60)}»` }]);
+      const def = defs.get(f.key);
+      if (!def) throw new ValidationError([{ path: 'cf', code: 'unknown_field', message: `El campo «${f.key}» no existe o está archivado` }]);
+      const bad = checkCfValue(def.type, f.op, f.value);
+      if (bad) throw new ValidationError([{ path: 'cf', code: 'invalid', message: bad }]);
+      return { definitionId: def.id, type: def.type, op: f.op, value: f.value };
+    });
   }
 
   private async extras(tx: TenantTx, ids: readonly string[]): Promise<Extras> {
