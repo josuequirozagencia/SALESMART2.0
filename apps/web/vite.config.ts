@@ -15,5 +15,7 @@ export default defineConfig({
     setupFiles: ['./test/setup.ts'],
     include: ['test/**/*.test.{ts,tsx}'],
     css: false,
+    // Los runners de CI son más lentos que un equipo de desarrollo: pruebas con tablas grandes (501 filas) pasaban de los 5 s por defecto
+    testTimeout: 20_000,
   },
 });
