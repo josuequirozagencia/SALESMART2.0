@@ -7,3 +7,4 @@ export { providerCredentials, providerSelection } from './providers';
 export { contacts, contactPhones, tags, contactTags, metaEvents, contactLists, contactListMembers, contactImports, contactImportRows, companies, contactCompanies, notes, tasks } from './crm';
 export { customFieldDefinitions, customFieldValues } from './custom-fields';
 export { pipelines, pipelineStages, opportunities, stageHistory } from './pipelines';
+export { channelAccounts, whatsappAccounts, channelRoutes } from './channels';

@@ -550,3 +550,34 @@ export interface StageSummary {
   count: number;
   total: string;
 }
+
+// ── Conexiones de canales (M5.1, ADR-50) ──
+export interface Channel {
+  id: string;
+  provider: 'meta_cloud';
+  /** WhatsApp oficial (API de Meta). Las conexiones por QR (no oficiales) llegarán en otro hito. */
+  is_official: boolean;
+  name: string;
+  status: 'active' | 'disabled';
+  waba_id: string;
+  phone_number_id: string;
+  display_phone: string | null;
+  verified_name: string | null;
+  /** Últimos 4 caracteres del token; el valor completo no se puede leer jamás. */
+  token_last4: string | null;
+  last_check_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface ChannelList {
+  items: Channel[];
+  /** `false`: la plataforma aún no tiene la clave de cifrado y no se pueden guardar conexiones. */
+  vault: { available: boolean };
+}
+export interface ChannelInput {
+  name: string;
+  waba_id: string;
+  phone_number_id: string;
+  access_token: string;
+}

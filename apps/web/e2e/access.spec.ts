@@ -1189,6 +1189,65 @@ test('oportunidades: crear desde el tablero y desde la ficha, mover (selector y 
   expect((await request.get(`${apiBase}/v1/opportunities/${list.items[0]!.id}`, { headers: other })).status()).toBe(404);
 });
 
+test('conexiones: el administrador conecta un número (Meta rechaza un token malo), lo comprueba, lo desactiva y lo desconecta; otra empresa no lo ve ni lo roba y puede usarlo al liberarse', async ({ page, request }) => {
+  const { apiBase } = state();
+  const TOKEN = 'fake-valid-token';
+  const PHONE_ID = '1090123456789';
+  const email = await createAccount(request, uniqueEmail('conex'));
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await page.getByRole('link', { name: 'Conexiones' }).click();
+  await expect(page).toHaveURL(/\/settings\/connections$/);
+  await expect(page.getByText('Aún no hay números conectados.')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Conectar un número' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Conectar un número de WhatsApp' });
+  await dlg.getByLabel(/^Nombre/).fill('Ventas');
+  await dlg.getByLabel(/WABA ID/).fill('1234567890123');
+  await dlg.getByLabel(/Phone number ID/).fill(PHONE_ID);
+  await dlg.getByLabel(/Token de acceso permanente/).fill('token-equivocado-123');
+  await dlg.getByRole('button', { name: 'Conectar' }).click();
+  await expect(dlg.getByRole('alert')).toContainText('Meta rechazó el token'); // no se guardó nada
+  await dlg.getByLabel(/Token de acceso permanente/).fill(TOKEN);
+  await dlg.getByRole('button', { name: 'Conectar' }).click();
+  await expect(dlg).toHaveCount(0);
+
+  const card = page.getByRole('listitem', { name: 'Ventas' });
+  await expect(card).toContainText('+1 555 6789');
+  await expect(card).toContainText('Activa');
+  await expect(card).toContainText('••••oken'); // solo los últimos 4; el token completo no vuelve
+  await expect(page.locator('body')).not.toContainText(TOKEN);
+  await page.reload();
+  await expect(page.getByRole('listitem', { name: 'Ventas' })).toContainText('••••oken');
+  await expect(page.locator('body')).not.toContainText(TOKEN);
+
+  await page.getByRole('button', { name: 'Comprobar Ventas' }).click();
+  await expect(page.getByRole('listitem', { name: 'Ventas' })).toContainText('Activa');
+  await page.getByRole('button', { name: 'Desactivar Ventas' }).click();
+  await expect(page.getByRole('listitem', { name: 'Ventas' })).toContainText('Desactivada');
+  await page.getByRole('button', { name: 'Activar Ventas' }).click();
+  await expect(page.getByRole('listitem', { name: 'Ventas' })).toContainText('Activa');
+
+  // Otra empresa: no ve la conexión y no puede conectar el mismo número
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  const json = { 'content-type': 'application/json' };
+  const body = { name: 'Robada', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: TOKEN };
+  expect(((await (await request.get(`${apiBase}/v1/channels`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  const stolen = await request.post(`${apiBase}/v1/channels`, { headers: { ...other, ...json }, data: body });
+  expect(stolen.status()).toBe(409);
+  expect(((await stolen.json()) as { error: { code: string } }).error.code).toBe('CHANNEL_NUMBER_IN_USE');
+  const channels = (await (await request.get(`${apiBase}/v1/channels`, { headers: mine })).json()) as { items: Array<{ id: string }> };
+  expect(channels.items).toHaveLength(1);
+  expect((await request.delete(`${apiBase}/v1/channels/${channels.items[0]!.id}`, { headers: other })).status()).toBe(404);
+
+  // Desconectar libera el número: la otra empresa ya puede usarlo
+  await page.getByRole('button', { name: 'Desconectar Ventas' }).click();
+  await page.getByRole('button', { name: 'Sí, desconectar' }).click();
+  await expect(page.getByText('Aún no hay números conectados.')).toBeVisible();
+  expect((await request.post(`${apiBase}/v1/channels`, { headers: { ...other, ...json }, data: body })).status()).toBe(201);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

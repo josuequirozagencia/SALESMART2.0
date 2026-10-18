@@ -49,6 +49,8 @@ export const envSchema = z.object({
   // 'resend' y 'turnstile' son los proveedores reales elegidos (ADR-37); 'console'/'memory'/'fake' solo desarrollo y pruebas.
   MAIL_PROVIDER: z.enum(['none', 'console', 'memory', 'resend']).default('none'),
   CAPTCHA_PROVIDER: z.enum(['none', 'fake', 'turnstile']).default('none'),
+  /** Adaptador de WhatsApp (M5, ADR-50): 'meta' = Cloud API real; 'fake' es solo desarrollo y pruebas y se rechaza en producción. */
+  WHATSAPP_PROVIDER: z.enum(['meta', 'fake']).default('meta'),
   /** Claves de los proveedores: sin valor por defecto, obligatorias solo si el proveedor está elegido, y sin espacios (se envían en cabeceras). */
   RESEND_API_KEY: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'formato inválido').optional(),
   /** Remitente verificado en Resend: «Sales Smart <no-reply@dominio>» o solo la dirección. */

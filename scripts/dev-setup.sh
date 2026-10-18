@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 rnd() { head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 28; }
 if [[ ! -f .env ]]; then
-  THR=$(rnd)$(rnd); ADMIN=$(rnd); OWNER=$(rnd); RW=$(rnd); PLAT=$(rnd); IDEN=$(rnd)
+  THR=$(rnd)$(rnd); ADMIN=$(rnd); OWNER=$(rnd); RW=$(rnd); PLAT=$(rnd); IDEN=$(rnd); CRED=$(head -c 32 /dev/urandom | base64)
   umask 077
   cat > .env <<ENV
 NODE_ENV=development
@@ -21,6 +21,9 @@ MAIL_PROVIDER=console
 # URL del frontend para los enlaces de los correos (explícita, no se deriva del Host). Solo desarrollo: ajusta el puerto de tu frontend
 FRONTEND_BASE_URL=http://localhost:5173
 CAPTCHA_PROVIDER=fake
+# Solo desarrollo: WhatsApp de mentira (acepta el token fake-valid-token; en producción la configuración rechaza el fake) y clave que cifra las credenciales
+WHATSAPP_PROVIDER=fake
+PROVIDER_CREDENTIALS_KEY=$CRED
 # --- Solo herramientas (NO cargar en la API de producción) ---
 TOOLS_DB_ADMIN_URL=postgresql://postgres:$ADMIN@127.0.0.1:5432/postgres
 TOOLS_DATABASE_URL_OWNER=postgresql://app_owner:$OWNER@127.0.0.1:5432/sales_smart

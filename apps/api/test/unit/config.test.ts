@@ -42,6 +42,13 @@ describe('configuración validada', () => {
     expect(loadConfig(prod).signup).toMatchObject({ mailProvider: 'none', captchaProvider: 'none' });
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
+  it('WhatsApp (ADR-50): por defecto el adaptador de Meta; el fake solo fuera de producción; un valor desconocido se rechaza', () => {
+    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta' });
+    expect(loadConfig({ ...good, WHATSAPP_PROVIDER: 'fake' }).channels.whatsappProvider).toBe('fake');
+    expect(loadConfig({ ...good, NODE_ENV: 'production' }).channels.whatsappProvider).toBe('meta');
+    expect(() => loadConfig({ ...good, NODE_ENV: 'production', WHATSAPP_PROVIDER: 'fake' })).toThrow(/WHATSAPP_PROVIDER/);
+    expect(() => loadConfig({ ...good, WHATSAPP_PROVIDER: 'twilio' })).toThrow(/WHATSAPP_PROVIDER/);
+  });
   describe('proveedores reales: Resend y Turnstile (ADR-37)', () => {
     const real = { MAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_test_1234567890abcdef', MAIL_FROM: 'Sales Smart <no-reply@growthconsulting.digital>', FRONTEND_BASE_URL: 'https://app.growthconsulting.digital', CAPTCHA_PROVIDER: 'turnstile', TURNSTILE_SECRET_KEY: '0x4AAAAAAAbcdefgh1234567' };
     it('configuración completa válida, también en producción (los fakes siguen prohibidos allí)', () => {

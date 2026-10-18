@@ -11,6 +11,7 @@ export function SettingsNav() {
         <NavLink to="/settings/fields" className={tab}>Campos personalizados</NavLink>
         <NavLink to="/settings/tags" className={tab}>Etiquetas</NavLink>
         <NavLink to="/settings/attribution" className={tab}>Atribución de Meta</NavLink>
+        <NavLink to="/settings/connections" className={tab}>Conexiones</NavLink>
       </nav>
     </div>
   );

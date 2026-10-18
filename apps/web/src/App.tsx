@@ -3,6 +3,7 @@ import { AgencyShell } from './features/agency/AgencyShell';
 import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
 import { AttributionPage } from './features/attribution/AttributionPage';
+import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { ContactsPage } from './features/contacts/ContactsPage';
 import { ClientCompaniesPage } from './features/crm/CompaniesPage';
 import { TasksPage } from './features/crm/TasksPage';
@@ -104,6 +105,7 @@ export function App() {
         <Route path="/settings/fields" element={<CustomFieldsPage />} />
         <Route path="/settings/tags" element={<TagsPage />} />
         <Route path="/settings/attribution" element={<AttributionPage />} />
+        <Route path="/settings/connections" element={<ConnectionsPage />} />
       </Route>
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/agencies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AgenciesPage /></PlatformShell>}</PlatformGate>} />

@@ -37,6 +37,10 @@ export interface AppConfig {
     /** Llavero de la bóveda de credenciales de proveedores (ADR-42): claves en base64 (el decodificado lo hace la bóveda). Undefined = sin bóveda. */
     readonly credentialsKeys: { readonly current: { readonly version: number; readonly key: string }; readonly previous: { readonly version: number; readonly key: string } | undefined } | undefined;
   };
+  readonly channels: {
+    /** Adaptador de WhatsApp (M5, ADR-50). */
+    readonly whatsappProvider: 'meta' | 'fake';
+  };
   readonly frontend: {
     /** Base explícita (sin barra final) o undefined si no se configuró. Nunca se deriva de la petición. */
     readonly baseUrl: string | undefined;
@@ -149,6 +153,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (e.NODE_ENV === 'production') {
     if (e.MAIL_PROVIDER === 'console' || e.MAIL_PROVIDER === 'memory') issues.push(`MAIL_PROVIDER: "${e.MAIL_PROVIDER}" es solo para desarrollo/pruebas y no se permite en producción`);
     if (e.CAPTCHA_PROVIDER === 'fake') issues.push('CAPTCHA_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.WHATSAPP_PROVIDER === 'fake') issues.push('WHATSAPP_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
   }
   // Bóveda de credenciales de proveedores (ADR-42): 32 bytes exactos, distinta de la clave de intentos; la anterior (rotación) exige su versión menor
   let credentialsKeys: AppConfig['providers']['credentialsKeys'];
@@ -198,6 +203,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, credentialsKeys },
+    channels: { whatsappProvider: e.WHATSAPP_PROVIDER },
     frontend: {
       baseUrl: frontendBase,
       resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH,

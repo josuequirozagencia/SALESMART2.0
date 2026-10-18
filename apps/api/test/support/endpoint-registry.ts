@@ -133,6 +133,12 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/opportunities/:id', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
   { route: 'POST /v1/opportunities/:id/move', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
   { route: 'GET /v1/pipelines/:id/summary', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  // Conexiones de canales (M5.1, ADR-50). Pruebas: test/channels/channels.test.ts
+  { route: 'GET /v1/channels', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
+  { route: 'POST /v1/channels', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
+  { route: 'PATCH /v1/channels/:id', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
+  { route: 'POST /v1/channels/:id/check', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
+  { route: 'DELETE /v1/channels/:id', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
