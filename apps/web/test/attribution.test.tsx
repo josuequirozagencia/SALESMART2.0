@@ -102,7 +102,7 @@ const attribution = (over: Partial<ContactAttribution> = {}): ContactAttribution
 });
 const contact = (over: Partial<Contact> = {}): Contact => ({
   id: 'c1', name: 'Ana Torres', email: null, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'meta_ctwa', consent: 'unknown', consent_updated_at: null,
-  custom_fields: {}, tags: [{ id: 't1', name: 'Lead', color: '#2563eb', system_key: 'lead', is_system: true }], attribution: attribution(), created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,
+  custom_fields: {}, tags: [{ id: 't1', name: 'Lead', color: '#2563eb', system_key: 'lead', is_system: true }], companies: [], attribution: attribution(), created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,
 });
 function contactsServer(c: Contact) {
   const calls = { n: 0 };

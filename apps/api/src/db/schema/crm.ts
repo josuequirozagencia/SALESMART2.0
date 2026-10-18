@@ -264,3 +264,109 @@ export const contactImportRows = tenantTable(
     index('contact_import_rows_status_idx').on(t['organizationId']!, t['importId']!, t['status']!, t['rowNo']!),
   ],
 );
+
+/**
+ * Empresa (cuenta) del CRM (M3.6, ADR-48). Dato compartido por toda la organización; sin responsable. Nombre único sin distinguir mayúsculas entre las
+ * vigentes. Borrado LÓGICO (libera el nombre): `app_rw` no tiene DELETE.
+ */
+export const companies = tenantTable(
+  'companies',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    name: text('name').notNull(),
+    website: text('website'),
+    phone: text('phone'),
+    email: text('email'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => [
+    check('companies_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 120`),
+    check('companies_website_len', sql`${t['website']!} IS NULL OR length(${t['website']!}) BETWEEN 1 AND 200`),
+    check('companies_phone_e164', sql`${t['phone']!} IS NULL OR ${t['phone']!} ~ '^\\+[1-9][0-9]{7,14}$'`),
+    check('companies_email_len', sql`${t['email']!} IS NULL OR length(${t['email']!}) BETWEEN 3 AND 254`),
+    uniqueIndex('companies_org_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
+  ],
+);
+
+/** Pertenencia de un contacto a una empresa (N:N). Pivote sin valor propio: desvincular borra la fila (el historial queda en `audit_logs`). */
+export const contactCompanies = tenantTable(
+  'contact_companies',
+  {
+    contactId: uuid('contact_id').notNull(),
+    companyId: uuid('company_id').notNull(),
+    addedBy: uuid('added_by').references(() => users.id),
+    addedAt: ts('added_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'contact_companies_pk', columns: [t['organizationId']!, t['contactId']!, t['companyId']!] }),
+    foreignKey({ name: 'contact_companies_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    foreignKey({ name: 'contact_companies_company_fk', columns: [t['organizationId']!, t['companyId']!], foreignColumns: [companies.organizationId, companies.id] }),
+    index('contact_companies_company_idx').on(t['organizationId']!, t['companyId']!),
+  ],
+);
+
+/**
+ * Nota interna (M3.6, ADR-48) sobre un contacto O una empresa (exactamente una). Solo del equipo: jamás sale al cliente. Borrado LÓGICO; editar sobrescribe el
+ * texto y marca `edited_at` (la auditoría no guarda el texto).
+ */
+export const notes = tenantTable(
+  'notes',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    contactId: uuid('contact_id'),
+    companyId: uuid('company_id'),
+    body: text('body').notNull(),
+    authorId: uuid('author_id').notNull().references(() => users.id),
+    editedAt: ts('edited_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => [
+    foreignKey({ name: 'notes_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    foreignKey({ name: 'notes_company_fk', columns: [t['organizationId']!, t['companyId']!], foreignColumns: [companies.organizationId, companies.id] }),
+    check('notes_target_one', sql`(${t['contactId']!} IS NULL) <> (${t['companyId']!} IS NULL)`),
+    check('notes_body_len', sql`length(btrim(${t['body']!})) BETWEEN 1 AND 5000`),
+    index('notes_contact_idx').on(t['organizationId']!, t['contactId']!, t['createdAt']!, t['id']!).where(sql`${t['deletedAt']!} IS NULL AND ${t['contactId']!} IS NOT NULL`),
+    index('notes_company_idx').on(t['organizationId']!, t['companyId']!, t['createdAt']!, t['id']!).where(sql`${t['deletedAt']!} IS NULL AND ${t['companyId']!} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Tarea (M3.6, ADR-48): pendiente de una persona, con vencimiento opcional y vinculada a lo sumo a un contacto o a una empresa. `done` ⇔ `completed_at`.
+ * Borrado LÓGICO. Sin recordatorios ni repetición (llegan con la Agenda y las automatizaciones).
+ */
+export const tasks = tenantTable(
+  'tasks',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    title: text('title').notNull(),
+    description: text('description'),
+    dueAt: ts('due_at'),
+    status: text('status').notNull().default('open'),
+    completedAt: ts('completed_at'),
+    completedBy: uuid('completed_by').references(() => users.id),
+    assigneeId: uuid('assignee_id').notNull().references(() => users.id),
+    contactId: uuid('contact_id'),
+    companyId: uuid('company_id'),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    deletedAt: ts('deleted_at'),
+  },
+  (t) => [
+    foreignKey({ name: 'tasks_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    foreignKey({ name: 'tasks_company_fk', columns: [t['organizationId']!, t['companyId']!], foreignColumns: [companies.organizationId, companies.id] }),
+    check('tasks_title_len', sql`length(btrim(${t['title']!})) BETWEEN 1 AND 200`),
+    check('tasks_description_len', sql`${t['description']!} IS NULL OR length(${t['description']!}) <= 2000`),
+    check('tasks_status_valid', sql`${t['status']!} IN ('open', 'done')`),
+    check('tasks_completion_consistent', sql`(${t['status']!} = 'done') = (${t['completedAt']!} IS NOT NULL)`),
+    check('tasks_one_target', sql`${t['contactId']!} IS NULL OR ${t['companyId']!} IS NULL`),
+    index('tasks_assignee_idx').on(t['organizationId']!, t['assigneeId']!, t['status']!, t['dueAt']!).where(sql`${t['deletedAt']!} IS NULL`),
+    index('tasks_contact_idx').on(t['organizationId']!, t['contactId']!).where(sql`${t['deletedAt']!} IS NULL AND ${t['contactId']!} IS NOT NULL`),
+    index('tasks_company_idx').on(t['organizationId']!, t['companyId']!).where(sql`${t['deletedAt']!} IS NULL AND ${t['companyId']!} IS NOT NULL`),
+  ],
+);

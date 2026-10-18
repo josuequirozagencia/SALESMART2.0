@@ -19,7 +19,7 @@ const CIUDAD = fld('ciudad', 'Ciudad', 'text');
 const INTERES = fld('interes', 'Interés', 'select', { options: ['Uñas', 'Barbería'] });
 const EDAD = fld('edad', 'Edad', 'number');
 const contact = (id: string, name: string, over: Partial<Contact> = {}): Contact => ({
-  id, name, email: `${id}@correo.test`, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null, custom_fields: {}, tags: [], attribution: null,
+  id, name, email: `${id}@correo.test`, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null, custom_fields: {}, tags: [], companies: [], attribution: null,
   created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,
 });
 const ANA = contact('c1', 'Ana Torres', { consent: 'granted', tags: [LEAD, VIP], custom_fields: { ciudad: 'Quito', interes: 'Uñas', edad: 34 } });

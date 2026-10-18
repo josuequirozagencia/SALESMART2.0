@@ -30,11 +30,13 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
           <Button onClick={onLogout}>Cerrar sesión</Button>
         </div>
       </header>
-      <div className="mx-auto grid max-w-[1100px] gap-4 p-5">
+      <div className="mx-auto grid max-w-[1100px] grid-cols-[minmax(0,1fr)] gap-4 p-5">
         {trial ? <TrialBanner trial={trial} role={me.role} /> : null}
-        <nav aria-label="Secciones" className="flex gap-1 border-b border-line">
+        <nav aria-label="Secciones" className="flex gap-1 overflow-x-auto whitespace-nowrap border-b border-line">
           <NavLink to="/" end className={tab}>Inicio</NavLink>
           <NavLink to="/contacts" className={tab}>Contactos</NavLink>
+          <NavLink to="/companies" className={tab}>Empresas</NavLink>
+          <NavLink to="/tasks" className={tab}>Tareas</NavLink>
           {manageFields ? <NavLink to="/settings/fields" className={tab}>Configuración</NavLink> : null}
         </nav>
         <main>{children}</main>

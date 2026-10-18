@@ -12,7 +12,7 @@ const tag = (id: string, name: string): ContactTag => ({ id, name, color: '#6a44
 const LEAD: ContactTag = { id: 't-lead', name: 'Lead', color: '#2563eb', system_key: 'lead', is_system: true };
 const VIP = tag('t-vip', 'VIP');
 const CIUDAD: CustomField = { id: 'f-ciudad', entity: 'contact', name: 'Ciudad', key: 'ciudad', type: 'text', options: null, required: false, show_in_form: true, position: 0, archived_at: null, created_at: '2026-10-10T15:00:00.000Z' };
-const ANA: Contact = { id: 'c1', name: 'Ana Torres', email: 'a@x.test', phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null, custom_fields: {}, tags: [], attribution: null, created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z' };
+const ANA: Contact = { id: 'c1', name: 'Ana Torres', email: 'a@x.test', phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null, custom_fields: {}, tags: [], companies: [], attribution: null, created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z' };
 
 const imp = (over: Partial<ContactImport> = {}): ContactImport => ({
   id: 'imp1', file_name: 'clientes.csv', status: 'staging', total_rows: 3, staged_rows: 0, headers: ['Nombre', 'Celular', 'Ciudad', 'Notas'], mapping: ['name', 'phone', 'cf:ciudad', 'ignore'],

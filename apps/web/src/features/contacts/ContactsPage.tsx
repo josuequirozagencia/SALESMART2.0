@@ -251,7 +251,7 @@ export function ContactsPage() {
       ) : null}
       {dialog ? (
         <ContactDialog
-          {...(dialog.contact ? { contact: dialog.contact } : {})}
+          {...(dialog.contact ? { contact: items.find((c) => c.id === dialog.contact!.id) ?? dialog.contact } : {})}
           owners={owners.data ?? []}
           canAssign={access.view_all}
           canDelete={access.delete}

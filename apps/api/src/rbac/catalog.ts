@@ -19,6 +19,8 @@ export const PERMISSIONS = {
   'contacts.delete': 'tenant',
   // M3.2 (ADR-44): definir los campos personalizados del contacto (tipo, opciones, obligatorio, visible en el formulario). Leerlos va con `contacts.read`.
   'custom_fields.manage': 'tenant',
+  // M3.6 (ADR-48): crear, editar, borrar empresas de contactos y vincularles contactos. Verlas va con `contacts.read`; las notas y tareas de una empresa, con `contacts.write`.
+  'companies.manage': 'tenant',
   'opportunities.read': 'tenant',
   'opportunities.write': 'tenant',
   'pipelines.manage': 'tenant',

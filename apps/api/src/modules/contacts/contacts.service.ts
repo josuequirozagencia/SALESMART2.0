@@ -12,6 +12,7 @@ import { MAX_EXPORT_ROWS, type ExportDto } from './contact-export';
 import { ContactListsRepository } from './contact-lists.repository';
 import { savedFilters } from './contact-lists.service';
 import type { CreateContactDto, ListContactsQuery, UpdateContactDto } from './contacts.dto';
+import { CompaniesService } from './companies.service';
 import { ContactsRepository, type ContactRow, type PhoneRow, type Scope } from './contacts.repository';
 
 export interface ContactView {
@@ -28,6 +29,8 @@ export interface ContactView {
   custom_fields: CustomValues;
   /** Etiquetas del contacto (M3.3): las del sistema las pone el sistema. */
   tags: TagView[];
+  /** Empresas a las que pertenece (M3.6, ADR-48). */
+  companies: Array<{ id: string; name: string }>;
   /** Origen del lead por Click-to-WhatsApp (M3.3, ADR-45); null si el contacto no llegó por un anuncio. */
   attribution: ContactAttribution | null;
   created_at: string;
@@ -60,6 +63,8 @@ interface Extras {
   custom: Map<string, CustomValues>;
   tags: Map<string, TagView[]>;
   capi: Map<string, { status: string; sentAt: Date | null }>;
+  /** Empresas vigentes del contacto (M3.6). */
+  companies: Map<string, Array<{ id: string; name: string }>>;
 }
 /** Lo leído para una exportación, aún sin los nombres de los responsables (esos viven en identidad y se resuelven FUERA de la transacción del tenant). */
 export interface ExportBundle {
@@ -108,6 +113,7 @@ export class ContactsService {
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
     @Inject(SystemTagsService) private readonly systemTags: SystemTagsService,
+    @Inject(CompaniesService) private readonly companies: CompaniesService,
     @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
     @Inject(ContactListsRepository) private readonly lists: ContactListsRepository,
   ) {}
@@ -291,7 +297,7 @@ export class ContactsService {
    */
   async exportRowsIn(tx: TenantTx, scope: ContactScope, q: ExportDto): Promise<ExportBundle> {
     const sc = this.scope(scope);
-    const out: ExportBundle = { rows: [], phones: new Map(), extras: { custom: new Map(), tags: new Map(), capi: new Map() } };
+    const out: ExportBundle = { rows: [], phones: new Map(), extras: { custom: new Map(), tags: new Map(), capi: new Map(), companies: new Map() } };
     const push = async (rows: ContactRow[]) => {
       const ids = rows.map((r) => r.id);
       const phones = await this.repo.phonesOf(tx, ids);
@@ -301,6 +307,7 @@ export class ContactsService {
       for (const [k, v] of x.custom) out.extras.custom.set(k, v);
       for (const [k, v] of x.tags) out.extras.tags.set(k, v);
       for (const [k, v] of x.capi) out.extras.capi.set(k, v);
+      for (const [k, v] of x.companies) out.extras.companies.set(k, v);
     };
     if (q.scope === 'selection') {
       const visible = await this.repo.visibleIds(tx, sc, q.ids ?? []);
@@ -368,7 +375,7 @@ export class ContactsService {
   }
 
   private async extras(tx: TenantTx, ids: readonly string[]): Promise<Extras> {
-    return { custom: await this.custom.valuesFor(tx, 'contact', ids), tags: await this.systemTags.forContacts(tx, ids), capi: await this.repo.lastPurchaseEvents(tx, ids) };
+    return { custom: await this.custom.valuesFor(tx, 'contact', ids), tags: await this.systemTags.forContacts(tx, ids), capi: await this.repo.lastPurchaseEvents(tx, ids), companies: await this.companies.forContacts(tx, ids) };
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -439,6 +446,7 @@ export class ContactsService {
       consent_updated_at: r.consentUpdatedAt ? iso(r.consentUpdatedAt) : null,
       custom_fields: x.custom.get(r.id) ?? {},
       tags: x.tags.get(r.id) ?? [],
+      companies: x.companies.get(r.id) ?? [],
       attribution: attributionOf(r, x.capi.get(r.id)),
       created_at: iso(r.createdAt),
       updated_at: iso(r.updatedAt),

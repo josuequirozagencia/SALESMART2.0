@@ -937,6 +937,78 @@ test('importar y exportar: el administrador sube un CSV, revisa, importa y desca
   expect((await request.get(`${apiBase}/v1/contact-imports`, { headers: { authorization: 'Bearer x' } })).status()).toBe(401);
 });
 
+test('empresas, notas y tareas: el administrador crea una empresa, le vincula un contacto, escribe una nota y una tarea y la completa; otra empresa no ve nada', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('crm'));
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}`, 'content-type': 'application/json' };
+  const ana = (await (await request.post(`${apiBase}/v1/contacts`, { headers: mine, data: { name: 'Ana Torres', phones: ['+593984217730'] } })).json()) as { id: string };
+
+  // Empresa creada desde la pantalla «Empresas»
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Empresas' }).click();
+  await page.getByRole('button', { name: 'Nueva empresa' }).click();
+  const create = page.getByRole('dialog', { name: 'Nueva empresa' });
+  await create.getByLabel('Nombre').fill('Acme SA');
+  await create.getByLabel('Sitio web').fill('acme.test');
+  await create.getByRole('button', { name: 'Crear empresa' }).click();
+  await expect(page.getByRole('button', { name: 'Abrir la empresa Acme SA' })).toBeVisible();
+
+  // Un nombre repetido se marca en el campo
+  await page.getByRole('button', { name: 'Nueva empresa' }).click();
+  const dup = page.getByRole('dialog', { name: 'Nueva empresa' });
+  await dup.getByLabel('Nombre').fill('acme sa');
+  await dup.getByRole('button', { name: 'Crear empresa' }).click();
+  await expect(dup.getByText('Ya existe una empresa con ese nombre')).toBeVisible();
+  await dup.getByRole('button', { name: 'Cancelar' }).click();
+
+  // Vincula el contacto desde la ficha de la empresa
+  await page.getByRole('button', { name: 'Abrir la empresa Acme SA' }).click();
+  const co = page.getByRole('dialog', { name: 'Empresa' });
+  await co.getByRole('tab', { name: /Contactos/ }).click();
+  await co.getByRole('searchbox', { name: 'Agregar contactos' }).fill('Ana');
+  await co.getByRole('button', { name: 'Agregar a Ana Torres' }).click();
+  await expect(co.getByRole('region', { name: 'Contactos de la empresa' }).getByText('Ana Torres')).toBeVisible();
+  await co.getByRole('button', { name: 'Cerrar' }).last().click();
+
+  // En la ficha del contacto: empresa, nota y tarea
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('button', { name: 'Abrir el contacto Ana Torres' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Contacto' });
+  await dlg.getByRole('tab', { name: /Empresas/ }).click();
+  await expect(dlg.getByRole('region', { name: 'Empresas' }).getByText('Acme SA')).toBeVisible();
+  await dlg.getByRole('tab', { name: 'Notas' }).click();
+  await dlg.getByLabel('Nueva nota').fill('Prefiere por la tarde');
+  await dlg.getByRole('button', { name: 'Agregar nota' }).click();
+  await expect(dlg.getByRole('region', { name: 'Notas' }).getByText('Prefiere por la tarde')).toBeVisible();
+  await dlg.getByRole('tab', { name: 'Tareas' }).click();
+  await dlg.getByRole('button', { name: 'Nueva tarea' }).click();
+  const task = page.getByRole('dialog', { name: 'Nueva tarea' });
+  await task.getByLabel('Título').fill('Llamar a Ana');
+  await task.getByLabel(/Vence/).fill('2030-01-15T10:30');
+  await task.getByRole('button', { name: 'Crear tarea' }).click();
+  await expect(dlg.getByRole('region', { name: 'Tareas' }).getByText('Llamar a Ana')).toBeVisible();
+  await dlg.getByRole('button', { name: 'Cerrar' }).click();
+
+  // La nota y la tarea persisten tras recargar; la tarea se completa desde «Tareas»
+  await page.reload();
+  await page.getByRole('button', { name: 'Abrir el contacto Ana Torres' }).click();
+  await page.getByRole('dialog', { name: 'Contacto' }).getByRole('tab', { name: 'Notas' }).click();
+  await expect(page.getByText('Prefiere por la tarde')).toBeVisible();
+  await page.getByRole('dialog', { name: 'Contacto' }).getByRole('button', { name: 'Cerrar' }).click();
+  await page.getByRole('link', { name: 'Tareas' }).click();
+  await expect(page.getByText('Contacto: Ana Torres')).toBeVisible();
+  await page.getByRole('checkbox', { name: 'Marcar «Llamar a Ana» como hecha' }).click();
+  await expect(page.getByText('No hay tareas pendientes.')).toBeVisible();
+  await page.getByRole('tab', { name: 'Hechas' }).click();
+  await expect(page.getByRole('checkbox', { name: 'Reabrir la tarea «Llamar a Ana»' })).toBeChecked();
+
+  // Otra empresa no ve nada de esto
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect(((await (await request.get(`${apiBase}/v1/companies`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect(((await (await request.get(`${apiBase}/v1/tasks?assignee=all&status=all`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect((await request.get(`${apiBase}/v1/contacts/${ana.id}/notes`, { headers: other })).status()).toBe(404);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);
@@ -997,6 +1069,30 @@ test.describe('móvil (390 px)', () => {
     expect(await overflow()).toBeLessThanOrEqual(0);
     await page.getByRole('button', { name: 'Nuevo campo' }).click();
     await expect(page.getByRole('dialog', { name: 'Nuevo campo' }).getByRole('button', { name: 'Crear campo' })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+  });
+  test('/companies y /tasks: con nombres largos no hay desborde horizontal y se abre el formulario', async ({ page, request }) => {
+    const { apiBase } = state();
+    const email = await createAccount(request, uniqueEmail('movilcrm'));
+    const token = await apiLogin(request, email);
+    const h = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    const long = 'Empresa-con-un-nombre-muy-largo-sin-espacios-'.repeat(3).slice(0, 118);
+    expect((await request.post(`${apiBase}/v1/companies`, { headers: h, data: { name: long, website: `www.${'sitio-largo-'.repeat(10)}.test`.slice(0, 190), phone: '+593984217730' } })).status()).toBe(201);
+    expect((await request.post(`${apiBase}/v1/tasks`, { headers: h, data: { title: 'Tarea-con-un-titulo-muy-largo-sin-espacios-'.repeat(4).slice(0, 190), due_at: '2030-01-15T10:30:00Z' } })).status()).toBe(201);
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    await page.goto('/companies');
+    await expect(page.getByRole('button', { name: `Abrir la empresa ${long}` })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.getByRole('button', { name: 'Nueva empresa' }).click();
+    await expect(page.getByRole('dialog', { name: 'Nueva empresa' }).getByRole('button', { name: 'Crear empresa' })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.goto('/tasks');
+    await expect(page.getByRole('button', { name: /Abrir la tarea Tarea-con-un-titulo/ })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.getByRole('button', { name: 'Nueva tarea' }).click();
+    await expect(page.getByRole('dialog', { name: 'Nueva tarea' }).getByRole('button', { name: 'Crear tarea' })).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(0);
   });
 });

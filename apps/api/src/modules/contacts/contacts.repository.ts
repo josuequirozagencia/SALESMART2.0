@@ -86,7 +86,7 @@ function cfCondition(tx: TenantTx, r: ResolvedCf): SQL {
 @Injectable()
 export class ContactsRepository {
   /** Contactos vigentes y visibles para este alcance. */
-  private visible(scope: Scope): SQL {
+  visible(scope: Scope): SQL {
     return scope.viewAll ? isNull(contacts.deletedAt) : (and(isNull(contacts.deletedAt), eq(contacts.ownerId, scope.userId)) as SQL);
   }
 

@@ -246,6 +246,20 @@
       "when": 1792249232118,
       "tag": "0034_m35_imports_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1792270432576,
+      "tag": "0035_m36_companies_notes_tasks",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1792270437333,
+      "tag": "0036_m36_companies_notes_tasks_grants",
+      "breakpoints": true
     }
   ]
 }

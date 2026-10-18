@@ -254,6 +254,8 @@ export interface Contact {
   custom_fields: Record<string, CustomValue>;
   /** Etiquetas del contacto (M3.3): las del sistema las pone el sistema. */
   tags: ContactTag[];
+  /** Empresas a las que pertenece (M3.6). */
+  companies: CompanyRef[];
   /** Origen del lead por Click-to-WhatsApp (M3.3); null si no llegó por un anuncio. */
   attribution: ContactAttribution | null;
   created_at: string;
@@ -412,4 +414,64 @@ export interface SavedList {
   member_count: number | null;
   created_at: string;
   updated_at: string;
+}
+
+// ── Empresas, notas y tareas (M3.6, ADR-48) ──
+export interface CompanyRef {
+  id: string;
+  name: string;
+}
+export interface CrmCompany extends CompanyRef {
+  website: string | null;
+  phone: string | null;
+  email: string | null;
+  /** Contactos vinculados que esta persona puede ver. */
+  contact_count: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface CrmCompanyList {
+  items: CrmCompany[];
+  next_cursor: string | null;
+  /** `manage`: crear, editar, borrar empresas y vincular contactos (administrador). `write`: notas y tareas de la empresa. */
+  access: { manage: boolean; write: boolean };
+}
+export interface CrmCompanyContact {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+}
+export interface Note {
+  id: string;
+  body: string;
+  author: { id: string; name: string };
+  edited_at: string | null;
+  created_at: string;
+  can_edit: boolean;
+  can_delete: boolean;
+}
+export interface Task {
+  id: string;
+  title: string;
+  description: string | null;
+  due_at: string | null;
+  status: 'open' | 'done';
+  completed_at: string | null;
+  assignee: { id: string; name: string };
+  contact: { id: string; name: string } | null;
+  company: { id: string; name: string } | null;
+  created_by: string;
+  overdue: boolean;
+  can_edit: boolean;
+  can_complete: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export interface TaskList {
+  items: Task[];
+  next_cursor: string | null;
+  /** Solo en la primera página. */
+  total: number | null;
+  access: { view_all: boolean; write: boolean };
 }

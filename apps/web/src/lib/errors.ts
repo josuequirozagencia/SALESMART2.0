@@ -31,6 +31,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'CUSTOM_FIELD_EXISTS': case 'CUSTOM_FIELD_KEY_RESERVED': case 'CUSTOM_FIELD_LIMIT': case 'CUSTOM_FIELD_ARCHIVED': case 'CUSTOM_FIELD_ORDER_STALE': return e.message;
     // Etiquetas y listas (ADR-46): el servidor ya redacta el motivo
     case 'TAG_EXISTS': case 'TAG_SYSTEM': case 'TAG_LIMIT': case 'LIST_EXISTS': case 'LIST_LIMIT': case 'LIST_FULL': case 'LIST_NOT_FIXED': case 'LIST_NOT_DYNAMIC': case 'LIST_NOT_YOURS': case 'LIST_SHARE_NOT_ALLOWED': return e.message;
+    // Empresas, notas y tareas (ADR-48): el servidor ya redacta el motivo
+    case 'COMPANY_EXISTS': case 'COMPANY_LIMIT': case 'NOTE_NOT_YOURS': case 'TASK_NOT_YOURS': case 'TASK_SCOPE': case 'TASK_ASSIGNEE_NOT_ALLOWED': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;
