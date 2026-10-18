@@ -274,6 +274,13 @@
       "when": 1792291810289,
       "tag": "0038_m4_pipelines_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1792299962531,
+      "tag": "0039_m42_advisor_opportunities_write",
+      "breakpoints": true
     }
   ]
 }

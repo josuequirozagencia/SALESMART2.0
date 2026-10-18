@@ -125,6 +125,14 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/pipelines/:id/stages/order', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
   { route: 'PATCH /v1/pipeline-stages/:id', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
   { route: 'DELETE /v1/pipeline-stages/:id', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  // Oportunidades (M4.2, ADR-49). Pruebas: test/opportunities/opportunities.test.ts
+  { route: 'GET /v1/opportunities', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  { route: 'POST /v1/opportunities', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  { route: 'GET /v1/opportunities/:id', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  { route: 'PATCH /v1/opportunities/:id', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  { route: 'DELETE /v1/opportunities/:id', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  { route: 'POST /v1/opportunities/:id/move', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
+  { route: 'GET /v1/pipelines/:id/summary', kind: 'tenant', isolationTest: '../../opportunities/opportunities.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

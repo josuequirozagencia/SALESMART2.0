@@ -8,8 +8,9 @@ import { AuthModule, LocalAccessResolver } from './modules/auth';
 import { AttributionModule } from './modules/attribution';
 import { ContactsModule } from './modules/contacts';
 import { CustomFieldsModule } from './modules/custom-fields';
+import { OpportunitiesModule } from './modules/opportunities';
 import { OrganizationsModule } from './modules/organizations';
 import { PipelinesModule } from './modules/pipelines';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

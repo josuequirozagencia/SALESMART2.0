@@ -500,6 +500,53 @@ export interface Pipeline {
 }
 export interface PipelineList {
   items: Pipeline[];
-  /** `manage`: configurar pipelines y etapas (administrador). `write`: operar oportunidades. */
-  access: { manage: boolean; write: boolean };
+  /** `manage`: configurar pipelines y etapas (administrador). `write`: operar oportunidades. `view_all`: ve las oportunidades de todos. */
+  access: { manage: boolean; write: boolean; view_all: boolean };
+}
+
+// ── Oportunidades (M4.2, ADR-49) ──
+export interface OpportunityContact {
+  id: string;
+  name: string;
+  email: string | null;
+  /** Teléfono principal. */
+  phone: string | null;
+  source: string;
+  tags: ContactTag[];
+}
+export interface Opportunity {
+  id: string;
+  pipeline_id: string;
+  stage_id: string;
+  status: StageKind;
+  /** Texto con 2 decimales («1500.00»): el dinero no pasa por flotantes. */
+  amount: string;
+  currency: string;
+  owner: { id: string; name: string } | null;
+  lost_reason: string | null;
+  closed_at: string | null;
+  stage_entered_at: string;
+  created_at: string;
+  contact: OpportunityContact;
+}
+export interface OpportunityHistoryEntry {
+  id: string;
+  at: string;
+  from_stage: { id: string; name: string } | null;
+  to_stage: { id: string; name: string };
+  user: { id: string; name: string } | null;
+  origin: string;
+}
+export interface OpportunityDetail extends Opportunity {
+  history: OpportunityHistoryEntry[];
+}
+export interface OpportunityPage {
+  items: Opportunity[];
+  next_cursor: string | null;
+  access: { write: boolean; view_all: boolean };
+}
+export interface StageSummary {
+  stage_id: string;
+  count: number;
+  total: string;
 }

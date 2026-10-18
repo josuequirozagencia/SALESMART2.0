@@ -1084,6 +1084,111 @@ test('oportunidades: el administrador ve el pipeline por defecto, crea otro, aju
   expect((await request.patch(`${apiBase}/v1/pipelines/${listed.items[0]!.id}`, { headers: { ...other, 'content-type': 'application/json' }, data: { name: 'Robado' } })).status()).toBe(404);
 });
 
+test('oportunidades: crear desde el tablero y desde la ficha, mover (selector y arrastre), perder con motivo, filtrar y ver el historial; otra empresa no ve nada', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('opps'));
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}`, 'content-type': 'application/json' };
+  const post = async (path: string, data: unknown) => {
+    const r = await request.post(`${apiBase}/v1${path}`, { headers: mine, data });
+    expect(r.status(), path).toBeLessThan(300);
+    return (await r.json()) as { id: string };
+  };
+  const ana = await post('/contacts', { name: 'Ana Torres', email: 'ana@correo.test', phones: ['+593984217730'] });
+  const beto = await post('/contacts', { name: 'Beto Luna', phones: ['+593991112233'] });
+  await post('/contacts', { name: 'Carla Mora', phones: ['+593987654321'] });
+  const pipelines = (await (await request.get(`${apiBase}/v1/pipelines`, { headers: mine })).json()) as { items: Array<{ id: string }> };
+  await post(`/pipelines/${pipelines.items[0]!.id}/stages`, { name: 'Perdido', kind: 'lost' });
+
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Oportunidades' }).click();
+  const board = page.getByRole('list', { name: /Etapas del pipeline Ventas/ });
+  await expect(board.getByRole('listitem', { name: 'Etapa Perdido' })).toBeVisible();
+
+  // Crear desde el tablero: busca el contacto, monto y etapa por defecto; se abre el panel
+  await page.getByRole('button', { name: 'Nueva oportunidad' }).click();
+  const create = page.getByRole('dialog', { name: 'Nueva oportunidad' });
+  await create.getByLabel('Contacto').fill('ana');
+  await create.getByRole('button', { name: 'Elegir a Ana Torres' }).click();
+  await create.getByLabel('Monto (USD)').fill('1500');
+  await create.getByRole('button', { name: 'Crear oportunidad' }).click();
+  const drawer = page.getByRole('dialog', { name: 'Oportunidad de Ana Torres' });
+  await expect(drawer.getByText('Creada en')).toBeVisible();
+  await drawer.getByRole('button', { name: 'Cerrar el panel' }).click();
+  await expect(board.getByRole('listitem', { name: 'Etapa Nuevo' }).getByRole('article', { name: 'Oportunidad de Ana Torres' })).toBeVisible();
+  await expect(board.getByRole('listitem', { name: 'Etapa Nuevo' }).getByText('1 oportunidad')).toBeVisible();
+
+  // Una segunda oportunidad para Ana en el mismo pipeline: el servidor la rechaza con su motivo
+  await page.getByRole('button', { name: 'Nueva oportunidad' }).click();
+  const dup = page.getByRole('dialog', { name: 'Nueva oportunidad' });
+  await dup.getByLabel('Contacto').fill('ana');
+  await dup.getByRole('button', { name: 'Elegir a Ana Torres' }).click();
+  await dup.getByRole('button', { name: 'Crear oportunidad' }).click();
+  await expect(dup.getByText(/ya tiene una oportunidad abierta/)).toBeVisible();
+  await dup.getByRole('button', { name: 'Cancelar' }).click();
+
+  // Beto se crea desde su ficha (pestaña Oportunidades)
+  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('button', { name: 'Abrir el contacto Beto Luna' }).click();
+  const ficha = page.getByRole('dialog', { name: 'Contacto' });
+  await ficha.getByRole('tab', { name: 'Oportunidades' }).click();
+  await ficha.getByRole('button', { name: 'Nueva oportunidad' }).click();
+  const fromContact = page.getByRole('dialog', { name: 'Nueva oportunidad' });
+  await expect(fromContact.getByText('Beto Luna')).toBeVisible();
+  await fromContact.getByLabel('Monto (USD)').fill('500');
+  await fromContact.getByRole('button', { name: 'Crear oportunidad' }).click();
+  await expect(ficha.getByRole('region', { name: 'Oportunidades' }).getByText('Abierta')).toBeVisible();
+  await ficha.getByRole('button', { name: 'Cerrar' }).click();
+
+  // Mover con el selector y arrastrando
+  await page.getByRole('link', { name: 'Oportunidades' }).click();
+  const nuevo = board.getByRole('listitem', { name: 'Etapa Nuevo' });
+  await expect(nuevo.getByRole('article')).toHaveCount(2);
+  await nuevo.getByLabel('Mover a Ana Torres').selectOption({ label: 'Propuesta' });
+  const propuesta = board.getByRole('listitem', { name: 'Etapa Propuesta' });
+  await expect(propuesta.getByRole('article', { name: 'Oportunidad de Ana Torres' })).toBeVisible();
+  // Arrastrar a una columna cercana (las del extremo derecho quedan fuera de la pantalla en un navegador de escritorio)
+  const contactado = board.getByRole('listitem', { name: 'Etapa Contactado' });
+  await propuesta.getByRole('article', { name: 'Oportunidad de Ana Torres' }).dragTo(contactado, { sourcePosition: { x: 40, y: 40 }, targetPosition: { x: 100, y: 30 } }); // soltar sobre el encabezado
+  await expect(contactado.getByRole('article', { name: 'Oportunidad de Ana Torres' })).toBeVisible();
+  await expect(propuesta.getByRole('article')).toHaveCount(0);
+  await contactado.getByLabel('Mover a Ana Torres').selectOption({ label: 'Ganado' });
+  const ganado = board.getByRole('listitem', { name: 'Etapa Ganado' });
+  await expect(ganado.getByRole('article', { name: 'Oportunidad de Ana Torres' })).toBeVisible();
+
+  // Perder con motivo
+  await nuevo.getByLabel('Mover a Beto Luna').selectOption({ label: 'Perdido' });
+  const reason = page.getByRole('dialog', { name: 'Motivo de la pérdida' });
+  await reason.getByRole('button', { name: 'Marcar como perdida' }).click();
+  await expect(reason.getByText('Escribe el motivo')).toBeVisible();
+  await reason.getByLabel('Motivo').fill('Eligió a la competencia');
+  await reason.getByRole('button', { name: 'Marcar como perdida' }).click();
+  const perdido = board.getByRole('listitem', { name: 'Etapa Perdido' });
+  await expect(perdido.getByRole('article', { name: 'Oportunidad de Beto Luna' })).toBeVisible();
+
+  // Historial y motivo en el panel
+  await perdido.getByRole('button', { name: 'Abrir la oportunidad de Beto Luna' }).click();
+  const betoDrawer = page.getByRole('dialog', { name: 'Oportunidad de Beto Luna' });
+  await expect(betoDrawer.getByText('Motivo de la pérdida:')).toBeVisible();
+  await expect(betoDrawer.getByText('Eligió a la competencia')).toBeVisible();
+  await expect(betoDrawer.getByText('Creada en')).toBeVisible();
+  await betoDrawer.getByRole('button', { name: 'Cerrar el panel' }).click();
+
+  // Filtros: el resumen y las columnas siguen la búsqueda
+  await page.getByRole('button', { name: 'Filtros' }).click();
+  await page.getByLabel('Buscar oportunidades').fill('ana');
+  await expect(page.getByText(/1 de 2 oportunidades/)).toBeVisible();
+  await expect(board.getByRole('article')).toHaveCount(1);
+  await page.getByRole('button', { name: 'Limpiar filtros' }).click();
+  await expect(board.getByRole('article')).toHaveCount(2);
+
+  // Reglas de la API y aislamiento
+  const list = (await (await request.get(`${apiBase}/v1/opportunities?limit=50`, { headers: mine })).json()) as { items: Array<{ id: string; status: string; amount: string; contact: { id: string } }> };
+  expect(list.items.map((o) => [o.contact.id === ana.id ? 'ana' : o.contact.id === beto.id ? 'beto' : '?', o.status, o.amount]).sort()).toEqual([['ana', 'won', '1500.00'], ['beto', 'lost', '500.00']]);
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  expect(((await (await request.get(`${apiBase}/v1/opportunities`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  expect((await request.get(`${apiBase}/v1/opportunities/${list.items[0]!.id}`, { headers: other })).status()).toBe(404);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

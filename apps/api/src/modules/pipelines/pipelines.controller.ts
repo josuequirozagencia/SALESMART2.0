@@ -26,7 +26,7 @@ export class PipelinesController {
   @Get()
   @Header('Cache-Control', 'no-store')
   async list(@Req() req: AuthedRequest) {
-    return { ...(await this.pipelines.list(scopeOf(req))), access: { manage: has(req, 'pipelines.manage'), write: has(req, 'opportunities.write') } };
+    return { ...(await this.pipelines.list(scopeOf(req))), access: { manage: has(req, 'pipelines.manage'), write: has(req, 'opportunities.write'), view_all: has(req, 'contacts.view_all') } };
   }
 
   @RequirePermission('pipelines.manage')

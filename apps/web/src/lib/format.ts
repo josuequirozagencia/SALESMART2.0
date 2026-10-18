@@ -32,3 +32,19 @@ export const ROLE_LABEL: Record<string, string> = {
   client_admin: 'Administrador',
   advisor: 'Asesor',
 };
+
+/** «$1,500.00» a partir del monto en texto de la API; el dinero solo se formatea al mostrarlo. */
+export const money = (amount: string, currency = 'USD'): string => new Intl.NumberFormat('es-EC', { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(Number(amount));
+
+/** Origen del contacto en palabras del producto; un origen que aún no conocemos se muestra tal cual. */
+export const SOURCE_LABEL: Record<string, string> = { manual: 'Manual', import: 'Importado', meta_ctwa: 'Anuncio de Meta', meta: 'Meta' };
+export const sourceLabel = (source: string): string => SOURCE_LABEL[source] ?? source;
+
+/** Iniciales de una persona para su insignia («Carolina Vera» → «CV»). */
+export const initials = (name: string): string =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join('') || '·';

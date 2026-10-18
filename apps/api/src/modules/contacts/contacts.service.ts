@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { contactPhones, contacts, Database, type TenantTx } from '../../db';
+import { contactPhones, contacts, Database, opportunities, type TenantTx } from '../../db';
 import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
@@ -232,8 +232,18 @@ export class ContactsService {
       await tx.update(contactPhones).set({ deletedAt: now, isPrimary: false }).where(and(eq(contactPhones.contactId, id), isNull(contactPhones.deletedAt)));
       await tx.update(contacts).set({ deletedAt: now, updatedAt: now }).where(eq(contacts.id, id));
       await writeAudit(tx, { entityType: 'contact', entityId: id, oldValue: { name: row.name, email: row.email, owner_id: row.ownerId, phones: phones.map((p) => p.e164) }, source: 'manual' });
+      // Sus oportunidades dejan de existir con él (M4.2, ADR-49): si no, quedarían invisibles pero seguirían bloqueando borrar etapas y pipelines
+      const gone = await tx.update(opportunities).set({ deletedAt: now, updatedAt: now }).where(and(eq(opportunities.contactId, id), isNull(opportunities.deletedAt))).returning({ id: opportunities.id });
+      for (const o of gone) await writeAudit(tx, { entityType: 'opportunity', entityId: o.id, field: 'deleted', oldValue: false, newValue: { deleted: true, reason: 'contact_deleted' }, source: 'manual' });
     });
     return { id, deleted: true };
+  }
+
+  /** El contacto vigente que esta persona puede ver (id, nombre y responsable); 404 uniforme si no. Para los módulos que cuelgan de un contacto, dentro de su transacción. */
+  async visibleContactIn(tx: TenantTx, scope: ContactScope, id: string): Promise<{ id: string; name: string; ownerId: string | null }> {
+    const row = await this.repo.byId(tx, this.scope(scope), id);
+    if (!row) throw new NotFoundError();
+    return { id: row.id, name: row.name, ownerId: row.ownerId };
   }
 
   /** Personas a las que se puede asignar un contacto (solo con `contacts.view_all`: lo exige el controlador). */

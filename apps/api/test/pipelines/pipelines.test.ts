@@ -133,7 +133,7 @@ describe('permisos', () => {
 
   it('el asesor ve los pipelines pero no los configura; la agencia en «lectura» tampoco', async () => {
     const p = await main(T.alice);
-    expect((await list(T.carol)).access).toEqual({ manage: false, write: false });
+    expect((await list(T.carol)).access).toEqual({ manage: false, write: true, view_all: false }); // opera sus oportunidades (M4.2), no configura
     expect((await list(T.alice)).access).toMatchObject({ manage: true });
     const denied: Array<[string, string, unknown?]> = [
       ['POST', '/pipelines', { name: 'x' }], ['PUT', '/pipelines/order', { ids: [p.id] }], ['PATCH', `/pipelines/${p.id}`, { name: 'y' }], ['DELETE', `/pipelines/${p.id}`],

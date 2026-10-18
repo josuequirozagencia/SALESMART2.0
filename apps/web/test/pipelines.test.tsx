@@ -24,7 +24,11 @@ function world(manage = true, initial: Pipeline[] = [VENTAS()]): World {
   const stageIds = ['s1', 's2', 's3', 's4', 'c1', 'c2', 'n1', 'n2', 'n3', 'x2', 'x3', 'x4', 'x5'];
   w.routes = {
     ...authed(manage ? ME_ADMIN : ME_ADVISOR),
-    'GET /pipelines': () => ({ body: { items: w.pipelines, access: { manage, write: manage } } }),
+    'GET /pipelines': () => ({ body: { items: w.pipelines, access: { manage, write: manage, view_all: manage } } }),
+    // El tablero pide el resumen por etapa y las oportunidades de cada columna; aquí están vacías (las pruebas de tarjetas viven en opportunities.test.tsx)
+    'GET /opportunities': () => ({ body: { items: [], next_cursor: null, access: { write: manage, view_all: manage } } }),
+    'GET /contacts/owners': () => ({ body: { items: [] } }),
+    'GET /tags': () => ({ body: { items: [], access: { manage } } }),
     'POST /pipelines': (call) => {
       rec(w, 'createPipeline', call);
       const name = (call.body as { name: string }).name;
@@ -35,6 +39,7 @@ function world(manage = true, initial: Pipeline[] = [VENTAS()]): World {
     },
   };
   for (const p of ['p1', 'p2', 'p3']) {
+    w.routes[`GET /pipelines/${p}/summary`] = () => ({ body: { items: find(p).stages.filter((s) => s.opportunity_count > 0).map((s) => ({ stage_id: s.id, count: s.opportunity_count, total: '0.00' })) } });
     w.routes[`PATCH /pipelines/${p}`] = (call) => {
       rec(w, 'patchPipeline', call);
       Object.assign(find(p), call.body);
@@ -94,10 +99,10 @@ describe('Oportunidades · tablero', () => {
     renderApp('/opportunities');
     expect(await screen.findByText(/Pipeline Ventas · 3 oportunidades/)).toBeInTheDocument();
     expect(within(board()).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Etapa Nuevo', 'Etapa Contactado', 'Etapa Ganado']);
-    expect(within(column('Nuevo')).getByText('2 oportunidades')).toBeInTheDocument();
-    expect(within(column('Contactado')).getByText('1 oportunidad')).toBeInTheDocument();
+    expect(await within(column('Nuevo')).findByText(/2 oportunidades/)).toBeInTheDocument();
+    expect(await within(column('Contactado')).findByText(/1 oportunidad(?!es)/)).toBeInTheDocument();
     expect(within(column('Ganado')).getByText('Ganada')).toBeInTheDocument();
-    expect(within(column('Nuevo')).getByText('Sin oportunidades')).toBeInTheDocument();
+    expect(await within(column('Nuevo')).findByText('Sin oportunidades')).toBeInTheDocument();
     expect(screen.getByText('1 etapa oculta')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Ver etapas ocultas' }));
     expect(within(board()).getAllByRole('listitem')).toHaveLength(4);
@@ -111,9 +116,9 @@ describe('Oportunidades · tablero', () => {
     renderApp('/opportunities');
     await screen.findByText(/Pipeline Ventas/);
     await userEvent.click(within(column('Nuevo')).getByRole('button', { name: 'Plegar la etapa Nuevo' }));
-    expect(within(column('Nuevo')).queryByText('2 oportunidades')).not.toBeInTheDocument();
+    expect(within(column('Nuevo')).queryByText(/2 oportunidades/)).not.toBeInTheDocument();
     await userEvent.click(within(column('Nuevo')).getByRole('button', { name: 'Desplegar la etapa Nuevo' }));
-    expect(within(column('Nuevo')).getByText('2 oportunidades')).toBeInTheDocument();
+    expect(await within(column('Nuevo')).findByText(/2 oportunidades/)).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Pipeline' }), 'p2');
     expect(await screen.findByText(/Pipeline Cursos · 0 oportunidades/)).toBeInTheDocument();
     expect(within(board()).getAllByRole('listitem').map((c) => c.getAttribute('aria-label'))).toEqual(['Etapa Interesado', 'Etapa Inscrito']);

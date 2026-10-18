@@ -1045,5 +1045,14 @@ Pipeline único con etapas fijas (el prototipo anterior); etapas identificadas p
 - **Conteos por persona:** el listado de pipelines cuenta solo las oportunidades que la persona puede ver (el asesor, las suyas); las reglas de borrado usan el total real.
 - **Móvil:** la barra de secciones de la empresa se desplaza horizontalmente y el tablero tiene su propio desplazamiento.
 
+### Precisiones al construir M4.2 (2026-10-18)
+- **Alcance y responsable:** sin `contacts.view_all` solo se ven y tocan las oportunidades **asignadas a la persona** (404 uniforme para las demás); el asesor crea siempre las suyas y solo puede asignarse a sí mismo (403 `OWNER_NOT_ALLOWED`). Quien ve todo puede elegir responsable, dejarla sin asignar o, por defecto, heredar el del contacto.
+- **Crear:** solo en una etapa **abierta y visible** (sin elegirla, la primera); el pipeline por defecto es el primero. **Mover:** a una etapa de SU pipeline, **nunca a una oculta** (409 `STAGE_HIDDEN`); mover a donde ya está no hace nada ni escribe historial; reabrir una cerrada cuando el contacto ya tiene otra abierta es 409 `OPPORTUNITY_OPEN_EXISTS`.
+- **Dinero:** el monto viaja y se guarda como **texto con 2 decimales** («1500.00»); se rechaza lo negativo, más de 2 decimales, notación científica y valores mayores a 999 999 999 999,99. Se admite la coma decimal al escribir.
+- **Motivo de pérdida:** vive en la oportunidad (hasta 200 caracteres), **no se copia a la auditoría**; la auditoría guarda la etapa y el estado.
+- **Borrar un contacto borra sus oportunidades** (lógico, con auditoría `contact_deleted`): si no, quedarían invisibles y seguirían bloqueando eliminar etapas y pipelines. El tablero solo cuenta oportunidades de contactos vigentes.
+- **Resumen por etapa** (`GET /pipelines/:id/summary`) con los mismos filtros del tablero; el listado de oportunidades (`GET /opportunities`) se pagina por cursor sobre la entrada a la etapa. El listado de pipelines incluye `view_all` en `access`.
+- **Interfaz:** tarjetas arrastrables con alternativa por teclado (**«Mover a…»**), columnas con total por etapa, ventana del motivo al mover a «perdida», panel lateral con historial y pestaña **Oportunidades** en la ficha del contacto. Al soltar una tarjeta se usa la tarjeta que empezó el arrastre (referencia), no solo el estado de React, porque el `drop` puede llegar antes de repintar.
+
 ### Impacto
 M4.1: migraciones `pipelines`, `pipeline_stages`, `opportunities`, `stage_history` (+ privilegios: `stage_history` solo inserción; sin DELETE en el resto); módulo `pipelines` (pipelines y etapas) con ensure del pipeline por defecto; web: sección Oportunidades (selector, editor de etapas, tablero vacío); Build Spec §6.3 y §7; `CLAUDE.md`. M4.2: módulo `opportunities`, permiso `opportunities.write` para `advisor`, tablero con tarjetas, filtros, panel lateral e historial.
