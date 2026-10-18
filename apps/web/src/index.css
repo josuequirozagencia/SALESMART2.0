@@ -11,16 +11,19 @@
   --f-ui: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
   --surface2: #eeebfa;
+  /* Cuánto del pastel de una etapa se mezcla con la superficie: pleno en claro, atenuado en oscuro */
+  --stage-mix: 100%;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #0e0a1f; --surface: #171230; --surface2: #211a42; --line: #30275a; --fg: #eeeafb; --muted: #a39cc4;
     --accent: #9b7bff; --accent-soft: #2d2260; --accent-ink: #120a33;
     --ok: #5bd08a; --ok-soft: #14331f; --warn: #e8b04a; --warn-soft: #3a2d10; --crit: #f0836f; --crit-soft: #3e1b15;
-    --info: #8db0f5; --info-soft: #1b2a55; --shadow: 0 10px 34px rgba(0, 0, 0, 0.55); color-scheme: dark;
+    --info: #8db0f5; --info-soft: #1b2a55; --shadow: 0 10px 34px rgba(0, 0, 0, 0.55); color-scheme: dark; --stage-mix: 38%;
   }
 }
 :root[data-theme="dark"] {
+  --stage-mix: 38%;
   --bg: #0e0a1f; --surface: #171230; --surface2: #211a42; --line: #30275a; --fg: #eeeafb; --muted: #a39cc4;
   --accent: #9b7bff; --accent-soft: #2d2260; --accent-ink: #120a33;
   --ok: #5bd08a; --ok-soft: #14331f; --warn: #e8b04a; --warn-soft: #3a2d10; --crit: #f0836f; --crit-soft: #3e1b15;

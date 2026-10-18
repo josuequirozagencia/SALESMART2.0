@@ -115,6 +115,16 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/tasks/:id', kind: 'tenant', isolationTest: '../../crm-extras/crm-extras.test.ts' },
   { route: 'POST /v1/tasks/:id/complete', kind: 'tenant', isolationTest: '../../crm-extras/crm-extras.test.ts' },
   { route: 'POST /v1/tasks/:id/reopen', kind: 'tenant', isolationTest: '../../crm-extras/crm-extras.test.ts' },
+  // Pipelines y etapas (M4.1, ADR-49). Pruebas: test/pipelines/pipelines.test.ts
+  { route: 'GET /v1/pipelines', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'POST /v1/pipelines', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'PUT /v1/pipelines/order', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'PATCH /v1/pipelines/:id', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'DELETE /v1/pipelines/:id', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'POST /v1/pipelines/:id/stages', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'PUT /v1/pipelines/:id/stages/order', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'PATCH /v1/pipeline-stages/:id', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
+  { route: 'DELETE /v1/pipeline-stages/:id', kind: 'tenant', isolationTest: '../../pipelines/pipelines.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

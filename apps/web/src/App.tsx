@@ -6,6 +6,7 @@ import { AttributionPage } from './features/attribution/AttributionPage';
 import { ContactsPage } from './features/contacts/ContactsPage';
 import { ClientCompaniesPage } from './features/crm/CompaniesPage';
 import { TasksPage } from './features/crm/TasksPage';
+import { OpportunitiesPage } from './features/pipelines/OpportunitiesPage';
 import { CustomFieldsPage } from './features/custom-fields/CustomFieldsPage';
 import { TagsPage } from './features/tags/TagsPage';
 import { AccessPage } from './features/platform/AccessPage';
@@ -98,6 +99,7 @@ export function App() {
         <Route path="/" element={<Home />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/companies" element={<ClientCompaniesPage />} />
+        <Route path="/opportunities" element={<OpportunitiesPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/settings/fields" element={<CustomFieldsPage />} />
         <Route path="/settings/tags" element={<TagsPage />} />

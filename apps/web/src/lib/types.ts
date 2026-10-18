@@ -475,3 +475,31 @@ export interface TaskList {
   total: number | null;
   access: { view_all: boolean; write: boolean };
 }
+
+// ── Pipelines y etapas (M4.1, ADR-49) ──
+export type StageKind = 'open' | 'won' | 'lost';
+export type StageColor = 'blue' | 'teal' | 'violet' | 'amber' | 'green' | 'red' | 'pink' | 'gray';
+export interface PipelineStage {
+  id: string;
+  name: string;
+  position: number;
+  kind: StageKind;
+  is_hidden: boolean;
+  color: StageColor;
+  /** Oportunidades de la etapa que esta persona puede ver. */
+  opportunity_count: number;
+}
+export interface Pipeline {
+  id: string;
+  name: string;
+  position: number;
+  appointment_stage_id: string | null;
+  opportunity_count: number;
+  /** También las etapas ocultas. */
+  stages: PipelineStage[];
+}
+export interface PipelineList {
+  items: Pipeline[];
+  /** `manage`: configurar pipelines y etapas (administrador). `write`: operar oportunidades. */
+  access: { manage: boolean; write: boolean };
+}

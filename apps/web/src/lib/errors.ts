@@ -31,6 +31,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'CUSTOM_FIELD_EXISTS': case 'CUSTOM_FIELD_KEY_RESERVED': case 'CUSTOM_FIELD_LIMIT': case 'CUSTOM_FIELD_ARCHIVED': case 'CUSTOM_FIELD_ORDER_STALE': return e.message;
     // Etiquetas y listas (ADR-46): el servidor ya redacta el motivo
     case 'TAG_EXISTS': case 'TAG_SYSTEM': case 'TAG_LIMIT': case 'LIST_EXISTS': case 'LIST_LIMIT': case 'LIST_FULL': case 'LIST_NOT_FIXED': case 'LIST_NOT_DYNAMIC': case 'LIST_NOT_YOURS': case 'LIST_SHARE_NOT_ALLOWED': return e.message;
+    // Pipelines y etapas (ADR-49): el servidor ya redacta el motivo
+    case 'PIPELINE_EXISTS': case 'PIPELINE_LIMIT': case 'PIPELINE_LAST': case 'PIPELINE_HAS_OPPORTUNITIES': case 'PIPELINE_ORDER_STALE': case 'STAGE_EXISTS': case 'STAGE_LIMIT': case 'STAGE_KIND_TAKEN': case 'STAGE_KIND_HAS_OPPORTUNITIES': case 'STAGE_WON_REQUIRED': case 'STAGE_WON_HIDDEN': case 'STAGE_LAST_OPEN': case 'STAGE_HAS_CLOSED_OPPORTUNITIES': case 'STAGE_ORDER_STALE': return e.message;
     // Empresas, notas y tareas (ADR-48): el servidor ya redacta el motivo
     case 'COMPANY_EXISTS': case 'COMPANY_LIMIT': case 'NOTE_NOT_YOURS': case 'TASK_NOT_YOURS': case 'TASK_SCOPE': case 'TASK_ASSIGNEE_NOT_ALLOWED': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo

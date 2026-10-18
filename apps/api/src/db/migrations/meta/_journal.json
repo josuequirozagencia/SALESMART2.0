@@ -260,6 +260,20 @@
       "when": 1792270437333,
       "tag": "0036_m36_companies_notes_tasks_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1792291805461,
+      "tag": "0037_m4_pipelines_opportunities",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1792291810289,
+      "tag": "0038_m4_pipelines_grants",
+      "breakpoints": true
     }
   ]
 }

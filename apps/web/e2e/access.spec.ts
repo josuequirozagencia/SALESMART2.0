@@ -1009,6 +1009,81 @@ test('empresas, notas y tareas: el administrador crea una empresa, le vincula un
   expect((await request.get(`${apiBase}/v1/contacts/${ana.id}/notes`, { headers: other })).status()).toBe(404);
 });
 
+test('oportunidades: el administrador ve el pipeline por defecto, crea otro, ajusta sus etapas (agregar, ocultar, perdida, ganada, orden, cita) y lo borra; otra empresa tiene el suyo', async ({ page, request }) => {
+  const { apiBase } = state();
+  const email = await createAccount(request, uniqueEmail('pipes'));
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Oportunidades' }).click();
+
+  // Pipeline por defecto «Ventas» con sus cinco etapas
+  await expect(page.getByText(/Pipeline Ventas · 0 oportunidades/)).toBeVisible();
+  const board = page.getByRole('list', { name: /Etapas del pipeline Ventas/ });
+  await expect(board.getByRole('listitem')).toHaveCount(5);
+  await expect(board.getByRole('listitem', { name: 'Etapa Ganado' }).getByText('Ganada')).toBeVisible();
+
+  // Nuevo pipeline: se crea y abre su editor de etapas
+  await page.getByRole('button', { name: 'Nuevo pipeline' }).click();
+  const create = page.getByRole('dialog', { name: 'Nuevo pipeline' });
+  await create.getByLabel('Nombre del pipeline').fill('ventas');
+  await create.getByRole('button', { name: 'Crear pipeline' }).click();
+  await expect(create.getByText('Ya existe un pipeline con ese nombre')).toBeVisible();
+  await create.getByLabel('Nombre del pipeline').fill('Cursos');
+  await create.getByRole('button', { name: 'Crear pipeline' }).click();
+  const editor = page.getByRole('dialog', { name: 'Etapas del pipeline' });
+  await expect(editor.getByLabel('Nombre de la etapa En seguimiento')).toBeVisible();
+
+  // Agregar una etapa abierta (queda antes de la ganada) y una perdida
+  await editor.getByLabel('Nueva etapa').fill('Inscripción');
+  await editor.getByRole('button', { name: 'Agregar etapa' }).click();
+  await expect(editor.getByLabel('Nombre de la etapa Inscripción')).toBeVisible();
+  await editor.getByLabel('Nueva etapa').fill('Descartado');
+  await editor.getByLabel('Tipo de la etapa nueva').selectOption('lost');
+  await editor.getByRole('button', { name: 'Agregar etapa' }).click();
+  await expect(editor.getByLabel('Nombre de la etapa Descartado')).toBeVisible();
+
+  // Renombrar, ocultar, cambiar la ganada, etapa de cita y orden
+  const rename = editor.getByLabel('Nombre de la etapa En seguimiento');
+  await rename.fill('Seguimiento');
+  await rename.blur();
+  await expect(editor.getByLabel('Nombre de la etapa Seguimiento')).toBeVisible();
+  await editor.getByRole('button', { name: 'Ocultar «Nuevo»' }).click();
+  await expect(editor.getByRole('button', { name: 'Mostrar «Nuevo»' })).toBeVisible();
+  await editor.getByLabel('Etapa de cita').selectOption({ label: 'Inscripción' });
+  await editor.getByLabel('Tipo de «Inscripción»').selectOption('won');
+  await expect(editor.getByLabel('Tipo de «Ganado»')).toHaveValue('open'); // la ganada anterior pasó a abierta
+  await expect(editor.getByLabel('Etapa de cita')).toHaveValue(''); // la etapa de cita debe ser abierta: se limpió
+  await editor.getByRole('button', { name: 'Eliminar «Ganado»' }).click();
+  await editor.getByRole('button', { name: 'Sí', exact: true }).click();
+  await expect(editor.getByLabel('Nombre de la etapa Ganado')).toHaveCount(0);
+  await editor.getByRole('button', { name: 'Bajar «Seguimiento»' }).click();
+  await editor.getByRole('button', { name: 'Listo' }).click();
+
+  // El tablero refleja la configuración: «Nuevo» está oculta
+  const cursos = page.getByRole('list', { name: /Etapas del pipeline Cursos/ });
+  expect(await cursos.getByRole('listitem').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['Etapa Inscripción', 'Etapa Seguimiento', 'Etapa Descartado']);
+  await expect(page.getByText('1 etapa oculta')).toBeVisible();
+  await page.getByRole('button', { name: 'Ver etapas ocultas' }).click();
+  await expect(cursos.getByRole('listitem', { name: 'Etapa Nuevo' }).getByText('Oculta')).toBeVisible();
+
+  // Se persiste en el servidor y se puede borrar el pipeline vacío
+  const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
+  const listed = (await (await request.get(`${apiBase}/v1/pipelines`, { headers: mine })).json()) as { items: Array<{ id: string; name: string; stages: Array<{ name: string; kind: string; is_hidden: boolean }> }> };
+  expect(listed.items.map((p) => p.name)).toEqual(['Ventas', 'Cursos']);
+  expect(listed.items[1]!.stages.map((s) => [s.name, s.kind, s.is_hidden])).toEqual([['Nuevo', 'open', true], ['Inscripción', 'won', false], ['Seguimiento', 'open', false], ['Descartado', 'lost', false]]);
+  await page.getByRole('button', { name: 'Etapas', exact: true }).click();
+  const again = page.getByRole('dialog', { name: 'Etapas del pipeline' });
+  await again.getByRole('button', { name: 'Borrar pipeline' }).click();
+  await again.getByRole('button', { name: 'Sí, borrar' }).click();
+  await expect(page.getByText(/Pipeline Ventas/)).toBeVisible();
+
+  // Otra empresa tiene su propio «Ventas» y no ve nada de esto
+  const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('otra')))}` };
+  const theirs = (await (await request.get(`${apiBase}/v1/pipelines`, { headers: other })).json()) as { items: Array<{ id: string; name: string }> };
+  expect(theirs.items.map((p) => p.name)).toEqual(['Ventas']);
+  expect(theirs.items[0]!.id).not.toBe(listed.items[0]!.id);
+  expect((await request.patch(`${apiBase}/v1/pipelines/${listed.items[0]!.id}`, { headers: { ...other, 'content-type': 'application/json' }, data: { name: 'Robado' } })).status()).toBe(404);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);
@@ -1087,6 +1162,9 @@ test.describe('móvil (390 px)', () => {
     expect(await overflow()).toBeLessThanOrEqual(0);
     await page.getByRole('button', { name: 'Nueva empresa' }).click();
     await expect(page.getByRole('dialog', { name: 'Nueva empresa' }).getByRole('button', { name: 'Crear empresa' })).toBeVisible();
+    expect(await overflow()).toBeLessThanOrEqual(0);
+    await page.goto('/opportunities');
+    await expect(page.getByRole('list', { name: /Etapas del pipeline Ventas/ })).toBeVisible();
     expect(await overflow()).toBeLessThanOrEqual(0);
     await page.goto('/tasks');
     await expect(page.getByRole('button', { name: /Abrir la tarea Tarea-con-un-titulo/ })).toBeVisible();
