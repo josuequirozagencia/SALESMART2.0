@@ -1,4 +1,5 @@
 // Contract test del puerto WhatsAppProvider (ADR-50 #9): el fake y el adaptador de Meta (contra un servidor simulado de la Graph API) deben comportarse igual.
+import { createHmac } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -14,6 +15,35 @@ interface Subject {
   unknownId: string;
   unavailableId: string;
 }
+
+const APP_SECRET = 'secreto-de-la-app-de-prueba-0123456789';
+const sign = (raw: Buffer | string, secret = APP_SECRET): string => `sha256=${createHmac('sha256', secret).update(raw).digest('hex')}`;
+/** Aviso de Meta con un mensaje de texto, uno con imagen, una reacción (se omite) y el estado de un mensaje nuestro. */
+const WEBHOOK = {
+  object: 'whatsapp_business_account',
+  entry: [
+    {
+      id: '1234567890123',
+      changes: [
+        {
+          field: 'messages',
+          value: {
+            messaging_product: 'whatsapp',
+            metadata: { display_phone_number: '15550006789', phone_number_id: '1090123456789' },
+            contacts: [{ profile: { name: 'Ana Torres' }, wa_id: '593984217730' }],
+            messages: [
+              { from: '593984217730', id: 'wamid.TXT1', timestamp: '1760000000', type: 'text', text: { body: 'Hola, quiero una cita' } },
+              { from: '593984217730', id: 'wamid.IMG1', timestamp: '1760000010', type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg', caption: 'mi corte' } },
+              { from: '593984217730', id: 'wamid.RXN1', timestamp: '1760000020', type: 'reaction', reaction: { message_id: 'wamid.OUT1', emoji: '\u{1F44D}' } },
+            ],
+            statuses: [{ id: 'wamid.OUT1', status: 'delivered', timestamp: '1760000030', recipient_id: '593984217730' }],
+          },
+        },
+      ],
+    },
+  ],
+};
+const entryValue = (value: unknown): unknown => ({ object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'messages', value }] }] });
 
 /** Lo que TODO proveedor de WhatsApp debe cumplir. */
 function contract(name: string, make: () => Subject): void {
@@ -41,6 +71,91 @@ function contract(name: string, make: () => Subject): void {
       expect(await code(s.provider.describeNumber({ accessToken: s.badToken }, s.knownId))).toBe('invalid_token');
       expect(await code(s.provider.describeNumber({ accessToken: s.validToken }, s.unknownId))).toBe('number_not_found');
       expect(await code(s.provider.describeNumber({ accessToken: s.validToken }, s.unavailableId))).toBe('unavailable');
+    });
+
+    it('verifyWebhook acepta solo la firma HMAC-SHA256 del cuerpo EXACTO y nunca lanza', () => {
+      const { provider } = make();
+      const raw = Buffer.from(JSON.stringify(WEBHOOK));
+      expect(provider.verifyWebhook(raw, sign(raw), APP_SECRET)).toBe(true);
+      expect(provider.verifyWebhook(raw, `sha256=${sign(raw).slice(7).toUpperCase()}`, APP_SECRET)).toBe(true); // el hexadecimal no distingue mayúsculas
+      expect(provider.verifyWebhook(raw, sign(raw, 'otro-secreto'), APP_SECRET)).toBe(false);
+      expect(provider.verifyWebhook(Buffer.from(`${raw.toString()} `), sign(raw), APP_SECRET)).toBe(false); // un solo byte distinto
+      expect(provider.verifyWebhook(Buffer.from(JSON.stringify(WEBHOOK, null, 2)), sign(raw), APP_SECRET)).toBe(false); // mismo JSON, otro formato
+      for (const bad of [undefined, '', 'sha256=', 'sha256=zz', `sha1=${sign(raw).slice(7)}`, sign(raw).slice(7), `sha256=${'0'.repeat(64)}`, `sha256=${'0'.repeat(63)}`]) expect(provider.verifyWebhook(raw, bad, APP_SECRET), String(bad)).toBe(false);
+      expect(provider.verifyWebhook(raw, sign(raw, ''), '')).toBe(false); // sin secreto nada es válido
+    });
+
+    it('parseWebhook traduce el aviso a eventos normalizados por número, omite lo que no usa y conserva el aviso original', () => {
+      const { provider } = make();
+      const now = new Date('2025-10-09T00:00:00Z');
+      const { events, ignored } = provider.parseWebhook(WEBHOOK, now);
+      expect(ignored).toBe(0); // la reacción se omite a propósito: no cuenta como error
+      expect(events).toHaveLength(1);
+      const e = events[0]!;
+      expect(e.event.phoneNumberId).toBe('1090123456789');
+      expect(e.raw).toEqual(WEBHOOK.entry[0]!.changes[0]!.value);
+      expect(e.event.messages.map((m) => [m.externalId, m.kind, m.text])).toEqual([['wamid.TXT1', 'text', 'Hola, quiero una cita'], ['wamid.IMG1', 'image', 'mi corte']]);
+      expect(e.event.messages[0]).toMatchObject({ from: '+593984217730', fromRaw: '593984217730', profileName: 'Ana Torres', media: null, sentAt: new Date(1760000000 * 1000) });
+      expect(e.event.messages[1]!.media).toEqual({ id: 'media-1', mimeType: 'image/jpeg', filename: null });
+      expect(e.event.statuses).toEqual([{ externalId: 'wamid.OUT1', state: 'delivered', at: new Date(1760000030 * 1000), error: null }]);
+      // lo guardado se vuelve a leer igual
+      expect(provider.parseStored(e.raw, now).events[0]!.event).toEqual(e.event);
+    });
+
+    it('parseWebhook es tolerante: contenido roto o desconocido se descarta y se cuenta, nunca lanza', () => {
+      const { provider } = make();
+      const junk: unknown[] = [null, undefined, 42, 'x', [], {}, { object: 'page' }, { object: 'whatsapp_business_account' }, { object: 'whatsapp_business_account', entry: 'no' }, { object: 'whatsapp_business_account', entry: [null, 1, { changes: 'no' }, { changes: [{ field: 'other', value: {} }, { field: 'messages' }, { field: 'messages', value: { metadata: {} } }] }] }];
+      for (const j of junk) expect(provider.parseWebhook(j).events, JSON.stringify(j)).toEqual([]);
+      const value = {
+        metadata: { phone_number_id: '1090123456789' },
+        messages: [null, 7, { id: 'a' }, { from: 'abc', id: 'b', type: 'text', text: { body: 'x' } }, { from: '12', id: 'c', type: 'text' }, { from: '593984217730', id: 'wamid.OK', type: 'text', text: { body: 'ok' } }],
+        statuses: [null, { id: 'x', status: 'raro' }, { status: 'sent' }],
+      };
+      const r = provider.parseWebhook(entryValue(value));
+      expect(r.events[0]!.event.messages.map((m) => m.externalId)).toEqual(['wamid.OK']);
+      expect(r.events[0]!.event.statuses).toEqual([]);
+      expect(r.ignored).toBe(8); // 5 mensajes y 3 estados que no se pudieron leer
+    });
+
+    it('parseWebhook entiende los demás tipos: audio, documento, ubicación, contactos, respuestas de botón y lo desconocido', () => {
+      const { provider } = make();
+      const from = '593984217730';
+      const msgs = [
+        { from, id: 'm1', type: 'audio', audio: { id: 'au-1', mime_type: 'audio/ogg; codecs=opus', voice: true } },
+        { from, id: 'm2', type: 'document', document: { id: 'doc-1', mime_type: 'application/pdf', filename: 'precios.pdf', caption: 'lista' } },
+        { from, id: 'm3', type: 'location', location: { latitude: -2.17, longitude: -79.92, name: 'Local', address: 'Av. 9 de Octubre' } },
+        { from, id: 'm4', type: 'contacts', contacts: [{ name: { formatted_name: 'A' } }, { name: { formatted_name: 'B' } }] },
+        { from, id: 'm5', type: 'interactive', interactive: { type: 'button_reply', button_reply: { id: 'b1', title: 'Sí, confirmo' } } },
+        { from, id: 'm6', type: 'interactive', interactive: { type: 'list_reply', list_reply: { id: 'l1', title: 'Corte de cabello' } } },
+        { from, id: 'm7', type: 'button', button: { text: 'Más información', payload: 'x' } },
+        { from, id: 'm8', type: 'order', order: {} },
+        { from, id: 'm9', type: 'sticker', sticker: { id: 'st-1', mime_type: 'image/webp' } },
+        { from, id: 'm10', type: 'system', system: { body: 'cambió de número' } },
+      ];
+      const r = provider.parseWebhook(entryValue({ metadata: { phone_number_id: '1090123456789' }, messages: msgs }));
+      const by = Object.fromEntries(r.events[0]!.event.messages.map((m) => [m.externalId, m]));
+      expect(Object.keys(by)).toEqual(['m1', 'm2', 'm3', 'm4', 'm5', 'm6', 'm7', 'm8', 'm9']); // el aviso del sistema se omite
+      expect(by['m1']).toMatchObject({ kind: 'audio', text: null, media: { id: 'au-1', mimeType: 'audio/ogg; codecs=opus', filename: null } });
+      expect(by['m2']).toMatchObject({ kind: 'document', text: 'lista', media: { id: 'doc-1', filename: 'precios.pdf' } });
+      expect(by['m3']).toMatchObject({ kind: 'location', extra: { location: { latitude: -2.17, longitude: -79.92, name: 'Local', address: 'Av. 9 de Octubre' } } });
+      expect(by['m4']).toMatchObject({ kind: 'contacts', extra: { contacts_count: 2 } });
+      expect(by['m5']).toMatchObject({ kind: 'interactive', text: 'Sí, confirmo' });
+      expect(by['m6']).toMatchObject({ kind: 'interactive', text: 'Corte de cabello' });
+      expect(by['m7']).toMatchObject({ kind: 'button', text: 'Más información' });
+      expect(by['m8']).toMatchObject({ kind: 'unsupported', text: null, media: null });
+      expect(by['m9']).toMatchObject({ kind: 'sticker', media: { id: 'st-1' } });
+      expect(r.ignored).toBe(0);
+    });
+
+    it('un estado fallido trae el código y el título del error; sin error, valores por omisión', () => {
+      const { provider } = make();
+      const statuses = [{ id: 'a', status: 'failed', timestamp: '1760000000', errors: [{ code: 131047, title: 'Re-engagement message' }] }, { id: 'b', status: 'failed' }, { id: 'c', status: 'read', timestamp: 1760000001 }];
+      const r = provider.parseWebhook(entryValue({ metadata: { phone_number_id: '1090123456789' }, statuses }));
+      expect(r.events[0]!.event.statuses).toEqual([
+        { externalId: 'a', state: 'failed', at: new Date(1760000000 * 1000), error: { code: '131047', title: 'Re-engagement message' } },
+        { externalId: 'b', state: 'failed', at: expect.any(Date), error: { code: 'unknown', title: 'Error del proveedor' } },
+        { externalId: 'c', state: 'read', at: new Date(1760000001 * 1000), error: null },
+      ]);
     });
 
     it('un error nunca contiene el token', async () => {

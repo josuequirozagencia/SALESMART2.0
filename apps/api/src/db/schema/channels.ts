@@ -56,6 +56,8 @@ export const whatsappAccounts = tenantTable(
     verifiedName: text('verified_name'),
     lastCheckAt: ts('last_check_at'),
     lastError: text('last_error'),
+    /** Última vez que Meta avisó de algo de este número (mensaje o estado): sirve para saber si el webhook está llegando. */
+    lastEventAt: ts('last_event_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },

@@ -1,4 +1,5 @@
-import { WhatsAppProviderError, type NumberInfo, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
+import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
+import { WhatsAppProviderError, type NumberInfo, type ParsedWebhook, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
 
 export interface MetaCloudOptions {
   /** Origen de la Graph API (se cambia en las pruebas por un servidor simulado). */
@@ -28,6 +29,18 @@ export class MetaCloudProvider implements WhatsAppProvider {
     this.version = opts.version ?? 'v21.0';
     this.fetchFn = opts.fetchFn ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
+  }
+
+  verifyWebhook(rawBody: Buffer, signature: string | undefined, appSecret: string): boolean {
+    return verifyMetaSignature(rawBody, signature, appSecret);
+  }
+
+  parseWebhook(body: unknown, now?: Date): ParsedWebhook {
+    return parseMetaWebhook(body, now);
+  }
+
+  parseStored(raw: Record<string, unknown>, now?: Date): ParsedWebhook {
+    return parseMetaWebhook(wrapMetaValue(raw), now);
   }
 
   async describeNumber(credentials: WhatsAppCredentials, phoneNumberId: string): Promise<NumberInfo> {

@@ -12,7 +12,7 @@ const SECRET = 'sk-live-ABCDEF1234567890cdef';
 /** Un campo de un proveedor: TODO se guarda cifrado y solo se ve su final; `masked` solo decide cómo se teclea. */
 const fld = (key: string, label: string, over: Partial<ProviderField> = {}): ProviderField => ({ key, label, masked: true, required: true, hint: null, set: false, last4: null, ...over });
 const prov = (key: string, label: string, fields: ProviderField[], over: Partial<ProviderItem> = {}): ProviderItem => ({ key, label, maturity: 'planned', note: null, configured: fields.every((f) => !f.required || f.set), fields, updated_at: null, ...over });
-const svc = (key: string, label: string, providers: ProviderItem[], over: Partial<ProviderService> = {}): ProviderService => ({ key, label, adapter: 'XProvider', managed: 'platform', note: `Nota de ${label}`, active: null, mode: null, providers, ...over });
+const svc = (key: string, label: string, providers: ProviderItem[], over: Partial<ProviderService> = {}): ProviderService => ({ key, label, adapter: 'XProvider', managed: 'platform', note: `Nota de ${label}`, active: null, mode: null, webhook_url: null, providers, ...over });
 
 const world = (): ProvidersList => ({
   vault: { available: true },
@@ -259,5 +259,29 @@ describe('Proveedores (solo Súper Admin)', () => {
     expect(await screen.findByText(/Tuvimos un problema de nuestro lado/)).toBeInTheDocument();
     await u.click(screen.getByRole('button', { name: 'Reintentar' }));
     expect(await card('IA de texto')).toBeInTheDocument();
+  });
+});
+
+describe('WhatsApp oficial · dirección del webhook (M5.2)', () => {
+  it('muestra la URL pública del servidor para pegarla en Meta, con el aviso del token de verificación; los demás servicios no la muestran', async () => {
+    const w = world();
+    w.services.push(svc('whatsapp_official', 'WhatsApp oficial', [prov('meta_cloud', 'Meta WhatsApp Cloud API', [fld('app_secret', 'Secreto de la app')])], { adapter: 'WhatsAppProvider', webhook_url: 'https://app.ejemplo.test/v1/channels/meta/webhook' }));
+    mockApi(routed(w, newCalls()));
+    renderApp('/platform/providers');
+    const card = within(await screen.findByRole('region', { name: 'WhatsApp oficial' }));
+    expect(card.getByLabelText('Dirección del webhook')).toHaveValue('https://app.ejemplo.test/v1/channels/meta/webhook');
+    expect(card.getByText(/token de verificación/)).toBeInTheDocument();
+    expect(screen.getAllByLabelText('Dirección del webhook')).toHaveLength(1);
+  });
+
+  it('copia la dirección al portapapeles', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const w = world();
+    w.services.push(svc('whatsapp_official', 'WhatsApp oficial', [prov('meta_cloud', 'Meta WhatsApp Cloud API', [fld('app_secret', 'Secreto de la app')])], { webhook_url: 'https://app.ejemplo.test/v1/channels/meta/webhook' }));
+    mockApi(routed(w, newCalls()));
+    renderApp('/platform/providers');
+    await userEvent.click(await screen.findByRole('button', { name: 'Copiar Dirección del webhook' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://app.ejemplo.test/v1/channels/meta/webhook'));
   });
 });

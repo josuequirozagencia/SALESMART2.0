@@ -1,7 +1,9 @@
+import type { NormalizedInboundEvent } from '../conversations';
+
 /**
- * Puerto de WhatsApp (ADR-02, ADR-50 #9). El núcleo —Inbox, conversaciones, CRM— solo habla con estos tipos normalizados; ningún módulo importa un SDK ni
- * una forma de mensaje de un proveedor. Cada implementación (Meta Cloud, el fake de pruebas, mañana Evolution/QR) cumple el mismo contract test.
- * M5.1 define lo que usan las conexiones; M5.2 añade la lectura de eventos y M5.4 el envío.
+ * Puerto de WhatsApp (ADR-02, ADR-50 #9). El núcleo —Inbox, conversaciones, CRM— solo habla con los tipos normalizados de `conversations`; ningún módulo
+ * importa una forma de mensaje de un proveedor. Cada implementación (Meta Cloud, el fake de pruebas, mañana Evolution/QR) cumple el mismo contract test.
+ * M5.1 define lo que usan las conexiones; M5.2 añade la verificación y la lectura de los avisos entrantes; M5.4 añadirá el envío.
  */
 
 /** Credenciales de UN número (las descifra la bóveda justo antes de usarlas; nunca se registran). */
@@ -30,30 +32,24 @@ export class WhatsAppProviderError extends Error {
   }
 }
 
+/** Lo que se entiende de un aviso entrante del proveedor. */
+export interface ParsedWebhook {
+  /** Un elemento por cada aviso de un número. `raw` es la parte original de ese aviso, para poder reprocesarla igual. */
+  readonly events: ReadonlyArray<{ readonly event: NormalizedInboundEvent; readonly raw: Record<string, unknown> }>;
+  /** Cuántos mensajes o estados se descartaron (tipo que no usamos, teléfono inválido, formato roto). */
+  readonly ignored: number;
+}
+
 export interface WhatsAppProvider {
   readonly name: 'meta_cloud' | 'fake';
   /** Consulta el número con el token dado: sirve para comprobar que ambos son válidos. */
   describeNumber(credentials: WhatsAppCredentials, phoneNumberId: string): Promise<NumberInfo>;
+  /** ¿El aviso entrante lo firmó de verdad el proveedor? `rawBody` es el cuerpo EXACTO recibido; `appSecret`, el secreto de la aplicación de la plataforma. */
+  verifyWebhook(rawBody: Buffer, signature: string | undefined, appSecret: string): boolean;
+  /** Lee un aviso entrante (ya verificado) y lo traduce a eventos normalizados, uno por número. Nunca lanza por un contenido mal formado. */
+  parseWebhook(body: unknown, now?: Date): ParsedWebhook;
+  /** Vuelve a leer la parte `raw` de un aviso guardado. */
+  parseStored(raw: Record<string, unknown>, now?: Date): ParsedWebhook;
 }
 
 export const WHATSAPP_PROVIDER = Symbol('WHATSAPP_PROVIDER');
-
-/** Tipos de contenido que el núcleo entiende; lo demás llega como `unsupported` con su descripción. */
-export type MessageKind = 'text' | 'image' | 'video' | 'audio' | 'document' | 'sticker' | 'location' | 'contacts' | 'reaction' | 'unsupported';
-
-/**
- * Mensaje normalizado (Build Spec §9). Un mismo `externalId` por canal identifica un mensaje (idempotencia). `from` y `to` en E.164 con «+».
- * Se usa a partir de M5.2; se define aquí para que el contrato del puerto sea único.
- */
-export interface NormalizedMessage {
-  readonly channelAccountId: string;
-  readonly externalId: string;
-  readonly direction: 'in' | 'out';
-  readonly from: string;
-  readonly to: string;
-  readonly timestamp: Date;
-  readonly kind: MessageKind;
-  readonly text: string | null;
-  /** Referencia al mensaje al que responde, si lo informa el proveedor. */
-  readonly replyToExternalId: string | null;
-}

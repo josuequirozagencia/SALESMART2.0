@@ -139,6 +139,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/channels/:id', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
   { route: 'POST /v1/channels/:id/check', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
   { route: 'DELETE /v1/channels/:id', kind: 'tenant', isolationTest: '../../channels/channels.test.ts' },
+  // Webhook de Meta (M5.2, ADR-50): PÚBLICO; la credencial es la firma del aviso (HMAC con el secreto de la app de la plataforma), con límite de fallos por IP. Pruebas: test/channels/meta-webhook.test.ts
+  { route: 'GET /v1/channels/meta/webhook', kind: 'public' },
+  { route: 'POST /v1/channels/meta/webhook', kind: 'public' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

@@ -29,6 +29,8 @@ export interface ChannelView {
   token_last4: string | null;
   last_check_at: string | null;
   last_error: string | null;
+  /** Última vez que Meta avisó de algo de este número (mensaje o estado): sirve para saber si el webhook está llegando. */
+  last_event_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +52,7 @@ const view = (a: AccountRow, w: WhatsAppRow): ChannelView => ({
   token_last4: a.tokenLast4,
   last_check_at: iso(w.lastCheckAt),
   last_error: w.lastError,
+  last_event_at: iso(w.lastEventAt),
   created_at: a.createdAt.toISOString(),
   updated_at: a.updatedAt.toISOString(),
 });

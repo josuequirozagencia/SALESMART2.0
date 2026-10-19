@@ -3,6 +3,7 @@ import { friendlyError } from '../../lib/errors';
 import { shortDate } from '../../lib/format';
 import type { ProviderItem, ProviderMaturity, ProviderService } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { CopyField } from '../../ui/CopyField';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { ProviderCredentialsDialog } from './ProviderCredentialsDialog';
 import { useProviders, useSetActiveProvider } from './useProviders';
@@ -62,6 +63,12 @@ function ServiceCard({ s, vault, onConfigure, onToggle, busyKey }: { s: Provider
       </div>
       <span className="font-mono text-[11.5px] text-muted">{s.adapter}</span>
       <p className="text-[12.5px] text-muted">{s.note}</p>
+      {s.webhook_url ? (
+        <div className="grid gap-1 rounded-xl bg-surface2 p-3">
+          <CopyField label="Dirección del webhook" value={s.webhook_url} />
+          <span className="text-[12px] text-muted">Pégala como URL de devolución de llamada del webhook de WhatsApp en tu app de Meta, junto con el token de verificación que guardes aquí, y suscribe el campo «messages».</span>
+        </div>
+      ) : null}
       {s.managed === 'platform' ? (
         s.providers.length === 0 ? (
           <p className="rounded-xl border border-dashed border-line p-3 text-center text-[12.5px] text-muted">Todavía no hay candidatos.</p>

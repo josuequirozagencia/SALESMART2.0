@@ -7,6 +7,7 @@ import { PlatformContext } from '../../../tenant';
 import { APP_CONFIG } from '../../../tokens';
 import { PROVIDER_CATALOG, findProvider, findService, type FieldDef, type Maturity, type Managed, type ProviderDef, type ServiceDef } from './catalog';
 import { CredentialVault, VaultOpenError } from './credential-vault';
+import { PlatformCredentialsReader } from './credentials-reader';
 import type { SaveCredentialsDto } from './providers.dto';
 
 export interface FieldView {
@@ -39,6 +40,8 @@ export interface ServiceView {
   note: string;
   /** Proveedor en uso (null = ninguno). */
   active: string | null;
+  /** Dirección que hay que pegar en el panel del proveedor para que nos avise (webhook); null si el servicio no la usa o falta la URL pública del servidor. */
+  webhook_url: string | null;
   /** Solo en los servicios gestionados por variables de entorno: el modo actual (none, console, resend…). */
   mode: string | null;
   providers: ProviderView[];
@@ -53,6 +56,8 @@ type Row = typeof providerCredentials.$inferSelect;
 const VALUE_RE = /^[\x21-\x7E]{1,1000}$/; // ASCII imprimible sin espacios (van en cabeceras, URL y cuerpos)
 
 const iso = (d: Date): string => d.toISOString();
+/** Servicios con webhook de entrada y su ruta (M5.2): la URL pública sale de la configuración del servidor, nunca de la petición. */
+const WEBHOOK_PATHS: Readonly<Record<string, string>> = { whatsapp_official: '/v1/channels/meta/webhook' };
 const aadOf = (service: string, provider: string): string => `${service}/${provider}`;
 const hintOf = (v: string): string | null => (v.length >= 8 ? v.slice(-4) : null);
 
@@ -91,6 +96,7 @@ export class ProvidersService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+    @Inject(PlatformCredentialsReader) private readonly reader: PlatformCredentialsReader,
   ) {
     this.vault = CredentialVault.fromConfig(cfg.providers.credentialsKeys);
   }
@@ -111,7 +117,7 @@ export class ProvidersService {
     const def = provider === null ? null : (findProvider(svc, provider) ?? null);
     if (provider !== null && !def) throw new NotFoundError();
     const actor = PlatformContext.current();
-    return this.db.withPlatform(async (tx) => {
+    const result = await this.db.withPlatform(async (tx) => {
       await this.lock(tx, service);
       const [cur] = await tx.select().from(providerSelection).where(eq(providerSelection.service, service)).limit(1);
       const previous = cur?.provider ?? null;
@@ -127,6 +133,8 @@ export class ProvidersService {
       await tx.insert(platformAudit).values({ action: provider ? 'provider.activated' : 'provider.deactivated', entityType: 'provider', actorUserId: actor.actorUserId, requestId: actor.requestId, details: { service, provider, previous } });
       return { service, active: provider, changed: true };
     });
+    this.reader.invalidate(service); // los adaptadores del servidor notan el cambio al instante
+    return result;
   }
 
   /** Guarda (parcialmente) los valores de un proveedor. Devuelve su vista, sin ningún valor (solo los últimos 4). */
@@ -180,6 +188,7 @@ export class ProvidersService {
       });
       return saved as Row;
     });
+    this.reader.invalidate(service);
     return this.providerView(def, out);
   }
 
@@ -189,7 +198,7 @@ export class ProvidersService {
     const def = findProvider(svc, provider);
     if (!def) throw new NotFoundError();
     const actor = PlatformContext.current();
-    return this.db.withPlatform(async (tx) => {
+    const result = await this.db.withPlatform(async (tx) => {
       await this.lock(tx, service);
       const [sel] = await tx.select().from(providerSelection).where(eq(providerSelection.service, service)).limit(1);
       if (sel?.provider === provider) throw new ConflictError('PROVIDER_ACTIVE', 'Este proveedor está en uso: desactívalo antes de quitar sus credenciales');
@@ -198,6 +207,8 @@ export class ProvidersService {
       await tx.insert(platformAudit).values({ action: 'provider.credentials_cleared', entityType: 'provider', actorUserId: actor.actorUserId, requestId: actor.requestId, details: { service, provider } });
       return { service, provider, cleared: true };
     });
+    this.reader.invalidate(service);
+    return result;
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -265,7 +276,9 @@ export class ProvidersService {
   }
 
   private serviceView(svc: ServiceDef, rows: Map<string, Row>, active: Map<string, string | null>): ServiceView {
-    const base = { key: svc.key, label: svc.label, adapter: svc.adapter, managed: svc.managed, note: svc.note };
+    const path = WEBHOOK_PATHS[svc.key];
+    const webhookUrl = path && this.cfg.frontend.baseUrl ? `${this.cfg.frontend.baseUrl}${path}` : null;
+    const base = { key: svc.key, label: svc.label, adapter: svc.adapter, managed: svc.managed, note: svc.note, webhook_url: webhookUrl };
     if (svc.managed === 'platform') {
       const sel = active.get(svc.key) ?? null;
       return { ...base, active: sel, mode: null, providers: svc.providers.map((p) => this.providerView(p, rows.get(aadOf(svc.key, p.key)))) };

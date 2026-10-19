@@ -2,7 +2,7 @@ import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, 
 import type { Request } from 'express';
 import { z } from 'zod';
 import { TooManyAttemptsError } from '../../errors';
-import { Public, ZodValidationPipe } from '../../http';
+import { Public, WindowLimiter, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { AttributionEndpointsService } from '../organizations';
 import { ctwaWebhookSchema, type CtwaWebhookDto } from './attribution.dto';
@@ -12,22 +12,6 @@ const idParam = new ZodValidationPipe(z.uuid());
 const WEBHOOK_LIMIT = 120; // peticiones por minuto y por (IP, punto de entrada)
 const WINDOW_MS = 60_000;
 
-/** Límite en memoria por proceso (ventana fija): frena ráfagas y adivinanzas sin tocar la base. Con varias instancias el tope real es por instancia. */
-class WindowLimiter {
-  private readonly hits = new Map<string, { n: number; resetAt: number }>();
-  /** true si la petición entra; false si se pasó del tope (y cuánto falta). */
-  take(key: string, now = Date.now()): { ok: true } | { ok: false; retryAfterSeconds: number } {
-    if (this.hits.size > 10_000) for (const [k, v] of this.hits) if (v.resetAt <= now) this.hits.delete(k);
-    const cur = this.hits.get(key);
-    if (!cur || cur.resetAt <= now) {
-      this.hits.set(key, { n: 1, resetAt: now + WINDOW_MS });
-      return { ok: true };
-    }
-    cur.n += 1;
-    return cur.n <= WEBHOOK_LIMIT ? { ok: true } : { ok: false, retryAfterSeconds: Math.max(1, Math.ceil((cur.resetAt - now) / 1000)) };
-  }
-}
-
 /**
  * Entrada de clics de Click-to-WhatsApp (M3.3, ADR-45). PÚBLICA: no hay sesión. La credencial es el par (identificador opaco de la URL + secreto en la cabecera
  * `X-Webhook-Secret`); la empresa sale de ahí, nunca del cuerpo. Un identificador desconocido y un secreto equivocado responden lo mismo (404). Límite de
@@ -36,7 +20,7 @@ class WindowLimiter {
 @Public()
 @Controller('attribution')
 export class AttributionWebhookController {
-  private readonly limiter = new WindowLimiter();
+  private readonly limiter = new WindowLimiter(WEBHOOK_LIMIT, WINDOW_MS);
 
   constructor(
     @Inject(AttributionService) private readonly attribution: AttributionService,

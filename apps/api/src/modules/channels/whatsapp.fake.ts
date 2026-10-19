@@ -1,4 +1,5 @@
-import { WhatsAppProviderError, type NumberInfo, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
+import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
+import { WhatsAppProviderError, type NumberInfo, type ParsedWebhook, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
 
 /** Token que el fake da por válido (solo desarrollo y pruebas; la configuración prohíbe el fake en producción). */
 export const FAKE_WHATSAPP_TOKEN = 'fake-valid-token';
@@ -14,6 +15,19 @@ export const FAKE_UNAVAILABLE_ID = '99999999';
 export class FakeWhatsAppProvider implements WhatsAppProvider {
   readonly name = 'fake' as const;
   readonly calls: Array<{ phoneNumberId: string }> = [];
+
+  // Los avisos del fake hablan el mismo formato que Meta (HMAC-SHA256 y la misma forma de mensajes): así el webhook completo se prueba sin Meta
+  verifyWebhook(rawBody: Buffer, signature: string | undefined, appSecret: string): boolean {
+    return verifyMetaSignature(rawBody, signature, appSecret);
+  }
+
+  parseWebhook(body: unknown, now?: Date): ParsedWebhook {
+    return parseMetaWebhook(body, now);
+  }
+
+  parseStored(raw: Record<string, unknown>, now?: Date): ParsedWebhook {
+    return parseMetaWebhook(wrapMetaValue(raw), now);
+  }
 
   describeNumber(credentials: WhatsAppCredentials, phoneNumberId: string): Promise<NumberInfo> {
     this.calls.push({ phoneNumberId });

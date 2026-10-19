@@ -9,7 +9,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const TOKEN = 'EAAG-token-permanente-de-prueba-0042';
 const channel = (over: Partial<Channel> = {}): Channel => ({
   id: 'ch1', provider: 'meta_cloud', is_official: true, name: 'Ventas', status: 'active', waba_id: '1234567890123', phone_number_id: '1090123456789',
-  display_phone: '+593 98 421 7730', verified_name: 'Barbería Norte', token_last4: '0042', last_check_at: '2026-10-18T15:00:00.000Z', last_error: null,
+  display_phone: '+593 98 421 7730', verified_name: 'Barbería Norte', token_last4: '0042', last_check_at: '2026-10-18T15:00:00.000Z', last_error: null, last_event_at: null,
   created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z', ...over,
 });
 
@@ -112,6 +112,17 @@ describe('Configuración › Conexiones', () => {
     const antigua = within(screen.getByRole('listitem', { name: 'Antigua' }));
     expect(antigua.getByText('Desactivada')).toBeInTheDocument();
     expect(antigua.getByRole('button', { name: 'Activar Antigua' })).toBeInTheDocument();
+  });
+
+  it('cada conexión dice cuándo llegó el último aviso de Meta, o que todavía no ha llegado ninguno', async () => {
+    mockApi(server([channel(), channel({ id: 'ch2', name: 'Soporte', phone_number_id: '1090123456780', last_event_at: '2026-10-18T16:45:00.000Z' })]).routes);
+    renderApp('/settings/connections');
+    const ventas = within(await screen.findByRole('listitem', { name: 'Ventas' }));
+    expect(ventas.getByText('Último aviso de Meta')).toBeInTheDocument();
+    expect(ventas.getByText('ninguno todavía')).toBeInTheDocument();
+    const soporte = within(screen.getByRole('listitem', { name: 'Soporte' }));
+    expect(soporte.queryByText('ninguno todavía')).not.toBeInTheDocument();
+    expect(soporte.getByText('Último aviso de Meta').nextElementSibling).toHaveTextContent(/^\d{2}\/\d{2} \d{2}:\d{2}$/);
   });
 
   it('comprobar vuelve a consultar a Meta; desactivar y activar cambian el estado', async () => {

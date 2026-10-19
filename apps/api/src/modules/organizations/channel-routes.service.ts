@@ -39,6 +39,12 @@ export class ChannelRoutesService {
     );
   }
 
+  /** Empresas que tienen (o tuvieron) algún número: la tarea que procesa los avisos del webhook solo recorre estas, no todas las empresas. */
+  async organizationIds(): Promise<string[]> {
+    const rows = await this.db.withIdentity((tx) => tx.selectDistinct({ id: channelRoutes.organizationId }).from(channelRoutes));
+    return rows.map((r) => r.id);
+  }
+
   /** La empresa y la conexión de un número activo; null si no existe o está desactivado (no se distingue la causa). */
   async resolve(phoneNumberId: string): Promise<ChannelRoute | null> {
     const [row] = await this.db.withIdentity((tx) => tx.select().from(channelRoutes).where(and(eq(channelRoutes.phoneNumberId, phoneNumberId), eq(channelRoutes.active, true))).limit(1));

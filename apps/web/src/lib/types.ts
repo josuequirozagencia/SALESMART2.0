@@ -230,6 +230,8 @@ export interface ProviderService {
   active: string | null;
   /** Solo los servicios gestionados por variables de entorno (correo, anti-bots): su modo actual. */
   mode: string | null;
+  /** Dirección que se pega en el panel del proveedor para que nos avise (webhook); null si el servicio no la usa. */
+  webhook_url: string | null;
   providers: ProviderItem[];
 }
 export interface ProvidersList {
@@ -567,6 +569,8 @@ export interface Channel {
   token_last4: string | null;
   last_check_at: string | null;
   last_error: string | null;
+  /** Última vez que Meta avisó de algo de este número (mensaje o estado): sirve para saber si el webhook está llegando. */
+  last_event_at: string | null;
   created_at: string;
   updated_at: string;
 }

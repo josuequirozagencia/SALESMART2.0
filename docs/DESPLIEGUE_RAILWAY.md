@@ -61,6 +61,13 @@ Los pasos de alta de **Resend** (dominio `growthconsulting.digital`: registros S
 Desde tu equipo, con las tres URLs de la app y `AUTH_THROTTLE_KEY` en el entorno:
 `BOOTSTRAP_SUPER_ADMIN_EMAIL=tu@correo pnpm bootstrap:super-admin` → imprime la contraseña **una sola vez**; cámbiala al primer ingreso.
 
+## 4b. WhatsApp oficial: webhook de Meta (M5.2, ADR-50)
+Una sola aplicación de Meta para todas las empresas; solo el Súper Admin la configura:
+1. En Plataforma › **Proveedores › WhatsApp oficial › Meta WhatsApp Cloud API › Configurar**: guarda el ID y el **secreto de la app** de Meta y un **token de verificación** (una cadena larga que inventas tú). Pulsa **Usar**. Requiere `PROVIDER_CREDENTIALS_KEY`.
+2. En el panel de tu app de Meta (producto WhatsApp › Configuración del webhook): pega como **URL de devolución de llamada** la «Dirección del webhook» que muestra esa tarjeta (`<FRONTEND_BASE_URL>/v1/channels/meta/webhook`; por eso `FRONTEND_BASE_URL` debe ser la URL pública real) y el mismo **token de verificación**; al verificar, Meta llama a esa dirección y debe responder el desafío. Suscribe el campo **`messages`**.
+3. Cada empresa conecta su número en Configuración › Conexiones (WABA ID, Phone number ID y token permanente). «Último aviso de Meta» en la conexión dice si los avisos están llegando.
+4. **VALIDAR con credenciales reales** (hasta hoy solo se probó con firmas simuladas): que Meta verifique la dirección; que un mensaje real a un número conectado cree el contacto, la conversación y el mensaje (en unos segundos); que reenviar el mismo aviso no duplique; los `wa_id` de México y Argentina (prefijos 521 y 549); y si hace falta suscribir la app a cada cuenta de WhatsApp Business al conectar un número. Con la API en producción `WHATSAPP_PROVIDER` queda en `meta`.
+
 ## 5. Lista de comprobación posterior al despliegue
 1. `GET https://<dominio>/health/ready` → `{"status":"ok"}`.
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.

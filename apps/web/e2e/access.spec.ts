@@ -1,6 +1,8 @@
 // E2E del flujo de acceso (ADR-23) en un navegador real contra la API y la web COMPILADAS.
 import { expect, test } from '@playwright/test';
+import { createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
+import pg from 'pg';
 import { adminToken, apiLogin, createAccount, decide, expireTrialOf, hasAgencyAccess, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
 
 const REASON = 'Aún estoy conectando mi WhatsApp y probando los agentes';
@@ -1246,6 +1248,89 @@ test('conexiones: el administrador conecta un número (Meta rechaza un token mal
   await page.getByRole('button', { name: 'Sí, desconectar' }).click();
   await expect(page.getByText('Aún no hay números conectados.')).toBeVisible();
   expect((await request.post(`${apiBase}/v1/channels`, { headers: { ...other, ...json }, data: body })).status()).toBe(201);
+});
+
+test('webhook de WhatsApp: el Súper Admin ve la dirección y guarda la app de Meta; un aviso firmado crea el contacto, la conversación y el mensaje de la empresa dueña del número; sin firma no entra', async ({ page, request }) => {
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-0123456789abcdef0123';
+  const VERIFY = 'verify-e2e-token-0123456789abcdef';
+  const PHONE_ID = '1090123450001';
+  const ANA = '593984217730';
+  const hook = `${apiBase}/v1/channels/meta/webhook`;
+
+  // 1) El Súper Admin ve la dirección que pegará en Meta y deja la app configurada y en uso
+  await uiLogin(page, s.rootEmail, s.rootPassword);
+  await page.getByRole('link', { name: 'Proveedores' }).click();
+  const wa = page.getByRole('region', { name: 'WhatsApp oficial' });
+  await expect(wa.getByLabel('Dirección del webhook', { exact: true })).toHaveValue(hook);
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.get(`${hook}?hub.mode=subscribe&hub.verify_token=${VERIFY}&hub.challenge=123`)).status()).toBe(503); // todavía sin configurar
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: VERIFY } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+  const challenge = await request.get(`${hook}?hub.mode=subscribe&hub.verify_token=${VERIFY}&hub.challenge=1158201444`);
+  expect(challenge.status()).toBe(200);
+  expect(await challenge.text()).toBe('1158201444');
+  expect((await request.get(`${hook}?hub.mode=subscribe&hub.verify_token=otro&hub.challenge=1`)).status()).toBe(403);
+  await page.reload();
+  await expect(page.getByRole('region', { name: 'WhatsApp oficial' }).getByText('En uso: Meta WhatsApp Cloud API')).toBeVisible();
+  await expect(page.locator('body')).not.toContainText(APP_SECRET);
+
+  // 2) Una empresa conecta su número (WhatsApp de mentira: acepta fake-valid-token)
+  const email = await createAccount(request, uniqueEmail('wa'));
+  await page.context().clearCookies();
+  await uiLogin(page, email);
+  await page.getByRole('link', { name: 'Configuración' }).click();
+  await page.getByRole('link', { name: 'Conexiones' }).click();
+  await page.getByRole('button', { name: 'Conectar un número' }).click();
+  const dlg = page.getByRole('dialog', { name: 'Conectar un número de WhatsApp' });
+  await dlg.getByLabel(/^Nombre/).fill('Ventas');
+  await dlg.getByLabel(/WABA ID/).fill('1234567890123');
+  await dlg.getByLabel(/Phone number ID/).fill(PHONE_ID);
+  await dlg.getByLabel(/Token de acceso permanente/).fill('fake-valid-token');
+  await dlg.getByRole('button', { name: 'Conectar' }).click();
+  const card = page.getByRole('listitem', { name: 'Ventas' });
+  await expect(card).toContainText('ninguno todavía'); // aún no llega ningún aviso de Meta
+
+  // 3) Meta avisa de un mensaje: sin firma o con firma ajena no entra; con la firma de la app, sí
+  const payload = JSON.stringify({
+    object: 'whatsapp_business_account',
+    entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Ana Torres' }, wa_id: ANA }], messages: [{ from: ANA, id: 'wamid.E2E1', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'Hola, quiero una cita' } }] } }] }],
+  });
+  const sign = (secret: string): string => `sha256=${createHmac('sha256', secret).update(payload).digest('hex')}`;
+  const send = (sig?: string) => request.post(hook, { headers: { 'content-type': 'application/json', ...(sig ? { 'x-hub-signature-256': sig } : {}) }, data: payload });
+  expect((await send()).status()).toBe(403);
+  expect((await send(sign('otro-secreto'))).status()).toBe(403);
+  expect((await send(sign(APP_SECRET))).status()).toBe(200);
+  expect((await send(sign(APP_SECRET))).status()).toBe(200); // Meta reintenta: no duplica
+
+  // 4) La tarea de proceso (cada pocos segundos) crea el contacto, la conversación y el mensaje en ESA empresa
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [email])).rows[0].organization_id as string;
+    let rows: Array<{ body: string | null; status: string }> = [];
+    for (let i = 0; i < 60 && rows.length === 0; i++) {
+      rows = (await db.query(`SELECT body, status FROM messages WHERE organization_id = $1`, [orgId])).rows as typeof rows;
+      if (rows.length === 0) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(rows).toEqual([{ body: 'Hola, quiero una cita', status: 'received' }]);
+    expect((await db.query(`SELECT c.name, c.source, c.consent, p.e164 FROM contacts c JOIN contact_phones p ON p.contact_id = c.id WHERE c.organization_id = $1`, [orgId])).rows).toEqual([{ name: 'Ana Torres', source: 'whatsapp', consent: 'unknown', e164: `+${ANA}` }]);
+    expect((await db.query(`SELECT status, unread_count FROM conversations WHERE organization_id = $1`, [orgId])).rows).toEqual([{ status: 'unassigned', unread_count: 1 }]);
+    expect((await db.query(`SELECT count(*)::int AS n FROM webhook_events WHERE organization_id = $1`, [orgId])).rows[0].n).toBe(1); // el reintento no se guardó dos veces
+    // Otra empresa no recibe nada de este número
+    const other = await createAccount(request, uniqueEmail('wa-otra'));
+    const otherOrg = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [other])).rows[0].organization_id as string;
+    expect((await db.query(`SELECT (SELECT count(*) FROM messages WHERE organization_id = $1)::int AS m, (SELECT count(*) FROM webhook_events WHERE organization_id = $1)::int AS e`, [otherOrg])).rows[0]).toEqual({ m: 0, e: 0 });
+  } finally {
+    await db.end();
+  }
+
+  // 5) «Conexiones» ya muestra cuándo llegó el último aviso, sin exponer el texto del mensaje ni los secretos
+  await page.reload();
+  await expect(page.getByRole('listitem', { name: 'Ventas' })).not.toContainText('ninguno todavía');
+  await expect(page.locator('body')).not.toContainText('Hola, quiero una cita');
+  await expect(page.locator('body')).not.toContainText(APP_SECRET);
 });
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {

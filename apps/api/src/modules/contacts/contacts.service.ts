@@ -252,16 +252,19 @@ export class ContactsService {
   }
 
   /**
-   * Para los canales de entrada (atribución): el contacto de la empresa activa con ese teléfono, o uno nuevo con el origen del canal, sin consentimiento y sin
-   * responsable. Serializa por teléfono para que dos llamadas simultáneas no creen dos contactos. Va DENTRO de la transacción del que llama.
+   * Para los canales de entrada (atribución, mensajes): el contacto de la empresa activa con ese teléfono, o uno nuevo con el origen del canal, sin consentimiento
+   * y sin responsable. Un contacto nuevo se llama como su perfil (`name`) si el canal lo informa; si no, como su teléfono. Serializa por teléfono para que dos llamadas simultáneas no creen dos contactos. Va DENTRO de la transacción del que llama.
    */
-  async findOrCreateByPhone(tx: TenantTx, e164: string, source: string): Promise<{ id: string; created: boolean }> {
+  async findOrCreateByPhone(tx: TenantTx, e164: string, source: string, name?: string | null): Promise<{ id: string; created: boolean }> {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`contact_phone:${e164}`}::text || ':' || app_org()::text), 0))`);
     const existing = await this.repo.idByPhone(tx, e164);
     if (existing) return { id: existing, created: false };
-    const [c] = await tx.insert(contacts).values({ name: e164, source, consent: 'unknown', createdBy: null }).returning();
+    // El nombre del perfil lo escribe quien tiene el teléfono: sin caracteres de control y dentro del largo permitido
+    const profile = (name ?? '').replace(/\p{Cc}/gu, ' ').trim().slice(0, 200).trim();
+    const finalName = profile === '' ? e164 : profile;
+    const [c] = await tx.insert(contacts).values({ name: finalName, source, consent: 'unknown', createdBy: null }).returning();
     await tx.insert(contactPhones).values({ contactId: c!.id, e164, isPrimary: true });
-    await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: e164, source, consent: 'unknown', phones: [e164] }, source: 'meta' });
+    await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: finalName, source, consent: 'unknown', phones: [e164] }, source: 'meta' });
     return { id: c!.id, created: true };
   }
 

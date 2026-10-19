@@ -3,6 +3,7 @@ import { friendlyError } from '../../lib/errors';
 import { shortDateTime } from '../../lib/format';
 import type { AttributionEndpointIssued } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { CopyField } from '../../ui/CopyField';
 import { SettingsNav } from '../app/SettingsNav';
 import { useAttributionEndpoint, useIssueEndpoint } from './useAttribution';
 
@@ -13,28 +14,6 @@ const EXAMPLE = `{
   "adset_name": "<nombre del conjunto de anuncios>",
   "ad_name": "<nombre del anuncio>"
 }`;
-
-function CopyField({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false);
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      /* sin permiso del portapapeles: el valor sigue visible para copiarlo a mano */
-    }
-  }
-  return (
-    <div className="grid gap-1">
-      <span className="text-[12.5px] font-semibold">{label}</span>
-      <div className="flex items-center gap-2">
-        <input readOnly aria-label={label} value={value} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 rounded-[10px] border border-line bg-surface2 px-3 py-2 font-mono text-[12.5px]" />
-        <Button className="!px-3 !py-2 !text-[12.5px]" aria-label={`Copiar ${label}`} onClick={() => void copy()}>{copied ? 'Copiado' : 'Copiar'}</Button>
-      </div>
-    </div>
-  );
-}
 
 /**
  * Configuración › Atribución de Meta (M3.3, ADR-45). El administrador genera el punto de entrada por el que GoHighLevel avisa de cada clic de
