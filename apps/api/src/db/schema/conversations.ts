@@ -68,6 +68,9 @@ export const conversations = tenantTable(
     assignedAt: ts('assigned_at'),
     /** Cómo llegó a su dueño: `distribution` = el reparto automático de la cola (cuenta para el tope diario) · `manual` = alguien la tomó o la transfirió (no cuenta). */
     assignmentSource: text('assignment_source').notNull().default('distribution'),
+    /** Reasignaciones automáticas por falta de respuesta en este ciclo (M5.5b) y a quiénes ya se les tocó: no se les vuelve a dar. Un traspaso a mano empieza un ciclo nuevo. */
+    rotations: integer('rotations').notNull().default(0),
+    triedOwners: uuid('tried_owners').array().notNull().default(sql`'{}'::uuid[]`),
     lastMessageAt: ts('last_message_at'),
     /** Último mensaje del CLIENTE: de aquí sale la ventana de 24 h de WhatsApp oficial. */
     lastInboundAt: ts('last_inbound_at'),
@@ -86,6 +89,7 @@ export const conversations = tenantTable(
     check('conversations_owner_status', sql`${t['status']!} = 'closed' OR ((${t['status']!} = 'unassigned') = (${t['ownerId']!} IS NULL))`),
     check('conversations_assigned_pair', sql`(${t['ownerId']!} IS NULL) = (${t['assignedAt']!} IS NULL)`),
     check('conversations_unread_valid', sql`${t['unreadCount']!} >= 0`),
+    check('conversations_rotations_valid', sql`${t['rotations']!} >= 0`),
     check('conversations_assignment_source_valid', sql`${t['assignmentSource']!} IN ('distribution', 'manual')`),
     uniqueIndex('conversations_one_open_uq').on(t['organizationId']!, t['contactId']!, t['channelAccountId']!).where(sql`${t['status']!} <> 'closed'`),
     index('conversations_list_idx').on(t['organizationId']!, t['status']!, t['lastMessageAt']!),

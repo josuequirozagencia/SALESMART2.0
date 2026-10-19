@@ -167,6 +167,13 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/conversations/:id/transfer', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
   { route: 'POST /v1/conversations/:id/share', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
   { route: 'DELETE /v1/conversations/:id/participants/:userId', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
+  // SLA, horario laboral y reasignación (M5.5b, ADR-07/50). Pruebas: test/inbox/sla.test.ts (A↔B, permisos, cronómetros, tiempo abierto, reasignación, feriados, horario de cola)
+  { route: 'GET /v1/sla', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
+  { route: 'PUT /v1/sla/policy', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
+  { route: 'PUT /v1/sla/hours', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
+  { route: 'POST /v1/sla/holidays', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
+  { route: 'DELETE /v1/sla/holidays/:id', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
+  { route: 'PUT /v1/queues/:id/hours', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

@@ -28,6 +28,12 @@ export const queues = tenantTable(
     batch: integer('batch').notNull().default(1),
     dailyCap: integer('daily_cap').notNull().default(0),
     onlyUnassigned: boolean('only_unassigned').notNull().default(true),
+    /** M5.5b: no repartir automáticamente mientras la cola está cerrada (fuera de horario o feriado): el lead espera y se reparte al abrir. */
+    respectHours: boolean('respect_hours').notNull().default(false),
+    /** M5.5b: minutos de tiempo abierto sin respuesta humana tras los que se reasigna la conversación a otra persona de la cola (0 = no reasignar). */
+    reassignMinutes: integer('reassign_minutes').notNull().default(0),
+    /** M5.5b: cuántas veces como máximo se reasigna una misma conversación. */
+    maxRotations: integer('max_rotations').notNull().default(3),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -39,6 +45,8 @@ export const queues = tenantTable(
     check('queues_mode_valid', sql`${t['mode']!} IN ('equal', 'weighted', 'load')`),
     check('queues_batch_valid', sql`${t['batch']!} BETWEEN 1 AND 50`),
     check('queues_cap_valid', sql`${t['dailyCap']!} BETWEEN 0 AND 1000`),
+    check('queues_reassign_valid', sql`${t['reassignMinutes']!} BETWEEN 0 AND 1440`),
+    check('queues_rotations_valid', sql`${t['maxRotations']!} BETWEEN 1 AND 10`),
     uniqueIndex('queues_org_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
   ],
 );

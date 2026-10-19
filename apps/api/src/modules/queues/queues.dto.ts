@@ -16,7 +16,7 @@ export const createQueueSchema = z.object({ name, color: color.optional() }).str
 export type CreateQueueDto = z.infer<typeof createQueueSchema>;
 
 export const updateQueueSchema = z
-  .object({ name: name.optional(), color: color.optional(), distribution_on: z.boolean().optional(), mode: mode.optional(), batch: batch.optional(), daily_cap: dailyCap.optional(), only_unassigned: z.boolean().optional() })
+  .object({ name: name.optional(), color: color.optional(), distribution_on: z.boolean().optional(), mode: mode.optional(), batch: batch.optional(), daily_cap: dailyCap.optional(), only_unassigned: z.boolean().optional(), respect_hours: z.boolean().optional(), reassign_minutes: z.number().int().min(0).max(1440).optional(), max_rotations: z.number().int().min(1).max(10).optional() })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });
 export type UpdateQueueDto = z.infer<typeof updateQueueSchema>;

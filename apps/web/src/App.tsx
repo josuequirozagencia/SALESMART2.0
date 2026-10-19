@@ -6,6 +6,7 @@ import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
+import { SlaPage } from './features/sla/SlaPage';
 import { ContactsPage } from './features/contacts/ContactsPage';
 import { ClientCompaniesPage } from './features/crm/CompaniesPage';
 import { TasksPage } from './features/crm/TasksPage';
@@ -110,6 +111,7 @@ export function App() {
         <Route path="/settings/attribution" element={<AttributionPage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/queues" element={<QueuesPage />} />
+        <Route path="/settings/sla" element={<SlaPage />} />
       </Route>
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/agencies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AgenciesPage /></PlatformShell>}</PlatformGate>} />

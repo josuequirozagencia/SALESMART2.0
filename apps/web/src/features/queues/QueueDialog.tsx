@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { initials } from '../../lib/format';
-import type { Queue, QueueMemberInput, QueueMode, QueueSettings, QueueSimulation } from '../../lib/types';
+import type { Queue, QueueMemberInput, QueueMode, QueueSettings, QueueSimulation, WeekHours } from '../../lib/types';
 import { Alert, Button, Field, Input } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { cloneWeek, defaultWeek, sameWeek, summarizeWeek, validateWeek } from '../sla/hours';
+import { HoursEditor } from '../sla/HoursEditor';
+import { useSaveQueueHours } from '../sla/useSla';
 import { ColorPicker } from './ColorPicker';
 import { useArchiveQueue, useDistributeQueue, useSetQueueMembers, useSimulateQueue, useUpdateQueue } from './useQueues';
 
@@ -20,8 +23,8 @@ const intIn = (v: string, min: number, max: number): number | null => (/^\d+$/.t
 
 /**
  * Configuración de una cola (M5.3, ADR-07): nombre y color, quiénes participan y con qué peso, cómo se reparten las conversaciones nuevas, un simulador y los
- * «sin asignar». Lo que se edita se guarda con «Guardar»; el simulador usa lo que hay en pantalla (no guarda nada). El horario, el reasignar por falta de
- * respuesta y los mensajes automáticos de la cola llegan con el SLA (M5.5).
+ * «sin asignar». Con M5.5b también su horario propio, si respeta el horario al repartir y cuándo reasigna si nadie responde. Lo que se edita se guarda con
+ * «Guardar»; el simulador usa lo que hay en pantalla (no guarda nada). Los mensajes automáticos de la cola (saludo, fuera de horario) llegan con M5.5c.
  */
 export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => void }) {
   const [name, setName] = useState(queue.name);
@@ -31,8 +34,13 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
   const [batch, setBatch] = useState(String(queue.batch));
   const [cap, setCap] = useState(String(queue.daily_cap));
   const [onlyNew, setOnlyNew] = useState(queue.only_unassigned);
+  const [respect, setRespect] = useState(queue.respect_hours);
+  const [reassign, setReassign] = useState(String(queue.reassign_minutes));
+  const [rotations, setRotations] = useState(String(queue.max_rotations));
+  const [ownHours, setOwnHours] = useState(queue.hours !== null);
+  const [week, setWeek] = useState<WeekHours>(() => (queue.hours ? cloneWeek(queue.hours) : defaultWeek()));
   const [members, setMembers] = useState(() => toMemberState(queue));
-  const [errors, setErrors] = useState<Partial<Record<'name' | 'batch' | 'cap' | 'weights', string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<'name' | 'batch' | 'cap' | 'weights' | 'reassign' | 'rotations' | 'hours', string>>>({});
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
   const [sim, setSim] = useState<QueueSimulation>();
@@ -40,6 +48,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
   const update = useUpdateQueue();
   const setMembersMut = useSetQueueMembers();
   const archive = useArchiveQueue();
+  const saveHours = useSaveQueueHours();
   const simulate = useSimulateQueue();
   const distribute = useDistributeQueue();
 
@@ -50,6 +59,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     if (synced.current === queue.updated_at) return;
     synced.current = queue.updated_at;
     setName(queue.name); setColor(queue.color); setOn(queue.distribution_on); setMode(queue.mode); setBatch(String(queue.batch)); setCap(String(queue.daily_cap)); setOnlyNew(queue.only_unassigned); setMembers(toMemberState(queue));
+    setRespect(queue.respect_hours); setReassign(String(queue.reassign_minutes)); setRotations(String(queue.max_rotations)); setOwnHours(queue.hours !== null); setWeek(queue.hours ? cloneWeek(queue.hours) : defaultWeek());
   }, [queue]);
 
   const active = queue.members.filter((m) => members[m.user_id]?.active);
@@ -57,7 +67,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
   const totalWeight = active.reduce((s, m) => s + weightOf(m.user_id), 0);
 
   /** Lo que hay en pantalla como valores ya validados, o los errores de cada campo. */
-  function read(): { settings: QueueSettings; members: QueueMemberInput[] } | null {
+  function read(): { settings: QueueSettings; members: QueueMemberInput[]; hours: WeekHours | null } | null {
     const next: typeof errors = {};
     const n = name.trim();
     if (n === '') next.name = 'Escribe el nombre de la cola';
@@ -68,6 +78,14 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     if (c === null) next.cap = 'Un número entero entre 0 y 1000 (0 = sin tope)';
     const list: QueueMemberInput[] = queue.members.map((m) => ({ user_id: m.user_id, active: members[m.user_id]?.active ?? false, weight: intIn(members[m.user_id]?.weight ?? '1', 1, 100) ?? 0 }));
     if (list.some((m) => m.weight === 0)) next.weights = 'El peso de cada asesor es un número entero entre 1 y 100';
+    const re = intIn(reassign, 0, 1440);
+    if (re === null) next.reassign = 'Un número entero de minutos entre 0 y 1440 (0 = no reasignar)';
+    const ro = intIn(rotations, 1, 10);
+    if (ro === null) next.rotations = 'Un número entero entre 1 y 10';
+    if (ownHours) {
+      const problem = validateWeek(week);
+      if (problem) next.hours = problem;
+    }
     setErrors(next);
     if (Object.keys(next).length > 0) return null;
     const settings: QueueSettings = {};
@@ -78,7 +96,10 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     if (b !== queue.batch) settings.batch = b!;
     if (c !== queue.daily_cap) settings.daily_cap = c!;
     if (onlyNew !== queue.only_unassigned) settings.only_unassigned = onlyNew;
-    return { settings, members: list };
+    if (respect !== queue.respect_hours) settings.respect_hours = respect;
+    if (re !== queue.reassign_minutes) settings.reassign_minutes = re!;
+    if (ro !== queue.max_rotations) settings.max_rotations = ro!;
+    return { settings, members: list, hours: ownHours ? week : null };
   }
 
   async function save() {
@@ -87,10 +108,12 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     const v = read();
     if (!v) return;
     const membersChanged = v.members.some((m, i) => m.active !== queue.members[i]!.active || m.weight !== queue.members[i]!.weight);
+    const hoursChanged = !sameWeek(v.hours, queue.hours);
     try {
       if (Object.keys(v.settings).length > 0) await update.mutateAsync({ id: queue.id, input: v.settings });
       if (membersChanged) await setMembersMut.mutateAsync({ id: queue.id, members: v.members });
-      setNote(Object.keys(v.settings).length > 0 || membersChanged ? 'Cambios guardados.' : 'No había cambios que guardar.');
+      if (hoursChanged) await saveHours.mutateAsync({ id: queue.id, days: v.hours });
+      setNote(Object.keys(v.settings).length > 0 || membersChanged || hoursChanged ? 'Cambios guardados.' : 'No había cambios que guardar.');
     } catch (e) {
       setError(friendlyError(e, 'No pudimos guardar los cambios.'));
     }
@@ -106,7 +129,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     );
   }
 
-  const busy = update.isPending || setMembersMut.isPending;
+  const busy = update.isPending || setMembersMut.isPending || saveHours.isPending;
   return (
     <Modal title={`Configurar ${queue.name}`} onClose={onClose} wide>
       <div className="grid max-h-[72vh] gap-4 overflow-y-auto pr-1" aria-label={`Configuración de ${queue.name}`}>
@@ -188,6 +211,31 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
               </div>
             ) : null}
           </div>
+        </section>
+
+        <section className="grid gap-3 rounded-2xl border border-line p-4" aria-label="Horario y reasignación">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-[13.5px] font-semibold">Horario y reasignación</span>
+            <Pill kind={queue.open_now ? 'ok' : 'muted'}>{queue.open_now ? 'Abierta ahora' : 'Cerrada ahora'}</Pill>
+          </div>
+          <label className="flex items-start gap-2 text-[13.5px]">
+            <input type="checkbox" aria-label="Respetar el horario al repartir" checked={respect} onChange={(e) => setRespect(e.target.checked)} className="mt-1" />
+            <span><b>Respetar el horario al repartir</b><span className="block text-[12px] text-muted">Con la cola cerrada no se reparte: la conversación espera «sin asignar» y se reparte sola cuando abre.</span></span>
+          </label>
+          <div className="grid items-start gap-3 sm:grid-cols-2">
+            <Field label="Reasignar si nadie responde en (minutos)" error={errors.reassign} hint="Minutos de horario abierto. 0 = no reasignar. Pasa a otra persona de la cola que no la haya tenido.">
+              {(p) => <Input {...p} inputMode="numeric" value={reassign} onChange={(e) => setReassign(e.target.value)} />}
+            </Field>
+            <Field label="Máximo de reasignaciones" error={errors.rotations} hint="Al llegar al máximo deja de reasignar y la conversación sigue vencida a la vista.">
+              {(p) => <Input {...p} inputMode="numeric" value={rotations} onChange={(e) => setRotations(e.target.value)} />}
+            </Field>
+          </div>
+          <label className="flex items-start gap-2 text-[13.5px]">
+            <input type="checkbox" aria-label="Esta cola tiene su propio horario" checked={ownHours} onChange={(e) => setOwnHours(e.target.checked)} className="mt-1" />
+            <span><b>Esta cola tiene su propio horario</b><span className="block text-[12px] text-muted">{ownHours ? 'Manda sobre el horario de la empresa para esta cola.' : 'Usa el horario de la empresa (Configuración › SLA y horario).'}{queue.hours ? ` Guardado: ${summarizeWeek(queue.hours)}.` : ''}</span></span>
+          </label>
+          {ownHours ? <HoursEditor value={week} onChange={setWeek} /> : null}
+          {errors.hours ? <span role="alert" className="text-[12px] font-medium text-crit">{errors.hours}</span> : null}
         </section>
 
         <section className="grid gap-2 rounded-2xl border border-line p-4" aria-label="Sin asignar">

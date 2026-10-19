@@ -612,6 +612,16 @@ export interface Queue {
   batch: number;
   daily_cap: number;
   only_unassigned: boolean;
+  /** Con «respetar el horario» la cola no reparte mientras está cerrada: las conversaciones esperan «sin asignar» y se reparten al abrir (M5.5b). */
+  respect_hours: boolean;
+  /** Minutos de horario laboral sin respuesta tras los cuales se reasigna a otra persona de la cola; 0 = no reasigna. */
+  reassign_minutes: number;
+  /** Cuántas veces se reasigna una conversación como máximo. */
+  max_rotations: number;
+  /** Horario propio de la cola (siempre los siete días); null = usa el de la empresa. */
+  hours: WeekHours | null;
+  /** ¿La cola está abierta ahora (con su horario o el de la empresa)? */
+  open_now: boolean;
   /** Todas las personas que pueden recibir trabajo, con su estado en ESTA cola. */
   members: QueueMember[];
   /** Conexiones cuya cola por defecto es esta. */
@@ -637,11 +647,47 @@ export interface QueueSettings {
   batch?: number;
   daily_cap?: number;
   only_unassigned?: boolean;
+  respect_hours?: boolean;
+  reassign_minutes?: number;
+  max_rotations?: number;
 }
 export interface QueueMemberInput {
   user_id: string;
   active: boolean;
   weight: number;
+}
+
+// ── SLA, horario laboral y feriados (M5.5b, ADR-07/50) ──
+export type WeekdayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+/** Tramos «HH:MM»–«HH:MM» de un día; un día sin tramos está cerrado. */
+export type DayHours = Array<[string, string]>;
+/** El horario semanal tal como lo devuelve la API: siempre los siete días. */
+export type WeekHours = Record<WeekdayKey, DayHours>;
+export interface Holiday {
+  id: string;
+  /** AAAA-MM-DD. */
+  date: string;
+  name: string;
+  yearly: boolean;
+}
+export interface SlaSettings {
+  policy: { target_minutes: number; risk_minutes: number };
+  /** Horario de la empresa; null = abierta siempre. */
+  hours: WeekHours | null;
+  holidays: Holiday[];
+  time_zone: string;
+  open_now: boolean;
+}
+/** Estado del cronómetro de respuesta de una conversación. */
+export type SlaState = 'ok' | 'risk' | 'late' | 'paused' | 'done';
+export interface ConversationSla {
+  kind: 'first' | 'followup';
+  state: SlaState;
+  started_at: string;
+  /** Fecha límite en tiempo abierto; null cuando ya se respondió. */
+  due_at: string | null;
+  /** Cuánto tardó en responder (tiempo abierto), si ya se respondió. */
+  response_seconds: number | null;
 }
 
 // ── Inbox (M5.4, ADR-16/50) ──
@@ -678,6 +724,8 @@ export interface Conversation {
   window: { open: boolean; expires_at: string | null };
   /** Lo que la persona puede hacer; es solo ayuda de presentación, el servidor vuelve a verificarlo. */
   can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean; transfer: boolean; share: boolean };
+  /** El cronómetro de respuesta; null si no hay nada que medir (sin asignar, o finalizada sin respuesta). */
+  sla: ConversationSla | null;
 }
 export interface ConversationList {
   items: Conversation[];
@@ -754,4 +802,6 @@ export interface InboxFilters {
   channel: string;
   tag: string;
   unread: boolean;
+  /** Por el cronómetro de respuesta: `late` vencidas · `risk` en riesgo · `ok` al día; vacío = todas. */
+  sla: '' | 'late' | 'risk' | 'ok';
 }

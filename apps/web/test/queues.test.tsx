@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Queue, QueueMember, QueueSimulation } from '../src/lib/types';
+import type { Queue, QueueMember, QueueSimulation, WeekHours } from '../src/lib/types';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -9,15 +9,15 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const member = (user_id: string, name: string, over: Partial<QueueMember> = {}): QueueMember => ({ user_id, name, role: 'advisor', active: false, weight: 1, open_count: 0, today_count: 0, ...over });
 const people = (): QueueMember[] => [member('u1', 'Alicia Torres', { role: 'client_admin' }), member('u2', 'Carolina Vera'), member('u3', 'Eva Mora')];
 const queue = (over: Partial<Queue> = {}): Queue => ({
-  id: 'q1', name: 'Ventas', color: '#7c5cfa', distribution_on: false, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, members: people(), channels: [], unassigned_count: 0,
+  id: 'q1', name: 'Ventas', color: '#7c5cfa', distribution_on: false, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, respect_hours: false, reassign_minutes: 0, max_rotations: 3, hours: null, open_now: true, members: people(), channels: [], unassigned_count: 0,
   created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z', ...over,
 });
 
-interface Calls { patches: unknown[]; puts: unknown[]; posts: unknown[]; sims: unknown[]; deletes: string[]; distributes: string[] }
+interface Calls { patches: unknown[]; puts: unknown[]; posts: unknown[]; sims: unknown[]; deletes: string[]; distributes: string[]; hours: unknown[] }
 
 /** Servidor de colas con estado. mockApi no admite rutas con parámetros: se enrutan una a una (q1, q2). */
 function server(initial: Queue[], o: { max?: number; sim?: QueueSimulation; distribute?: { assigned: number; remaining: number }; del?: () => ReturnType<Handler> } = {}) {
-  const st = { items: initial, calls: { patches: [], puts: [], posts: [], sims: [], deletes: [], distributes: [] } as Calls, clock: 0 };
+  const st = { items: initial, calls: { patches: [], puts: [], posts: [], sims: [], deletes: [], distributes: [], hours: [] } as Calls, clock: 0 };
   const touch = (q: Queue): Queue => ({ ...q, updated_at: new Date(Date.UTC(2026, 9, 19, 12, 0, ++st.clock)).toISOString() });
   const routes: Record<string, Handler> = {
     ...authed(ME_ADMIN),
@@ -41,6 +41,12 @@ function server(initial: Queue[], o: { max?: number; sim?: QueueSimulation; dist
       st.calls.puts.push(body);
       const list = (body as { members: Array<{ user_id: string; active: boolean; weight: number }> }).members;
       st.items = st.items.map((q) => (q.id === id ? touch({ ...q, members: q.members.map((m) => ({ ...m, ...(list.find((x) => x.user_id === m.user_id) ?? {}) })) }) : q));
+      return { body: st.items.find((q) => q.id === id) };
+    };
+    routes[`PUT /queues/${id}/hours`] = ({ body }) => {
+      st.calls.hours.push(body);
+      const days = (body as { days: WeekHours | null }).days;
+      st.items = st.items.map((q) => (q.id === id ? touch({ ...q, hours: days }) : q));
       return { body: st.items.find((q) => q.id === id) };
     };
     routes[`DELETE /queues/${id}`] = o.del ?? (() => { st.calls.deletes.push(id); st.items = st.items.filter((q) => q.id !== id); return { body: { id, archived: true } }; });
@@ -220,6 +226,107 @@ describe('Configurar una cola', () => {
     await a.qc.invalidateQueries({ queryKey: ['queues'] });
     await d.findByText('Conversaciones sin asignar: 5');
     expect(name).toHaveValue('Escribiendo');
+  });
+});
+
+const week = (over: Partial<WeekHours> = {}): WeekHours => ({ mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [], ...over });
+
+describe('Horario y reasignación de una cola (M5.5b)', () => {
+  it('muestra los valores por omisión (no respeta el horario, no reasigna, 3 rotaciones, sin horario propio) y la tarjeta avisa si la cola está cerrada', async () => {
+    mockApi(server([queue({ open_now: false })]).routes);
+    renderApp('/settings/queues');
+    expect(within(await screen.findByRole('button', { name: 'Configurar Ventas' })).getByText('Cerrada ahora')).toBeInTheDocument();
+    const d = await open('Ventas');
+    const sec = within(d.getByRole('region', { name: 'Horario y reasignación' }));
+    expect(sec.getByText('Cerrada ahora')).toBeInTheDocument();
+    expect(sec.getByLabelText('Respetar el horario al repartir')).not.toBeChecked();
+    expect(sec.getByLabelText('Reasignar si nadie responde en (minutos)')).toHaveValue('0');
+    expect(sec.getByLabelText('Máximo de reasignaciones')).toHaveValue('3');
+    expect(sec.getByLabelText('Esta cola tiene su propio horario')).not.toBeChecked();
+    expect(sec.getByText(/Usa el horario de la empresa/)).toBeInTheDocument();
+    expect(sec.queryByRole('list', { name: 'Horario semanal' })).not.toBeInTheDocument();
+  });
+
+  it('guarda SOLO lo que cambió: respetar el horario, minutos para reasignar y máximo de rotaciones (un PATCH, sin tocar asesores ni horario)', async () => {
+    const s = server([queue({ distribution_on: true })]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.click(d.getByLabelText('Respetar el horario al repartir'));
+    await userEvent.clear(d.getByLabelText('Reasignar si nadie responde en (minutos)'));
+    await userEvent.type(d.getByLabelText('Reasignar si nadie responde en (minutos)'), '10');
+    await userEvent.clear(d.getByLabelText('Máximo de reasignaciones'));
+    await userEvent.type(d.getByLabelText('Máximo de reasignaciones'), '2');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+    expect(s.st.calls.patches).toEqual([{ respect_hours: true, reassign_minutes: 10, max_rotations: 2 }]);
+    expect(s.st.calls.puts).toEqual([]);
+    expect(s.st.calls.hours).toEqual([]);
+  });
+
+  it('valida en pantalla los minutos (0–1440) y las rotaciones (1–10) antes de enviar', async () => {
+    const s = server([queue()]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.clear(d.getByLabelText('Reasignar si nadie responde en (minutos)'));
+    await userEvent.type(d.getByLabelText('Reasignar si nadie responde en (minutos)'), '1500');
+    await userEvent.clear(d.getByLabelText('Máximo de reasignaciones'));
+    await userEvent.type(d.getByLabelText('Máximo de reasignaciones'), '0');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Un número entero de minutos entre 0 y 1440 (0 = no reasignar)')).toBeInTheDocument();
+    expect(d.getByText('Un número entero entre 1 y 10')).toBeInTheDocument();
+    expect(s.st.calls.patches).toEqual([]);
+  });
+
+  it('horario propio: al activarlo parte de lunes a viernes 08:30–18:00; se valida y se guarda con su propio PUT, sin tocar los demás ajustes', async () => {
+    const s = server([queue()]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.click(d.getByLabelText('Esta cola tiene su propio horario'));
+    expect(d.getByLabelText('Lunes tramo 1 desde')).toHaveValue('08:30');
+    expect(d.getByLabelText('Sábado abierto')).not.toBeChecked();
+    // una hora imposible no se envía
+    await userEvent.clear(d.getByLabelText('Lunes tramo 1 hasta'));
+    await userEvent.type(d.getByLabelText('Lunes tramo 1 hasta'), '7:00');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText(/Lunes, tramo 1: la hora de fin debe ser HH:MM/)).toBeInTheDocument();
+    expect(s.st.calls.hours).toEqual([]);
+    await userEvent.clear(d.getByLabelText('Lunes tramo 1 hasta'));
+    await userEvent.type(d.getByLabelText('Lunes tramo 1 hasta'), '17:00');
+    await userEvent.click(d.getByLabelText('Viernes abierto'));
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+    expect(s.st.calls.hours).toEqual([{ days: week({ mon: [['08:30', '17:00']], tue: [['08:30', '18:00']], wed: [['08:30', '18:00']], thu: [['08:30', '18:00']] }) }]);
+    expect(s.st.calls.patches).toEqual([]);
+    expect(await d.findByText(/Guardado: Lun 08:30–17:00 · Mar a Jue 08:30–18:00/)).toBeInTheDocument();
+  });
+
+  it('con horario propio ya guardado se ve en el editor; quitarlo («usa el de la empresa») envía days: null', async () => {
+    const own = week({ mon: [['10:00', '12:00']], tue: [['10:00', '12:00']] });
+    const s = server([queue({ hours: own })]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    expect(d.getByLabelText('Esta cola tiene su propio horario')).toBeChecked();
+    expect(d.getByLabelText('Lunes tramo 1 desde')).toHaveValue('10:00');
+    expect(d.getByLabelText('Miércoles abierto')).not.toBeChecked();
+    await userEvent.click(d.getByLabelText('Esta cola tiene su propio horario'));
+    expect(d.queryByRole('list', { name: 'Horario semanal' })).not.toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+    expect(s.st.calls.hours).toEqual([{ days: null }]);
+  });
+
+  it('sin cambios no envía nada ni toca el horario', async () => {
+    const s = server([queue({ hours: week({ mon: [['10:00', '12:00']] }) })]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('No había cambios que guardar.')).toBeInTheDocument();
+    expect([s.st.calls.patches, s.st.calls.puts, s.st.calls.hours]).toEqual([[], [], []]);
   });
 });
 

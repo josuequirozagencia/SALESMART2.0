@@ -8,6 +8,7 @@ import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { Composer } from './Composer';
+import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
 import { TransferDialog } from './TransferDialog';
@@ -30,6 +31,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
   const [dialog, setDialog] = useState(false);
+  const now = useNow(30_000);
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
@@ -48,6 +50,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Pill kind={status.kind}>{status.label}</Pill>
+        <SlaPill sla={c.sla} now={now} />
         <span className="text-[12.5px] text-muted">{c.owner ? `Asignada a ${c.owner.name}` : 'Sin asesor'}</span>
         {c.participants.length > 0 ? <span className="text-[12.5px] text-muted" title={c.participants.map((p) => `${p.user.name}: ${p.permission === 'reply' ? 'puede responder' : 'solo ver y dejar notas'}`).join('\n')}>Compartida con {c.participants.map((p) => p.user.name.split(' ')[0]).join(', ')}</span> : null}
         {c.tags.map((t) => <span key={t.id} className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ backgroundColor: t.color }}>{t.name}</span>)}

@@ -7,6 +7,7 @@ import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { chatTime, STATUS_PILL } from './inboxFormat';
+import { SlaPill } from './SlaPill';
 import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
 
 const TABS: Array<{ id: InboxTab; label: string; hint: string }> = [
@@ -44,6 +45,7 @@ function Row({ c, active, now }: { c: Conversation; active: boolean; now: number
           </span>
           <span className="mt-1 flex flex-wrap items-center gap-1">
             <Pill kind={status.kind}>{status.label}</Pill>
+            <SlaPill sla={c.sla} now={now} hideDone />
             {c.queue ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted">{c.queue.name}</span> : null}
             {c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted">{c.owner.name.split(' ')[0]}</span> : null}
             {c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view' ? <span className="rounded bg-info-soft px-1.5 py-0.5 text-[10.5px] font-semibold text-info" title="Te la compartieron">Compartida</span> : null}
@@ -67,7 +69,8 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const counts = q.data?.pages[0]?.counts ?? null;
   const filtered = activeFilterCount(filters);
-  const now = useNow(60_000);
+  // Las horas relativas («hace 5 min», «Vence en 2 min») se cuentan desde el último dato que llegó: así un listado recién consultado nunca muestra un cronómetro «de hace un minuto»
+  const now = Math.max(useNow(60_000), q.dataUpdatedAt);
   const set = (patch: Partial<InboxFilters>) => onFilters({ ...filters, ...patch });
 
   // La búsqueda espera a que se deje de escribir
@@ -123,6 +126,14 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
                 </select>
               </label>
             ) : null}
+            <label className="grid gap-1 text-[12px] font-semibold">Tiempo de respuesta
+              <select aria-label="Tiempo de respuesta" value={filters.sla} onChange={(e) => set({ sla: e.target.value as InboxFilters['sla'] })} className={`${selectCls} font-normal`}>
+                <option value="">Todas</option>
+                <option value="late">Vencidas</option>
+                <option value="risk">En riesgo</option>
+                <option value="ok">Al día</option>
+              </select>
+            </label>
             <label className="flex items-center gap-2 text-[13px]">
               <input type="checkbox" aria-label="Solo no leídas" checked={filters.unread} onChange={(e) => set({ unread: e.target.checked })} />
               Solo no leídas

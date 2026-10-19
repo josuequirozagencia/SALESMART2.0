@@ -19,6 +19,7 @@ function QueueCard({ q, onOpen }: { q: Queue; onOpen: () => void }) {
           <b className="text-[15px]">{q.name}</b>
           <Pill kind={q.distribution_on ? 'ok' : 'muted'}>{q.distribution_on ? 'Reparto activo' : 'Reparto manual'}</Pill>
         </span>
+        {!q.open_now ? <span><Pill kind="muted">Cerrada ahora</Pill></span> : null}
         <span className="flex items-center gap-2 text-[12.5px] text-muted">
           {team.length > 0 ? (
             <>

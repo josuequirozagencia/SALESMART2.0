@@ -1667,6 +1667,186 @@ async function activeShares(db: pg.Client, conversationId: string): Promise<Arra
   return (await db.query(`SELECT user_id, permission FROM conversation_participants WHERE conversation_id = $1 AND revoked_at IS NULL ORDER BY added_at, id`, [conversationId])).rows as Array<{ user_id: string; permission: string }>;
 }
 
+test('SLA: el administrador configura objetivo, horario y feriado; el cronómetro aparece en el Inbox y vence; lo que nadie responde pasa solo a otro asesor con su aviso; otra empresa no ve nada', async ({ page, request, browser }) => {
+  test.setTimeout(180_000);
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-sla-0123456789abcdef';
+  const PHONE_ID = '1090123450055';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-sla-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('sla'));
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    // Dos asesores que pueden entrar: comparten la contraseña de la prueba (aún no hay pantalla para invitar al equipo)
+    const advisors: Record<string, { name: string; email: string }> = {};
+    for (const [name, email] of [['Carlos E2E', uniqueEmail('carlos-sla')], ['Elena E2E', uniqueEmail('elena-sla')]] as const) {
+      const id = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), $3 FROM users WHERE email = $2 RETURNING id`, [email, adminEmail, name])).rows[0].id as string;
+      await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [id, orgId]);
+      advisors[id] = { name, email };
+    }
+    const [idA, idB] = Object.keys(advisors) as [string, string];
+    const nameOf = (id: string): string => advisors[id]!.name;
+    const otherOf = (id: string): string => (id === idA ? idB : idA);
+
+    // La cola con los dos asesores y el número conectado (por la API: ya hay E2E de esas pantallas)
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: idA, active: true, weight: 1 }, { user_id: idB, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea SLA', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+
+    // 1) El administrador configura el SLA desde la pantalla
+    await uiLogin(page, adminEmail);
+    await page.getByRole('link', { name: 'Configuración' }).click();
+    await page.getByRole('link', { name: 'SLA y horario' }).click();
+    await expect(page).toHaveURL(/\/settings\/sla$/);
+    const policy = page.getByRole('region', { name: 'Objetivo de respuesta' });
+    await expect(policy.getByLabel('Responder en (minutos)')).toHaveValue('15'); // por omisión
+    await policy.getByLabel('Responder en (minutos)').fill('20');
+    await policy.getByLabel('Avisar «en riesgo» cuando falten (minutos)').fill('5');
+    await policy.getByRole('button', { name: 'Guardar objetivo' }).click();
+    await expect(policy.getByText('Objetivo de respuesta guardado.')).toBeVisible();
+    expect((await db.query(`SELECT target_minutes, risk_minutes FROM sla_policies WHERE organization_id = $1`, [orgId])).rows).toEqual([{ target_minutes: 20, risk_minutes: 5 }]);
+
+    const hours = page.getByRole('region', { name: 'Horario laboral' });
+    await hours.getByRole('radio', { name: 'Horario semanal' }).check();
+    await hours.getByLabel('Sábado abierto').check();
+    await hours.getByLabel('Sábado tramo 1 hasta').fill('13:00');
+    await hours.getByRole('button', { name: 'Guardar horario' }).click();
+    await expect(hours.getByText('Horario guardado.')).toBeVisible();
+    await expect(hours.getByText(/Guardado: Lun a Vie 08:30–18:00 · Sáb 08:30–13:00/)).toBeVisible();
+    const week = (await db.query(`SELECT days FROM business_hours WHERE organization_id = $1 AND scope = 'org'`, [orgId])).rows[0].days as number[][][];
+    expect([week[0], week[1], week[6]]).toEqual([[], [[510, 1080]], [[510, 780]]]); // domingo cerrado, lunes 08:30–18:00, sábado 08:30–13:00 (minutos desde la medianoche)
+
+    const holidays = page.getByRole('region', { name: 'Feriados' });
+    await holidays.getByLabel('Fecha').fill('2026-12-25');
+    await holidays.getByLabel('Nombre').fill('Navidad');
+    await holidays.getByLabel('Se repite cada año').check();
+    await holidays.getByRole('button', { name: 'Agregar feriado' }).click();
+    await expect(holidays.getByText('25/12/2026')).toBeVisible();
+    await expect(holidays.getByText('Cada año', { exact: true })).toBeVisible();
+    expect((await db.query(`SELECT to_char(day, 'YYYY-MM-DD') AS day, name, yearly FROM holidays WHERE organization_id = $1 AND deleted_at IS NULL`, [orgId])).rows).toEqual([{ day: '2026-12-25', name: 'Navidad', yearly: true }]);
+
+    // Para que el resto no dependa de la hora en que corre la prueba, la empresa vuelve a «Abierta siempre»
+    await hours.getByRole('radio', { name: 'Abierta siempre' }).check();
+    await hours.getByRole('button', { name: 'Guardar horario' }).click();
+    await expect(hours.getByText('La empresa quedó abierta siempre.')).toBeVisible();
+    expect((await db.query(`SELECT count(*)::int AS n FROM business_hours WHERE organization_id = $1`, [orgId])).rows[0].n).toBe(0);
+
+    // 2) Un cliente escribe: se reparte y su cronómetro corre con el objetivo nuevo (20 min)
+    const hook = `${apiBase}/v1/channels/meta/webhook`;
+    const incoming = async (from: string, id: string, name: string): Promise<void> => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name }, wa_id: from }], messages: [{ from, id, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'Hola, quiero una cita' } }] } }] }] });
+      const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+      expect((await request.post(hook, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    };
+    const waitConv = async (name: string): Promise<{ id: string; owner_id: string; contact_id: string }> => {
+      for (let i = 0; i < 60; i++) {
+        const r = (await db.query(`SELECT c.id, c.owner_id, c.contact_id FROM conversations c JOIN contacts k ON k.id = c.contact_id AND k.organization_id = c.organization_id WHERE c.organization_id = $1 AND k.name = $2 AND c.owner_id IS NOT NULL`, [orgId, name])).rows[0] as { id: string; owner_id: string; contact_id: string } | undefined;
+        if (r) return r;
+        await new Promise((res) => setTimeout(res, 500));
+      }
+      throw new Error(`la conversación de ${name} no se repartió`);
+    };
+    await incoming('593984217740', 'wamid.SLA1', 'Cliente Uno');
+    const one = await waitConv('Cliente Uno');
+    const t1 = (await db.query(`SELECT kind, owner_id, (EXTRACT(EPOCH FROM (due_at - started_at)) / 60)::int AS minutes, reassign_at FROM response_timers WHERE conversation_id = $1 AND stopped_at IS NULL`, [one.id])).rows;
+    expect(t1).toEqual([{ kind: 'first', owner_id: one.owner_id, minutes: 20, reassign_at: null }]);
+
+    // 3) Su asesor lo ve en «Pendientes» con el cronómetro; al vencer se marca «Vencida» y el filtro la encuentra
+    const login = async (id: string) => {
+      const ctx = await browser.newContext();
+      contexts.push(ctx);
+      const p = await ctx.newPage();
+      await uiLogin(p, advisors[id]!.email);
+      await p.getByRole('link', { name: 'Inbox' }).click();
+      await p.getByRole('tab', { name: /Pendientes/ }).click();
+      return p;
+    };
+    const owner = await login(one.owner_id);
+    await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByText(/Responder en (19|20) min/)).toBeVisible();
+    await db.query(`UPDATE response_timers SET started_at = now() - interval '25 minutes', due_at = now() - interval '5 minutes' WHERE conversation_id = $1 AND stopped_at IS NULL`, [one.id]);
+    await owner.reload();
+    await owner.getByRole('tab', { name: /Pendientes/ }).click();
+    await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByText(/Vencida hace [56] min/)).toBeVisible();
+    await owner.getByRole('button', { name: /Filtros/ }).click();
+    await owner.getByRole('combobox', { name: 'Tiempo de respuesta' }).selectOption('late');
+    await expect(owner.getByRole('link', { name: /^Cliente Uno/ })).toBeVisible();
+    await owner.getByRole('combobox', { name: 'Tiempo de respuesta' }).selectOption('ok');
+    await expect(owner.getByText('No hay conversaciones con estos filtros.')).toBeVisible();
+    await owner.getByRole('combobox', { name: 'Tiempo de respuesta' }).selectOption('');
+    await owner.getByRole('link', { name: /^Cliente Uno/ }).click();
+    const thread = owner.getByRole('region', { name: 'Conversación con Cliente Uno' });
+    await expect(thread.getByText(/Vencida hace [56] min/)).toBeVisible();
+    // Al aceptar y responder, el cronómetro se detiene y guarda cuánto tardó
+    await thread.getByRole('button', { name: 'Aceptar' }).click();
+    await thread.getByRole('textbox', { name: 'Mensaje' }).fill('Hola, claro: ¿mañana a las 10?');
+    await thread.getByRole('textbox', { name: 'Mensaje' }).press('Enter');
+    await expect(thread.getByText(/Respondió en (2[4-6]) min/)).toBeVisible();
+    const done = (await db.query(`SELECT stop_reason, response_seconds FROM response_timers WHERE conversation_id = $1`, [one.id])).rows[0] as { stop_reason: string; response_seconds: number };
+    expect(done.stop_reason).toBe('human_reply');
+    expect(done.response_seconds).toBeGreaterThanOrEqual(24 * 60);
+    expect(done.response_seconds).toBeLessThan(27 * 60);
+
+    // 4) La cola pide reasignar al minuto sin respuesta (desde su configuración)
+    await page.getByRole('link', { name: 'Colas' }).click();
+    await page.getByRole('button', { name: 'Configurar Ventas' }).click();
+    const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
+    await cfg.getByLabel('Reasignar si nadie responde en (minutos)').fill('1');
+    await cfg.getByRole('button', { name: 'Guardar' }).click();
+    await expect(cfg.getByText('Cambios guardados.')).toBeVisible();
+    expect((await db.query(`SELECT reassign_minutes, max_rotations, respect_hours FROM queues WHERE id = $1`, [queue.id])).rows).toEqual([{ reassign_minutes: 1, max_rotations: 3, respect_hours: false }]);
+
+    // 5) Otro cliente escribe y su asesor no responde: al pasar el minuto la tarea del SLA se la pasa al otro asesor
+    await incoming('593984217741', 'wamid.SLA2', 'Cliente Dos');
+    const two = await waitConv('Cliente Dos');
+    const t2 = (await db.query(`SELECT (EXTRACT(EPOCH FROM (reassign_at - started_at)) / 60)::int AS minutes FROM response_timers WHERE conversation_id = $1 AND stopped_at IS NULL`, [two.id])).rows[0] as { minutes: number };
+    expect(t2.minutes).toBe(1);
+    await db.query(`UPDATE response_timers SET started_at = now() - interval '2 minutes', reassign_at = now() - interval '1 minute' WHERE conversation_id = $1 AND stopped_at IS NULL`, [two.id]);
+    const next = otherOf(two.owner_id);
+    type Moved = { owner_id: string; status: string; rotations: number; tried_owners: string[] };
+    let moved: Moved | undefined;
+    for (let i = 0; i < 90 && !moved; i++) {
+      const r = (await db.query(`SELECT owner_id, status, rotations, tried_owners FROM conversations WHERE id = $1`, [two.id])).rows[0] as Moved;
+      if (r.owner_id !== two.owner_id) moved = r;
+      else await new Promise((res) => setTimeout(res, 1000));
+    }
+    expect(moved).toEqual({ owner_id: next, status: 'pending', rotations: 1, tried_owners: [two.owner_id] });
+    const stops = (await db.query(`SELECT owner_id, stop_reason FROM response_timers WHERE conversation_id = $1`, [two.id])).rows as Array<{ owner_id: string; stop_reason: string | null }>;
+    expect(Object.fromEntries(stops.map((r) => [r.owner_id, r.stop_reason]))).toEqual({ [two.owner_id]: 'reassigned', [next]: null });
+    expect((await db.query(`SELECT owner_id FROM contacts WHERE id = $1`, [two.contact_id])).rows[0].owner_id).toBe(next); // el lead pasa con la conversación
+    const noteText = `La conversación pasó de ${nameOf(two.owner_id)} a ${nameOf(next)}: no hubo respuesta en 1 min de horario laboral.`;
+    expect((await db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND kind = 'note' AND sender_type = 'system'`, [two.id])).rows.map((r: { body: string }) => r.body)).toEqual([noteText]);
+
+    // 6) Quien la recibe la ve «Pendiente» con su propio cronómetro y el aviso en el historial; quien la tenía ya no la ve
+    const receiver = next === one.owner_id ? owner : await login(next);
+    await receiver.getByRole('link', { name: 'Inbox' }).click();
+    await receiver.getByRole('tab', { name: /Pendientes/ }).click();
+    await expect(receiver.getByRole('link', { name: /^Cliente Dos/ }).getByText(/Responder en (19|20) min/)).toBeVisible({ timeout: 30_000 });
+    await receiver.getByRole('link', { name: /^Cliente Dos/ }).click();
+    await expect(receiver.getByRole('region', { name: 'Conversación con Cliente Dos' }).getByRole('log', { name: 'Mensajes' }).getByText(noteText)).toBeVisible();
+    const former = { authorization: `Bearer ${await apiLogin(request, advisors[two.owner_id]!.email)}` };
+    expect((await request.get(`${apiBase}/v1/conversations/${two.id}`, { headers: former })).status()).toBe(404);
+
+    // 7) Otra empresa no ve ni toca la configuración del SLA
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('sla-otra')))}`, 'content-type': 'application/json' };
+    const theirs = (await (await request.get(`${apiBase}/v1/sla`, { headers: other })).json()) as { policy: { target_minutes: number; risk_minutes: number }; hours: unknown; holidays: unknown[] };
+    expect(theirs).toMatchObject({ policy: { target_minutes: 15, risk_minutes: 3 }, hours: null, holidays: [] });
+    const hid = (await db.query(`SELECT id FROM holidays WHERE organization_id = $1`, [orgId])).rows[0].id as string;
+    expect((await request.delete(`${apiBase}/v1/sla/holidays/${hid}`, { headers: other })).status()).toBe(404);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/hours`, { headers: other, data: { days: null } })).status()).toBe(404);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

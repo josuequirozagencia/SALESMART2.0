@@ -30,6 +30,7 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
   last_message: { direction: 'in', kind: 'text', preview: 'Hola', status: 'received', at: ago(5 * MIN) },
   window: { open: true, expires_at: new Date(Date.now() + 23 * HOUR).toISOString() },
   can: FULL,
+  sla: null,
   ...over,
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({

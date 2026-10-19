@@ -29,6 +29,7 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
   last_message: { direction: 'in', kind: 'text', preview: 'Hola, ¿tienen cita mañana?', status: 'received', at: ago(5 * MIN) },
   window: { open: true, expires_at: new Date(Date.now() + 23 * HOUR).toISOString() },
   can: { reply: true, note: true, accept: false, take: false, close: true, transfer: false, share: false },
+  sla: null,
   ...over,
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
@@ -452,5 +453,74 @@ describe('Inbox · acciones', () => {
     mockApi(server(w));
     renderApp('/inbox/c1');
     expect(await screen.findByText('Ventana de 24 h cerrada')).toBeInTheDocument();
+  });
+});
+
+describe('Inbox · SLA', () => {
+  const sla = (state: NonNullable<Conversation['sla']>['state'], dueInMs: number | null, over: Partial<NonNullable<Conversation['sla']>> = {}): NonNullable<Conversation['sla']> => ({
+    kind: 'first',
+    state,
+    started_at: ago(5 * MIN),
+    due_at: dueInMs === null ? null : new Date(Date.now() + dueInMs).toISOString(),
+    response_seconds: null,
+    ...over,
+  });
+
+  it('el listado muestra el cronómetro de cada conversación: al día, en riesgo, vencida y en pausa; «respondida» no estorba en el listado', async () => {
+    const w = world({
+      convs: [
+        conv({ id: 'c1', contact: { id: 'k1', name: 'Ana Torres', phone: null }, sla: sla('ok', 9.5 * MIN) }),
+        conv({ id: 'c2', contact: { id: 'k2', name: 'Bruno Díaz', phone: null }, sla: sla('risk', 1.5 * MIN) }),
+        conv({ id: 'c3', contact: { id: 'k3', name: 'Carla Ruiz', phone: null }, sla: sla('late', -4.5 * MIN) }),
+        conv({ id: 'c4', contact: { id: 'k4', name: 'Diego Paz', phone: null }, sla: sla('paused', 10 * MIN) }),
+        conv({ id: 'c5', contact: { id: 'k5', name: 'Elena Vega', phone: null }, sla: sla('done', null, { response_seconds: 300 }) }),
+        conv({ id: 'c6', contact: { id: 'k6', name: 'Fabio Ríos', phone: null }, sla: null }),
+      ],
+      counts: { working: 6, pending: 0, closed: 0, unread: 0 },
+    });
+    mockApi(server(w));
+    renderApp('/inbox');
+    expect(within(await screen.findByRole('link', { name: 'Ana Torres' })).getByText('Responder en 10 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Bruno Díaz' })).getByText('Vence en 2 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Carla Ruiz' })).getByText('Vencida hace 5 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Diego Paz' })).getByText('En pausa · fuera de horario')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Elena Vega' })).queryByText(/Respondió en/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Fabio Ríos' })).queryByText(/Responder|Vence|Vencida|pausa/)).not.toBeInTheDocument();
+  });
+
+  it('el encabezado del hilo muestra el cronómetro, también el tiempo que tardó en responder, con la explicación al pasar el cursor', async () => {
+    const w = world({ convs: [conv({ sla: sla('late', -11.5 * MIN) })] });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const chip = await screen.findByText('Vencida hace 12 min');
+    expect(chip.closest('span[title]')).toHaveAttribute('title', expect.stringContaining('Primera respuesta'));
+  });
+
+  it('una respuesta ya dada se ve en el hilo como «Respondió en…» (tiempo abierto)', async () => {
+    mockApi(server(world({ convs: [conv({ status: 'waiting', sla: sla('done', null, { response_seconds: 720 }) })] })));
+    renderApp('/inbox/c1');
+    expect(await screen.findByText('Respondió en 12 min')).toBeInTheDocument();
+  });
+
+  it('el cronómetro de una respuesta posterior se explica distinto al de la primera', async () => {
+    mockApi(server(world({ convs: [conv({ sla: sla('risk', 2 * MIN, { kind: 'followup' }) })] })));
+    renderApp('/inbox/c1');
+    const chip = await screen.findByText(/Vence en \d+ min/);
+    expect(chip.closest('span[title]')).toHaveAttribute('title', expect.stringContaining('Respuesta al último mensaje del cliente'));
+  });
+
+  it('el filtro «Tiempo de respuesta» pide al servidor justo eso y cuenta como filtro puesto', async () => {
+    const api = mockApi(server(world(), ME_ADMIN));
+    renderApp('/inbox');
+    await screen.findByRole('link', { name: 'Ana Torres' });
+    expect(api.last('GET /conversations')!.query.get('sla')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: /Filtros/ }));
+    await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Tiempo de respuesta' }), 'late');
+    await waitFor(() => expect(api.last('GET /conversations')!.query.get('sla')).toBe('late'));
+    expect(screen.getByRole('button', { name: /Filtros\s*1/ })).toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Tiempo de respuesta' }), 'risk');
+    await waitFor(() => expect(api.last('GET /conversations')!.query.get('sla')).toBe('risk'));
+    await userEvent.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
+    await waitFor(() => expect(api.last('GET /conversations')!.query.get('sla')).toBeNull());
   });
 });

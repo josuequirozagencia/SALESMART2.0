@@ -38,6 +38,8 @@ export const listConversationsQuerySchema = z
     channel: z.uuid().optional(),
     tag: z.uuid().optional(),
     unread: flag.optional(),
+    /** Por el cronómetro de respuesta abierto: `late` vencido · `risk` en riesgo · `ok` al día (sin cronómetro o lejos de vencer). */
+    sla: z.enum(['late', 'risk', 'ok']).optional(),
     /** Nombre o teléfono del contacto. */
     q: z.string().trim().min(1).max(100).optional(),
     cursor: z.string().min(1).max(300).optional(),

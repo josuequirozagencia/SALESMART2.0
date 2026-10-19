@@ -1,4 +1,5 @@
 import type { messages } from '../../db';
+import type { SlaView } from '../sla';
 import type { TagView } from '../tags';
 import { abilities, myAccessOf, windowOf, type Abilities, type ChannelState, type Collab, type ConversationRow, type InboxScope, type MyAccess, type WindowState } from './inbox.access';
 
@@ -44,6 +45,8 @@ export interface ConversationView {
   last_message: LastMessageView | null;
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente. */
   window: WindowState;
+  /** El cronómetro de respuesta (M5.5b): en regla, en riesgo, vencido, en pausa fuera de horario o ya respondido; null si no hay medición. */
+  sla: SlaView | null;
   /** Qué puede hacer quien consulta; la interfaz solo lo muestra, cada acción lo vuelve a verificar. */
   can: Abilities;
 }
@@ -102,6 +105,7 @@ export interface ConversationParts {
   /** Si quien consulta no es la dueña, su permiso como colaboradora. */
   collab: Collab;
   tags: readonly TagView[];
+  sla: SlaView | null;
   last: { direction: string; kind: string; body: string | null; status: string; sentAt: Date } | null;
 }
 
@@ -127,6 +131,7 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
     tags: [...p.tags],
     last_message: p.last ? { direction: p.last.direction as 'in' | 'out', kind: p.last.kind, preview: previewOf(p.last.kind, p.last.body), status: p.last.status, at: p.last.sentAt.toISOString() } : null,
     window: windowOf(c.lastInboundAt, now),
+    sla: p.sla,
     can: abilities(scope, c, p.channelState, p.collab),
   };
 }

@@ -260,12 +260,12 @@ export class ContactsService {
     return true;
   }
 
-  /** El lead cambia de manos (transferir una conversación, M5.5): el contacto pasa a esa persona, la tuviera otra o ninguna. true = cambió; auditado como acción manual. */
-  async reassignOwner(tx: TenantTx, id: string, userId: string): Promise<boolean> {
+  /** El lead cambia de manos (transferir una conversación, M5.5): el contacto pasa a esa persona, la tuviera otra o ninguna. true = cambió; auditado como acción manual (o automática si lo hace la reasignación por SLA). */
+  async reassignOwner(tx: TenantTx, id: string, userId: string, source: 'manual' | 'automation' = 'manual'): Promise<boolean> {
     const [cur] = await tx.select({ ownerId: contacts.ownerId }).from(contacts).where(and(eq(contacts.id, id), isNull(contacts.deletedAt))).for('update').limit(1);
     if (!cur || cur.ownerId === userId) return false;
     await tx.update(contacts).set({ ownerId: userId, updatedAt: new Date() }).where(eq(contacts.id, id));
-    await writeAudit(tx, { entityType: 'contact', entityId: id, field: 'owner_id', oldValue: cur.ownerId, newValue: userId, source: 'manual' });
+    await writeAudit(tx, { entityType: 'contact', entityId: id, field: 'owner_id', oldValue: cur.ownerId, newValue: userId, source });
     return true;
   }
 

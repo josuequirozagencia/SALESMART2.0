@@ -6,15 +6,16 @@ import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, Inbo
 export const LIST_POLL_MS = 10_000;
 export const THREAD_POLL_MS = 5_000;
 
-export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false };
+export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, sla: '' };
 
 /** Cuántos filtros (además de la pestaña) están puestos. */
-export const activeFilterCount = (f: InboxFilters): number => [f.owner, f.queue, f.channel, f.tag].filter(Boolean).length + (f.unread ? 1 : 0);
+export const activeFilterCount = (f: InboxFilters): number => [f.owner, f.queue, f.channel, f.tag, f.sla].filter(Boolean).length + (f.unread ? 1 : 0);
 
 function listQuery(f: InboxFilters, cursor: string | undefined): string {
   const p = new URLSearchParams({ tab: f.tab });
   if (f.q.trim()) p.set('q', f.q.trim());
   for (const k of ['owner', 'queue', 'channel', 'tag'] as const) if (f[k]) p.set(k, f[k]);
+  if (f.sla) p.set('sla', f.sla);
   if (f.unread) p.set('unread', '1');
   if (cursor) p.set('cursor', cursor);
   p.set('limit', '30');

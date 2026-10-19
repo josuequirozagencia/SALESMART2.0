@@ -82,9 +82,10 @@ export class OpportunitiesService {
 
   /**
    * El lead cambia de manos (transferir una conversación, M5.5): las oportunidades ABIERTAS del contacto que eran de quien lo tenía —o de nadie— pasan a la nueva persona.
-   * Las de otra persona, las ganadas y las perdidas no se tocan. Dentro de la transacción de quien llama; cada cambio queda auditado como acción manual. Devuelve cuántas movió.
+   * Las de otra persona, las ganadas y las perdidas no se tocan. Dentro de la transacción de quien llama; cada cambio queda auditado (como acción manual salvo que la haga la
+   * reasignación automática del SLA, `source: 'automation'`). Devuelve cuántas movió.
    */
-  async reassignOpenOwner(tx: TenantTx, contactId: string, from: string | null, to: string): Promise<number> {
+  async reassignOpenOwner(tx: TenantTx, contactId: string, from: string | null, to: string, source: 'manual' | 'automation' = 'manual'): Promise<number> {
     const rows = await tx
       .select({ id: opportunities.id, ownerId: opportunities.ownerId })
       .from(opportunities)
@@ -93,7 +94,7 @@ export class OpportunitiesService {
     for (const r of rows) {
       if (r.ownerId === to) continue;
       await tx.update(opportunities).set({ ownerId: to, updatedAt: new Date() }).where(eq(opportunities.id, r.id));
-      await writeAudit(tx, { entityType: 'opportunity', entityId: r.id, field: 'owner_id', oldValue: r.ownerId, newValue: to, source: 'manual' });
+      await writeAudit(tx, { entityType: 'opportunity', entityId: r.id, field: 'owner_id', oldValue: r.ownerId, newValue: to, source });
     }
     return rows.filter((r) => r.ownerId !== to).length;
   }

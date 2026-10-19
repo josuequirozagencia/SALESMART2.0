@@ -77,11 +77,13 @@ Estado: **borrador para validar** contra el prototipo v8. Cada flujo indica acto
 - **Pasos:** webhook → `NormalizedMessage` → pipeline de handlers en orden declarado (deduplicar → identificar/crear contacto → cola del canal → reglas de automatización → agente IA si aplica → reparto) → conversación **Pendiente** asignada al asesor según la regla de la cola → notificación → el asesor pulsa **Aceptar** (nada se abre solo) → pasa a «Trabajando» → **inicia el cronómetro de SLA** al asignar.
 - **Reglas:** SLA 15 min (configurable) con horario laboral, días laborales, feriados y zona horaria; si no acepta/responde en N min → reasignación (con máximo de rotaciones); «respuesta humana» = mensaje de un humano, no automático, no nota.
 - **Errores:** contacto bloqueado → no entra al reparto; sin asesor disponible → «Sin asignar» + alerta; mensaje duplicado → ignorado.
+- **Implementación del SLA (M5.5b, ADR-50):** el cronómetro de primera respuesta corre desde que la conversación se asigna (reparto, «Asignarme», transferir o reasignar) y mide solo tiempo abierto (horario de la empresa o el propio de la cola, feriados, zona horaria); sin horario guardado, abierta siempre. Si la cola reasigna, al pasar N minutos abiertos sin respuesta humana la conversación pasa a otra persona de la cola (nunca repite en el ciclo, hasta el máximo de rotaciones) con el lead, una nota automática y auditoría como acción automática; con «respetar el horario» la cola cerrada no reparte y lo hace al abrir. Aceptar no detiene el reloj; escribir al cliente sí.
 - **Prototipo:** pestañas Trabajando/Esperando/Finalizadas, chip de SLA, aceptar.
 
 ### F09. Atender una conversación
 - **Actor:** AS.
 - **Pasos:** abre el chat (lista con etiquetas, fuente, dueño, SLA) → lee contexto CRM a la derecha (etapa, etiquetas, datos capturados por IA) → responde: texto, `/` respuestas rápidas con variables, **emojis, imágenes, video, documentos, audio (grabación), plantilla** → **programar mensaje** (día/hora; se cancela si el cliente responde antes) → **nota interna** (modo separado; nunca sale al cliente) → pausa/activa IA → finalizar.
+- **Implementación (M5.5b):** en la lista y en el encabezado del chat, el chip del cronómetro («Responder en 12 min», «Vence en 2 min», «Vencida hace 5 min», «En pausa · fuera de horario», «Respondió en 12 min») y el filtro «Tiempo de respuesta» (vencidas, en riesgo, al día).
 - **Reglas:** el primer mensaje humano detiene el SLA y registra el tiempo de primera respuesta; un mensaje humano pausa la IA en esa conversación; adjuntos por URL firmada, tipo MIME validado, antivirus y límite por canal; un audio entrante puede transcribirse (consume créditos de IA).
 - **Filtros de la lista:** asesor (solo roles altos), fuente, cola, etiqueta, SLA, no leídos. Un AS solo ve sus chats y los compartidos con él (aplicado en servidor).
 - **Errores:** fuera de 24 h en WhatsApp oficial → solo plantillas; archivo demasiado grande → mensaje claro; envío fallido → estado «no enviado» con reintentar.
@@ -93,7 +95,7 @@ Estado: **borrador para validar** contra el prototipo v8. Cada flujo indica acto
 - **Reglas (ADR-14):** transferir cambia el dueño (SLA y comisión pasan al nuevo); compartir **no** cambia el dueño; la visibilidad es `dueño o participante activo`; se puede revocar el acceso.
 - **Errores:** destino fuera de horario o ausente → advertencia (no bloqueo); asesor sin acceso a la cola → advertencia.
 - **Pendiente:** comisión si el colaborador cierra la venta (propuesta: el dueño, con % compartido opcional).
-- **Implementación (M5.5a, ADR-50):** botón «Transferir» del chat (Transferir / Compartir) → selector con carga y cola (advertencia, no bloqueo) → «y seguir como colaborador» o permiso al compartir → nota opcional → aviso automático interno. Transferir deja la conversación «pendiente» para el destinatario y mueve el contacto y las oportunidades abiertas; el horario del destino se advierte con M5.5b.
+- **Implementación (M5.5a, ADR-50):** botón «Transferir» del chat (Transferir / Compartir) → selector con carga y cola (advertencia, no bloqueo) → «y seguir como colaborador» o permiso al compartir → nota opcional → aviso automático interno. Transferir deja la conversación «pendiente» para el destinatario y mueve el contacto y las oportunidades abiertas; el SLA pasa al nuevo (su cronómetro empieza al recibirla, M5.5b); la advertencia de «fuera de horario» del destino queda pendiente (no hay horario por asesor, ver ADR-50 DECIDE 2).
 - **Prototipo:** sí.
 
 ### F11. Importar y exportar contactos

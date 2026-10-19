@@ -5,7 +5,8 @@ import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
-import { OrgMembersService } from '../organizations';
+import { OrgDirectoryService, OrgMembersService } from '../organizations';
+import { SlaService } from '../sla';
 import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type InboxAccess } from './inbox.access';
 import type { NoteDto, ReplyDto } from './inbox.dto';
 import { messageView, type MessageView } from './inbox.views';
@@ -27,6 +28,8 @@ export class OutboundService {
     @Inject(Database) private readonly db: Database,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(OutboundDispatcher) private readonly dispatcher: OutboundDispatcher,
+    @Inject(SlaService) private readonly sla: SlaService,
+    @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -34,6 +37,7 @@ export class OutboundService {
     const scope = scopeOf(access);
     if (!scope.canReply) throw new ForbiddenError();
     const now = new Date();
+    const timeZone = (await this.directory.current()).timeZone;
     const messageId = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
       assertCanReply(scope, c, channel.state, collab);
@@ -47,6 +51,8 @@ export class OutboundService {
         .update(conversations)
         .set({ status: 'waiting', lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${at}::timestamptz), ${at}::timestamptz)`, unreadCount: 0, updatedAt: now })
         .where(eq(conversations.id, conversationId));
+      // El primer mensaje HUMANO detiene el cronómetro de respuesta (no una nota ni un mensaje automático) y guarda cuánto tardó
+      await this.sla.stopOnReply(tx, conversationId, m!.id, { now, timeZone });
       // Responder sin haber aceptado equivale a aceptar: queda en la auditoría como el cambio de estado que es
       if (c.status === 'pending') await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'status', oldValue: 'pending', newValue: 'waiting' });
       return m!.id;

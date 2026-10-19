@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Patch, 
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
+import { hoursSchema, type HoursDto } from '../sla';
 import { createQueueSchema, setMembersSchema, simulateSchema, updateQueueSchema, type CreateQueueDto, type SetMembersDto, type SimulateDto, type UpdateQueueDto } from './queues.dto';
 import { QueuesService } from './queues.service';
 
@@ -34,6 +35,14 @@ export class QueuesController {
   @Header('Cache-Control', 'no-store')
   update(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(updateQueueSchema)) b: UpdateQueueDto) {
     return this.queues.update(id, b);
+  }
+
+  /** Horario propio de la cola (`days: null` vuelve a usar el de la empresa): define cuándo corre el SLA, cuándo reasigna y cuándo reparte si «respeta el horario». */
+  @RequirePermission('queues.manage')
+  @Put(':id/hours')
+  @Header('Cache-Control', 'no-store')
+  setHours(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(hoursSchema)) b: HoursDto) {
+    return this.queues.setHours(id, b);
   }
 
   /** Quién participa en la cola y con qué peso (reemplaza la configuración de las personas listadas; quien no aparece queda apagado). */

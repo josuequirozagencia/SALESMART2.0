@@ -13,7 +13,7 @@ const channel = (over: Partial<Channel> = {}): Channel => ({
   created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z', ...over,
 });
 
-const queue = (id: string, name: string): Queue => ({ id, name, color: '#7c5cfa', distribution_on: true, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, members: [], channels: [], unassigned_count: 0, created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z' });
+const queue = (id: string, name: string): Queue => ({ id, name, color: '#7c5cfa', distribution_on: true, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, respect_hours: false, reassign_minutes: 0, max_rotations: 3, hours: null, open_now: true, members: [], channels: [], unassigned_count: 0, created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z' });
 const QUEUES = [queue('q1', 'Ventas'), queue('q2', 'Soporte')];
 
 function server(initial: Channel[] = [], opts: { vault?: boolean } = {}) {

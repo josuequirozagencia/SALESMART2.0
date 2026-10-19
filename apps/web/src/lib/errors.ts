@@ -39,6 +39,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'CHANNEL_EXISTS': case 'CHANNEL_NUMBER_IN_USE': case 'CHANNEL_LIMIT': case 'CHANNEL_TOKEN_INVALID': case 'CHANNEL_NUMBER_NOT_FOUND': case 'CHANNEL_PROVIDER_UNAVAILABLE': case 'CHANNEL_CREDENTIALS_UNREADABLE': case 'CHANNEL_VAULT_UNAVAILABLE': case 'CHANNEL_QUEUE_NOT_FOUND': return e.message;
     // Colas y reparto (ADR-07): el servidor ya redacta el motivo
     case 'QUEUE_EXISTS': case 'QUEUE_LIMIT': case 'QUEUE_IN_USE': case 'QUEUE_DISTRIBUTION_OFF': return e.message;
+    // SLA y feriados (ADR-50): el servidor ya redacta el motivo
+    case 'HOLIDAY_EXISTS': case 'HOLIDAY_LIMIT': return e.message;
     // Inbox (ADR-16/50): el servidor ya redacta el motivo
     case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': case 'CONVERSATION_NOT_ACCEPTED': case 'ALREADY_OWNER': case 'PARTICIPANT_LIMIT': case 'TRANSFER_TARGET_NOT_ALLOWED': case 'SHARE_TARGET_NOT_ALLOWED': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo

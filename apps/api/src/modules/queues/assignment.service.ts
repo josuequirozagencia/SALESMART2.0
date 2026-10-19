@@ -3,6 +3,7 @@ import { and, eq, isNull } from 'drizzle-orm';
 import { channelAccounts, conversations, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
+import { SlaService } from '../sla';
 import { DistributionService } from './distribution.service';
 import type { AssignmentContext } from './queues.types';
 
@@ -23,6 +24,7 @@ export class AssignmentService {
   constructor(
     @Inject(DistributionService) private readonly distribution: DistributionService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(SlaService) private readonly sla: SlaService,
   ) {}
 
   async assignConversation(tx: TenantTx, conversationId: string, ctx: AssignmentContext): Promise<AssignResult> {
@@ -42,9 +44,11 @@ export class AssignmentService {
     const a = await this.distribution.assignFor(tx, queueId, ctx, { contactOwnerId: contactOwner });
     if (a.ownerId === null) return { assigned: false, ownerId: null, queueId };
 
-    await tx.update(conversations).set({ ownerId: a.ownerId, assignedAt: ctx.now, status: 'pending', updatedAt: ctx.now }).where(eq(conversations.id, conv.id));
+    await tx.update(conversations).set({ ownerId: a.ownerId, assignedAt: ctx.now, assignmentSource: 'distribution', status: 'pending', rotations: 0, triedOwners: [], updatedAt: ctx.now }).where(eq(conversations.id, conv.id));
     await writeAudit(tx, { entityType: 'conversation', entityId: conv.id, field: 'owner_id', oldValue: null, newValue: a.ownerId, source: 'automation' });
     if (a.reason === 'distributed') await this.contacts.assignOwnerIfNone(tx, conv.contactId, a.ownerId);
+    // El cronómetro de primera respuesta corre desde que se asigna (F08)
+    await this.sla.startFirst(tx, { id: conv.id, ownerId: a.ownerId, queueId }, ctx);
     return { assigned: true, ownerId: a.ownerId, queueId };
   }
 }

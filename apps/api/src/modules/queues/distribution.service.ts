@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, gte, inArray, isNull } from 'drizzle-orm';
 import { sql } from 'drizzle-orm';
 import { conversations, queueDistributionState, queueMembers, queues, type TenantTx } from '../../db';
+import { SlaService } from '../sla';
 import { parseState, pickNext, type Candidate, type DistMode, type DistRules } from './distribution';
 import { startOfLocalDay } from './local-day';
 import type { Assignment, AssignmentContext } from './queues.types';
@@ -22,6 +23,8 @@ export interface MemberOverride {
  */
 @Injectable()
 export class DistributionService {
+  constructor(@Inject(SlaService) private readonly sla: SlaService) {}
+
   /** Reglas de reparto de una cola. */
   rulesOf(q: Pick<QueueRow, 'mode' | 'batch' | 'dailyCap'>): DistRules {
     return { mode: q.mode as DistMode, batch: q.batch, dailyCap: q.dailyCap };
@@ -31,7 +34,7 @@ export class DistributionService {
    * A quién se le puede asignar en la cola, EN ORDEN ESTABLE (por alta en la cola y luego por id), con su peso y su carga. Solo cuenta quien está activo en la cola
    * y además puede recibir trabajo en la empresa. `members` sustituye lo guardado (simulación).
    */
-  async candidates(tx: TenantTx, queueId: string, ctx: AssignmentContext, rules: DistRules, members?: readonly MemberOverride[]): Promise<Candidate[]> {
+  async candidates(tx: TenantTx, queueId: string, ctx: AssignmentContext, rules: DistRules, members?: readonly MemberOverride[], exclude?: ReadonlySet<string>): Promise<Candidate[]> {
     const saved = await tx
       .select({ userId: queueMembers.userId, active: queueMembers.active, weight: queueMembers.weight, createdAt: queueMembers.createdAt })
       .from(queueMembers)
@@ -40,7 +43,7 @@ export class DistributionService {
     const order = new Map(saved.map((r, i) => [r.userId, i]));
     const base: MemberOverride[] = members ? [...members] : saved.filter((r) => r.active).map((r) => ({ userId: r.userId, weight: r.weight }));
     const people = base
-      .filter((m) => ctx.assignable.has(m.userId))
+      .filter((m) => ctx.assignable.has(m.userId) && !exclude?.has(m.userId))
       // Los que ya estaban en la cola conservan su lugar; los nuevos van después, por id
       .sort((a, b) => (order.get(a.userId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.userId) ?? Number.MAX_SAFE_INTEGER) || a.userId.localeCompare(b.userId));
     if (people.length === 0) return [];
@@ -74,17 +77,20 @@ export class DistributionService {
    *  - Reparto apagado → nadie (queda «sin asignar»).
    *  - «Solo contactos no asignados» y el contacto ya tiene dueño que puede recibir trabajo → va a él (cartera), sin tocar el reparto.
    *  - Si no, rotación / ponderado / carga entre los asesores activos de la cola, respetando el tope diario.
+   *  - Con «respetar el horario» y la cola cerrada ahora (fuera de horario o feriado), nadie: el lead espera y se reparte al abrir (M5.5b).
+   *  - `exclude`: personas a las que no se les asigna (la reasignación por falta de respuesta no vuelve a quien ya tuvo la conversación).
    */
-  async assignFor(tx: TenantTx, queueId: string, ctx: AssignmentContext, opts: { contactOwnerId: string | null }): Promise<Assignment> {
+  async assignFor(tx: TenantTx, queueId: string, ctx: AssignmentContext, opts: { contactOwnerId: string | null; exclude?: ReadonlySet<string> }): Promise<Assignment> {
     const [queue] = await tx.select().from(queues).where(and(eq(queues.id, queueId), isNull(queues.deletedAt))).limit(1);
     if (!queue || !queue.distributionOn) return { ownerId: null, reason: 'off' };
-    if (queue.onlyUnassigned && opts.contactOwnerId !== null && ctx.assignable.has(opts.contactOwnerId)) return { ownerId: opts.contactOwnerId, reason: 'cartera' };
+    if (queue.respectHours && !(await this.sla.isOpen(tx, queueId, ctx))) return { ownerId: null, reason: 'closed' };
+    if (queue.onlyUnassigned && opts.contactOwnerId !== null && ctx.assignable.has(opts.contactOwnerId) && !opts.exclude?.has(opts.contactOwnerId)) return { ownerId: opts.contactOwnerId, reason: 'cartera' };
 
     // El candado de la fila de estado serializa los repartos de ESTA cola
     await tx.insert(queueDistributionState).values({ queueId }).onConflictDoNothing();
     const [row] = await tx.select().from(queueDistributionState).where(eq(queueDistributionState.queueId, queueId)).for('update').limit(1);
     const rules = this.rulesOf(queue);
-    const candidates = await this.candidates(tx, queueId, ctx, rules);
+    const candidates = await this.candidates(tx, queueId, ctx, rules, undefined, opts.exclude);
     const pick = pickNext(candidates, rules, parseState(row?.state));
     if (pick.userId === null) return { ownerId: null, reason: 'none_available' };
     await tx.update(queueDistributionState).set({ state: { last: pick.state.last, streak: pick.state.streak, current: pick.state.current }, updatedAt: ctx.now }).where(eq(queueDistributionState.queueId, queueId));

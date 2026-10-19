@@ -10,7 +10,8 @@ export interface AssignmentContext {
   readonly assignable: ReadonlySet<string>;
 }
 
-export type AssignReason = 'distributed' | 'cartera' | 'off' | 'none_available';
+/** `closed`: la cola respeta el horario y ahora está cerrada (fuera de horario o feriado): el lead espera y se reparte al abrir. */
+export type AssignReason = 'distributed' | 'cartera' | 'off' | 'none_available' | 'closed';
 
 export interface Assignment {
   readonly ownerId: string | null;

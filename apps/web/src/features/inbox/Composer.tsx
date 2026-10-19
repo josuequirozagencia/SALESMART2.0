@@ -38,12 +38,11 @@ export function Composer({ c }: { c: Conversation }) {
 
   const submit = (): void => {
     if (!trimmed || send.isPending || !canWrite) return;
-    send.mutate(trimmed, {
-      onSuccess: () => {
-        setText('');
-        ref.current?.focus();
-      },
-    });
+    // El texto se limpia al enviar (no al terminar de refrescar la lista): si no, lo que la persona ya empezó a escribir después —una nota, el siguiente mensaje— se borraría
+    // cuando llegue la respuesta. Si el envío falla, el texto vuelve, salvo que ya haya escrito otra cosa.
+    setText('');
+    ref.current?.focus();
+    send.mutate(trimmed, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {

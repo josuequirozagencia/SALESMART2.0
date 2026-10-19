@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messages, queues, type TenantTx } from '../../db';
+import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messages, queues, responseTimers, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
-import { likeEscape, OrgMembersService } from '../organizations';
+import { likeEscape, OrgDirectoryService, OrgMembersService } from '../organizations';
+import { SlaService, type TimerContext } from '../sla';
 import { SystemTagsService, type TagView } from '../tags';
 import { abilities, channelState, collabColumn, loadConversation, scopeOf, visibleTo, type Collab, type InboxAccess, type InboxScope } from './inbox.access';
 import type { InboxTab, ListConversationsQuery, MessagesQuery } from './inbox.dto';
@@ -57,6 +58,21 @@ function decode(raw: string): Cursor {
   return { k: c.k, id: c.id };
 }
 
+/** Conversaciones con un cronómetro de respuesta ABIERTO que cumple `extra` (la RLS acota por empresa). */
+const openTimer = (extra: SQL): SQL =>
+  sql`EXISTS (SELECT 1 FROM ${responseTimers} t WHERE t.organization_id = ${conversations.organizationId} AND t.conversation_id = ${conversations.id} AND t.stopped_at IS NULL AND ${extra})`;
+
+/** El filtro «SLA»: vencido, en riesgo (faltan `riskMinutes` o menos) o al día (sin cronómetro abierto, o lejos de vencer). */
+function slaCondition(kind: 'late' | 'risk' | 'ok', now: Date, riskMinutes: number): SQL {
+  const at = now.toISOString();
+  const soon = new Date(now.getTime() + riskMinutes * 60_000).toISOString();
+  const late = openTimer(sql`t.due_at < ${at}::timestamptz`);
+  const risk = openTimer(sql`t.due_at >= ${at}::timestamptz AND t.due_at <= ${soon}::timestamptz`);
+  if (kind === 'late') return late;
+  if (kind === 'risk') return risk;
+  return sql`NOT (${late}) AND NOT (${risk})`;
+}
+
 const TAB_STATUSES: Readonly<Record<InboxTab, readonly string[]>> = { working: ['working', 'waiting'], pending: ['pending', 'unassigned'], closed: ['closed'] };
 
 interface Row {
@@ -89,20 +105,24 @@ export class InboxService {
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(SlaService) private readonly sla: SlaService,
+    @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
   ) {}
 
   async list(access: InboxAccess, q: ListConversationsQuery): Promise<ConversationList> {
     const scope = scopeOf(access);
     const now = new Date();
+    const ctx: TimerContext = { now, timeZone: (await this.directory.current()).timeZone };
     const cursor = q.cursor ? decode(q.cursor) : null;
     const data = await this.db.withTenant(async (tx) => {
-      const where: SQL[] = [...this.filters(tx, scope, q), this.tabCondition(q.tab)];
+      const slaCtx = { now, riskMinutes: (await this.sla.policy(tx)).riskMinutes };
+      const where: SQL[] = [...this.filters(tx, scope, q, slaCtx), this.tabCondition(q.tab)];
       if (q.unread) where.push(sql`${conversations.unreadCount} > 0`);
       if (cursor) where.push(sql`(${ACTIVITY}, ${conversations.id}) < (${cursor.k}::timestamptz, ${cursor.id}::uuid)`);
       const rows = await this.fetchRows(tx, scope, and(...where) as SQL, q.limit + 1);
       const page = rows.slice(0, q.limit);
       const next = rows.length > q.limit ? encode({ k: page[page.length - 1]!.key, id: page[page.length - 1]!.c.id }) : null;
-      return { parts: await this.hydrate(tx, scope, page), next, counts: cursor ? null : await this.counts(tx, scope, q) };
+      return { parts: await this.hydrate(tx, scope, page, ctx), next, counts: cursor ? null : await this.counts(tx, scope, q, slaCtx) };
     });
     return { items: await this.views(data.parts, scope, now), next_cursor: data.next, counts: data.counts };
   }
@@ -110,10 +130,11 @@ export class InboxService {
   async get(access: InboxAccess, id: string): Promise<ConversationView> {
     const scope = scopeOf(access);
     const now = new Date();
+    const ctx: TimerContext = { now, timeZone: (await this.directory.current()).timeZone };
     const part = await this.db.withTenant(async (tx) => {
       const [row] = await this.fetchRows(tx, scope, and(eq(conversations.id, id), visibleTo(scope), isNull(contacts.deletedAt)) as SQL, 1);
       if (!row) throw new NotFoundError();
-      return (await this.hydrate(tx, scope, [row]))[0]!;
+      return (await this.hydrate(tx, scope, [row], ctx))[0]!;
     });
     return (await this.views([part], scope, now))[0]!;
   }
@@ -179,6 +200,7 @@ export class InboxService {
     if (!scope.viewAll) throw new ForbiddenError();
     // Quien actúa debe poder recibir trabajo (un administrador o un asesor de la empresa; no un acceso de soporte). Es identidad: se lee ANTES de la transacción
     if (!(await this.members.canBeAssigned(scope.userId))) throw new ForbiddenError('NOT_ASSIGNABLE', 'Tu usuario no puede recibir conversaciones en esta empresa');
+    const timeZone = (await this.directory.current({ fresh: true })).timeZone;
     await this.db.withTenant(async (tx) => {
       const { c } = await loadConversation(tx, scope, id, true);
       if (c.status !== 'unassigned') {
@@ -186,7 +208,9 @@ export class InboxService {
         throw new ConflictError('CONVERSATION_STATE', 'La conversación ya tiene asesor o está finalizada');
       }
       const now = new Date();
-      await tx.update(conversations).set({ ownerId: scope.userId, assignedAt: now, assignmentSource: 'manual', status: 'working', updatedAt: now }).where(eq(conversations.id, id));
+      await tx.update(conversations).set({ ownerId: scope.userId, assignedAt: now, assignmentSource: 'manual', status: 'working', rotations: 0, triedOwners: [], updatedAt: now }).where(eq(conversations.id, id));
+      // El cronómetro de primera respuesta corre desde que la toma
+      await this.sla.startFirst(tx, { id, ownerId: scope.userId, queueId: c.queueId }, { now, timeZone });
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'owner_id', oldValue: null, newValue: scope.userId });
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'status', oldValue: 'unassigned', newValue: 'working' });
       await this.contacts.assignOwnerIfNone(tx, c.contactId, scope.userId);
@@ -204,6 +228,7 @@ export class InboxService {
       if (!abilities(scope, c, channel.state, collab).close) throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación puede finalizarla');
       const now = new Date();
       await tx.update(conversations).set({ status: 'closed', closedAt: now, unreadCount: 0, updatedAt: now }).where(eq(conversations.id, id));
+      await this.sla.stopOpen(tx, id, 'closed', now);
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'status', oldValue: c.status, newValue: 'closed' });
     });
     return this.get(access, id);
@@ -227,13 +252,14 @@ export class InboxService {
   }
 
   /** Condiciones que comparten el listado y los conteos (todas menos pestaña, cursor y «no leídas»). */
-  private filters(tx: TenantTx, scope: InboxScope, q: ListConversationsQuery): SQL[] {
+  private filters(tx: TenantTx, scope: InboxScope, q: ListConversationsQuery, sla: { now: Date; riskMinutes: number }): SQL[] {
     const where: SQL[] = [isNull(contacts.deletedAt)];
     const visible = visibleTo(scope);
     if (visible) where.push(visible);
     if (q.owner) where.push(eq(conversations.ownerId, q.owner));
     if (q.queue) where.push(eq(conversations.queueId, q.queue));
     if (q.channel) where.push(eq(conversations.channelAccountId, q.channel));
+    if (q.sla) where.push(slaCondition(q.sla, sla.now, sla.riskMinutes));
     if (q.tag) where.push(exists(tx.select({ one: sql`1` }).from(contactTags).where(and(eq(contactTags.contactId, conversations.contactId), eq(contactTags.tagId, q.tag)))));
     if (q.q) {
       const like = `%${likeEscape(q.q)}%`;
@@ -248,7 +274,7 @@ export class InboxService {
     return inArray(conversations.status, [...TAB_STATUSES[tab]]);
   }
 
-  private async counts(tx: TenantTx, scope: InboxScope, q: ListConversationsQuery): Promise<NonNullable<ConversationList['counts']>> {
+  private async counts(tx: TenantTx, scope: InboxScope, q: ListConversationsQuery, sla: { now: Date; riskMinutes: number }): Promise<NonNullable<ConversationList['counts']>> {
     const unread = q.unread ? sql`${conversations.unreadCount} > 0` : sql`true`;
     const inTab = (tab: InboxTab): SQL => sql`${conversations.status} in (${sql.join(TAB_STATUSES[tab].map((s) => sql`${s}`), sql`, `)}) and ${unread}`;
     const [n] = await tx
@@ -260,7 +286,7 @@ export class InboxService {
       })
       .from(conversations)
       .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
-      .where(and(...this.filters(tx, scope, q)));
+      .where(and(...this.filters(tx, scope, q, sla)));
     return { working: n?.working ?? 0, pending: n?.pending ?? 0, closed: n?.closed ?? 0, unread: n?.unread ?? 0 };
   }
 
@@ -277,7 +303,7 @@ export class InboxService {
   }
 
   /** Teléfono principal, etiquetas y último mensaje real de cada conversación de la página. El responsable (identidad) lo pone quien llama, fuera de la transacción. */
-  private async hydrate(tx: TenantTx, scope: InboxScope, rows: readonly Row[]): Promise<Hydrated[]> {
+  private async hydrate(tx: TenantTx, scope: InboxScope, rows: readonly Row[], ctx: TimerContext): Promise<Hydrated[]> {
     if (rows.length === 0) return [];
     const contactIds = [...new Set(rows.map((r) => r.c.contactId))];
     const convIds = rows.map((r) => r.c.id);
@@ -296,6 +322,7 @@ export class InboxService {
       .from(conversationParticipants)
       .where(and(inArray(conversationParticipants.conversationId, convIds), isNull(conversationParticipants.revokedAt)))
       .orderBy(asc(conversationParticipants.addedAt), asc(conversationParticipants.id));
+    const slaViews = await this.sla.views(tx, rows.map((r) => ({ id: r.c.id, queueId: r.c.queueId })), ctx);
     const participants = new Map<string, Hydrated['participantRows']>();
     for (const p of partRows) participants.set(p.conversationId, [...(participants.get(p.conversationId) ?? []), { userId: p.userId, permission: p.permission, addedBy: p.addedBy, addedAt: p.addedAt }]);
     return rows.map((r) => ({
@@ -307,6 +334,7 @@ export class InboxService {
       queue: r.c.queueId && r.queueName !== null ? { id: r.c.queueId, name: r.queueName, color: r.queueColor ?? '#7c5cfa' } : null,
       tags: tagsByContact.get(r.c.contactId) ?? [],
       last: last.get(r.c.id) ?? null,
+      sla: slaViews.get(r.c.id) ?? null,
       collab: r.c.ownerId === scope.userId ? null : r.collab,
       participantRows: participants.get(r.c.id) ?? [],
     }));

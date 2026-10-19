@@ -30,6 +30,8 @@ export const PERMISSIONS = {
   'sales.cancel': 'tenant',
   'appointments.manage': 'tenant',
   'queues.manage': 'tenant',
+  // M5.5b: política de respuesta (SLA), horario laboral y feriados de la empresa.
+  'sla.manage': 'tenant',
   'tags.manage': 'tenant',
   'agents.manage': 'tenant',
   'agents.test': 'tenant',

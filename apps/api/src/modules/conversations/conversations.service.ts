@@ -4,6 +4,7 @@ import { conversations, messages, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
+import { SlaService } from '../sla';
 import { SystemTagsService } from '../tags';
 import type { NormalizedMessage, NormalizedReaction, NormalizedStatus } from './normalized';
 
@@ -32,6 +33,7 @@ export class ConversationsService {
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
+    @Inject(SlaService) private readonly sla: SlaService,
   ) {}
 
   /**
@@ -82,7 +84,9 @@ export class ConversationsService {
       })
       .where(eq(conversations.id, conv.id));
     // Una conversación sin dueño (nueva, o que antes no tenía a quién) se reparte ahora; si ya tiene dueño no se toca
-    await this.assignment.assignConversation(tx, conv.id, assign);
+    const a = await this.assignment.assignConversation(tx, conv.id, assign);
+    // Si ya tenía dueño, el cliente espera una respuesta POSTERIOR (el cronómetro corre desde su mensaje, no desde que lo procesamos); si acaba de asignarse, ya corre el de primera respuesta
+    if (!a.assigned && a.ownerId) await this.sla.startFollowup(tx, { id: conv.id, ownerId: a.ownerId, queueId: a.queueId }, { now: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, timeZone: assign.timeZone });
     return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
   }
 

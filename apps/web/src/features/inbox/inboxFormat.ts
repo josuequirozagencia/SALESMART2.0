@@ -1,4 +1,5 @@
-import type { ChatMessage, ConversationStatus } from '../../lib/types';
+import { durationLabel, shortDateTime } from '../../lib/format';
+import type { ChatMessage, ConversationSla, ConversationStatus } from '../../lib/types';
 import type { PillKind } from '../../ui/Pill';
 
 export const STATUS_PILL: Record<ConversationStatus, { label: string; kind: PillKind }> = {
@@ -67,4 +68,25 @@ export function describeExtra(m: ChatMessage): string | null {
     return typeof n === 'number' ? (n === 1 ? '1 contacto compartido' : `${n} contactos compartidos`) : null;
   }
   return null;
+}
+
+/** «5 min», «1 h 05 min» o la fecha si falta más de un día; siempre al menos 1 minuto (la cuenta se redondea hacia arriba). */
+function span(ms: number, at: string): string {
+  const m = Math.max(1, Math.ceil(ms / 60_000));
+  if (m < 60) return `${m} min`;
+  if (m < 1440) return m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+  return shortDateTime(at);
+}
+
+/** Cómo se ve el cronómetro de respuesta: el texto corto, su color y la explicación (al pasar el cursor). */
+export function slaChip(sla: ConversationSla, now: number): { kind: PillKind; text: string; title: string } {
+  const what = sla.kind === 'first' ? 'Primera respuesta' : 'Respuesta al último mensaje del cliente';
+  const due = sla.due_at ? Date.parse(sla.due_at) : null;
+  switch (sla.state) {
+    case 'done': return { kind: 'muted', text: `Respondió en ${durationLabel(sla.response_seconds ?? 0)}`, title: `${what}: tiempo que tardó, contando solo el horario de atención` };
+    case 'late': return { kind: 'crit', text: due === null ? 'Vencida' : `Vencida hace ${span(now - due, sla.due_at!)}`, title: `${what}: venció${sla.due_at ? ` el ${shortDateTime(sla.due_at)}` : ''}` };
+    case 'risk': return { kind: 'warn', text: due === null ? 'En riesgo' : `Vence en ${span(due - now, sla.due_at!)}`, title: `${what}: está por vencer` };
+    case 'paused': return { kind: 'muted', text: 'En pausa · fuera de horario', title: `${what}: el reloj no corre fuera del horario de atención${sla.due_at ? `; vence ${shortDateTime(sla.due_at)} si no cambia` : ''}` };
+    default: return { kind: 'ok', text: due === null ? 'Al día' : `Responder en ${span(due - now, sla.due_at!)}`, title: `${what}: vence${sla.due_at ? ` el ${shortDateTime(sla.due_at)}` : ''}` };
+  }
 }

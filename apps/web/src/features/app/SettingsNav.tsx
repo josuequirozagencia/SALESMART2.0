@@ -13,6 +13,7 @@ export function SettingsNav() {
         <NavLink to="/settings/attribution" className={tab}>Atribución de Meta</NavLink>
         <NavLink to="/settings/connections" className={tab}>Conexiones</NavLink>
         <NavLink to="/settings/queues" className={tab}>Colas</NavLink>
+        <NavLink to="/settings/sla" className={tab}>SLA y horario</NavLink>
       </nav>
     </div>
   );

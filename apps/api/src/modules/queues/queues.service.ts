@@ -5,6 +5,7 @@ import { ConflictError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { OrgDirectoryService, OrgMembersService, type OrgPerson } from '../organizations';
+import { isOpenAt, SlaConfigService, SlaService, type HoursDto, type WeekView } from '../sla';
 import { AssignmentService } from './assignment.service';
 import { simulate as runSimulation, type DistMode } from './distribution';
 import { DistributionService, OPEN_STATUSES } from './distribution.service';
@@ -33,6 +34,16 @@ export interface QueueView {
   batch: number;
   daily_cap: number;
   only_unassigned: boolean;
+  /** No repartir automáticamente mientras la cola está cerrada: el lead espera y se reparte al abrir (M5.5b). */
+  respect_hours: boolean;
+  /** Minutos de tiempo abierto sin respuesta humana tras los que se reasigna (0 = no reasignar). */
+  reassign_minutes: number;
+  /** Veces como máximo que se reasigna una misma conversación. */
+  max_rotations: number;
+  /** Horario propio de la cola; null = usa el de la empresa. */
+  hours: WeekView | null;
+  /** ¿La cola está abierta ahora (con su horario o el de la empresa, y los feriados)? */
+  open_now: boolean;
   /** Todas las personas que pueden recibir trabajo, con su estado en ESTA cola (`active: false` y peso 1 si no participan). */
   members: QueueMemberView[];
   /** Conexiones cuya cola por defecto es esta (se cambia en «Conexiones»). */
@@ -59,7 +70,7 @@ type QueueRow = typeof queues.$inferSelect;
 const AUDIT = 'queue';
 const DEFAULT_SIMULATION = 20;
 
-const view = (q: QueueRow, members: QueueMemberView[], channels: QueueView['channels'], unassigned: number): QueueView => ({
+const view = (q: QueueRow, members: QueueMemberView[], channels: QueueView['channels'], unassigned: number, hours: WeekView | null, openNow: boolean): QueueView => ({
   id: q.id,
   name: q.name,
   color: q.color,
@@ -68,6 +79,11 @@ const view = (q: QueueRow, members: QueueMemberView[], channels: QueueView['chan
   batch: q.batch,
   daily_cap: q.dailyCap,
   only_unassigned: q.onlyUnassigned,
+  respect_hours: q.respectHours,
+  reassign_minutes: q.reassignMinutes,
+  max_rotations: q.maxRotations,
+  hours,
+  open_now: openNow,
   members,
   channels,
   unassigned_count: unassigned,
@@ -87,6 +103,8 @@ export class QueuesService {
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(DistributionService) private readonly distribution: DistributionService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
+    @Inject(SlaService) private readonly sla: SlaService,
+    @Inject(SlaConfigService) private readonly slaConfig: SlaConfigService,
   ) {}
 
   async list(): Promise<QueueList> {
@@ -129,6 +147,9 @@ export class QueuesService {
         change('batch', 'batch', q.batch, input.batch);
         change('daily_cap', 'dailyCap', q.dailyCap, input.daily_cap);
         change('only_unassigned', 'onlyUnassigned', q.onlyUnassigned, input.only_unassigned);
+        change('respect_hours', 'respectHours', q.respectHours, input.respect_hours);
+        change('reassign_minutes', 'reassignMinutes', q.reassignMinutes, input.reassign_minutes);
+        change('max_rotations', 'maxRotations', q.maxRotations, input.max_rotations);
         if (audits.length === 0) return;
         set.updatedAt = new Date();
         await tx.update(queues).set(set).where(eq(queues.id, id));
@@ -137,6 +158,12 @@ export class QueuesService {
       .catch((e: unknown) => {
         throw this.nameTaken(e) ?? e;
       });
+    return this.one(id);
+  }
+
+  /** Horario propio de la cola (`days: null` = vuelve a usar el de la empresa). */
+  async setHours(id: string, input: HoursDto): Promise<QueueView> {
+    await this.slaConfig.setQueueHours(id, input);
     return this.one(id);
   }
 
@@ -221,15 +248,23 @@ export class QueuesService {
     return this.db.withTenant(async (tx) => {
       const q = await this.mustGet(tx, id);
       if (!q.distributionOn) throw new ConflictError('QUEUE_DISTRIBUTION_OFF', 'El reparto de esta cola está apagado. Enciéndelo para repartir');
-      const pending = await this.unassignedOf(tx, id, 500);
-      let assigned = 0;
-      for (const convId of pending) {
-        const r = await this.assignment.assignConversation(tx, convId, ctx);
-        if (!r.assigned) break; // nadie puede recibir más: el resto sigue sin asignar
-        assigned += 1;
-      }
+      const assigned = await this.distributeWithin(tx, id, ctx, 500);
       return { assigned, remaining: (await this.unassignedOf(tx, id, 100_000)).length };
     });
+  }
+
+  /**
+   * Reparte las «sin asignar» de UNA cola dentro de la transacción de quien llama (hasta `limit`, las más antiguas primero) y devuelve cuántas asignó. Se detiene cuando nadie
+   * puede recibir más (o, con «respetar el horario», mientras la cola está cerrada). La usan «Repartir ahora» y la tarea que atiende lo que esperó a que la cola abriera.
+   */
+  async distributeWithin(tx: TenantTx, queueId: string, ctx: AssignmentContext, limit = 500): Promise<number> {
+    let assigned = 0;
+    for (const convId of await this.unassignedOf(tx, queueId, limit)) {
+      const r = await this.assignment.assignConversation(tx, convId, ctx);
+      if (!r.assigned) break;
+      assigned += 1;
+    }
+    return assigned;
   }
 
   // ── lectura ────────────────────────────────────────────────────────────────
@@ -244,7 +279,8 @@ export class QueuesService {
   private async load(only?: readonly string[]): Promise<QueueView[]> {
     const people = await this.members.assignable();
     const dir = await this.directory.current({ fresh: true });
-    const since = startOfLocalDay(new Date(), dir.timeZone);
+    const now = new Date();
+    const since = startOfLocalDay(now, dir.timeZone);
     return this.db.withTenant(async (tx) => {
       const rows = await tx
         .select()
@@ -256,6 +292,8 @@ export class QueuesService {
       const memberRows = await tx.select().from(queueMembers).where(inArray(queueMembers.queueId, ids));
       const chans = await tx.select({ id: channelAccounts.id, name: channelAccounts.name, queueId: channelAccounts.queueId }).from(channelAccounts).where(and(inArray(channelAccounts.queueId, ids), isNull(channelAccounts.deletedAt))).orderBy(asc(channelAccounts.createdAt));
       const personIds = people.map((p) => p.id);
+      const ownHours = await this.slaConfig.queueHours(tx, ids);
+      const cals = await this.sla.calendars(tx, dir.timeZone);
 
       const unassigned = new Map<string, number>();
       const pendingRows = await tx.execute<{ qid: string; n: number }>(sql`
@@ -271,7 +309,7 @@ export class QueuesService {
         const t = await tx
           .select({ q: conversations.queueId, u: conversations.ownerId, n: sql<number>`count(*)::int` })
           .from(conversations)
-          .where(and(inArray(conversations.queueId, ids), inArray(conversations.ownerId, personIds), gte(conversations.assignedAt, since)))
+          .where(and(inArray(conversations.queueId, ids), inArray(conversations.ownerId, personIds), eq(conversations.assignmentSource, 'distribution'), gte(conversations.assignedAt, since)))
           .groupBy(conversations.queueId, conversations.ownerId);
         for (const r of t) if (r.q && r.u) today.set(`${r.q}|${r.u}`, r.n);
         const o = await tx
@@ -288,7 +326,7 @@ export class QueuesService {
           const m = mine.get(p.id);
           return { user_id: p.id, name: p.name, role: p.role, active: m?.active ?? false, weight: m?.weight ?? 1, open_count: open.get(p.id) ?? 0, today_count: today.get(`${q.id}|${p.id}`) ?? 0 };
         });
-        return view(q, members, chans.filter((c) => c.queueId === q.id).map((c) => ({ id: c.id, name: c.name })), unassigned.get(q.id) ?? 0);
+        return view(q, members, chans.filter((c) => c.queueId === q.id).map((c) => ({ id: c.id, name: c.name })), unassigned.get(q.id) ?? 0, ownHours.get(q.id) ?? null, isOpenAt(cals.forQueue(q.id), now));
       });
     });
   }

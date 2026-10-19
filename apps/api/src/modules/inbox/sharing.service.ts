@@ -5,7 +5,8 @@ import { AppError, ConflictError, ForbiddenError, NotFoundError } from '../../er
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { OpportunitiesService } from '../opportunities';
-import { OrgMembersService, type OrgPerson } from '../organizations';
+import { OrgDirectoryService, OrgMembersService, type OrgPerson } from '../organizations';
+import { SlaService } from '../sla';
 import { abilities, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
 import { InboxService } from './inbox.service';
 import type { ConversationStatus, ConversationView } from './inbox.views';
@@ -64,6 +65,8 @@ export class SharingService {
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(OpportunitiesService) private readonly opportunities: OpportunitiesService,
     @Inject(InboxService) private readonly inbox: InboxService,
+    @Inject(SlaService) private readonly sla: SlaService,
+    @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
   ) {}
 
   /** A quién se puede transferir o compartir, con su carga y si está en la cola. Solo para quien puede hacer alguna de las dos cosas con esta conversación. */
@@ -113,6 +116,7 @@ export class SharingService {
     }
     const nameOf = (uid: string): string => people.get(uid)?.name ?? names.get(uid)?.name ?? 'otra persona';
     const now = new Date();
+    const timeZone = (await this.directory.current({ fresh: true })).timeZone;
     const prev = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, id, true);
       if (!abilities(scope, c, channel.state, collab).transfer) throw this.notAllowed(c, 'transferirla');
@@ -120,7 +124,9 @@ export class SharingService {
       const before = c.ownerId;
       // Quien recibe la conversación deja de ser colaborador: ahora es la dueña
       await this.revokeActive(tx, id, target.id, scope.userId, now);
-      await tx.update(conversations).set({ ownerId: target.id, assignedAt: now, assignmentSource: 'manual', status: 'pending', updatedAt: now }).where(eq(conversations.id, id));
+      await tx.update(conversations).set({ ownerId: target.id, assignedAt: now, assignmentSource: 'manual', status: 'pending', rotations: 0, triedOwners: [], updatedAt: now }).where(eq(conversations.id, id));
+      // El SLA pasa a la nueva persona: la medición anterior queda en el historial y su cronómetro de primera respuesta corre desde ahora
+      await this.sla.startFirst(tx, { id, ownerId: target.id, queueId: c.queueId }, { now, timeZone }, 'transferred');
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'owner_id', oldValue: before, newValue: target.id });
       if (c.status !== 'pending') await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'status', oldValue: c.status, newValue: 'pending' });
       // El anterior dueño puede seguir como colaborador (solo si todavía es de la empresa)
