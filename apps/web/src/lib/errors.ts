@@ -36,7 +36,9 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Empresas, notas y tareas (ADR-48): el servidor ya redacta el motivo
     case 'COMPANY_EXISTS': case 'COMPANY_LIMIT': case 'NOTE_NOT_YOURS': case 'TASK_NOT_YOURS': case 'TASK_SCOPE': case 'TASK_ASSIGNEE_NOT_ALLOWED': return e.message;
     // Conexiones de canales (ADR-50): el servidor ya redacta el motivo (sin datos secretos)
-    case 'CHANNEL_EXISTS': case 'CHANNEL_NUMBER_IN_USE': case 'CHANNEL_LIMIT': case 'CHANNEL_TOKEN_INVALID': case 'CHANNEL_NUMBER_NOT_FOUND': case 'CHANNEL_PROVIDER_UNAVAILABLE': case 'CHANNEL_CREDENTIALS_UNREADABLE': case 'CHANNEL_VAULT_UNAVAILABLE': return e.message;
+    case 'CHANNEL_EXISTS': case 'CHANNEL_NUMBER_IN_USE': case 'CHANNEL_LIMIT': case 'CHANNEL_TOKEN_INVALID': case 'CHANNEL_NUMBER_NOT_FOUND': case 'CHANNEL_PROVIDER_UNAVAILABLE': case 'CHANNEL_CREDENTIALS_UNREADABLE': case 'CHANNEL_VAULT_UNAVAILABLE': case 'CHANNEL_QUEUE_NOT_FOUND': return e.message;
+    // Colas y reparto (ADR-07): el servidor ya redacta el motivo
+    case 'QUEUE_EXISTS': case 'QUEUE_LIMIT': case 'QUEUE_IN_USE': case 'QUEUE_DISTRIBUTION_OFF': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;

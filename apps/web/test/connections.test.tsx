@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Channel, ChannelList } from '../src/lib/types';
+import type { Channel, ChannelList, Queue } from '../src/lib/types';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -9,9 +9,12 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const TOKEN = 'EAAG-token-permanente-de-prueba-0042';
 const channel = (over: Partial<Channel> = {}): Channel => ({
   id: 'ch1', provider: 'meta_cloud', is_official: true, name: 'Ventas', status: 'active', waba_id: '1234567890123', phone_number_id: '1090123456789',
-  display_phone: '+593 98 421 7730', verified_name: 'Barbería Norte', token_last4: '0042', last_check_at: '2026-10-18T15:00:00.000Z', last_error: null, last_event_at: null,
+  display_phone: '+593 98 421 7730', verified_name: 'Barbería Norte', token_last4: '0042', last_check_at: '2026-10-18T15:00:00.000Z', last_error: null, last_event_at: null, queue_id: null,
   created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z', ...over,
 });
+
+const queue = (id: string, name: string): Queue => ({ id, name, color: '#7c5cfa', distribution_on: true, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, members: [], channels: [], unassigned_count: 0, created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z' });
+const QUEUES = [queue('q1', 'Ventas'), queue('q2', 'Soporte')];
 
 function server(initial: Channel[] = [], opts: { vault?: boolean } = {}) {
   const s = { items: initial, vault: opts.vault ?? true, routes: {} as Record<string, Handler>, bodies: [] as unknown[] };
@@ -19,6 +22,7 @@ function server(initial: Channel[] = [], opts: { vault?: boolean } = {}) {
   s.routes = {
     ...authed(ME_ADMIN),
     'GET /channels': () => list(),
+    'GET /queues': () => ({ body: { items: QUEUES, limits: { max_queues: 20 } } }),
     'POST /channels': ({ body }) => {
       s.bodies.push(body);
       const b = body as { name: string; waba_id: string; phone_number_id: string };
@@ -114,6 +118,46 @@ describe('Configuración › Conexiones', () => {
     expect(antigua.getByRole('button', { name: 'Activar Antigua' })).toBeInTheDocument();
   });
 
+  it('cada conexión dice a qué cola va; al conectar o editar se elige la cola por defecto y se manda solo si cambió', async () => {
+    const s = server([channel({ queue_id: 'q1' }), channel({ id: 'ch2', name: 'Soporte técnico', phone_number_id: '1090123456780' })]);
+    const api = mockApi(s.routes);
+    renderApp('/settings/connections');
+    const ventas = within(await screen.findByRole('listitem', { name: 'Ventas' }));
+    expect(ventas.getByText('Cola').nextElementSibling).toHaveTextContent('Ventas');
+    expect(within(screen.getByRole('listitem', { name: 'Soporte técnico' })).getByText('Cola').nextElementSibling).toHaveTextContent('sin cola');
+    // editar: sin tocar la cola no se manda; cambiarla sí; «Sin cola» la quita
+    await userEvent.click(screen.getByRole('button', { name: 'Editar Ventas' }));
+    let d = within(await screen.findByRole('dialog', { name: 'Editar conexión' }));
+    expect(d.getByLabelText('Cola por defecto')).toHaveValue('q1');
+    await userEvent.selectOptions(d.getByLabelText('Cola por defecto'), 'q2');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.last('PATCH /channels/ch1')!.body).toEqual({ queue_id: 'q2' });
+    await userEvent.click(screen.getByRole('button', { name: 'Editar Ventas' }));
+    d = within(await screen.findByRole('dialog', { name: 'Editar conexión' }));
+    await userEvent.selectOptions(d.getByLabelText('Cola por defecto'), '');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(api.count('PATCH /channels/ch1')).toBe(2));
+    expect(api.last('PATCH /channels/ch1')!.body).toEqual({ queue_id: null });
+  });
+
+  it('al conectar un número se puede elegir su cola (opcional)', async () => {
+    const s = server();
+    mockApi(s.routes);
+    renderApp('/settings/connections');
+    await userEvent.click(await screen.findByRole('button', { name: 'Conectar un número' }));
+    const d = within(await screen.findByRole('dialog', { name: 'Conectar un número de WhatsApp' }));
+    expect(d.getByLabelText('Cola por defecto')).toHaveValue(''); // sin cola por omisión
+    await userEvent.type(d.getByLabelText(/^Nombre/), 'Ventas');
+    await userEvent.type(d.getByLabelText(/WABA ID/), '1234567890123');
+    await userEvent.type(d.getByLabelText(/Phone number ID/), '1090123456789');
+    await userEvent.type(d.getByLabelText(/Token de acceso permanente/), TOKEN);
+    await userEvent.selectOptions(d.getByLabelText('Cola por defecto'), 'q2');
+    await userEvent.click(d.getByRole('button', { name: 'Conectar' }));
+    await waitFor(() => expect(s.bodies).toHaveLength(1));
+    expect(s.bodies[0]).toMatchObject({ queue_id: 'q2' });
+  });
+
   it('cada conexión dice cuándo llegó el último aviso de Meta, o que todavía no ha llegado ninguno', async () => {
     mockApi(server([channel(), channel({ id: 'ch2', name: 'Soporte', phone_number_id: '1090123456780', last_event_at: '2026-10-18T16:45:00.000Z' })]).routes);
     renderApp('/settings/connections');
@@ -195,7 +239,7 @@ describe('Configuración › Conexiones', () => {
   });
 
   it('sin permiso (403) se explica y no se ofrece conectar nada', async () => {
-    mockApi({ ...authed(ME_ADMIN), 'GET /channels': () => err(403, 'FORBIDDEN') });
+    mockApi({ ...authed(ME_ADMIN), 'GET /channels': () => err(403, 'FORBIDDEN'), 'GET /queues': () => err(403, 'FORBIDDEN') });
     renderApp('/settings/connections');
     expect(await screen.findByRole('alert')).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar las conexiones.');
     expect(screen.queryByRole('button', { name: 'Conectar un número' })).not.toBeInTheDocument();

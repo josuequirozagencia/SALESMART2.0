@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { uuidv7 } from '@sales-smart/shared';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { channelAccounts, Database, whatsappAccounts, type TenantTx } from '../../db';
+import { channelAccounts, Database, queues, whatsappAccounts, type TenantTx } from '../../db';
 import { AppError, ConflictError, NotFoundError, ServiceUnavailableError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { TenantContext } from '../../tenant';
@@ -21,6 +21,8 @@ export interface ChannelView {
   is_official: boolean;
   name: string;
   status: 'active' | 'disabled';
+  /** Cola por defecto: a dónde van las conversaciones nuevas de este número. */
+  queue_id: string | null;
   waba_id: string;
   phone_number_id: string;
   display_phone: string | null;
@@ -45,6 +47,7 @@ const view = (a: AccountRow, w: WhatsAppRow): ChannelView => ({
   is_official: a.isOfficial,
   name: a.name,
   status: a.status as ChannelView['status'],
+  queue_id: a.queueId,
   waba_id: w.wabaId,
   phone_number_id: w.phoneNumberId,
   display_phone: w.displayPhone,
@@ -92,6 +95,7 @@ export class ConnectionsService {
       if ((n?.n ?? 0) >= MAX_CHANNELS) throw new ConflictError('CHANNEL_LIMIT', `Se alcanzó el máximo de ${MAX_CHANNELS} conexiones. Desconecta alguna para crear otra`);
       const [dup] = await tx.select({ id: whatsappAccounts.channelAccountId }).from(whatsappAccounts).where(and(eq(whatsappAccounts.phoneNumberId, input.phone_number_id), eq(whatsappAccounts.active, true))).limit(1);
       if (dup) throw this.numberInUse();
+      if (input.queue_id) await this.requireQueue(tx, input.queue_id);
     });
     const info = await this.verify(input.access_token, input.phone_number_id);
     const id = uuidv7();
@@ -101,13 +105,13 @@ export class ConnectionsService {
         const sealed = this.vault.seal(id, { access_token: input.access_token });
         const [a] = await tx
           .insert(channelAccounts)
-          .values({ id, provider: 'meta_cloud', isOfficial: true, name: input.name, credentialsSealed: sealed.sealed, keyVersion: sealed.keyVersion, tokenLast4: last4(input.access_token), createdBy: c.userId ?? null })
+          .values({ id, provider: 'meta_cloud', isOfficial: true, name: input.name, queueId: input.queue_id ?? null, credentialsSealed: sealed.sealed, keyVersion: sealed.keyVersion, tokenLast4: last4(input.access_token), createdBy: c.userId ?? null })
           .returning();
         const [w] = await tx
           .insert(whatsappAccounts)
           .values({ channelAccountId: id, wabaId: input.waba_id, phoneNumberId: input.phone_number_id, displayPhone: info.displayPhone, verifiedName: info.verifiedName, lastCheckAt: new Date() })
           .returning();
-        await writeAudit(tx, { entityType: AUDIT, entityId: id, newValue: { name: a!.name, provider: 'meta_cloud', waba_id: w!.wabaId, phone_number_id: w!.phoneNumberId }, source: 'manual' });
+        await writeAudit(tx, { entityType: AUDIT, entityId: id, newValue: { name: a!.name, provider: 'meta_cloud', waba_id: w!.wabaId, phone_number_id: w!.phoneNumberId, queue_id: a!.queueId }, source: 'manual' });
         return view(a!, w!);
       });
     } catch (e) {
@@ -133,6 +137,11 @@ export class ConnectionsService {
         if (input.status !== undefined && input.status !== a.status) {
           set.status = input.status;
           audits.push({ field: 'status', oldValue: a.status, newValue: input.status });
+        }
+        if (input.queue_id !== undefined && input.queue_id !== a.queueId) {
+          if (input.queue_id !== null) await this.requireQueue(tx, input.queue_id);
+          set.queueId = input.queue_id;
+          audits.push({ field: 'queue_id', oldValue: a.queueId, newValue: input.queue_id });
         }
         let wa = w;
         if (input.access_token !== undefined && info) {
@@ -246,6 +255,12 @@ export class ConnectionsService {
     } catch (e) {
       this.log.error({ err: e }, 'no se pudo deshacer la reserva del número');
     }
+  }
+
+  /** La cola existe en la empresa y no está archivada (la clave foránea compuesta ya impide una de otra empresa). */
+  private async requireQueue(tx: TenantTx, id: string): Promise<void> {
+    const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, id), isNull(queues.deletedAt))).limit(1);
+    if (!q) throw new AppError(400, 'CHANNEL_QUEUE_NOT_FOUND', 'Esa cola no existe o está archivada');
   }
 
   private nameTaken(e: unknown): ConflictError | undefined {

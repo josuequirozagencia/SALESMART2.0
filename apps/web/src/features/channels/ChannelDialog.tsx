@@ -3,6 +3,7 @@ import { friendlyError } from '../../lib/errors';
 import type { Channel } from '../../lib/types';
 import { Alert, Button, Field, Input, PasswordInput } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
+import { useQueues } from '../queues/useQueues';
 import { useConnectChannel, useUpdateChannel } from './useChannels';
 
 const IDS = /^[0-9]{5,25}$/;
@@ -17,6 +18,8 @@ export function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose
   const [waba, setWaba] = useState('');
   const [phoneId, setPhoneId] = useState('');
   const [token, setToken] = useState('');
+  const [queueId, setQueueId] = useState(channel?.queue_id ?? '');
+  const queues = useQueues();
   const [errors, setErrors] = useState<Partial<Record<'name' | 'waba' | 'phone' | 'token', string>>>({});
   const [error, setError] = useState<string>();
   const connect = useConnectChannel();
@@ -38,13 +41,14 @@ export function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose
     setError(undefined);
     const h = { onSuccess: onClose, onError: (err: unknown) => setError(friendlyError(err, 'No pudimos guardar la conexión.')) };
     if (editing) {
-      const input: { name?: string; access_token?: string } = {};
+      const input: { name?: string; access_token?: string; queue_id?: string | null } = {};
       if (n !== channel.name) input.name = n;
+      if (queueId !== (channel.queue_id ?? '')) input.queue_id = queueId === '' ? null : queueId;
       if (t !== '') input.access_token = t;
       if (Object.keys(input).length === 0) return onClose();
       update.mutate({ id: channel.id, input }, h);
     } else {
-      connect.mutate({ name: n, waba_id: w, phone_number_id: p, access_token: t }, h);
+      connect.mutate({ name: n, waba_id: w, phone_number_id: p, access_token: t, ...(queueId !== '' ? { queue_id: queueId } : {}) }, h);
     }
   }
 
@@ -70,6 +74,14 @@ export function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose
         )}
         <Field label={editing ? 'Token nuevo (opcional)' : 'Token de acceso permanente'} error={errors.token} hint={editing ? 'Déjalo vacío para conservar el actual. Se comprueba con Meta antes de guardarlo.' : 'Se guarda cifrado y no se vuelve a mostrar. Se comprueba con Meta antes de guardarlo.'} required={!editing}>
           {(p) => <PasswordInput {...p} value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" spellCheck={false} />}
+        </Field>
+        <Field label="Cola por defecto" hint="Las conversaciones nuevas de este número van a esta cola, que decide el asesor. Sin cola quedan «sin asignar».">
+          {(p) => (
+            <select {...p} value={queueId} onChange={(e) => setQueueId(e.target.value)} className="w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg">
+              <option value="">Sin cola</option>
+              {(queues.data?.items ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+            </select>
+          )}
         </Field>
         {error ? <Alert>{error}</Alert> : null}
         <div className="flex justify-end gap-2">

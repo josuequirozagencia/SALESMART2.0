@@ -5,6 +5,8 @@ import { Database, webhookEvents, whatsappAccounts, type TenantTx } from '../../
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { ConversationsService } from '../conversations';
+import type { OrgDirectory } from '../organizations';
+import type { AssignmentContext } from '../queues';
 import { deepStripNul } from './meta-webhook';
 import { WHATSAPP_PROVIDER, type WhatsAppProvider } from './whatsapp.port';
 
@@ -60,8 +62,12 @@ export class WebhookEventsService {
     });
   }
 
-  /** Procesa los avisos pendientes cuya hora ya llegó. Devuelve cuántos tomó (hechos o reprogramados). */
-  async runDue(now = new Date(), batch = EVENT_BATCH): Promise<number> {
+  /**
+   * Procesa los avisos pendientes cuya hora ya llegó. Devuelve cuántos tomó (hechos o reprogramados). `dir` es lo de identidad que el reparto necesita (zona horaria
+   * y quién puede recibir trabajo): quien llama lo lee ANTES, porque dentro de la transacción de negocio no se puede tocar la identidad.
+   */
+  async runDue(now: Date, dir: OrgDirectory, batch = EVENT_BATCH): Promise<number> {
+    const assign: AssignmentContext = { now, timeZone: dir.timeZone, assignable: dir.assignable };
     return this.db.withTenant(async (tx) => {
       const due = await tx
         .select()
@@ -70,13 +76,13 @@ export class WebhookEventsService {
         .orderBy(asc(webhookEvents.receivedAt), asc(webhookEvents.id))
         .limit(batch)
         .for('update', { skipLocked: true });
-      for (const ev of due) await this.processOne(tx, ev, now);
+      for (const ev of due) await this.processOne(tx, ev, now, assign);
       if (due.length < batch) await this.redactOld(tx, now);
       return due.length;
     });
   }
 
-  private async processOne(tx: TenantTx, ev: EventRow, now: Date): Promise<void> {
+  private async processOne(tx: TenantTx, ev: EventRow, now: Date, assign: AssignmentContext): Promise<void> {
     const attempts = ev.attempts + 1;
     // SAVEPOINT en la misma transacción: si este aviso falla se revierte solo lo suyo y la transacción (y los demás avisos del lote) siguen sanos
     await tx.execute(sql`SAVEPOINT webhook_event`);
@@ -85,7 +91,7 @@ export class WebhookEventsService {
       // Un aviso sin contenido (ya vaciado) no tiene nada que procesar
       if (ev.payload) {
         for (const { event } of this.provider.parseStored(ev.payload, ev.receivedAt).events) {
-          for (const m of event.messages) await this.conversations.ingestInbound(tx, ev.channelAccountId, m);
+          for (const m of event.messages) await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
           for (const s of event.statuses) await this.conversations.applyStatus(tx, ev.channelAccountId, s);
         }
       }

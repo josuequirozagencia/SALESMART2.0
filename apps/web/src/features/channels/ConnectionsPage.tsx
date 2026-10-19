@@ -5,6 +5,7 @@ import type { Channel } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
+import { useQueues } from '../queues/useQueues';
 import { ChannelDialog } from './ChannelDialog';
 import { useCheckChannel, useChannels, useDisconnectChannel, useUpdateChannel } from './useChannels';
 
@@ -16,7 +17,7 @@ function statusPill(c: Channel): { kind: PillKind; label: string } {
   return { kind: 'ok', label: 'Activa' };
 }
 
-function ChannelCard({ channel: c, onEdit, onError }: { channel: Channel; onEdit: () => void; onError: (m: string | undefined) => void }) {
+function ChannelCard({ channel: c, queueName, onEdit, onError }: { channel: Channel; queueName: string | null; onEdit: () => void; onError: (m: string | undefined) => void }) {
   const check = useCheckChannel();
   const update = useUpdateChannel();
   const disconnect = useDisconnectChannel();
@@ -39,6 +40,7 @@ function ChannelCard({ channel: c, onEdit, onError }: { channel: Channel; onEdit
         <div className="flex gap-1.5"><dt className="text-muted">Phone number ID</dt><dd className="font-mono">{c.phone_number_id}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Token</dt><dd className="font-mono">{c.token_last4 ? `••••${c.token_last4}` : 'sin token'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Última comprobación</dt><dd>{c.last_check_at ? shortDateTime(c.last_check_at) : 'nunca'}</dd></div>
+        <div className="flex gap-1.5"><dt className="text-muted">Cola</dt><dd>{queueName ?? 'sin cola'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso de Meta</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
       </dl>
       {confirm ? (
@@ -66,6 +68,8 @@ function ChannelCard({ channel: c, onEdit, onError }: { channel: Channel; onEdit
  */
 export function ConnectionsPage() {
   const q = useChannels();
+  const queues = useQueues();
+  const queueName = (id: string | null): string | null => (id ? (queues.data?.items.find((x) => x.id === id)?.name ?? null) : null);
   const [dialog, setDialog] = useState<{ channel?: Channel } | null>(null);
   const [error, setError] = useState<string>();
   const items = q.data?.items ?? [];
@@ -91,7 +95,7 @@ export function ConnectionsPage() {
           <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[13.5px] text-muted">Aún no hay números conectados.{vaultOk ? ' Conecta el primero con «Conectar un número».' : ''}</p>
         ) : (
           <ul aria-label="Conexiones" className="grid gap-3">
-            {items.map((c) => <ChannelCard key={c.id} channel={c} onEdit={() => setDialog({ channel: c })} onError={setError} />)}
+            {items.map((c) => <ChannelCard key={c.id} channel={c} queueName={queueName(c.queue_id)} onEdit={() => setDialog({ channel: c })} onError={setError} />)}
           </ul>
         )
       ) : null}

@@ -561,6 +561,8 @@ export interface Channel {
   is_official: boolean;
   name: string;
   status: 'active' | 'disabled';
+  /** Cola por defecto: a dónde van las conversaciones nuevas de este número. */
+  queue_id: string | null;
   waba_id: string;
   phone_number_id: string;
   display_phone: string | null;
@@ -584,4 +586,60 @@ export interface ChannelInput {
   waba_id: string;
   phone_number_id: string;
   access_token: string;
+  /** Cola por defecto (opcional). */
+  queue_id?: string | null;
+}
+
+// ── Colas y reparto (M5.3, ADR-07) ──
+export type QueueMode = 'equal' | 'weighted' | 'load';
+export interface QueueMember {
+  user_id: string;
+  name: string;
+  role: string;
+  active: boolean;
+  weight: number;
+  /** Conversaciones abiertas que atiende ahora. */
+  open_count: number;
+  /** Conversaciones que recibió hoy de esta cola. */
+  today_count: number;
+}
+export interface Queue {
+  id: string;
+  name: string;
+  color: string;
+  distribution_on: boolean;
+  mode: QueueMode;
+  batch: number;
+  daily_cap: number;
+  only_unassigned: boolean;
+  /** Todas las personas que pueden recibir trabajo, con su estado en ESTA cola. */
+  members: QueueMember[];
+  /** Conexiones cuya cola por defecto es esta. */
+  channels: Array<{ id: string; name: string }>;
+  unassigned_count: number;
+  created_at: string;
+  updated_at: string;
+}
+export interface QueueList {
+  items: Queue[];
+  limits: { max_queues: number };
+}
+export interface QueueSimulation {
+  sequence: Array<{ user_id: string; name: string }>;
+  counts: Array<{ user_id: string; name: string; count: number }>;
+  stopped_early: boolean;
+}
+export interface QueueSettings {
+  name?: string;
+  color?: string;
+  distribution_on?: boolean;
+  mode?: QueueMode;
+  batch?: number;
+  daily_cap?: number;
+  only_unassigned?: boolean;
+}
+export interface QueueMemberInput {
+  user_id: string;
+  active: boolean;
+  weight: number;
 }

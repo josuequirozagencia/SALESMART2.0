@@ -4,6 +4,8 @@ import { uuidv7 } from '@sales-smart/shared';
 import { channelAccounts } from './channels';
 import { contacts } from './crm';
 import { tenantTable } from './helpers';
+import { users } from './identity';
+import { queues } from './queues';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -50,7 +52,8 @@ export const webhookEvents = tenantTable(
 /**
  * Conversación de UN contacto por UN canal. Solo puede haber una ABIERTA (cualquier estado menos `closed`) por contacto y canal: índice único parcial.
  * Estados (ADR-50 #5): `unassigned` sin asesor · `pending` asignada y sin aceptar · `working` · `waiting` esperando al cliente · `closed`.
- * Hasta M5.3 (colas y reparto) las nuevas quedan `unassigned`.
+ * M5.3: la conversación nace en la cola de su conexión; si el reparto de la cola elige a un asesor queda `pending` con su dueño (`owner_id`, `assigned_at`); si el reparto
+ * está apagado, no hay asesor disponible o el canal no tiene cola, queda `unassigned`. Salvo `closed`, hay dueño si y solo si el estado no es `unassigned`.
  */
 export const conversations = tenantTable(
   'conversations',
@@ -59,6 +62,10 @@ export const conversations = tenantTable(
     contactId: uuid('contact_id').notNull(),
     channelAccountId: uuid('channel_account_id').notNull(),
     status: text('status').notNull().default('unassigned'),
+    queueId: uuid('queue_id'),
+    /** Quién la atiende (asesor). Null = sin asignar. */
+    ownerId: uuid('owner_id').references(() => users.id),
+    assignedAt: ts('assigned_at'),
     lastMessageAt: ts('last_message_at'),
     /** Último mensaje del CLIENTE: de aquí sale la ventana de 24 h de WhatsApp oficial. */
     lastInboundAt: ts('last_inbound_at'),
@@ -70,10 +77,15 @@ export const conversations = tenantTable(
     foreignKey({ name: 'conversations_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
     foreignKey({ name: 'conversations_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
     check('conversations_status_valid', sql`${t['status']!} IN ('unassigned', 'pending', 'working', 'waiting', 'closed')`),
+    foreignKey({ name: 'conversations_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
+    check('conversations_owner_status', sql`${t['status']!} = 'closed' OR ((${t['status']!} = 'unassigned') = (${t['ownerId']!} IS NULL))`),
+    check('conversations_assigned_pair', sql`(${t['ownerId']!} IS NULL) = (${t['assignedAt']!} IS NULL)`),
     check('conversations_unread_valid', sql`${t['unreadCount']!} >= 0`),
     uniqueIndex('conversations_one_open_uq').on(t['organizationId']!, t['contactId']!, t['channelAccountId']!).where(sql`${t['status']!} <> 'closed'`),
     index('conversations_list_idx').on(t['organizationId']!, t['status']!, t['lastMessageAt']!),
     index('conversations_contact_idx').on(t['organizationId']!, t['contactId']!),
+    index('conversations_owner_idx').on(t['organizationId']!, t['ownerId']!, t['status']!),
+    index('conversations_assigned_idx').on(t['organizationId']!, t['queueId']!, t['assignedAt']!),
   ],
 );
 

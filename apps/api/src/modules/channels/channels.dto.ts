@@ -9,11 +9,14 @@ const metaId = z.string().trim().regex(/^[0-9]{5,25}$/, 'debe tener solo dígito
 const token = z.string().trim().regex(/^[\x21-\x7E]{10,1000}$/, 'el token tiene un formato no válido');
 
 /** Conexión nueva de WhatsApp oficial: el número y su token. Se comprueba contra el proveedor antes de guardarla. */
-export const createChannelSchema = z.object({ name, waba_id: metaId, phone_number_id: metaId, access_token: token }).strict();
+/** Cola por defecto de la conexión (M5.3): `null` o ausente = sin cola (las conversaciones nuevas quedan «sin asignar»). */
+const queueId = z.uuid().nullable();
+
+export const createChannelSchema = z.object({ name, waba_id: metaId, phone_number_id: metaId, access_token: token, queue_id: queueId.optional() }).strict();
 export type CreateChannelDto = z.infer<typeof createChannelSchema>;
 
 export const updateChannelSchema = z
-  .object({ name: name.optional(), status: z.enum(['active', 'disabled']).optional(), access_token: token.optional() })
+  .object({ name: name.optional(), status: z.enum(['active', 'disabled']).optional(), access_token: token.optional(), queue_id: queueId.optional() })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });
 export type UpdateChannelDto = z.infer<typeof updateChannelSchema>;

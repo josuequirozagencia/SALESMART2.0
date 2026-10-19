@@ -309,6 +309,20 @@
       "when": 1792358775725,
       "tag": "0043_m52_conversations_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1792411079604,
+      "tag": "0044_m53_queues",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1792411090580,
+      "tag": "0045_m53_queues_grants",
+      "breakpoints": true
     }
   ]
 }

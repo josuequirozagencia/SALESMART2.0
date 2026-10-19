@@ -9,7 +9,8 @@ export function useChannels() {
 
 function useDone() {
   const qc = useQueryClient();
-  return () => qc.invalidateQueries({ queryKey: ['channels'] });
+  // Las colas muestran qué conexiones las usan
+  return () => Promise.all([qc.invalidateQueries({ queryKey: ['channels'] }), qc.invalidateQueries({ queryKey: ['queues'] })]);
 }
 
 export function useConnectChannel() {
@@ -20,7 +21,7 @@ export function useConnectChannel() {
 export function useUpdateChannel() {
   const done = useDone();
   return useMutation({
-    mutationFn: ({ id, input }: { id: string; input: { name?: string; status?: 'active' | 'disabled'; access_token?: string } }) => api<Channel>(`/channels/${id}`, { method: 'PATCH', body: input }),
+    mutationFn: ({ id, input }: { id: string; input: { name?: string; status?: 'active' | 'disabled'; access_token?: string; queue_id?: string | null } }) => api<Channel>(`/channels/${id}`, { method: 'PATCH', body: input }),
     onSettled: done,
   });
 }

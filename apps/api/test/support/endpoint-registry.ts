@@ -142,6 +142,14 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Webhook de Meta (M5.2, ADR-50): PÚBLICO; la credencial es la firma del aviso (HMAC con el secreto de la app de la plataforma), con límite de fallos por IP. Pruebas: test/channels/meta-webhook.test.ts
   { route: 'GET /v1/channels/meta/webhook', kind: 'public' },
   { route: 'POST /v1/channels/meta/webhook', kind: 'public' },
+  // Colas y reparto (M5.3, ADR-07/ADR-50). Pruebas: test/queues/queues.test.ts (A↔B, permisos, reparto, concurrencia)
+  { route: 'GET /v1/queues', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'POST /v1/queues', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'PATCH /v1/queues/:id', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'PUT /v1/queues/:id/members', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'DELETE /v1/queues/:id', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'POST /v1/queues/:id/simulate', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'POST /v1/queues/:id/distribute', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

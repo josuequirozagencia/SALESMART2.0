@@ -12,6 +12,7 @@ import { CustomFieldsModule } from './modules/custom-fields';
 import { OpportunitiesModule } from './modules/opportunities';
 import { OrganizationsModule } from './modules/organizations';
 import { PipelinesModule } from './modules/pipelines';
+import { QueuesModule } from './modules/queues';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, ChannelsModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, ChannelsModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

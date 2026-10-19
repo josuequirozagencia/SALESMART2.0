@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { ScheduledJob } from '../../jobs/scheduled-job';
 import { TenantContext } from '../../tenant';
-import { ChannelRoutesService } from '../organizations';
+import { ChannelRoutesService, OrgDirectoryService } from '../organizations';
 import { EVENT_BATCH, WebhookEventsService } from './webhook-events.service';
 
 /** Tope de lotes seguidos por empresa y pasada: una ráfaga grande se drena rápido, pero ninguna empresa acapara la tarea. */
@@ -20,13 +20,16 @@ export class WebhookEventsJob implements ScheduledJob {
   constructor(
     @Inject(WebhookEventsService) private readonly events: WebhookEventsService,
     @Inject(ChannelRoutesService) private readonly routes: ChannelRoutesService,
+    @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
   ) {}
 
   async run(now: Date): Promise<number> {
     let processed = 0;
     for (const organizationId of await this.routes.organizationIds()) {
+      // Lo de identidad (zona horaria, quién puede recibir trabajo) se lee ANTES de abrir la transacción de negocio; se guarda 30 s por empresa
+      const dir = await TenantContext.run({ organizationId }, () => this.directory.current());
       for (let i = 0; i < MAX_BATCHES_PER_RUN; i++) {
-        const n = await TenantContext.run({ organizationId }, () => this.events.runDue(now));
+        const n = await TenantContext.run({ organizationId }, () => this.events.runDue(now, dir));
         processed += n;
         if (n < EVENT_BATCH) break; // lote incompleto: ya no quedan avisos pendientes
       }

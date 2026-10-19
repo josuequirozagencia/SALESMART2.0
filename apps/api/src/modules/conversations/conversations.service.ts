@@ -3,6 +3,8 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { conversations, messages, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
+import { AssignmentService, type AssignmentContext } from '../queues';
+import { SystemTagsService } from '../tags';
 import type { NormalizedMessage, NormalizedStatus } from './normalized';
 
 export interface IngestResult {
@@ -25,17 +27,24 @@ const RANK: Readonly<Record<string, number>> = { queued: 0, sent: 1, delivered: 
  */
 @Injectable()
 export class ConversationsService {
-  constructor(@Inject(ContactsService) private readonly contacts: ContactsService) {}
+  constructor(
+    @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(AssignmentService) private readonly assignment: AssignmentService,
+    @Inject(SystemTagsService) private readonly tags: SystemTagsService,
+  ) {}
 
   /**
    * Registra un mensaje que ENTRA. Idempotente por `(canal, externalId)`: repetirlo no crea nada. Crea el contacto y la conversación si hacen falta, y
-   * actualiza la conversación (último mensaje, no leídos; si esperaba al cliente, vuelve a «trabajando»).
+   * actualiza la conversación (último mensaje, no leídos; si esperaba al cliente, vuelve a «trabajando») y, si sigue «sin asignar», la reparte según la cola de su
+   * conexión (M5.3). `assign` trae lo de identidad que el reparto necesita (zona horaria y quién puede recibir trabajo): se resuelve antes de abrir la transacción.
    */
-  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage): Promise<IngestResult> {
+  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext): Promise<IngestResult> {
     const [seen] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId))).limit(1);
     if (seen) return { duplicate: true, conversationId: null, contactCreated: false, conversationCreated: false };
 
     const contact = await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
+    // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
+    if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
     const conv = await this.openConversation(tx, contact.id, channelAccountId);
     const inserted = await tx
       .insert(messages)
@@ -69,6 +78,8 @@ export class ConversationsService {
         updatedAt: new Date(),
       })
       .where(eq(conversations.id, conv.id));
+    // Una conversación sin dueño (nueva, o que antes no tenía a quién) se reparte ahora; si ya tiene dueño no se toca
+    await this.assignment.assignConversation(tx, conv.id, assign);
     return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
   }
 

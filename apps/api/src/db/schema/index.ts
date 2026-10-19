@@ -9,3 +9,4 @@ export { customFieldDefinitions, customFieldValues } from './custom-fields';
 export { pipelines, pipelineStages, opportunities, stageHistory } from './pipelines';
 export { channelAccounts, whatsappAccounts, channelRoutes } from './channels';
 export { webhookEvents, conversations, messages } from './conversations';
+export { queues, queueMembers, queueDistributionState } from './queues';

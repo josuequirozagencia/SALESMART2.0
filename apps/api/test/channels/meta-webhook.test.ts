@@ -101,7 +101,7 @@ const runJob = (now = new Date()): Promise<number> => main.get(WebhookEventsJob)
 // ── Base de datos ────────────────────────────────────────────────────────────
 interface EventRow { id: string; organization_id: string; phone_number_id: string; status: string; attempts: number; last_error: string | null; payload: Record<string, unknown> | null; redacted_at: Date | null; processed_at: Date | null; next_attempt_at: Date }
 const events = async (org?: string): Promise<EventRow[]> => (await admin.query(`SELECT * FROM webhook_events ${org ? `WHERE organization_id = '${org}'` : ''} ORDER BY received_at, id`)).rows as EventRow[];
-interface ConvRow { id: string; organization_id: string; contact_id: string; channel_account_id: string; status: string; unread_count: number; last_message_at: Date | null; last_inbound_at: Date | null }
+interface ConvRow { id: string; organization_id: string; contact_id: string; channel_account_id: string; status: string; owner_id: string | null; queue_id: string | null; unread_count: number; last_message_at: Date | null; last_inbound_at: Date | null }
 const convs = async (org = ORG_A): Promise<ConvRow[]> => (await admin.query('SELECT * FROM conversations WHERE organization_id = $1 ORDER BY created_at, id', [org])).rows as ConvRow[];
 interface MsgRow { id: string; conversation_id: string; external_id: string | null; direction: string; sender_type: string; kind: string; body: string | null; media: Record<string, unknown> | null; meta: Record<string, unknown>; status: string; error: string | null; sent_at: Date; delivered_at: Date | null; read_at: Date | null }
 const msgs = async (org = ORG_A): Promise<MsgRow[]> => (await admin.query('SELECT * FROM messages WHERE organization_id = $1 ORDER BY sent_at, id', [org])).rows as MsgRow[];
@@ -344,6 +344,20 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(audit).not.toContain('Hola, quiero una cita');
   });
 
+  it('quien escribe por primera vez es un lead: el sistema le pone la etiqueta «Lead»; a un contacto que ya existía no se le pone ni se le quita nada, y no se manda ningún evento a Meta', async () => {
+    expect((await call('POST', '/contacts', aliceToken, { name: 'Ya existía', phones: [`+${BETO}`] })).status).toBe(201);
+    await post(wa({ id: 'wamid.N1' })); // Ana, nueva
+    await post(wa({ from: BETO, id: 'wamid.E1', name: 'Beto' })); // Beto, que ya era contacto
+    await runJob();
+    const tagsOf = async (name: string) => (await admin.query(`SELECT t.system_key, ct.set_by FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id AND t.organization_id = ct.organization_id JOIN contacts c ON c.id = ct.contact_id WHERE c.organization_id = $1 AND c.name = $2`, [ORG_A, name])).rows;
+    expect(await tagsOf('Ana Torres')).toEqual([{ system_key: 'lead', set_by: 'system' }]);
+    expect(await tagsOf('Ya existía')).toEqual([]);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM meta_events WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(0);
+    await post(wa({ id: 'wamid.N2', ts: T0 + 5 })); // Ana vuelve a escribir: no se repite
+    await runJob();
+    expect(await tagsOf('Ana Torres')).toHaveLength(1);
+  });
+
   it('los siguientes mensajes del mismo contacto caen en LA MISMA conversación (una abierta por contacto y canal) y suman no leídos', async () => {
     await post(wa({ id: 'wamid.A1', ts: T0 }));
     await post(wa({ id: 'wamid.A2', ts: T0 + 30, text: 'segundo' }));
@@ -413,7 +427,7 @@ describe('procesar: contacto, conversación y mensajes', () => {
   it('con la conversación cerrada, el siguiente mensaje abre otra; con la conversación esperando al cliente, vuelve a «trabajando»', async () => {
     await post(wa({ id: 'wamid.A1' }));
     await runJob();
-    await admin.query(`UPDATE conversations SET status = 'waiting' WHERE organization_id = $1`, [ORG_A]);
+    await admin.query(`UPDATE conversations SET status = 'waiting', owner_id = $2, assigned_at = now() WHERE organization_id = $1`, [ORG_A, IDS.alice]); // esperando al cliente: ya tiene quien la atiende
     await post(wa({ id: 'wamid.A2', ts: T0 + 10 }));
     await runJob();
     expect((await convs()).map((c) => c.status)).toEqual(['working']);
@@ -444,6 +458,20 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(await contactsOf()).toEqual([]);
     expect(await msgs()).toEqual([]);
     expect((await events())[0]!.status).toBe('done');
+  });
+
+  it('con una cola de reparto en la conexión, el mensaje que llega por el webhook queda asignado a un asesor (la tarea lee la identidad antes de abrir la transacción)', async () => {
+    const q = await json<{ id: string }>(await call('POST', '/queues', aliceToken, { name: 'Ventas' }));
+    expect((await call('PATCH', `/queues/${q.id}`, aliceToken, { distribution_on: true })).status).toBe(200);
+    expect((await call('PUT', `/queues/${q.id}/members`, aliceToken, { members: [{ user_id: IDS.alice, active: true, weight: 1 }] })).status).toBe(200);
+    expect((await call('PATCH', `/channels/${channelA}`, aliceToken, { queue_id: q.id })).status).toBe(200);
+    await post(wa());
+    await runJob();
+    const cv = await convs();
+    expect(cv).toHaveLength(1);
+    expect(cv[0]).toMatchObject({ status: 'pending', owner_id: IDS.alice, queue_id: q.id });
+    expect((await contactsOf())[0]!.id).toBe(cv[0]!.contact_id); // y el contacto quedó en su cartera
+    expect((await admin.query(`SELECT owner_id FROM contacts WHERE organization_id = $1`, [ORG_A])).rows[0].owner_id).toBe(IDS.alice);
   });
 
   it('una conexión DESACTIVADA sigue recibiendo: los mensajes de clientes no se pierden', async () => {
@@ -556,9 +584,9 @@ describe('fallos, reintentos y concurrencia', () => {
   it('un aviso malo no aborta a los demás del mismo lote', async () => {
     const svc = main.get(ConversationsService);
     const original = svc.ingestInbound.bind(svc);
-    vi.spyOn(svc, 'ingestInbound').mockImplementation(async (tx, channel, m) => {
+    vi.spyOn(svc, 'ingestInbound').mockImplementation(async (tx, channel, m, assign) => {
       if (m.externalId === 'wamid.MALO') throw new Error('falla este');
-      return original(tx, channel, m);
+      return original(tx, channel, m, assign);
     });
     await post(wa({ id: 'wamid.MALO', ts: T0 }));
     await post(wa({ id: 'wamid.BUENO', ts: T0 + 1 }));
@@ -685,7 +713,7 @@ describe('aislamiento A↔B y base de datos', () => {
     await expect(sql(msg('external_id', `'in', 'contact', 'text', 'received', now(), 'wamid.A1'`))).rejects.toThrow(/messages_channel_external_uq/);
     await expect(sql(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, status, sent_at) VALUES (gen_random_uuid(), '${ORG_B}', '${conv.id}', '${channelB}', 'in', 'contact', 'text', 'received', now())`)).rejects.toThrow(/messages_conversation_fk/); // conversación de otra empresa
     await expect(sql(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id) VALUES (gen_random_uuid(), '${ORG_A}', '${conv.contact_id}', '${channelA}')`)).rejects.toThrow(/conversations_one_open_uq/); // una sola abierta
-    await expect(sql(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status) VALUES (gen_random_uuid(), '${ORG_A}', '${conv.contact_id}', '${channelA}', 'abierta')`)).rejects.toThrow(/conversations_status_valid/);
+    await expect(sql(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, owner_id, assigned_at) VALUES (gen_random_uuid(), '${ORG_A}', '${conv.contact_id}', '${channelA}', 'abierta', '${IDS.alice}', now())`)).rejects.toThrow(/conversations_status_valid/);
     await expect(sql(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id) VALUES (gen_random_uuid(), '${ORG_B}', '${conv.contact_id}', '${channelB}')`)).rejects.toThrow(/conversations_contact_fk/); // contacto de otra empresa
     await expect(sql(`INSERT INTO webhook_events(id, organization_id, channel_account_id, phone_number_id, payload_hash) VALUES (gen_random_uuid(), '${ORG_A}', '${channelA}', '${PHONE_A}', 'no-es-hex')`)).rejects.toThrow(/webhook_events_hash_shape/);
     await expect(sql(`INSERT INTO webhook_events(id, organization_id, channel_account_id, phone_number_id, payload_hash) VALUES (gen_random_uuid(), '${ORG_B}', '${channelA}', '${PHONE_A}', '${'a'.repeat(64)}')`)).rejects.toThrow(/webhook_events_channel_fk/);

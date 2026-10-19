@@ -1333,6 +1333,106 @@ test('webhook de WhatsApp: el Súper Admin ve la dirección y guarda la app de M
   await expect(page.locator('body')).not.toContainText(APP_SECRET);
 });
 
+test('colas y reparto: el administrador crea una cola con tres asesores, la enlaza a su conexión y tres mensajes de clientes distintos se reparten uno a cada asesor; otra empresa no ve la cola', async ({ page, request }) => {
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-colas-0123456789abcdef';
+  const VERIFY = 'verify-e2e-colas-0123456789abcdef';
+  const PHONE_ID = '1090123450077';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: VERIFY } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  // La empresa y dos asesores (no hay todavía una pantalla para invitarlos: se crean directo en la base de la prueba)
+  const email = await createAccount(request, uniqueEmail('colas'));
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [email])).rows[0].organization_id as string;
+    const advisors: Array<[string, string]> = [['Carlos E2E', uniqueEmail('carlos')], ['Elena E2E', uniqueEmail('elena')]];
+    for (const [fullName, mail] of advisors) {
+      const id = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) VALUES (gen_random_uuid(), $1, '$argon2id$sin-acceso', 'active', now(), $2) RETURNING id`, [mail, fullName])).rows[0].id as string;
+      await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [id, orgId]);
+    }
+
+    // 1) Crea la cola «Ventas», enciende el reparto y elige a los tres
+    await uiLogin(page, email);
+    await page.getByRole('link', { name: 'Configuración' }).click();
+    await page.getByRole('link', { name: 'Colas' }).click();
+    await expect(page.getByText(/Aún no hay colas/)).toBeVisible();
+    await page.getByRole('button', { name: 'Nueva cola' }).click();
+    const nuevo = page.getByRole('dialog', { name: 'Nueva cola' });
+    await nuevo.getByLabel('Nombre').fill('Ventas');
+    await nuevo.getByRole('button', { name: 'Crear cola' }).click();
+    const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
+    await cfg.getByLabel('Repartir las conversaciones nuevas automáticamente').check();
+    for (const n of ['Ana E2E', 'Carlos E2E', 'Elena E2E']) await cfg.getByLabel(`${n} participa`).check();
+    await cfg.getByRole('button', { name: 'Guardar' }).click();
+    await expect(cfg.getByText('Cambios guardados.')).toBeVisible();
+    await cfg.getByRole('button', { name: 'Simular 20 conversaciones' }).click();
+    const simR = cfg.getByRole('region', { name: 'Resultado de la simulación' });
+    for (const n of ['Ana E2E', 'Carlos E2E', 'Elena E2E']) await expect(simR).toContainText(n);
+    await cfg.getByRole('button', { name: 'Cerrar' }).click();
+    const card = page.getByRole('button', { name: 'Configurar Ventas' });
+    await expect(card).toContainText('Reparto activo');
+    await expect(card).toContainText('3 asesores');
+
+    // 2) Conecta el número eligiendo esa cola
+    await page.getByRole('link', { name: 'Conexiones' }).click();
+    await page.getByRole('button', { name: 'Conectar un número' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Conectar un número de WhatsApp' });
+    await dlg.getByLabel(/^Nombre/).fill('Línea ventas');
+    await dlg.getByLabel(/WABA ID/).fill('1234567890123');
+    await dlg.getByLabel(/Phone number ID/).fill(PHONE_ID);
+    await dlg.getByLabel(/Token de acceso permanente/).fill('fake-valid-token');
+    await dlg.getByLabel('Cola por defecto').selectOption({ label: 'Ventas' });
+    await dlg.getByRole('button', { name: 'Conectar' }).click();
+    const conn = page.getByRole('listitem', { name: 'Línea ventas' });
+    await expect(conn).toContainText('Cola');
+    await expect(conn.getByText('Cola').locator('xpath=following-sibling::dd')).toHaveText('Ventas');
+
+    // 3) Tres clientes distintos escriben (avisos firmados de Meta)
+    const hook = `${apiBase}/v1/channels/meta/webhook`;
+    const clients = ['593984217730', '593991234567', '593987654321'];
+    for (const [i, from] of clients.entries()) {
+      const payload = JSON.stringify({
+        object: 'whatsapp_business_account',
+        entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: `Cliente ${i + 1}` }, wa_id: from }], messages: [{ from, id: `wamid.COLAS${i}`, timestamp: String(Math.floor(Date.now() / 1000) + i), type: 'text', text: { body: 'Hola' } }] } }] }],
+      });
+      const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+      expect((await request.post(hook, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    }
+
+    // 4) La tarea de proceso los reparte: uno a cada asesor, en «pendiente»
+    let rows: Array<{ email: string; status: string }> = [];
+    for (let i = 0; i < 60 && rows.length < 3; i++) {
+      rows = (await db.query(`SELECT u.email, c.status FROM conversations c JOIN users u ON u.id = c.owner_id WHERE c.organization_id = $1`, [orgId])).rows as typeof rows;
+      if (rows.length < 3) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map((r) => r.email)).size).toBe(3); // uno a cada asesor
+    expect(rows.every((r) => r.status === 'pending')).toBe(true);
+    expect((await db.query(`SELECT count(*)::int AS n FROM contacts WHERE organization_id = $1 AND owner_id IS NOT NULL`, [orgId])).rows[0].n).toBe(3); // y cada contacto queda en la cartera de su asesor
+    expect((await db.query(`SELECT count(*)::int AS n FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id AND t.organization_id = ct.organization_id WHERE ct.organization_id = $1 AND t.system_key = 'lead'`, [orgId])).rows[0].n).toBe(3); // y son leads
+
+    // 5) La pantalla muestra la carga de cada asesor y ya no hay «sin asignar»
+    await page.getByRole('link', { name: 'Colas' }).click();
+    await page.getByRole('button', { name: 'Configurar Ventas' }).click();
+    const cfg2 = page.getByRole('dialog', { name: 'Configurar Ventas' });
+    await expect(cfg2.getByText('1 abiertas · 1 hoy')).toHaveCount(3);
+    await expect(cfg2.getByText('Conversaciones sin asignar: 0')).toBeVisible();
+
+    // 6) Otra empresa no ve la cola ni puede tocarla
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('colas-otra')))}` };
+    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
+    const qid = ((await (await request.get(`${apiBase}/v1/queues`, { headers: mine })).json()) as { items: Array<{ id: string }> }).items[0]!.id;
+    expect((await request.patch(`${apiBase}/v1/queues/${qid}`, { headers: { ...other, 'content-type': 'application/json' }, data: { name: 'Robada' } })).status()).toBe(404);
+  } finally {
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

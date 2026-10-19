@@ -246,6 +246,20 @@ export class ContactsService {
     return { id: row.id, name: row.name, ownerId: row.ownerId };
   }
 
+  /** Quién atiende al contacto (su dueño, la «cartera»); null si no tiene. Sin alcance por persona: lo usa el reparto de conversaciones. */
+  async ownerOf(tx: TenantTx, id: string): Promise<string | null> {
+    const [r] = await tx.select({ ownerId: contacts.ownerId }).from(contacts).where(and(eq(contacts.id, id), isNull(contacts.deletedAt))).limit(1);
+    return r?.ownerId ?? null;
+  }
+
+  /** Pone dueño a un contacto que no tiene (el primer reparto forma su cartera); si ya tiene, no lo cambia. true = lo puso. Auditado como acción automática. */
+  async assignOwnerIfNone(tx: TenantTx, id: string, userId: string): Promise<boolean> {
+    const rows = await tx.update(contacts).set({ ownerId: userId, updatedAt: new Date() }).where(and(eq(contacts.id, id), isNull(contacts.deletedAt), isNull(contacts.ownerId))).returning({ id: contacts.id });
+    if (rows.length === 0) return false;
+    await writeAudit(tx, { entityType: 'contact', entityId: id, field: 'owner_id', oldValue: null, newValue: userId, source: 'automation' });
+    return true;
+  }
+
   /** Personas a las que se puede asignar un contacto (solo con `contacts.view_all`: lo exige el controlador). */
   async owners(): Promise<{ items: OrgPerson[] }> {
     return { items: await this.members.assignable() };

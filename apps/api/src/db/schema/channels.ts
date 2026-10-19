@@ -3,6 +3,7 @@ import { boolean, check, foreignKey, index, integer, jsonb, text, timestamp, uni
 import { uuidv7 } from '@sales-smart/shared';
 import { tenantTable, identityTable } from './helpers';
 import { organizations, users } from './identity';
+import { queues } from './queues';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -28,6 +29,8 @@ export const channelAccounts = tenantTable(
     /** Los últimos 4 caracteres del token, para mostrarlos; el valor completo no se puede leer. */
     tokenLast4: text('token_last4'),
     settings: jsonb('settings').$type<Record<string, unknown>>().notNull().default(sql`'{}'::jsonb`),
+    /** Cola por defecto de la conexión (M5.3): a dónde van las conversaciones nuevas de este número. Sin cola, quedan «sin asignar». */
+    queueId: uuid('queue_id'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -39,6 +42,7 @@ export const channelAccounts = tenantTable(
     check('channel_accounts_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 60`),
     check('channel_accounts_last4_shape', sql`${t['tokenLast4']!} IS NULL OR length(${t['tokenLast4']!}) = 4`),
     check('channel_accounts_credentials_pair', sql`(${t['credentialsSealed']!} IS NULL) = (${t['keyVersion']!} IS NULL)`),
+    foreignKey({ name: 'channel_accounts_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
     uniqueIndex('channel_accounts_org_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
   ],
 );
