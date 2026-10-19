@@ -46,6 +46,7 @@ function Row({ c, active, now }: { c: Conversation; active: boolean; now: number
             <Pill kind={status.kind}>{status.label}</Pill>
             {c.queue ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted">{c.queue.name}</span> : null}
             {c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[10.5px] font-semibold text-muted">{c.owner.name.split(' ')[0]}</span> : null}
+            {c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view' ? <span className="rounded bg-info-soft px-1.5 py-0.5 text-[10.5px] font-semibold text-info" title="Te la compartieron">Compartida</span> : null}
             {c.tags.slice(0, 2).map((t) => <span key={t.id} className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ backgroundColor: t.color }}>{t.name}</span>)}
           </span>
         </span>

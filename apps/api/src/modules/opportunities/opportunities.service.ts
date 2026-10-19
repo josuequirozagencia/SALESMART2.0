@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { contactPhones, contacts, Database, opportunities, pipelines, pipelineStages, stageHistory, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
@@ -79,6 +79,24 @@ export class OpportunitiesService {
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(SystemTagsService) private readonly systemTags: SystemTagsService,
   ) {}
+
+  /**
+   * El lead cambia de manos (transferir una conversación, M5.5): las oportunidades ABIERTAS del contacto que eran de quien lo tenía —o de nadie— pasan a la nueva persona.
+   * Las de otra persona, las ganadas y las perdidas no se tocan. Dentro de la transacción de quien llama; cada cambio queda auditado como acción manual. Devuelve cuántas movió.
+   */
+  async reassignOpenOwner(tx: TenantTx, contactId: string, from: string | null, to: string): Promise<number> {
+    const rows = await tx
+      .select({ id: opportunities.id, ownerId: opportunities.ownerId })
+      .from(opportunities)
+      .where(and(eq(opportunities.contactId, contactId), eq(opportunities.status, 'open'), isNull(opportunities.deletedAt), from === null ? isNull(opportunities.ownerId) : or(isNull(opportunities.ownerId), eq(opportunities.ownerId, from))))
+      .for('update');
+    for (const r of rows) {
+      if (r.ownerId === to) continue;
+      await tx.update(opportunities).set({ ownerId: to, updatedAt: new Date() }).where(eq(opportunities.id, r.id));
+      await writeAudit(tx, { entityType: 'opportunity', entityId: r.id, field: 'owner_id', oldValue: r.ownerId, newValue: to, source: 'manual' });
+    }
+    return rows.filter((r) => r.ownerId !== to).length;
+  }
 
   async list(scope: ContactScope, q: ListOpportunitiesQuery): Promise<{ items: OpportunityView[]; next_cursor: string | null }> {
     const sc = this.scope(scope);

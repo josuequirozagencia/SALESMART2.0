@@ -162,6 +162,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/conversations/:id/close', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/read', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/messages/:id/retry', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  // Transferir y compartir (M5.5a, ADR-14/50). Pruebas: test/inbox/sharing.test.ts (A↔B, quién puede, visibilidad del colaborador, el lead se mueve, notas automáticas, auditoría)
+  { route: 'GET /v1/conversations/:id/transfer-options', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
+  { route: 'POST /v1/conversations/:id/transfer', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
+  { route: 'POST /v1/conversations/:id/share', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
+  { route: 'DELETE /v1/conversations/:id/participants/:userId', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

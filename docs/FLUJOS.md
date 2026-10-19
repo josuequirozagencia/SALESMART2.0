@@ -93,6 +93,7 @@ Estado: **borrador para validar** contra el prototipo v8. Cada flujo indica acto
 - **Reglas (ADR-14):** transferir cambia el dueño (SLA y comisión pasan al nuevo); compartir **no** cambia el dueño; la visibilidad es `dueño o participante activo`; se puede revocar el acceso.
 - **Errores:** destino fuera de horario o ausente → advertencia (no bloqueo); asesor sin acceso a la cola → advertencia.
 - **Pendiente:** comisión si el colaborador cierra la venta (propuesta: el dueño, con % compartido opcional).
+- **Implementación (M5.5a, ADR-50):** botón «Transferir» del chat (Transferir / Compartir) → selector con carga y cola (advertencia, no bloqueo) → «y seguir como colaborador» o permiso al compartir → nota opcional → aviso automático interno. Transferir deja la conversación «pendiente» para el destinatario y mueve el contacto y las oportunidades abiertas; el horario del destino se advierte con M5.5b.
 - **Prototipo:** sí.
 
 ### F11. Importar y exportar contactos

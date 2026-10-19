@@ -1,6 +1,6 @@
 import type { messages } from '../../db';
 import type { TagView } from '../tags';
-import { abilities, windowOf, type Abilities, type ChannelState, type ConversationRow, type InboxScope, type WindowState } from './inbox.access';
+import { abilities, myAccessOf, windowOf, type Abilities, type ChannelState, type Collab, type ConversationRow, type InboxScope, type MyAccess, type WindowState } from './inbox.access';
 
 export type ConversationStatus = 'unassigned' | 'pending' | 'working' | 'waiting' | 'closed';
 
@@ -11,6 +11,15 @@ export interface LastMessageView {
   preview: string;
   status: string;
   at: string;
+}
+
+/** Una persona con acceso a la conversación además de su dueño (M5.5, ADR-14). */
+export interface ParticipantView {
+  user: { id: string; name: string };
+  /** `reply` puede responder (cuando el dueño ya la aceptó); `view` solo ve y deja notas. */
+  permission: 'reply' | 'view';
+  added_by: { id: string; name: string } | null;
+  added_at: string;
 }
 
 export interface ConversationView {
@@ -24,6 +33,10 @@ export interface ConversationView {
   created_at: string;
   contact: { id: string; name: string; phone: string | null };
   owner: { id: string; name: string } | null;
+  /** Quienes la comparten con su dueño (colaboradores con acceso vigente). */
+  participants: ParticipantView[];
+  /** Cómo se relaciona quien consulta con ella: dueño, colaborador (con o sin permiso de responder) o supervisor (la ve porque ve todo). */
+  my_access: MyAccess;
   queue: { id: string; name: string; color: string } | null;
   channel: { id: string; name: string; state: ChannelState };
   tags: TagView[];
@@ -85,6 +98,9 @@ export interface ConversationParts {
   channelState: ChannelState;
   queue: { id: string; name: string; color: string } | null;
   owner: { id: string; name: string } | null;
+  participants: ParticipantView[];
+  /** Si quien consulta no es la dueña, su permiso como colaboradora. */
+  collab: Collab;
   tags: readonly TagView[];
   last: { direction: string; kind: string; body: string | null; status: string; sentAt: Date } | null;
 }
@@ -104,12 +120,14 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
     created_at: c.createdAt.toISOString(),
     contact: { id: c.contactId, name: p.contactName, phone: p.phone },
     owner: p.owner,
+    participants: p.participants,
+    my_access: myAccessOf(scope, c, p.collab),
     queue: p.queue,
     channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState },
     tags: [...p.tags],
     last_message: p.last ? { direction: p.last.direction as 'in' | 'out', kind: p.last.kind, preview: previewOf(p.last.kind, p.last.body), status: p.last.status, at: p.last.sentAt.toISOString() } : null,
     window: windowOf(c.lastInboundAt, now),
-    can: abilities(scope, c, p.channelState),
+    can: abilities(scope, c, p.channelState, p.collab),
   };
 }
 

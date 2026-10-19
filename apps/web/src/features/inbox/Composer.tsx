@@ -11,6 +11,8 @@ export function replyBlock(c: Conversation): string | null {
   if (c.status === 'closed') return 'La conversación está finalizada. Si el cliente escribe de nuevo, se abrirá otra.';
   if (c.status === 'unassigned') return c.can.take ? 'Esta conversación aún no tiene asesor. Asígnatela para poder responder.' : 'Esta conversación aún no tiene asesor.';
   if (!c.can.reply && c.channel.state !== 'active') return 'La conexión de WhatsApp de esta conversación está desactivada o desconectada.';
+  if (!c.can.reply && c.my_access === 'collaborator_view') return 'Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente.';
+  if (!c.can.reply && c.my_access === 'collaborator_reply' && c.status === 'pending') return `${c.owner?.name ?? 'Quien la tiene'} aún no acepta la conversación: podrás responder cuando lo haga.`;
   if (!c.can.reply) return c.owner ? `Solo ${c.owner.name} puede responder esta conversación.` : 'No puedes responder esta conversación.';
   if (!c.window.open) return 'Pasaron más de 24 horas desde el último mensaje del cliente: WhatsApp solo permite escribirle con una plantilla aprobada (las plantillas llegan pronto).';
   return null;

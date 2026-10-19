@@ -648,6 +648,15 @@ export interface QueueMemberInput {
 export type ConversationStatus = 'unassigned' | 'pending' | 'working' | 'waiting' | 'closed';
 /** Pestañas: `working` = trabajando y esperando al cliente · `pending` = «Pendientes»: por aceptar (y sin asignar para quien ve todo) · `closed` = finalizadas. */
 export type InboxTab = 'working' | 'pending' | 'closed';
+/** Cómo se relaciona quien consulta con la conversación: dueño, colaborador (con o sin permiso de responder) o supervisor (la ve porque ve todo). */
+export type MyAccess = 'owner' | 'collaborator_reply' | 'collaborator_view' | 'supervisor';
+/** Una persona con acceso a la conversación además de su dueño (M5.5, ADR-14). */
+export interface Participant {
+  user: { id: string; name: string };
+  permission: 'reply' | 'view';
+  added_by: { id: string; name: string } | null;
+  added_at: string;
+}
 export interface Conversation {
   id: string;
   status: ConversationStatus;
@@ -659,6 +668,8 @@ export interface Conversation {
   created_at: string;
   contact: { id: string; name: string; phone: string | null };
   owner: { id: string; name: string } | null;
+  participants: Participant[];
+  my_access: MyAccess;
   queue: { id: string; name: string; color: string } | null;
   channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed' };
   tags: ContactTag[];
@@ -666,7 +677,7 @@ export interface Conversation {
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */
   window: { open: boolean; expires_at: string | null };
   /** Lo que la persona puede hacer; es solo ayuda de presentación, el servidor vuelve a verificarlo. */
-  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean };
+  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean; transfer: boolean; share: boolean };
 }
 export interface ConversationList {
   items: Conversation[];
@@ -698,6 +709,35 @@ export interface ChatMessagePage {
   items: ChatMessage[];
   /** Para pedir los más antiguos; null si ya no hay más. */
   next_cursor: string | null;
+}
+/** Una persona a la que se puede transferir o con la que se puede compartir (M5.5). `in_queue` null = la conversación no tiene cola. */
+export interface PersonOption {
+  id: string;
+  name: string;
+  role: string;
+  open_count: number;
+  in_queue: boolean | null;
+  is_owner: boolean;
+  is_self: boolean;
+  collaborator: 'reply' | 'view' | null;
+}
+export interface TransferOptions {
+  items: PersonOption[];
+  queue: { id: string; name: string } | null;
+  can: { transfer: boolean; share: boolean };
+}
+export interface TransferResult {
+  id: string;
+  status: ConversationStatus;
+  owner: { id: string; name: string };
+  /** ¿Quien la transfirió sigue viéndola? */
+  still_visible: boolean;
+}
+export interface RevokeResult {
+  id: string;
+  user_id: string;
+  revoked: true;
+  still_visible: boolean;
 }
 export interface InboxOptions {
   queues: Array<{ id: string; name: string; color: string }>;

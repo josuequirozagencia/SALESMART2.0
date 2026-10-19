@@ -1,14 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { channelAccounts, contactPhones, contactTags, contacts, conversations, Database, messages, queues, type TenantTx } from '../../db';
+import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messages, queues, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { likeEscape, OrgMembersService } from '../organizations';
 import { SystemTagsService, type TagView } from '../tags';
-import { abilities, channelState, loadConversation, scopeOf, visibleTo, type InboxAccess, type InboxScope } from './inbox.access';
+import { abilities, channelState, collabColumn, loadConversation, scopeOf, visibleTo, type Collab, type InboxAccess, type InboxScope } from './inbox.access';
 import type { InboxTab, ListConversationsQuery, MessagesQuery } from './inbox.dto';
-import { conversationView, messageView, type ConversationParts, type ConversationView, type MessageView } from './inbox.views';
+import { conversationView, messageView, type ConversationParts, type ConversationView, type MessageView, type ParticipantView } from './inbox.views';
 
 export interface ConversationList {
   items: ConversationView[];
@@ -68,7 +68,11 @@ interface Row {
   queueName: string | null;
   queueColor: string | null;
   key: string;
+  collab: Collab;
 }
+
+/** Lo que la transacción reúne de cada conversación; los nombres (identidad) se ponen después, fuera de ella. */
+type Hydrated = Omit<ConversationParts, 'owner' | 'participants'> & { participantRows: Array<{ userId: string; permission: string; addedBy: string | null; addedAt: Date }> };
 
 /**
  * La bandeja de conversaciones (M5.4, ADR-16/50): listado con pestañas, filtros y conteos; detalle; hilo de mensajes; y las acciones de estado (aceptar, tomar,
@@ -95,26 +99,23 @@ export class InboxService {
       const where: SQL[] = [...this.filters(tx, scope, q), this.tabCondition(q.tab)];
       if (q.unread) where.push(sql`${conversations.unreadCount} > 0`);
       if (cursor) where.push(sql`(${ACTIVITY}, ${conversations.id}) < (${cursor.k}::timestamptz, ${cursor.id}::uuid)`);
-      const rows = await this.fetchRows(tx, and(...where) as SQL, q.limit + 1);
+      const rows = await this.fetchRows(tx, scope, and(...where) as SQL, q.limit + 1);
       const page = rows.slice(0, q.limit);
       const next = rows.length > q.limit ? encode({ k: page[page.length - 1]!.key, id: page[page.length - 1]!.c.id }) : null;
-      return { parts: await this.hydrate(tx, page), next, counts: cursor ? null : await this.counts(tx, scope, q) };
+      return { parts: await this.hydrate(tx, scope, page), next, counts: cursor ? null : await this.counts(tx, scope, q) };
     });
-    const owners = await this.members.labels(data.parts.map((p) => p.c.ownerId).filter((x): x is string => x !== null));
-    const items = data.parts.map((p) => conversationView({ ...p, owner: p.c.ownerId ? (owners.get(p.c.ownerId) ?? { id: p.c.ownerId, name: 'Persona desconocida' }) : null }, scope, now));
-    return { items, next_cursor: data.next, counts: data.counts };
+    return { items: await this.views(data.parts, scope, now), next_cursor: data.next, counts: data.counts };
   }
 
   async get(access: InboxAccess, id: string): Promise<ConversationView> {
     const scope = scopeOf(access);
     const now = new Date();
     const part = await this.db.withTenant(async (tx) => {
-      const [row] = await this.fetchRows(tx, and(eq(conversations.id, id), visibleTo(scope), isNull(contacts.deletedAt)) as SQL, 1);
+      const [row] = await this.fetchRows(tx, scope, and(eq(conversations.id, id), visibleTo(scope), isNull(contacts.deletedAt)) as SQL, 1);
       if (!row) throw new NotFoundError();
-      return (await this.hydrate(tx, [row]))[0]!;
+      return (await this.hydrate(tx, scope, [row]))[0]!;
     });
-    const owners = await this.members.labels(part.c.ownerId ? [part.c.ownerId] : []);
-    return conversationView({ ...part, owner: part.c.ownerId ? (owners.get(part.c.ownerId) ?? { id: part.c.ownerId, name: 'Persona desconocida' }) : null }, scope, now);
+    return (await this.views([part], scope, now))[0]!;
   }
 
   /** Mensajes y notas de la conversación, los más recientes primero por página (el arreglo sale de más antiguo a más reciente). */
@@ -185,7 +186,7 @@ export class InboxService {
         throw new ConflictError('CONVERSATION_STATE', 'La conversación ya tiene asesor o está finalizada');
       }
       const now = new Date();
-      await tx.update(conversations).set({ ownerId: scope.userId, assignedAt: now, status: 'working', updatedAt: now }).where(eq(conversations.id, id));
+      await tx.update(conversations).set({ ownerId: scope.userId, assignedAt: now, assignmentSource: 'manual', status: 'working', updatedAt: now }).where(eq(conversations.id, id));
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'owner_id', oldValue: null, newValue: scope.userId });
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'status', oldValue: 'unassigned', newValue: 'working' });
       await this.contacts.assignOwnerIfNone(tx, c.contactId, scope.userId);
@@ -198,9 +199,9 @@ export class InboxService {
     const scope = scopeOf(access);
     this.requireReply(scope);
     await this.db.withTenant(async (tx) => {
-      const { c, channel } = await loadConversation(tx, scope, id, true);
+      const { c, channel, collab } = await loadConversation(tx, scope, id, true);
       if (c.status === 'closed') return;
-      if (!abilities(scope, c, channel.state).close) throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación puede finalizarla');
+      if (!abilities(scope, c, channel.state, collab).close) throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación puede finalizarla');
       const now = new Date();
       await tx.update(conversations).set({ status: 'closed', closedAt: now, unreadCount: 0, updatedAt: now }).where(eq(conversations.id, id));
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'status', oldValue: c.status, newValue: 'closed' });
@@ -263,9 +264,9 @@ export class InboxService {
     return { working: n?.working ?? 0, pending: n?.pending ?? 0, closed: n?.closed ?? 0, unread: n?.unread ?? 0 };
   }
 
-  private fetchRows(tx: TenantTx, where: SQL, limit: number): Promise<Row[]> {
+  private fetchRows(tx: TenantTx, scope: InboxScope, where: SQL, limit: number): Promise<Row[]> {
     return tx
-      .select({ c: conversations, contactName: contacts.name, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, queueName: queues.name, queueColor: queues.color, key: KEY })
+      .select({ c: conversations, contactName: contacts.name, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, queueName: queues.name, queueColor: queues.color, key: KEY, collab: collabColumn(scope) })
       .from(conversations)
       .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
       .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
@@ -276,7 +277,7 @@ export class InboxService {
   }
 
   /** Teléfono principal, etiquetas y último mensaje real de cada conversación de la página. El responsable (identidad) lo pone quien llama, fuera de la transacción. */
-  private async hydrate(tx: TenantTx, rows: readonly Row[]): Promise<Array<Omit<ConversationParts, 'owner'>>> {
+  private async hydrate(tx: TenantTx, scope: InboxScope, rows: readonly Row[]): Promise<Hydrated[]> {
     if (rows.length === 0) return [];
     const contactIds = [...new Set(rows.map((r) => r.c.contactId))];
     const convIds = rows.map((r) => r.c.id);
@@ -290,6 +291,13 @@ export class InboxService {
       .where(and(inArray(messages.conversationId, convIds), sql`${messages.kind} <> 'note'`))
       .orderBy(messages.conversationId, desc(messages.sentAt), desc(messages.id));
     const last = new Map(lastRows.map((m) => [m.conversationId, m]));
+    const partRows = await tx
+      .select({ conversationId: conversationParticipants.conversationId, userId: conversationParticipants.userId, permission: conversationParticipants.permission, addedBy: conversationParticipants.addedBy, addedAt: conversationParticipants.addedAt })
+      .from(conversationParticipants)
+      .where(and(inArray(conversationParticipants.conversationId, convIds), isNull(conversationParticipants.revokedAt)))
+      .orderBy(asc(conversationParticipants.addedAt), asc(conversationParticipants.id));
+    const participants = new Map<string, Hydrated['participantRows']>();
+    for (const p of partRows) participants.set(p.conversationId, [...(participants.get(p.conversationId) ?? []), { userId: p.userId, permission: p.permission, addedBy: p.addedBy, addedAt: p.addedAt }]);
     return rows.map((r) => ({
       c: r.c,
       contactName: r.contactName,
@@ -299,6 +307,26 @@ export class InboxService {
       queue: r.c.queueId && r.queueName !== null ? { id: r.c.queueId, name: r.queueName, color: r.queueColor ?? '#7c5cfa' } : null,
       tags: tagsByContact.get(r.c.contactId) ?? [],
       last: last.get(r.c.id) ?? null,
+      collab: r.c.ownerId === scope.userId ? null : r.collab,
+      participantRows: participants.get(r.c.id) ?? [],
     }));
+  }
+
+  /** Pone los nombres (identidad, fuera de la transacción) a lo reunido y arma las vistas. */
+  private async views(parts: readonly Hydrated[], scope: InboxScope, now: Date): Promise<ConversationView[]> {
+    const ids = new Set<string>();
+    for (const p of parts) {
+      if (p.c.ownerId) ids.add(p.c.ownerId);
+      for (const r of p.participantRows) {
+        ids.add(r.userId);
+        if (r.addedBy) ids.add(r.addedBy);
+      }
+    }
+    const labels = await this.members.labels([...ids]);
+    const who = (id: string): { id: string; name: string } => labels.get(id) ?? { id, name: 'Persona desconocida' };
+    return parts.map((p) => {
+      const participants: ParticipantView[] = p.participantRows.map((r) => ({ user: who(r.userId), permission: r.permission === 'reply' ? 'reply' : 'view', added_by: r.addedBy ? who(r.addedBy) : null, added_at: r.addedAt.toISOString() }));
+      return conversationView({ ...p, owner: p.c.ownerId ? who(p.c.ownerId) : null, participants }, scope, now);
+    });
   }
 }

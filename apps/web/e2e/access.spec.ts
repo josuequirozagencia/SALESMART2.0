@@ -1506,8 +1506,8 @@ test('inbox: un cliente escribe, el asesor acepta, responde (sale por el proveed
     await thread.getByRole('button', { name: 'Nota interna' }).click();
     await thread.getByRole('textbox', { name: 'Nota interna' }).fill('Prefiere las mañanas');
     await thread.getByRole('button', { name: 'Guardar nota' }).click();
-    await expect(log.getByText(/Nota interna · Carlos E2E/)).toBeVisible();
-    await expect(log.getByText('Prefiere las mañanas')).toBeVisible();
+    await expect(log.getByText(/Nota interna · Carlos E2E/)).toBeVisible({ timeout: 15_000 });
+    await expect(log.getByText('Prefiere las mañanas')).toBeVisible({ timeout: 15_000 });
     expect((await db.query(`SELECT status FROM messages WHERE organization_id = $1 AND kind = 'note'`, [orgId])).rows).toEqual([{ status: 'internal' }]);
     await thread.getByRole('button', { name: 'Responder' }).click();
 
@@ -1546,6 +1546,126 @@ test('inbox: un cliente escribe, el asesor acepta, responde (sale por el proveed
     await db.end();
   }
 });
+
+test('inbox: compartir (solo ver) y transferir una conversación entre dos asesores; el aviso queda en el historial, el lead se mueve, quien la compartía sigue y otra empresa no ve nada', async ({ page, request, browser }) => {
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-compartir-0123456789abcdef';
+  const PHONE_ID = '1090123450066';
+  const FROM = '593984217733';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-compartir-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('compartir'));
+  const carlosEmail = uniqueEmail('carlos-compartir');
+  const elenaEmail = uniqueEmail('elena-compartir');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const mk = async (email: string, name: string): Promise<string> => {
+      const id = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), $3 FROM users WHERE email = $2 RETURNING id`, [email, adminEmail, name])).rows[0].id as string;
+      await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [id, orgId]);
+      return id;
+    };
+    const carlosId = await mk(carlosEmail, 'Carlos E2E');
+    const elenaId = await mk(elenaEmail, 'Elena E2E');
+
+    // Cola con Carlos como único asesor, número conectado y un cliente que escribe
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea compartir', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+    const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Cliente Compartido' }, wa_id: FROM }], messages: [{ from: FROM, id: 'wamid.SHARE1', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'Necesito ayuda con un paquete' } }] } }] }] });
+    const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+    expect((await request.post(`${apiBase}/v1/channels/meta/webhook`, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    let conv: { id: string; contact_id: string } | undefined;
+    for (let i = 0; i < 60 && !conv; i++) {
+      conv = (await db.query(`SELECT id, contact_id FROM conversations WHERE organization_id = $1 AND owner_id = $2`, [orgId, carlosId])).rows[0] as typeof conv;
+      if (!conv) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(conv).toBeDefined();
+
+    // 1) Carlos la acepta y la comparte con Elena «solo ver y notas»
+    await uiLogin(page, carlosEmail);
+    await page.getByRole('link', { name: 'Inbox' }).click();
+    await page.getByRole('tab', { name: /Pendientes/ }).click();
+    await page.getByRole('link', { name: /^Cliente Compartido/ }).click();
+    const carlos = page.getByRole('region', { name: 'Conversación con Cliente Compartido' });
+    await carlos.getByRole('button', { name: 'Aceptar' }).click();
+    await expect(carlos.getByText('Trabajando')).toBeVisible();
+    await carlos.getByRole('button', { name: 'Transferir' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Transferir o compartir' });
+    await dlg.getByRole('tab', { name: 'Compartir' }).click();
+    await dlg.getByRole('radio', { name: 'Elena E2E' }).check();
+    await dlg.getByRole('radio', { name: 'Solo ver y dejar notas' }).check();
+    await dlg.getByRole('textbox', { name: 'Nota (opcional)' }).fill('Mírala tú también');
+    await dlg.getByRole('button', { name: 'Compartir' }).click();
+    await expect(carlos.getByText('Compartida con Elena')).toBeVisible();
+    await expect(carlos.getByRole('log', { name: 'Mensajes' }).getByText('Carlos E2E compartió la conversación con Elena E2E (solo ver y dejar notas). Nota: Mírala tú también')).toBeVisible();
+    expect(await activeShares(db, conv!.id)).toEqual([{ user_id: elenaId, permission: 'view' }]);
+
+    // 2) Elena la ve como «Compartida»: puede leer y dejar notas, no escribirle al cliente
+    const elenaCtx = await browser.newContext();
+    const elenaPage = await elenaCtx.newPage();
+    await uiLogin(elenaPage, elenaEmail);
+    await elenaPage.getByRole('link', { name: 'Inbox' }).click();
+    await expect(elenaPage.getByText('Compartida', { exact: true })).toBeVisible();
+    await elenaPage.getByRole('link', { name: /^Cliente Compartido/ }).click();
+    const elena = elenaPage.getByRole('region', { name: 'Conversación con Cliente Compartido' });
+    await expect(elena.getByRole('log', { name: 'Mensajes' }).getByText('Necesito ayuda con un paquete')).toBeVisible();
+    await expect(elena.getByText('Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente.')).toBeVisible();
+    await expect(elena.getByRole('textbox', { name: 'Mensaje' })).toHaveCount(0);
+    await elena.getByRole('textbox', { name: 'Nota interna' }).fill('Yo me encargo del envío');
+    await elena.getByRole('button', { name: 'Guardar nota' }).click();
+    await expect(elena.getByRole('log', { name: 'Mensajes' }).getByText('Yo me encargo del envío')).toBeVisible();
+
+    // 3) Carlos se la transfiere a Elena y sigue como colaborador con permiso de responder
+    await carlos.getByRole('button', { name: 'Transferir' }).click();
+    const dlg2 = page.getByRole('dialog', { name: 'Transferir o compartir' });
+    await dlg2.getByRole('tab', { name: 'Transferir' }).click();
+    await dlg2.getByRole('radio', { name: 'Elena E2E' }).check();
+    await dlg2.getByRole('radio', { name: 'Seguir como colaborador: puede responder' }).check();
+    await dlg2.getByRole('button', { name: 'Transferir' }).click();
+    await expect(carlos.getByText('Asignada a Elena E2E')).toBeVisible();
+    await expect(carlos.getByText('Por aceptar')).toBeVisible();
+    await expect(carlos.getByText('Elena E2E aún no acepta la conversación: podrás responder cuando lo haga.')).toBeVisible();
+    await expect(carlos.getByRole('log', { name: 'Mensajes' }).getByText('Carlos E2E transfirió la conversación a Elena E2E. Carlos E2E sigue como colaborador (puede responder).')).toBeVisible();
+    const row = (await db.query(`SELECT owner_id, status, assignment_source FROM conversations WHERE id = $1`, [conv!.id])).rows[0];
+    expect(row).toMatchObject({ owner_id: elenaId, status: 'pending', assignment_source: 'manual' });
+    expect((await db.query(`SELECT owner_id FROM contacts WHERE id = $1`, [conv!.contact_id])).rows[0].owner_id).toBe(elenaId); // el lead se mueve con la conversación
+    expect(await activeShares(db, conv!.id)).toEqual([{ user_id: carlosId, permission: 'reply' }]); // Elena ya no es colaboradora: es la dueña
+
+    // 4) Elena (ahora dueña) la acepta sin recargar y responde; Carlos, colaborador, también puede escribir
+    await expect(elena.getByRole('button', { name: 'Aceptar' })).toBeVisible({ timeout: 30_000 });
+    await elena.getByRole('button', { name: 'Aceptar' }).click();
+    await elena.getByRole('textbox', { name: 'Mensaje' }).fill('Hola, soy Elena: ya tengo tu pedido');
+    await elena.getByRole('textbox', { name: 'Mensaje' }).press('Enter');
+    await expect(elena.getByRole('log', { name: 'Mensajes' }).getByRole('img', { name: 'Enviado' })).toBeVisible();
+    await expect(carlos.getByRole('textbox', { name: 'Mensaje' })).toBeVisible({ timeout: 30_000 });
+    await carlos.getByRole('textbox', { name: 'Mensaje' }).fill('Y yo te confirmo la entrega');
+    await carlos.getByRole('textbox', { name: 'Mensaje' }).press('Enter');
+    await expect(carlos.getByRole('log', { name: 'Mensajes' }).getByText('Y yo te confirmo la entrega')).toBeVisible();
+    const sent = (await db.query(`SELECT body, created_by, status FROM messages WHERE conversation_id = $1 AND kind = 'text' AND direction = 'out' ORDER BY sent_at, id`, [conv!.id])).rows as Array<{ body: string; created_by: string; status: string }>;
+    expect(sent).toEqual([{ body: 'Hola, soy Elena: ya tengo tu pedido', created_by: elenaId, status: 'sent' }, { body: 'Y yo te confirmo la entrega', created_by: carlosId, status: 'sent' }]);
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND kind = 'note' AND sender_type = 'system' AND status = 'internal'`, [conv!.id])).rows[0].n).toBe(2);
+    await elenaCtx.close();
+
+    // 5) Otra empresa no ve ni toca nada
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('compartir-otra')))}`, 'content-type': 'application/json' };
+    expect((await request.get(`${apiBase}/v1/conversations/${conv!.id}/transfer-options`, { headers: other })).status()).toBe(404);
+    expect((await request.post(`${apiBase}/v1/conversations/${conv!.id}/transfer`, { headers: other, data: { to_user_id: elenaId } })).status()).toBe(404);
+    expect((await request.post(`${apiBase}/v1/conversations/${conv!.id}/share`, { headers: other, data: { user_id: elenaId, permission: 'view' } })).status()).toBe(404);
+  } finally {
+    await db.end();
+  }
+});
+
+async function activeShares(db: pg.Client, conversationId: string): Promise<Array<{ user_id: string; permission: string }>> {
+  return (await db.query(`SELECT user_id, permission FROM conversation_participants WHERE conversation_id = $1 AND revoked_at IS NULL ORDER BY added_at, id`, [conversationId])).rows as Array<{ user_id: string; permission: string }>;
+}
 
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();

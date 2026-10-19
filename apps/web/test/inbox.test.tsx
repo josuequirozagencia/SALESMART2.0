@@ -21,12 +21,14 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
   created_at: ago(3 * HOUR),
   contact: { id: 'k1', name: 'Ana Torres', phone: '+593984217730' },
   owner: { id: 'u2', name: 'Luis Navas' },
+  participants: [],
+  my_access: 'owner',
   queue: { id: 'q1', name: 'Ventas', color: '#7c5cfa' },
   channel: { id: 'ch1', name: 'Barbería WhatsApp', state: 'active' },
   tags: [],
   last_message: { direction: 'in', kind: 'text', preview: 'Hola, ¿tienen cita mañana?', status: 'received', at: ago(5 * MIN) },
   window: { open: true, expires_at: new Date(Date.now() + 23 * HOUR).toISOString() },
-  can: { reply: true, note: true, accept: false, take: false, close: true },
+  can: { reply: true, note: true, accept: false, take: false, close: true, transfer: false, share: false },
   ...over,
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
@@ -89,7 +91,7 @@ function server(w: World, me = ME_ADVISOR) {
     for (const action of ['accept', 'take', 'close', 'read'] as const) {
       routes[`POST /conversations/${id}/${action}`] = () => {
         w.posts.push({ path: `/conversations/${id}/${action}`, body: undefined });
-        const next: Partial<Conversation> = action === 'accept' ? { status: 'working', can: { reply: true, note: true, accept: false, take: false, close: true } } : action === 'take' ? { status: 'working', owner: { id: 'u1', name: 'Ana Pérez' }, can: { reply: true, note: true, accept: false, take: false, close: true } } : action === 'close' ? { status: 'closed', closed_at: new Date().toISOString(), can: { reply: false, note: true, accept: false, take: false, close: false } } : { unread_count: 0 };
+        const next: Partial<Conversation> = action === 'accept' ? { status: 'working', can: { reply: true, note: true, accept: false, take: false, close: true, transfer: false, share: false } } : action === 'take' ? { status: 'working', owner: { id: 'u1', name: 'Ana Pérez' }, can: { reply: true, note: true, accept: false, take: false, close: true, transfer: false, share: false } } : action === 'close' ? { status: 'closed', closed_at: new Date().toISOString(), can: { reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false } } : { unread_count: 0 };
         w.convs = w.convs.map((c) => (c.id === id ? { ...c, ...next } : c));
         return { body: w.convs.find((c) => c.id === id) };
       };
@@ -256,7 +258,7 @@ describe('Inbox · hilo', () => {
   });
 
   it('quien no puede responder no ve «Reintentar» en un mensaje fallido', async () => {
-    const w = world({ convs: [conv({ can: { reply: false, note: true, accept: false, take: false, close: true } })], messages: { c1: [out('m3', 'No salió', 'failed', { error: 'WhatsApp rechazó el mensaje' })] } });
+    const w = world({ convs: [conv({ can: { reply: false, note: true, accept: false, take: false, close: true, transfer: false, share: false } })], messages: { c1: [out('m3', 'No salió', 'failed', { error: 'WhatsApp rechazó el mensaje' })] } });
     mockApi(server(w, ME_ADMIN));
     renderApp('/inbox/c1');
     expect(await screen.findByText('WhatsApp rechazó el mensaje')).toBeInTheDocument();
@@ -292,7 +294,7 @@ describe('Inbox · hilo', () => {
   });
 
   it('si la conversación es de otra persona, no la marca como leída', async () => {
-    const w = world({ convs: [conv({ unread_count: 2, owner: { id: 'u9', name: 'Marta Sol' }, can: { reply: false, note: true, accept: false, take: false, close: true } })] });
+    const w = world({ convs: [conv({ unread_count: 2, owner: { id: 'u9', name: 'Marta Sol' }, can: { reply: false, note: true, accept: false, take: false, close: true, transfer: false, share: false } })] });
     const api = mockApi(server(w, ME_ADMIN));
     renderApp('/inbox/c1');
     await screen.findByRole('log', { name: 'Mensajes' });
@@ -366,10 +368,10 @@ describe('Inbox · responder y notas', () => {
   const closedWindow = { open: false, expires_at: ago(HOUR) };
   const cases: Array<[string, Partial<Conversation>, RegExp, boolean]> = [
     ['la ventana de 24 h cerrada', { window: closedWindow }, /Pasaron más de 24 horas/, true],
-    ['una conversación finalizada', { status: 'closed', can: { reply: false, note: true, accept: false, take: false, close: false } }, /está finalizada/, true],
-    ['una conversación sin asesor (quien puede tomarla)', { status: 'unassigned', owner: null, can: { reply: false, note: true, accept: false, take: true, close: true } }, /Asígnatela para poder responder/, true],
-    ['una conversación de otra persona', { owner: { id: 'u9', name: 'Marta Sol' }, can: { reply: false, note: true, accept: false, take: false, close: true } }, /Solo Marta Sol puede responder/, true],
-    ['la conexión desactivada', { channel: { id: 'ch1', name: 'Barbería WhatsApp', state: 'disabled' }, can: { reply: false, note: true, accept: false, take: false, close: true } }, /desactivada o desconectada/, true],
+    ['una conversación finalizada', { status: 'closed', can: { reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false } }, /está finalizada/, true],
+    ['una conversación sin asesor (quien puede tomarla)', { status: 'unassigned', owner: null, can: { reply: false, note: true, accept: false, take: true, close: true, transfer: false, share: false } }, /Asígnatela para poder responder/, true],
+    ['una conversación de otra persona', { owner: { id: 'u9', name: 'Marta Sol' }, can: { reply: false, note: true, accept: false, take: false, close: true, transfer: false, share: false } }, /Solo Marta Sol puede responder/, true],
+    ['la conexión desactivada', { channel: { id: 'ch1', name: 'Barbería WhatsApp', state: 'disabled' }, can: { reply: false, note: true, accept: false, take: false, close: true, transfer: false, share: false } }, /desactivada o desconectada/, true],
   ];
   it.each(cases)('con %s no se puede escribir al cliente, se explica por qué y solo quedan las notas', async (_label, over, reason, noteOnly) => {
     const w = world({ convs: [conv(over)] });
@@ -383,7 +385,7 @@ describe('Inbox · responder y notas', () => {
   });
 
   it('quien no puede escribir nada (solo lectura) ve el motivo y ningún redactor', async () => {
-    const w = world({ convs: [conv({ can: { reply: false, note: false, accept: false, take: false, close: false } })] });
+    const w = world({ convs: [conv({ can: { reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false } })] });
     mockApi(server(w, ME_ADMIN));
     renderApp('/inbox/c1');
     expect(await screen.findByText(/Solo Luis Navas puede responder/)).toBeInTheDocument();
@@ -393,7 +395,7 @@ describe('Inbox · responder y notas', () => {
 
 describe('Inbox · acciones', () => {
   it('«Aceptar» acepta la conversación pendiente y pasa a trabajando', async () => {
-    const w = world({ convs: [conv({ status: 'pending', can: { reply: true, note: true, accept: true, take: false, close: true } })] });
+    const w = world({ convs: [conv({ status: 'pending', can: { reply: true, note: true, accept: true, take: false, close: true, transfer: false, share: false } })] });
     mockApi(server(w));
     renderApp('/inbox/c1');
     await userEvent.click(await screen.findByRole('button', { name: 'Aceptar' }));
@@ -403,7 +405,7 @@ describe('Inbox · acciones', () => {
   });
 
   it('«Asignarme» toma una conversación sin asignar', async () => {
-    const w = world({ convs: [conv({ status: 'unassigned', owner: null, can: { reply: false, note: true, accept: false, take: true, close: true } })] });
+    const w = world({ convs: [conv({ status: 'unassigned', owner: null, can: { reply: false, note: true, accept: false, take: true, close: true, transfer: false, share: false } })] });
     mockApi(server(w, ME_ADMIN));
     renderApp('/inbox/c1');
     expect(screen.queryByRole('button', { name: 'Aceptar' })).not.toBeInTheDocument();
@@ -429,7 +431,7 @@ describe('Inbox · acciones', () => {
   });
 
   it('si el servidor rechaza una acción (409), muestra su motivo', async () => {
-    const w = world({ convs: [conv({ status: 'pending', can: { reply: true, note: true, accept: true, take: false, close: true } })] });
+    const w = world({ convs: [conv({ status: 'pending', can: { reply: true, note: true, accept: true, take: false, close: true, transfer: false, share: false } })] });
     const routes = server(w);
     routes['POST /conversations/c1/accept'] = () => err(409, 'CONVERSATION_STATE', 'La conversación no está pendiente de aceptar');
     mockApi(routes);

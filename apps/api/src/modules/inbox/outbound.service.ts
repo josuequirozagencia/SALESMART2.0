@@ -35,8 +35,8 @@ export class OutboundService {
     if (!scope.canReply) throw new ForbiddenError();
     const now = new Date();
     const messageId = await this.db.withTenant(async (tx) => {
-      const { c, channel } = await loadConversation(tx, scope, conversationId, true);
-      assertCanReply(scope, c, channel.state);
+      const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
+      assertCanReply(scope, c, channel.state, collab);
       assertWindowOpen(c.lastInboundAt, now);
       const [m] = await tx
         .insert(messages)
@@ -77,12 +77,12 @@ export class OutboundService {
       const [probe] = await tx.select({ conversationId: messages.conversationId }).from(messages).where(and(eq(messages.id, messageId), eq(messages.direction, 'out'), sql`${messages.kind} <> 'note'`)).limit(1);
       if (!probe) throw new NotFoundError();
       // Mismo orden de bloqueos que al responder: primero la conversación (404 si no puede verla), luego el mensaje
-      const { c, channel } = await loadConversation(tx, scope, probe.conversationId, true);
+      const { c, channel, collab } = await loadConversation(tx, scope, probe.conversationId, true);
       const [m] = await tx.select({ status: messages.status }).from(messages).where(eq(messages.id, messageId)).for('update').limit(1);
       if (!m) throw new NotFoundError();
       if (m.status === 'queued') return;
       if (m.status !== 'failed') throw new ConflictError('MESSAGE_NOT_FAILED', 'Solo se puede reintentar un mensaje que falló');
-      assertCanReply(scope, c, channel.state);
+      assertCanReply(scope, c, channel.state, collab);
       assertWindowOpen(c.lastInboundAt, now);
       await tx.update(messages).set({ status: 'queued', error: null, attempts: 0, nextAttemptAt: now, meta: sql`${messages.meta} - 'error_code'` }).where(eq(messages.id, messageId));
     });

@@ -36,10 +36,11 @@ function Body({ m }: { m: ChatMessage }) {
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
 export function MessageBubble({ m, canRetry, retrying, onRetry }: { m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void }) {
   if (m.is_note) {
+    const auto = m.sender_type === 'system';
     return (
       <li className="flex justify-center">
-        <div className="max-w-[82%] rounded-lg bg-warn-soft px-3 py-2 text-[13.5px] text-warn">
-          <b className="mr-1">Nota interna{m.author ? ` · ${m.author.name}` : ''}</b>
+        <div className={`max-w-[82%] rounded-lg px-3 py-2 text-[13.5px] ${auto ? 'bg-surface2 text-muted' : 'bg-warn-soft text-warn'}`}>
+          <b className="mr-1">{auto ? 'Aviso automático' : `Nota interna${m.author ? ` · ${m.author.name}` : ''}`}</b>
           <Body m={m} />
           <time dateTime={m.sent_at} className="mt-0.5 block text-right text-[11px] opacity-70">{bubbleTime(m.sent_at)}</time>
         </div>

@@ -52,7 +52,8 @@ export class DistributionService {
       const rows = await tx
         .select({ userId: conversations.ownerId, n: sql<number>`count(*)::int` })
         .from(conversations)
-        .where(and(eq(conversations.queueId, queueId), inArray(conversations.ownerId, ids), gte(conversations.assignedAt, since)))
+        // Solo cuenta lo que repartió el reparto automático: tomar o transferir a mano no consume el tope (ADR-50, M5.3/M5.5)
+        .where(and(eq(conversations.queueId, queueId), inArray(conversations.ownerId, ids), eq(conversations.assignmentSource, 'distribution'), gte(conversations.assignedAt, since)))
         .groupBy(conversations.ownerId);
       for (const r of rows) if (r.userId) today.set(r.userId, r.n);
     }

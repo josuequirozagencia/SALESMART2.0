@@ -66,6 +66,8 @@ export const conversations = tenantTable(
     /** Quién la atiende (asesor). Null = sin asignar. */
     ownerId: uuid('owner_id').references(() => users.id),
     assignedAt: ts('assigned_at'),
+    /** Cómo llegó a su dueño: `distribution` = el reparto automático de la cola (cuenta para el tope diario) · `manual` = alguien la tomó o la transfirió (no cuenta). */
+    assignmentSource: text('assignment_source').notNull().default('distribution'),
     lastMessageAt: ts('last_message_at'),
     /** Último mensaje del CLIENTE: de aquí sale la ventana de 24 h de WhatsApp oficial. */
     lastInboundAt: ts('last_inbound_at'),
@@ -84,6 +86,7 @@ export const conversations = tenantTable(
     check('conversations_owner_status', sql`${t['status']!} = 'closed' OR ((${t['status']!} = 'unassigned') = (${t['ownerId']!} IS NULL))`),
     check('conversations_assigned_pair', sql`(${t['ownerId']!} IS NULL) = (${t['assignedAt']!} IS NULL)`),
     check('conversations_unread_valid', sql`${t['unreadCount']!} >= 0`),
+    check('conversations_assignment_source_valid', sql`${t['assignmentSource']!} IN ('distribution', 'manual')`),
     uniqueIndex('conversations_one_open_uq').on(t['organizationId']!, t['contactId']!, t['channelAccountId']!).where(sql`${t['status']!} <> 'closed'`),
     index('conversations_list_idx').on(t['organizationId']!, t['status']!, t['lastMessageAt']!),
     index('conversations_contact_idx').on(t['organizationId']!, t['contactId']!),
@@ -141,5 +144,32 @@ export const messages = tenantTable(
     uniqueIndex('messages_channel_external_uq').on(t['organizationId']!, t['channelAccountId']!, t['externalId']!).where(sql`${t['externalId']!} IS NOT NULL`),
     index('messages_conversation_idx').on(t['organizationId']!, t['conversationId']!, t['sentAt']!, t['id']!),
     index('messages_outbox_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'queued'`),
+  ],
+);
+
+/**
+ * Quién más participa en una conversación además de su dueño (M5.5, ADR-14). TABLA DE NEGOCIO (tenant). El dueño es `conversations.owner_id` (una sola fuente de verdad: no se
+ * repite aquí); esta tabla guarda a los COLABORADORES, con permiso para responder (`reply`) o solo para ver y dejar notas (`view`). Compartir no cambia el dueño. Una persona
+ * tiene a lo sumo UN acceso vigente por conversación; revocar pone la hora (no hay DELETE) y la persona puede volver a recibir acceso más tarde.
+ */
+export const conversationParticipants = tenantTable(
+  'conversation_participants',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    conversationId: uuid('conversation_id').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    permission: text('permission').notNull(),
+    addedBy: uuid('added_by').references(() => users.id),
+    addedAt: ts('added_at').notNull().defaultNow(),
+    revokedAt: ts('revoked_at'),
+    revokedBy: uuid('revoked_by').references(() => users.id),
+  },
+  (t) => [
+    foreignKey({ name: 'conversation_participants_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
+    check('conversation_participants_permission_valid', sql`${t['permission']!} IN ('reply', 'view')`),
+    check('conversation_participants_revoked_pair', sql`(${t['revokedAt']!} IS NULL) = (${t['revokedBy']!} IS NULL)`),
+    uniqueIndex('conversation_participants_active_uq').on(t['organizationId']!, t['conversationId']!, t['userId']!).where(sql`${t['revokedAt']!} IS NULL`),
+    // La visibilidad de una persona consulta «¿tiene un acceso vigente a esta conversación?»
+    index('conversation_participants_user_idx').on(t['organizationId']!, t['userId']!, t['conversationId']!).where(sql`${t['revokedAt']!} IS NULL`),
   ],
 );

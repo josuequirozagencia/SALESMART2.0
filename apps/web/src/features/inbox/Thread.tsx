@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import { initials, timeLeft } from '../../lib/format';
@@ -10,7 +10,8 @@ import { Pill } from '../../ui/Pill';
 import { Composer } from './Composer';
 import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
-import { useConversation, useConversationAction, useMarkRead, useMessages, useRetryMessage } from './useInbox';
+import { TransferDialog } from './TransferDialog';
+import { useConversation, useConversationAction, useMarkRead, useMessages, useRetryMessage, useRevoke } from './useInbox';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 
@@ -23,9 +24,13 @@ function WindowNote({ c }: { c: Conversation }) {
   return <Pill kind={left < 3 * 3_600_000 ? 'warn' : 'muted'}>Puedes escribir libremente: quedan {timeLeft(left)}</Pill>;
 }
 
-function Header({ c, onBackError }: { c: Conversation; onBackError: (m: string | undefined) => void }) {
+function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void }) {
   const act = useConversationAction(c.id);
+  const leave = useRevoke(c.id);
+  const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
+  const [dialog, setDialog] = useState(false);
+  const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
     onBackError(undefined);
@@ -44,6 +49,7 @@ function Header({ c, onBackError }: { c: Conversation; onBackError: (m: string |
       <div className="flex flex-wrap items-center gap-2">
         <Pill kind={status.kind}>{status.label}</Pill>
         <span className="text-[12.5px] text-muted">{c.owner ? `Asignada a ${c.owner.name}` : 'Sin asesor'}</span>
+        {c.participants.length > 0 ? <span className="text-[12.5px] text-muted" title={c.participants.map((p) => `${p.user.name}: ${p.permission === 'reply' ? 'puede responder' : 'solo ver y dejar notas'}`).join('\n')}>Compartida con {c.participants.map((p) => p.user.name.split(' ')[0]).join(', ')}</span> : null}
         {c.tags.map((t) => <span key={t.id} className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ backgroundColor: t.color }}>{t.name}</span>)}
         <WindowNote c={c} />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -57,10 +63,13 @@ function Header({ c, onBackError }: { c: Conversation; onBackError: (m: string |
           <>
             {c.can.accept ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('accept', 'No pudimos aceptar la conversación.')}>Aceptar</Button> : null}
             {c.can.take ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('take', 'No pudimos asignarte la conversación.')}>Asignarme</Button> : null}
+            {c.can.transfer || c.can.share ? <Button className={SMALL} onClick={() => setDialog(true)}>Transferir</Button> : null}
+            {collaborator ? <Button className={SMALL} loading={leave.isPending} onClick={() => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</Button> : null}
             {c.can.close ? <Button className={SMALL} onClick={() => setConfirm(true)}>Finalizar</Button> : null}
           </>
         )}
         </div>
+        {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
       </div>
     </header>
   );
@@ -150,7 +159,7 @@ export function Thread({ id, meId }: { id: string; meId: string }) {
   }
   return (
     <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-col bg-bg">
-      <Header c={c} onBackError={setActionError} />
+      <Header c={c} meId={meId} onBackError={setActionError} />
       {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
       <Messages c={c} />
       <Composer key={c.id} c={c} />

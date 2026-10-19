@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions } from '../../lib/types';
+import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, RevokeResult, TransferOptions, TransferResult } from '../../lib/types';
 
 /** Cada cuánto se vuelve a mirar (sin tiempo real hasta M5.7): el listado y el hilo abierto. Con la pestaña en segundo plano no se consulta. */
 export const LIST_POLL_MS = 10_000;
@@ -55,7 +55,7 @@ export function useInboxOptions() {
 
 function useRefresh(id: string) {
   const qc = useQueryClient();
-  return () => Promise.all([qc.invalidateQueries({ queryKey: ['conversation', id] }), qc.invalidateQueries({ queryKey: ['messages', id] }), qc.invalidateQueries({ queryKey: ['conversations'] })]);
+  return () => Promise.all([qc.invalidateQueries({ queryKey: ['transfer-options', id] }), qc.invalidateQueries({ queryKey: ['conversation', id] }), qc.invalidateQueries({ queryKey: ['messages', id] }), qc.invalidateQueries({ queryKey: ['conversations'] })]);
 }
 
 /** Escribe al cliente. El mensaje vuelve con su estado (`queued`, `sent` o `failed`). */
@@ -92,6 +92,46 @@ export function useMarkRead(id: string) {
       return qc.invalidateQueries({ queryKey: ['conversations'] });
     },
   });
+}
+
+/** A quién se puede transferir o compartir, con su carga y si está en la cola de la conversación. */
+export function useTransferOptions(id: string, enabled: boolean) {
+  return useQuery({ queryKey: ['transfer-options', id], enabled, staleTime: 0, queryFn: () => api<TransferOptions>(`/conversations/${id}/transfer-options`) });
+}
+
+export interface TransferInput {
+  to_user_id: string;
+  keep_as?: 'reply' | 'view';
+  note?: string;
+}
+
+/** Pasa la conversación (y el lead) a otra persona, que debe aceptarla. */
+export function useTransfer(id: string) {
+  const refresh = useRefresh(id);
+  return useMutation({ mutationFn: (input: TransferInput) => api<TransferResult>(`/conversations/${id}/transfer`, { method: 'POST', body: input }), onSettled: refresh });
+}
+
+export interface ShareInput {
+  user_id: string;
+  permission: 'reply' | 'view';
+  note?: string;
+}
+
+/** Da acceso a otra persona sin cambiar el dueño. */
+export function useShare(id: string) {
+  const qc = useQueryClient();
+  const refresh = useRefresh(id);
+  return useMutation({
+    mutationFn: (input: ShareInput) => api<Conversation>(`/conversations/${id}/share`, { method: 'POST', body: input }),
+    onSuccess: (c) => qc.setQueryData(['conversation', id], c),
+    onSettled: refresh,
+  });
+}
+
+/** Quita el acceso de un colaborador (o la propia persona deja de participar). */
+export function useRevoke(id: string) {
+  const refresh = useRefresh(id);
+  return useMutation({ mutationFn: (userId: string) => api<RevokeResult>(`/conversations/${id}/participants/${userId}`, { method: 'DELETE' }), onSettled: refresh });
 }
 
 export function useRetryMessage(conversationId: string) {

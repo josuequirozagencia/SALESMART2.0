@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { abilities, windowOf, WINDOW_MS, type InboxScope } from '../../src/modules/inbox/inbox.access';
+import { abilities, assertCanReply, windowOf, WINDOW_MS, type InboxScope } from '../../src/modules/inbox/inbox.access';
 import { previewOf } from '../../src/modules/inbox/inbox.views';
 import { backoffMs, SEND_LEASE_MS, SEND_MAX_ATTEMPTS } from '../../src/modules/inbox/outbound-dispatcher.service';
 
@@ -43,26 +43,53 @@ describe('ventana de 24 h', () => {
 
 describe('qué puede hacer cada persona con una conversación', () => {
   const me = 'u-1';
-  const advisor: InboxScope = { userId: me, viewAll: false, canReply: true };
-  const admin: InboxScope = { userId: 'u-2', viewAll: true, canReply: true };
-  const reader: InboxScope = { userId: 'u-3', viewAll: true, canReply: false };
+  const advisor: InboxScope = { userId: me, viewAll: false, canReply: true, canTransfer: true, canShare: true };
+  const admin: InboxScope = { userId: 'u-2', viewAll: true, canReply: true, canTransfer: true, canShare: true };
+  const reader: InboxScope = { userId: 'u-3', viewAll: true, canReply: false, canTransfer: false, canShare: false };
 
   it('el dueño responde y acepta lo pendiente; nadie más responde', () => {
-    expect(abilities(advisor, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true });
-    expect(abilities(advisor, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true });
+    expect(abilities(advisor, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
+    expect(abilities(advisor, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true });
     expect(abilities(advisor, { status: 'waiting', ownerId: me }, 'active').reply).toBe(true);
-    expect(abilities(admin, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: true });
+    expect(abilities(admin, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: true, transfer: true, share: true });
   });
 
   it('lo sin asignar solo lo toma quien ve todo; lo finalizado no admite nada salvo notas', () => {
-    expect(abilities(admin, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: true, accept: false, take: true, close: true });
+    expect(abilities(admin, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: true, accept: false, take: true, close: true, transfer: true, share: false }); // una sin asignar se puede asignar a alguien, pero aún no hay con quién compartirla
     expect(abilities(advisor, { status: 'unassigned', ownerId: null }, 'active').take).toBe(false);
-    expect(abilities(advisor, { status: 'closed', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: false });
+    expect(abilities(advisor, { status: 'closed', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false });
   });
 
   it('con la conexión desactivada o desconectada no se responde; sin permiso de responder, nada de lo que escribe', () => {
     expect(abilities(advisor, { status: 'working', ownerId: me }, 'disabled').reply).toBe(false);
     expect(abilities(advisor, { status: 'working', ownerId: me }, 'removed').reply).toBe(false);
-    expect(abilities(reader, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: false, accept: false, take: false, close: false });
+    expect(abilities(reader, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false });
+  });
+
+  it('quien recibe la conversación compartida: con permiso de responder escribe solo cuando el dueño ya la aceptó; solo para ver, deja notas y nada más; ninguno la transfiere, comparte ni finaliza', () => {
+    const other = { status: 'working', ownerId: 'u-9' };
+    expect(abilities(advisor, other, 'active', 'reply')).toEqual({ reply: true, note: true, accept: false, take: false, close: false, transfer: false, share: false });
+    expect(abilities(advisor, { status: 'waiting', ownerId: 'u-9' }, 'active', 'reply').reply).toBe(true);
+    expect(abilities(advisor, { status: 'pending', ownerId: 'u-9' }, 'active', 'reply').reply).toBe(false); // el dueño aún no la acepta
+    expect(abilities(advisor, other, 'active', 'view')).toEqual({ reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false });
+    expect(abilities(advisor, other, 'disabled', 'reply').reply).toBe(false);
+    expect(abilities(advisor, other, 'active', null).note).toBe(true); // sin acceso a ella ni llegaría aquí; la regla de visibilidad es la consulta
+  });
+
+  it('por qué no responde quien comparte: ver solamente, esperar a que el dueño acepte, o no ser colaborador', () => {
+    const why = (c: { status: string; ownerId: string | null }, collab: 'reply' | 'view' | null): string | null => {
+      try {
+        assertCanReply(advisor, c, 'active', collab);
+        return null;
+      } catch (e) {
+        return (e as { code?: string }).code ?? 'otro';
+      }
+    };
+    expect(why({ status: 'working', ownerId: 'u-9' }, 'view')).toBe('NOT_OWNER');
+    expect(why({ status: 'working', ownerId: 'u-9' }, null)).toBe('NOT_OWNER');
+    expect(why({ status: 'pending', ownerId: 'u-9' }, 'reply')).toBe('CONVERSATION_NOT_ACCEPTED');
+    expect(why({ status: 'working', ownerId: 'u-9' }, 'reply')).toBeNull();
+    expect(why({ status: 'working', ownerId: me }, null)).toBeNull();
+    expect(why({ status: 'closed', ownerId: me }, null)).toBe('CONVERSATION_CLOSED');
   });
 });

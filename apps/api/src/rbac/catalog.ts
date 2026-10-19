@@ -89,7 +89,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
   client_admin: tenantKeys,
   // `contacts.write` del asesor es de alcance PROPIO (ADR-32 #3 / ADR-43): crea contactos asignados a sí mismo y edita los suyos.
   // M4.2 (ADR-49): `opportunities.write` del asesor es de alcance PROPIO (sus oportunidades), igual que sus contactos.
-  advisor: ['inbox.read', 'inbox.reply', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write'],
+  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write'],
 };
 
 /**
