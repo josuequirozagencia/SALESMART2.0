@@ -16,6 +16,13 @@ export const EVENT_MAX_ATTEMPTS = 5;
 export const PAYLOAD_RETENTION_DAYS = 30;
 const REDACT_BATCH = 500;
 const MAX_BACKOFF_MS = 10 * 60_000;
+/**
+ * Un estado (enviado, entregado, leído) o una reacción puede llegar ANTES de que anotemos el identificador del mensaje que acabamos de enviar (Meta avisa a los milisegundos de aceptarlo).
+ * Mientras el aviso sea reciente, uno que trae estados o reacciones a mensajes desconocidos se vuelve a mirar en unos segundos en vez de darse por terminado; pasado ese tiempo se descarta
+ * (un mensaje enviado desde otro lugar, o anterior a este sistema, nunca lo va a conocer).
+ */
+export const STATUS_WAIT_MS = 2 * 60_000;
+export const STATUS_RETRY_MS = 10_000;
 
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 
@@ -87,12 +94,14 @@ export class WebhookEventsService {
     // SAVEPOINT en la misma transacción: si este aviso falla se revierte solo lo suyo y la transacción (y los demás avisos del lote) siguen sanos
     await tx.execute(sql`SAVEPOINT webhook_event`);
     let failure: unknown = null;
+    let unknownTargets = 0;
     try {
       // Un aviso sin contenido (ya vaciado) no tiene nada que procesar
       if (ev.payload) {
         for (const { event } of this.provider.parseStored(ev.payload, ev.receivedAt).events) {
           for (const m of event.messages) await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
-          for (const s of event.statuses) await this.conversations.applyStatus(tx, ev.channelAccountId, s);
+          for (const s of event.statuses) if ((await this.conversations.applyStatus(tx, ev.channelAccountId, s)) === 'unknown') unknownTargets += 1;
+          for (const r of event.reactions) if ((await this.conversations.applyReaction(tx, ev.channelAccountId, r)) === 'unknown') unknownTargets += 1;
         }
       }
       await tx.execute(sql`RELEASE SAVEPOINT webhook_event`);
@@ -101,6 +110,11 @@ export class WebhookEventsService {
       await tx.execute(sql`ROLLBACK TO SAVEPOINT webhook_event`);
     }
     if (failure === null) {
+      if (unknownTargets > 0 && now.getTime() - ev.receivedAt.getTime() < STATUS_WAIT_MS) {
+        // Se queda pendiente sin contar como intento fallido: lo ya aplicado es idempotente
+        await tx.update(webhookEvents).set({ nextAttemptAt: new Date(now.getTime() + STATUS_RETRY_MS) }).where(eq(webhookEvents.id, ev.id));
+        return;
+      }
       await tx.update(webhookEvents).set({ status: 'done', attempts, processedAt: now, lastError: null }).where(eq(webhookEvents.id, ev.id));
       return;
     }

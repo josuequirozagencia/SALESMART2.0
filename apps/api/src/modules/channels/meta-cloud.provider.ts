@@ -1,5 +1,5 @@
 import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
-import { WhatsAppProviderError, type NumberInfo, type ParsedWebhook, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
+import { WhatsAppProviderError, type NumberInfo, type ParsedWebhook, type SendTextInput, type SentMessage, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
 
 export interface MetaCloudOptions {
   /** Origen de la Graph API (se cambia en las pruebas por un servidor simulado). */
@@ -12,6 +12,14 @@ export interface MetaCloudOptions {
 }
 
 const ID_RE = /^[0-9]{5,25}$/;
+/** Destino de un mensaje: E.164 sin «+» (8 a 15 dígitos). */
+const TO_RE = /^[0-9]{8,15}$/;
+/** Largo máximo del texto de un mensaje de WhatsApp. */
+const MAX_TEXT = 4096;
+/** Códigos de error de la Cloud API que significan «ese destinatario no puede recibir»: número inválido o sin WhatsApp, fuera de la lista de prueba, no registrado. */
+const RECIPIENT_CODES: ReadonlySet<number> = new Set([131026, 131030, 131021, 133010]);
+/** Códigos de límite de envíos (por número, por par o general). */
+const RATE_CODES: ReadonlySet<number> = new Set([130429, 131056, 80007, 4]);
 
 /**
  * Adaptador de WhatsApp Cloud API de Meta (ADR-02/50). Habla con la Graph API por `fetch` y traduce sus respuestas a los códigos de nuestro puerto.
@@ -68,5 +76,38 @@ export class MetaCloudProvider implements WhatsAppProvider {
     // 100 = el objeto no existe o el token no tiene permiso sobre él; 404 también
     if (res.status === 404 || code === 100) throw new WhatsAppProviderError('number_not_found', 'Meta no encontró ese número con este token');
     throw new WhatsAppProviderError('unavailable', 'Meta no pudo atender la consulta');
+  }
+
+  async sendText(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendTextInput): Promise<SentMessage> {
+    if (!ID_RE.test(phoneNumberId)) throw new WhatsAppProviderError('number_not_found', 'El identificador del número no es válido');
+    // El destino va en el cuerpo: solo dígitos (E.164 sin «+»). Un texto vacío o más largo que el máximo de WhatsApp ni siquiera sale a la red
+    if (!TO_RE.test(input.to)) throw new WhatsAppProviderError('recipient_invalid', 'El número de destino no es válido');
+    if (input.text === '' || input.text.length > MAX_TEXT) throw new WhatsAppProviderError('rejected', 'El texto no es válido para WhatsApp');
+    let res: Response;
+    try {
+      res = await this.fetchFn(`${this.base}/${this.version}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${credentials.accessToken}`, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: input.to, type: 'text', text: { preview_url: false, body: input.text } }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      throw new WhatsAppProviderError('unavailable', 'No pudimos conectar con Meta');
+    }
+    const body = (await res.json().catch(() => null)) as { messages?: Array<{ id?: unknown }>; error?: { code?: unknown } } | null;
+    if (res.ok) {
+      const id = body?.messages?.[0]?.id;
+      if (typeof id !== 'string' || id === '') throw new WhatsAppProviderError('unavailable', 'Meta respondió con un formato inesperado');
+      return { externalId: id };
+    }
+    const code = typeof body?.error?.code === 'number' ? body.error.code : null;
+    // Los mensajes de error NUNCA llevan el texto enviado ni el teléfono: solo nuestra explicación y, si acaso, el código numérico de Meta
+    if (res.status === 401 || code === 190) throw new WhatsAppProviderError('invalid_token', 'Meta rechazó el token');
+    if (code === 131047) throw new WhatsAppProviderError('window_closed', 'Pasaron más de 24 horas desde el último mensaje del cliente: Meta solo admite una plantilla aprobada');
+    if (code !== null && RECIPIENT_CODES.has(code)) throw new WhatsAppProviderError('recipient_invalid', `Meta no pudo entregar el mensaje a ese número (código ${code})`);
+    if (res.status === 429 || (code !== null && RATE_CODES.has(code))) throw new WhatsAppProviderError('rate_limited', 'Meta limitó los envíos de este número por ahora');
+    if (res.status === 404 || code === 100) throw new WhatsAppProviderError('number_not_found', 'Meta no encontró el número de la conexión con este token');
+    if (res.status >= 500) throw new WhatsAppProviderError('unavailable', 'Meta no pudo atender el envío');
+    throw new WhatsAppProviderError('rejected', code === null ? 'Meta rechazó el mensaje' : `Meta rechazó el mensaje (código ${code})`);
   }
 }

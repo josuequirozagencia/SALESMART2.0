@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { ContextBanner } from '../context/ContextBanner';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { TrialBanner } from '../trial/TrialBanner';
@@ -17,6 +17,8 @@ const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex
 export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Trial | null; onLogout: () => void; children: ReactNode }) {
   // «Configuración» solo para quien puede administrar los campos (el servidor lo dice; no se replica la matriz de permisos aquí)
   const manageFields = useCustomFields().data?.access.manage === true;
+  // El Inbox necesita más ancho que el resto de las secciones: lista y hilo, uno al lado del otro
+  const wide = useLocation().pathname.startsWith('/inbox');
   return (
     <div className="min-h-full bg-bg">
       <ContextBanner me={me} />
@@ -30,10 +32,11 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
           <Button onClick={onLogout}>Cerrar sesión</Button>
         </div>
       </header>
-      <div className="mx-auto grid max-w-[1100px] grid-cols-[minmax(0,1fr)] gap-4 p-5">
+      <div className={`mx-auto grid ${wide ? 'max-w-[1500px]' : 'max-w-[1100px]'} grid-cols-[minmax(0,1fr)] gap-4 p-5`}>
         {trial ? <TrialBanner trial={trial} role={me.role} /> : null}
         <nav aria-label="Secciones" className="flex gap-1 overflow-x-auto whitespace-nowrap border-b border-line">
           <NavLink to="/" end className={tab}>Inicio</NavLink>
+          <NavLink to="/inbox" className={tab}>Inbox</NavLink>
           <NavLink to="/contacts" className={tab}>Contactos</NavLink>
           <NavLink to="/companies" className={tab}>Empresas</NavLink>
           <NavLink to="/opportunities" className={tab}>Oportunidades</NavLink>

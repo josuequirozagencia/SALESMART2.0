@@ -39,6 +39,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'CHANNEL_EXISTS': case 'CHANNEL_NUMBER_IN_USE': case 'CHANNEL_LIMIT': case 'CHANNEL_TOKEN_INVALID': case 'CHANNEL_NUMBER_NOT_FOUND': case 'CHANNEL_PROVIDER_UNAVAILABLE': case 'CHANNEL_CREDENTIALS_UNREADABLE': case 'CHANNEL_VAULT_UNAVAILABLE': case 'CHANNEL_QUEUE_NOT_FOUND': return e.message;
     // Colas y reparto (ADR-07): el servidor ya redacta el motivo
     case 'QUEUE_EXISTS': case 'QUEUE_LIMIT': case 'QUEUE_IN_USE': case 'QUEUE_DISTRIBUTION_OFF': return e.message;
+    // Inbox (ADR-16/50): el servidor ya redacta el motivo
+    case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;

@@ -19,7 +19,15 @@ export interface NumberInfo {
   readonly verifiedName: string | null;
 }
 
-export type WhatsAppErrorCode = 'invalid_token' | 'number_not_found' | 'unavailable';
+/**
+ * `invalid_token` el proveedor no acepta el token · `number_not_found` no encuentra el número · `unavailable` no respondió o falló de su lado (se puede reintentar) ·
+ * `rate_limited` límite de envíos (se puede reintentar) · `window_closed` pasaron las 24 h: solo plantillas · `recipient_invalid` el destinatario no puede recibir
+ * (número inválido, sin WhatsApp, fuera de la lista de prueba) · `rejected` cualquier otro rechazo del proveedor.
+ */
+export type WhatsAppErrorCode = 'invalid_token' | 'number_not_found' | 'unavailable' | 'rate_limited' | 'window_closed' | 'recipient_invalid' | 'rejected';
+
+/** ¿Tiene sentido volver a intentar el mismo envío más tarde? Solo si el fallo fue pasajero. */
+export const isRetryableError = (code: WhatsAppErrorCode): boolean => code === 'unavailable' || code === 'rate_limited';
 
 /** Fallo del proveedor, traducido a un código nuestro. El mensaje NUNCA incluye el token ni datos del cliente. */
 export class WhatsAppProviderError extends Error {
@@ -40,10 +48,23 @@ export interface ParsedWebhook {
   readonly ignored: number;
 }
 
+/** Mensaje de texto a enviar. `to` es el teléfono de destino en dígitos (sin «+»), tal como lo informó el proveedor. */
+export interface SendTextInput {
+  readonly to: string;
+  readonly text: string;
+}
+
+export interface SentMessage {
+  /** Identificador que el proveedor le dio al mensaje: con él llegarán sus estados de entrega. */
+  readonly externalId: string;
+}
+
 export interface WhatsAppProvider {
   readonly name: 'meta_cloud' | 'fake';
   /** Consulta el número con el token dado: sirve para comprobar que ambos son válidos. */
   describeNumber(credentials: WhatsAppCredentials, phoneNumberId: string): Promise<NumberInfo>;
+  /** Envía un mensaje de texto desde el número. Lanza `WhatsAppProviderError` (con un mensaje seguro: sin token ni texto del cliente) si no se pudo. */
+  sendText(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendTextInput): Promise<SentMessage>;
   /** ¿El aviso entrante lo firmó de verdad el proveedor? `rawBody` es el cuerpo EXACTO recibido; `appSecret`, el secreto de la aplicación de la plataforma. */
   verifyWebhook(rawBody: Buffer, signature: string | undefined, appSecret: string): boolean;
   /** Lee un aviso entrante (ya verificado) y lo traduce a eventos normalizados, uno por número. Nunca lanza por un contenido mal formado. */

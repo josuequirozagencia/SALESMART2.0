@@ -3,6 +3,7 @@ import { AgencyShell } from './features/agency/AgencyShell';
 import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
 import { AttributionPage } from './features/attribution/AttributionPage';
+import { InboxPage } from './features/inbox/InboxPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
 import { ContactsPage } from './features/contacts/ContactsPage';
@@ -99,6 +100,7 @@ export function App() {
       <Route path="/accept-invite" element={<AcceptInviteScreen />} />
       <Route element={<AppGate />}>
         <Route path="/" element={<Home />} />
+        <Route path="/inbox/:id?" element={<InboxPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/companies" element={<ClientCompaniesPage />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />

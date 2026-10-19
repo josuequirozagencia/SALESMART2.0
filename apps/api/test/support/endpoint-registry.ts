@@ -150,6 +150,18 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/queues/:id', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'POST /v1/queues/:id/simulate', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'POST /v1/queues/:id/distribute', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  // Inbox (M5.4, ADR-16/50). Pruebas: test/inbox/inbox.test.ts (A↔B, visibilidad por persona, permisos, ventana de 24 h, envío con reintentos, notas, concurrencia)
+  { route: 'GET /v1/conversations', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'GET /v1/conversations/options', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'GET /v1/conversations/:id', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'GET /v1/conversations/:id/messages', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/conversations/:id/messages', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/conversations/:id/notes', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/conversations/:id/accept', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/conversations/:id/take', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/conversations/:id/close', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/conversations/:id/read', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'POST /v1/messages/:id/retry', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

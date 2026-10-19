@@ -1,5 +1,6 @@
 export { ChannelsModule } from './channels.module';
-export { WHATSAPP_PROVIDER, WhatsAppProviderError, type WhatsAppProvider, type WhatsAppCredentials, type NumberInfo, type ParsedWebhook } from './whatsapp.port';
+export { WHATSAPP_PROVIDER, WhatsAppProviderError, isRetryableError, type WhatsAppProvider, type WhatsAppCredentials, type WhatsAppErrorCode, type NumberInfo, type ParsedWebhook, type SendTextInput, type SentMessage } from './whatsapp.port';
+export { ChannelVault } from './channel-vault.service';
 export { FakeWhatsAppProvider, FAKE_WHATSAPP_TOKEN, FAKE_UNKNOWN_PREFIX, FAKE_UNAVAILABLE_ID } from './whatsapp.fake';
 export { MetaCloudProvider, type MetaCloudOptions } from './meta-cloud.provider';
 export { WebhookEventsJob, MAX_BATCHES_PER_RUN } from './webhook-events.job';

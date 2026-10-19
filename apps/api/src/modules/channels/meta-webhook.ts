@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedStatus } from '../conversations';
+import type { InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedStatus } from '../conversations';
 import type { ParsedWebhook } from './whatsapp.port';
 
 /**
@@ -46,7 +46,7 @@ const MEDIA_KINDS = ['image', 'audio', 'video', 'document', 'sticker'] as const;
 
 interface Parsed {
   message: NormalizedMessage | null;
-  /** true = es un mensaje que no se guarda a propósito (reacciones, avisos del sistema): no cuenta como descartado por error. */
+  /** true = es un mensaje que no se guarda a propósito (avisos del sistema): no cuenta como descartado por error. */
   skipped: boolean;
 }
 
@@ -55,7 +55,7 @@ function parseMessage(m: Record<string, unknown>, names: ReadonlyMap<string, str
   const from = str(m['from']);
   const type = str(m['type']);
   if (!id || !from || !type) return { message: null, skipped: false };
-  if (type === 'reaction' || type === 'system') return { message: null, skipped: true };
+  if (type === 'system') return { message: null, skipped: true };
   const phone = `+${from.replace(/\D/g, '')}`;
   if (!E164_RE.test(phone)) return { message: null, skipped: false };
 
@@ -99,6 +99,19 @@ function parseMessage(m: Record<string, unknown>, names: ReadonlyMap<string, str
   };
 }
 
+/** Largo máximo de una reacción (una secuencia de emoji con varios modificadores llega a ~25 unidades). */
+const MAX_EMOJI = 32;
+
+/** Reacción de un cliente: el emoji, o ninguno si quitó la suya. Sin el mensaje al que reacciona, o con un emoji inválido (control, demasiado largo), se descarta. */
+function parseReaction(m: Record<string, unknown>, now: Date): NormalizedReaction | null {
+  const r = isObj(m['reaction']) ? m['reaction'] : null;
+  const target = r ? str(r['message_id']) : null;
+  if (!r || !target) return null;
+  const raw = typeof r['emoji'] === 'string' ? stripNul(r['emoji']).trim() : '';
+  if (raw.length > MAX_EMOJI || /\p{Cc}/u.test(raw)) return null;
+  return { targetExternalId: target, emoji: raw === '' ? null : raw, at: toDate(m['timestamp'], now) };
+}
+
 function parseStatus(s: Record<string, unknown>, now: Date): NormalizedStatus | null {
   const id = str(s['id']);
   const state = str(s['status']);
@@ -132,7 +145,14 @@ export function parseMetaWebhook(body: unknown, now = new Date()): ParsedWebhook
         if (isObj(c) && str(c['wa_id']) && isObj(c['profile']) && str(c['profile']['name'])) names.set(str(c['wa_id'])!, str(c['profile']['name'])!);
       }
       const messages: NormalizedMessage[] = [];
+      const reactions: NormalizedReaction[] = [];
       for (const m of arr(value['messages'])) {
+        if (isObj(m) && str(m['type']) === 'reaction') {
+          const r = parseReaction(m, now);
+          if (r) reactions.push(r);
+          else ignored += 1;
+          continue;
+        }
         const p = isObj(m) ? parseMessage(m, names, now) : { message: null, skipped: false };
         if (p.message) messages.push(p.message);
         else if (!p.skipped) ignored += 1;
@@ -143,7 +163,7 @@ export function parseMetaWebhook(body: unknown, now = new Date()): ParsedWebhook
         if (p) statuses.push(p);
         else ignored += 1;
       }
-      events.push({ event: { phoneNumberId, messages, statuses }, raw: value });
+      events.push({ event: { phoneNumberId, messages, statuses, reactions }, raw: value });
     }
   }
   return { events, ignored };

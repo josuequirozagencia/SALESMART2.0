@@ -643,3 +643,75 @@ export interface QueueMemberInput {
   active: boolean;
   weight: number;
 }
+
+// ── Inbox (M5.4, ADR-16/50) ──
+export type ConversationStatus = 'unassigned' | 'pending' | 'working' | 'waiting' | 'closed';
+/** Pestañas: `working` = trabajando y esperando al cliente · `pending` = «Pendientes»: por aceptar (y sin asignar para quien ve todo) · `closed` = finalizadas. */
+export type InboxTab = 'working' | 'pending' | 'closed';
+export interface Conversation {
+  id: string;
+  status: ConversationStatus;
+  unread_count: number;
+  last_message_at: string | null;
+  last_inbound_at: string | null;
+  assigned_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  contact: { id: string; name: string; phone: string | null };
+  owner: { id: string; name: string } | null;
+  queue: { id: string; name: string; color: string } | null;
+  channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed' };
+  tags: ContactTag[];
+  last_message: { direction: 'in' | 'out'; kind: string; preview: string; status: string; at: string } | null;
+  /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */
+  window: { open: boolean; expires_at: string | null };
+  /** Lo que la persona puede hacer; es solo ayuda de presentación, el servidor vuelve a verificarlo. */
+  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean };
+}
+export interface ConversationList {
+  items: Conversation[];
+  next_cursor: string | null;
+  /** Solo en la primera página. */
+  counts: { working: number; pending: number; closed: number; unread: number } | null;
+}
+export type MessageStatus = 'received' | 'queued' | 'sent' | 'delivered' | 'read' | 'failed' | 'internal';
+export interface ChatMessage {
+  id: string;
+  direction: 'in' | 'out';
+  sender_type: string;
+  author: { id: string; name: string } | null;
+  kind: string;
+  text: string | null;
+  media: { mime_type: string | null; filename: string | null } | null;
+  extra: Record<string, unknown> | null;
+  /** Reacción del cliente a este mensaje (un emoji), o null. */
+  reaction: string | null;
+  status: MessageStatus;
+  error: string | null;
+  sent_at: string;
+  delivered_at: string | null;
+  read_at: string | null;
+  is_note: boolean;
+}
+export interface ChatMessagePage {
+  /** De la más antigua a la más reciente. */
+  items: ChatMessage[];
+  /** Para pedir los más antiguos; null si ya no hay más. */
+  next_cursor: string | null;
+}
+export interface InboxOptions {
+  queues: Array<{ id: string; name: string; color: string }>;
+  channels: Array<{ id: string; name: string; state: 'active' | 'disabled' }>;
+  /** Solo para quien ve todas las conversaciones. */
+  owners: Array<{ id: string; name: string }>;
+  tags: ContactTag[];
+}
+export interface InboxFilters {
+  tab: InboxTab;
+  q: string;
+  owner: string;
+  queue: string;
+  channel: string;
+  tag: string;
+  unread: boolean;
+}

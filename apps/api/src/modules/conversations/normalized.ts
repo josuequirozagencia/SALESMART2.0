@@ -44,10 +44,19 @@ export interface NormalizedStatus {
   readonly error: { readonly code: string; readonly title: string } | null;
 }
 
+/** Reacción del cliente a un mensaje (nuestro o suyo). `emoji` null = quitó su reacción. Un cliente tiene una sola reacción por mensaje: la última reemplaza a la anterior. */
+export interface NormalizedReaction {
+  /** Identificador, en el proveedor, del mensaje al que reacciona. */
+  readonly targetExternalId: string;
+  readonly emoji: string | null;
+  readonly at: Date;
+}
+
 /** Todo lo que un proveedor avisó de UN número en un mismo aviso. */
 export interface NormalizedInboundEvent {
   /** Identificador del número de la empresa al que llegó (con él se resuelve la empresa). */
   readonly phoneNumberId: string;
   readonly messages: readonly NormalizedMessage[];
   readonly statuses: readonly NormalizedStatus[];
+  readonly reactions: readonly NormalizedReaction[];
 }

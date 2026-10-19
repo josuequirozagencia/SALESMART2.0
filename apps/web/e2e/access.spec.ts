@@ -1433,6 +1433,120 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
   }
 });
 
+test('inbox: un cliente escribe, el asesor acepta, responde (sale por el proveedor), deja una nota, el cliente contesta y se ve sin recargar, y se finaliza; el resto del equipo y otras empresas no la ven', async ({ page, request }) => {
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-inbox-0123456789abcdef';
+  const PHONE_ID = '1090123450088';
+  const FROM = '593984217731';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-inbox-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('inbox'));
+  const carlosEmail = uniqueEmail('carlos-inbox');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    // Un asesor que puede entrar: comparte la contraseña de la prueba (aún no hay pantalla para invitar al equipo)
+    const carlosId = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), 'Carlos E2E' FROM users WHERE email = $2 RETURNING id`, [carlosEmail, adminEmail])).rows[0].id as string;
+    await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [carlosId, orgId]);
+
+    // Cola con Carlos como único asesor y un número conectado a ella (por la API: ya hay E2E de esas pantallas)
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea inbox', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+
+    // 1) El cliente escribe (aviso firmado de Meta)
+    const hook = `${apiBase}/v1/channels/meta/webhook`;
+    const incoming = async (id: string, body: string, ts: number): Promise<void> => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Cliente Inbox' }, wa_id: FROM }], messages: [{ from: FROM, id, timestamp: String(ts), type: 'text', text: { body } }] } }] }] });
+      const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+      expect((await request.post(hook, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    };
+    await incoming('wamid.INBOX1', 'Hola, quiero una cita', Math.floor(Date.now() / 1000));
+    let conv: { id: string; status: string } | undefined;
+    for (let i = 0; i < 60 && !conv; i++) {
+      conv = (await db.query(`SELECT id, status FROM conversations WHERE organization_id = $1 AND owner_id = $2`, [orgId, carlosId])).rows[0] as typeof conv;
+      if (!conv) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(conv?.status).toBe('pending');
+
+    // 2) Carlos la ve en «Pendientes» con un mensaje sin leer, la abre y la acepta
+    await uiLogin(page, carlosEmail);
+    await page.getByRole('link', { name: 'Inbox' }).click();
+    await expect(page.getByRole('tab', { name: /Pendientes\s*1/ })).toBeVisible();
+    await page.getByRole('tab', { name: /Pendientes/ }).click();
+    await page.getByRole('link', { name: 'Cliente Inbox, 1 sin leer' }).click();
+    const thread = page.getByRole('region', { name: 'Conversación con Cliente Inbox' });
+    await expect(thread.getByRole('heading', { name: 'Cliente Inbox' })).toBeVisible();
+    await expect(thread.getByText('Por aceptar')).toBeVisible();
+    await expect(thread.getByRole('log', { name: 'Mensajes' }).getByText('Hola, quiero una cita')).toBeVisible();
+    await expect(thread.getByText(/Puedes escribir libremente: quedan 23 h/)).toBeVisible();
+    await thread.getByRole('button', { name: 'Aceptar' }).click();
+    await expect(thread.getByText('Trabajando')).toBeVisible();
+    await expect(thread.getByRole('button', { name: 'Aceptar' })).toHaveCount(0);
+
+    // 3) Responde: el mensaje sale por el proveedor (de mentira en la prueba) y queda «Enviado»
+    await thread.getByRole('textbox', { name: 'Mensaje' }).fill('Hola, claro: ¿mañana a las 10?');
+    await thread.getByRole('textbox', { name: 'Mensaje' }).press('Enter');
+    const log = thread.getByRole('log', { name: 'Mensajes' });
+    await expect(log.getByText('Hola, claro: ¿mañana a las 10?')).toBeVisible();
+    await expect(log.getByRole('img', { name: 'Enviado' })).toBeVisible();
+    const sent = (await db.query(`SELECT status, external_id, created_by FROM messages WHERE organization_id = $1 AND direction = 'out' AND kind = 'text'`, [orgId])).rows;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ status: 'sent', created_by: carlosId });
+    expect(sent[0].external_id).toMatch(/^wamid\.FAKE\./);
+    expect((await db.query(`SELECT status, unread_count FROM conversations WHERE id = $1`, [conv!.id])).rows[0]).toMatchObject({ status: 'waiting', unread_count: 0 });
+
+    // 4) Una nota interna: se ve distinta y nunca sale al cliente
+    await thread.getByRole('button', { name: 'Nota interna' }).click();
+    await thread.getByRole('textbox', { name: 'Nota interna' }).fill('Prefiere las mañanas');
+    await thread.getByRole('button', { name: 'Guardar nota' }).click();
+    await expect(log.getByText(/Nota interna · Carlos E2E/)).toBeVisible();
+    await expect(log.getByText('Prefiere las mañanas')).toBeVisible();
+    expect((await db.query(`SELECT status FROM messages WHERE organization_id = $1 AND kind = 'note'`, [orgId])).rows).toEqual([{ status: 'internal' }]);
+    await thread.getByRole('button', { name: 'Responder' }).click();
+
+    // 5) El cliente contesta: aparece SIN recargar (la pantalla se actualiza sola) y la conversación vuelve a «Trabajando»
+    await incoming('wamid.INBOX2', 'Perfecto, a las 10 me viene bien', Math.floor(Date.now() / 1000) + 1);
+    await expect(log.getByText('Perfecto, a las 10 me viene bien')).toBeVisible({ timeout: 30_000 });
+
+    // 5b) El cliente reacciona con 👍 al mensaje del asesor: se ve sobre ese mensaje (sin recargar) y NO cuenta como un mensaje nuevo
+    const reactionBody = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Cliente Inbox' }, wa_id: FROM }], messages: [{ from: FROM, id: 'wamid.INBOX-RX1', timestamp: String(Math.floor(Date.now() / 1000) + 2), type: 'reaction', reaction: { message_id: sent[0].external_id, emoji: '👍' } }] } }] }] });
+    const reactionSig = `sha256=${createHmac('sha256', APP_SECRET).update(reactionBody).digest('hex')}`;
+    expect((await request.post(hook, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': reactionSig }, data: reactionBody })).status()).toBe(200);
+    await expect(log.getByRole('img', { name: 'Reacción del cliente: 👍' })).toBeVisible({ timeout: 30_000 });
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1`, [conv!.id])).rows[0].n).toBe(4); // la reacción no es un mensaje
+
+    // 6) La finaliza (con confirmación) y la encuentra en «Finalizadas»
+    await thread.getByRole('button', { name: 'Finalizar' }).click();
+    await thread.getByRole('button', { name: 'Sí, finalizar' }).click();
+    await expect(thread.getByText(/está finalizada/)).toBeVisible();
+    await page.getByRole('tab', { name: /Finalizadas/ }).click();
+    await expect(page.getByRole('link', { name: 'Cliente Inbox' })).toBeVisible();
+    expect((await db.query(`SELECT status, closed_at FROM conversations WHERE id = $1`, [conv!.id])).rows[0]).toMatchObject({ status: 'closed' });
+
+    // 7) Visibilidad: lo sin asignar lo ve el administrador (puede tomarla), no el asesor; otra empresa no ve nada
+    const lonely = (await db.query(`INSERT INTO contacts(id, organization_id, name) VALUES (gen_random_uuid(), $1, 'Sin dueño') RETURNING id`, [orgId])).rows[0].id as string;
+    const channelId = (await db.query(`SELECT id FROM channel_accounts WHERE organization_id = $1`, [orgId])).rows[0].id as string;
+    const free = (await db.query(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, last_message_at, last_inbound_at) VALUES (gen_random_uuid(), $1, $2, $3, 'unassigned', now(), now()) RETURNING id`, [orgId, lonely, channelId])).rows[0].id as string;
+    const carlos = { authorization: `Bearer ${await apiLogin(request, carlosEmail)}` };
+    expect((await request.get(`${apiBase}/v1/conversations/${free}`, { headers: carlos })).status()).toBe(404);
+    const seen = (await (await request.get(`${apiBase}/v1/conversations/${free}`, { headers: adm })).json()) as { status: string; can: { take: boolean } };
+    expect(seen).toMatchObject({ status: 'unassigned', can: { take: true } });
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('inbox-otra')))}` };
+    expect((await request.get(`${apiBase}/v1/conversations/${conv!.id}`, { headers: other })).status()).toBe(404);
+    expect((await request.post(`${apiBase}/v1/conversations/${conv!.id}/notes`, { headers: { ...other, 'content-type': 'application/json' }, data: { text: 'intruso' } })).status()).toBe(404);
+    expect(((await (await request.get(`${apiBase}/v1/conversations?tab=closed`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+  } finally {
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

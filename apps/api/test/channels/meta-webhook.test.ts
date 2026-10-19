@@ -439,7 +439,7 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(new Set((await msgs()).map((m) => m.conversation_id)).size).toBe(2);
   });
 
-  it('adjuntos: queda la referencia y el pie, sin archivo (se descargarán en M5.6); las reacciones y los avisos del sistema se omiten; lo desconocido queda como «no compatible»', async () => {
+  it('adjuntos: queda la referencia y el pie, sin archivo (se descargarán en M5.6); una reacción no es un mensaje; lo desconocido queda como «no compatible»', async () => {
     const mk = (id: string, ts: number, message: Record<string, unknown>) => post(wa({ id, ts, message: { type: message['type'], ...message } }));
     await mk('wamid.IMG', T0, { type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg', caption: 'mi corte' }, text: undefined });
     await mk('wamid.AUD', T0 + 1, { type: 'audio', audio: { id: 'media-2', mime_type: 'audio/ogg' }, text: undefined });
@@ -449,7 +449,8 @@ describe('procesar: contacto, conversación y mensajes', () => {
     const m = await msgs();
     expect(m.map((x) => [x.external_id, x.kind, x.body])).toEqual([['wamid.IMG', 'image', 'mi corte'], ['wamid.AUD', 'audio', null], ['wamid.ORD', 'unsupported', null]]);
     expect(m[0]!.media).toEqual({ id: 'media-1', mime_type: 'image/jpeg', filename: null });
-    expect((await events()).map((e) => e.status)).toEqual(['done', 'done', 'done', 'done']);
+    // la reacción es a un mensaje que no conocemos (A0): se vuelve a mirar unos segundos; los demás avisos terminaron
+    expect((await events()).map((e) => e.status)).toEqual(['done', 'done', 'pending', 'done']);
   });
 
   it('un teléfono que no tiene forma de E.164 se descarta sin romper el aviso ni crear contacto', async () => {
@@ -523,11 +524,19 @@ describe('estados de entrega de los mensajes que enviamos', () => {
     expect(await out()).toMatchObject({ status: 'delivered', error: null });
   });
 
-  it('un estado de un mensaje que no conocemos se ignora sin error y no toca nada más', async () => {
+  it('un estado de un mensaje que no conocemos no toca nada más: se vuelve a mirar unos segundos (puede llegar antes de que anotemos el mensaje) y pasados 2 minutos se descarta sin error', async () => {
     await seedOutbound();
     await post(wa({ message: null, statuses: [{ id: 'wamid.OTRO', status: 'read', timestamp: String(T0 + 9) }], id: 'evt-x' }));
     expect(await runJob()).toBe(1);
-    expect((await events()).every((e) => e.status === 'done')).toBe(true);
+    const pending = (await events()).at(-1)!; // el último: antes quedó terminado el mensaje que sembró la prueba
+    expect(pending).toMatchObject({ status: 'pending', attempts: 0, last_error: null });
+    expect(pending.next_attempt_at.getTime()).toBeGreaterThan(Date.now() + 5_000);
+    expect(await out()).toMatchObject({ status: 'sent', read_at: null });
+    expect(await runJob()).toBe(0); // aún no le toca
+    expect(await runJob(new Date(Date.now() + 60_000))).toBe(1); // a la vista otra vez: sigue sin conocerse
+    expect((await events()).at(-1)).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(await runJob(new Date(Date.now() + 3 * 60_000))).toBe(1); // pasada la espera, se da por terminado
+    expect((await events()).every((e) => e.status === 'done' && e.last_error === null)).toBe(true);
     expect(await out()).toMatchObject({ status: 'sent', read_at: null });
   });
 
@@ -540,6 +549,102 @@ describe('estados de entrega de los mensajes que enviamos', () => {
     await feed(st('read', T0 + 20), 1); // el aviso llega por el número de A
     expect((await msgs(ORG_B)).find((m) => m.external_id === 'wamid.OUT1')!.status).toBe('sent');
     expect((await out()).status).toBe('read');
+  });
+});
+
+describe('reacciones de los clientes', () => {
+  const HEART = '\u{2764}\u{FE0F}';
+  const UP = '\u{1F44D}';
+  const LAUGH = '\u{1F602}';
+  let n = 0;
+  /** Un mensaje del cliente (IN1) y uno nuestro ya enviado (OUT1) en la misma conversación. */
+  async function seed(): Promise<ConvRow> {
+    await post(wa({ id: 'wamid.IN1' }));
+    await runJob();
+    const conv = (await convs())[0]!;
+    await admin.query(
+      `INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, external_id, direction, sender_type, kind, body, status, sent_at) VALUES (gen_random_uuid(), $1,$2,$3,'wamid.OUT1','out','human','text','Hola Ana','sent', $4)`,
+      [ORG_A, conv.id, channelA, new Date(T0 * 1000 + 5000)],
+    );
+    return conv;
+  }
+  /** Llega el aviso de una reacción (sin emoji = quitó la suya) y la tarea lo procesa. */
+  const react = async (target: string, emoji: string | null, ts: number, o: { phoneId?: string; from?: string } = {}): Promise<number> => {
+    n += 1;
+    await post(wa({ ...o, id: `wamid.RX${n}`, ts, message: { type: 'reaction', text: undefined, reaction: emoji === null ? { message_id: target } : { message_id: target, emoji } } }));
+    return runJob();
+  };
+  const metaOf = async (ext: string): Promise<Record<string, unknown>> => (await msgs()).find((m) => m.external_id === ext)!.meta;
+
+  it('el cliente reacciona a un mensaje nuestro y a uno suyo: la reacción queda en el mensaje y NO es un mensaje nuevo (no suma no leídos, no mueve la conversación ni abre la ventana de 24 h)', async () => {
+    const conv = await seed();
+    const before = (await convs())[0]!;
+    await react('wamid.OUT1', UP, T0 + 10);
+    await react('wamid.IN1', HEART, T0 + 11);
+    expect(await metaOf('wamid.OUT1')).toMatchObject({ reaction: UP });
+    expect(await metaOf('wamid.IN1')).toMatchObject({ reaction: HEART, wa_id: ANA });
+    const after = (await convs())[0]!;
+    expect([after.status, after.unread_count, after.last_message_at, after.last_inbound_at]).toEqual([before.status, before.unread_count, before.last_message_at, before.last_inbound_at]);
+    expect((await msgs()).map((m) => m.external_id)).toEqual(['wamid.IN1', 'wamid.OUT1']); // ningún mensaje nuevo
+    expect((await events()).every((e) => e.status === 'done' && e.last_error === null)).toBe(true);
+    expect(conv.id).toBe(after.id);
+  });
+
+  it('la última reacción reemplaza a la anterior, una sin emoji la quita y un aviso más antiguo que lo guardado no la pisa (llegan desordenados)', async () => {
+    await seed();
+    await react('wamid.OUT1', UP, T0 + 10);
+    await react('wamid.OUT1', LAUGH, T0 + 20);
+    expect(await metaOf('wamid.OUT1')).toMatchObject({ reaction: LAUGH });
+    await react('wamid.OUT1', HEART, T0 + 15); // más antigua que la guardada
+    expect(await metaOf('wamid.OUT1')).toMatchObject({ reaction: LAUGH });
+    await react('wamid.OUT1', null, T0 + 30); // la quitó
+    const meta = await metaOf('wamid.OUT1');
+    expect(meta['reaction']).toBeUndefined();
+    expect(meta['reaction_at']).toBe(new Date((T0 + 30) * 1000).toISOString());
+    await react('wamid.OUT1', UP, T0 + 25); // una anterior a la baja tampoco revive
+    expect((await metaOf('wamid.OUT1'))['reaction']).toBeUndefined();
+    await react('wamid.OUT1', HEART, T0 + 40);
+    expect(await metaOf('wamid.OUT1')).toMatchObject({ reaction: HEART });
+  });
+
+  it('una reacción a un mensaje que aún no conocemos se vuelve a mirar unos segundos y se aplica cuando el mensaje aparece; si nunca aparece, a los 2 minutos se descarta sin error', async () => {
+    const conv = await seed();
+    await react('wamid.TARDE', UP, T0 + 10);
+    const waiting = (await events()).at(-1)!;
+    expect(waiting).toMatchObject({ status: 'pending', attempts: 0, last_error: null });
+    await admin.query(
+      `INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, external_id, direction, sender_type, kind, body, status, sent_at) VALUES (gen_random_uuid(), $1,$2,$3,'wamid.TARDE','out','human','text','Llegó tarde','sent', now())`,
+      [ORG_A, conv.id, channelA],
+    );
+    expect(await runJob(new Date(Date.now() + 15_000))).toBe(1);
+    expect(await metaOf('wamid.TARDE')).toMatchObject({ reaction: UP });
+    expect((await events()).at(-1)).toMatchObject({ status: 'done', last_error: null });
+    // a un mensaje que nunca conoceremos
+    await react('wamid.NUNCA', HEART, T0 + 50);
+    expect((await events()).at(-1)).toMatchObject({ status: 'pending' });
+    expect(await runJob(new Date(Date.now() + 3 * 60_000))).toBe(1);
+    expect((await events()).every((e) => e.status === 'done' && e.last_error === null)).toBe(true);
+  });
+
+  it('la reacción solo toca mensajes de ESA empresa y de ESE canal: el mismo identificador en otra empresa no se ve afectado', async () => {
+    await seed();
+    await post(wa({ phoneId: PHONE_B, from: BETO, id: 'wamid.IN-B' }));
+    await runJob();
+    const convB = (await convs(ORG_B))[0]!;
+    await admin.query(
+      `INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, external_id, direction, sender_type, kind, body, status, sent_at) VALUES (gen_random_uuid(), $1,$2,$3,'wamid.OUT1','out','human','text','Hola Beto','sent', now())`,
+      [ORG_B, convB.id, channelB],
+    );
+    await react('wamid.OUT1', UP, T0 + 10); // llega por el número de A
+    expect(await metaOf('wamid.OUT1')).toMatchObject({ reaction: UP });
+    expect((await msgs(ORG_B)).find((m) => m.external_id === 'wamid.OUT1')!.meta['reaction']).toBeUndefined();
+  });
+
+  it('un emoji que no cabe se descarta sin romper el aviso ni tocar el mensaje', async () => {
+    await seed();
+    await react('wamid.OUT1', 'x'.repeat(40), T0 + 10);
+    expect((await metaOf('wamid.OUT1'))['reaction']).toBeUndefined();
+    expect((await events()).every((e) => e.status === 'done')).toBe(true);
   });
 });
 

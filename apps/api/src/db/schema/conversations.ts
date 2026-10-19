@@ -70,6 +70,9 @@ export const conversations = tenantTable(
     /** Último mensaje del CLIENTE: de aquí sale la ventana de 24 h de WhatsApp oficial. */
     lastInboundAt: ts('last_inbound_at'),
     unreadCount: integer('unread_count').notNull().default(0),
+    /** Con quién se habla en el canal (el identificador que informó el proveedor, p. ej. el `wa_id` de WhatsApp): a él se le responde. Null en las anteriores a M5.4. */
+    peerId: text('peer_id'),
+    closedAt: ts('closed_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -114,6 +117,11 @@ export const messages = tenantTable(
     sentAt: ts('sent_at').notNull(),
     deliveredAt: ts('delivered_at'),
     readAt: ts('read_at'),
+    /** Quién lo escribió (mensajes humanos y notas); null en los que entran y en los automáticos. */
+    createdBy: uuid('created_by').references(() => users.id),
+    /** Intentos de envío hechos y cuándo toca el siguiente (solo mensajes en cola). */
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: ts('next_attempt_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -124,10 +132,14 @@ export const messages = tenantTable(
     // Lo que entra lo escribe el contacto; lo que sale, nunca
     check('messages_sender_direction', sql`(${t['direction']!} = 'in') = (${t['senderType']!} = 'contact')`),
     check('messages_kind_valid', sql`${t['kind']!} IN ('text', 'image', 'audio', 'video', 'document', 'sticker', 'location', 'contacts', 'interactive', 'button', 'template', 'note', 'unsupported')`),
-    check('messages_status_valid', sql`${t['status']!} IN ('received', 'queued', 'sent', 'delivered', 'read', 'failed')`),
+    check('messages_status_valid', sql`${t['status']!} IN ('received', 'queued', 'sent', 'delivered', 'read', 'failed', 'internal')`),
+    // Una nota interna es `internal` y solo ella: así ningún camino de envío (que toma `queued`) puede llegar a mandarla al cliente
+    check('messages_note_internal', sql`(${t['kind']!} = 'note') = (${t['status']!} = 'internal')`),
+    check('messages_attempts_valid', sql`${t['attempts']!} >= 0`),
     check('messages_body_len', sql`${t['body']!} IS NULL OR length(${t['body']!}) <= 8000`),
     check('messages_error_len', sql`${t['error']!} IS NULL OR length(${t['error']!}) <= 300`),
     uniqueIndex('messages_channel_external_uq').on(t['organizationId']!, t['channelAccountId']!, t['externalId']!).where(sql`${t['externalId']!} IS NOT NULL`),
     index('messages_conversation_idx').on(t['organizationId']!, t['conversationId']!, t['sentAt']!, t['id']!),
+    index('messages_outbox_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'queued'`),
   ],
 );

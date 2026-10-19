@@ -1,0 +1,141 @@
+import type { messages } from '../../db';
+import type { TagView } from '../tags';
+import { abilities, windowOf, type Abilities, type ChannelState, type ConversationRow, type InboxScope, type WindowState } from './inbox.access';
+
+export type ConversationStatus = 'unassigned' | 'pending' | 'working' | 'waiting' | 'closed';
+
+export interface LastMessageView {
+  direction: 'in' | 'out';
+  kind: string;
+  /** Una línea: el comienzo del texto o, si no hay texto, el tipo de contenido («Imagen», «Audio»…). */
+  preview: string;
+  status: string;
+  at: string;
+}
+
+export interface ConversationView {
+  id: string;
+  status: ConversationStatus;
+  unread_count: number;
+  last_message_at: string | null;
+  last_inbound_at: string | null;
+  assigned_at: string | null;
+  closed_at: string | null;
+  created_at: string;
+  contact: { id: string; name: string; phone: string | null };
+  owner: { id: string; name: string } | null;
+  queue: { id: string; name: string; color: string } | null;
+  channel: { id: string; name: string; state: ChannelState };
+  tags: TagView[];
+  /** El último mensaje real (las notas internas no cuentan). */
+  last_message: LastMessageView | null;
+  /** Ventana de 24 h de WhatsApp oficial para escribir libremente. */
+  window: WindowState;
+  /** Qué puede hacer quien consulta; la interfaz solo lo muestra, cada acción lo vuelve a verificar. */
+  can: Abilities;
+}
+
+export interface MessageView {
+  id: string;
+  direction: 'in' | 'out';
+  sender_type: string;
+  author: { id: string; name: string } | null;
+  kind: string;
+  text: string | null;
+  /** Adjunto entrante: solo la referencia; hasta M5.6 no se descarga. */
+  media: { mime_type: string | null; filename: string | null } | null;
+  /** Datos propios del tipo (ubicación, cantidad de contactos…). */
+  extra: Record<string, unknown> | null;
+  /** Reacción del cliente a este mensaje (un emoji), o null. */
+  reaction: string | null;
+  status: string;
+  error: string | null;
+  sent_at: string;
+  delivered_at: string | null;
+  read_at: string | null;
+  is_note: boolean;
+}
+
+const KIND_LABEL: Readonly<Record<string, string>> = {
+  image: 'Imagen',
+  audio: 'Audio',
+  video: 'Video',
+  document: 'Documento',
+  sticker: 'Sticker',
+  location: 'Ubicación',
+  contacts: 'Contacto',
+  interactive: 'Respuesta',
+  button: 'Botón',
+  template: 'Plantilla',
+  unsupported: 'Mensaje no compatible',
+};
+
+/** Vista previa de una línea para el listado. */
+export function previewOf(kind: string, body: string | null): string {
+  const text = body?.replace(/\s+/g, ' ').trim() ?? '';
+  if (text !== '') return text.length > 140 ? `${text.slice(0, 139)}…` : text;
+  return KIND_LABEL[kind] ?? 'Mensaje';
+}
+
+export interface ConversationParts {
+  c: ConversationRow;
+  contactName: string;
+  phone: string | null;
+  channelName: string;
+  channelState: ChannelState;
+  queue: { id: string; name: string; color: string } | null;
+  owner: { id: string; name: string } | null;
+  tags: readonly TagView[];
+  last: { direction: string; kind: string; body: string | null; status: string; sentAt: Date } | null;
+}
+
+const iso = (d: Date | null): string | null => (d ? d.toISOString() : null);
+
+export function conversationView(p: ConversationParts, scope: InboxScope, now: Date): ConversationView {
+  const { c } = p;
+  return {
+    id: c.id,
+    status: c.status as ConversationStatus,
+    unread_count: c.unreadCount,
+    last_message_at: iso(c.lastMessageAt),
+    last_inbound_at: iso(c.lastInboundAt),
+    assigned_at: iso(c.assignedAt),
+    closed_at: iso(c.closedAt),
+    created_at: c.createdAt.toISOString(),
+    contact: { id: c.contactId, name: p.contactName, phone: p.phone },
+    owner: p.owner,
+    queue: p.queue,
+    channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState },
+    tags: [...p.tags],
+    last_message: p.last ? { direction: p.last.direction as 'in' | 'out', kind: p.last.kind, preview: previewOf(p.last.kind, p.last.body), status: p.last.status, at: p.last.sentAt.toISOString() } : null,
+    window: windowOf(c.lastInboundAt, now),
+    can: abilities(scope, c, p.channelState),
+  };
+}
+
+type MessageRow = typeof messages.$inferSelect;
+
+/** `wa_id`, el código del último error de envío y la hora de la reacción son de uso interno: no se muestran (la reacción se muestra aparte). */
+const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at']);
+
+export function messageView(m: MessageRow, author: { id: string; name: string } | null): MessageView {
+  const media = m.media as { mime_type?: unknown; filename?: unknown } | null;
+  const extra = Object.fromEntries(Object.entries(m.meta).filter(([k]) => !HIDDEN_META.has(k)));
+  return {
+    id: m.id,
+    direction: m.direction as 'in' | 'out',
+    sender_type: m.senderType,
+    author,
+    kind: m.kind,
+    text: m.body,
+    media: media ? { mime_type: typeof media.mime_type === 'string' ? media.mime_type : null, filename: typeof media.filename === 'string' ? media.filename : null } : null,
+    extra: Object.keys(extra).length > 0 ? extra : null,
+    reaction: typeof m.meta['reaction'] === 'string' ? m.meta['reaction'] : null,
+    status: m.status,
+    error: m.error,
+    sent_at: m.sentAt.toISOString(),
+    delivered_at: iso(m.deliveredAt),
+    read_at: iso(m.readAt),
+    is_note: m.kind === 'note',
+  };
+}

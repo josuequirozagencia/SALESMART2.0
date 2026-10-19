@@ -5,7 +5,7 @@ import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { SystemTagsService } from '../tags';
-import type { NormalizedMessage, NormalizedStatus } from './normalized';
+import type { NormalizedMessage, NormalizedReaction, NormalizedStatus } from './normalized';
 
 export interface IngestResult {
   /** El mensaje ya estaba registrado (mismo canal y mismo identificador): no se cambió nada. */
@@ -16,6 +16,7 @@ export interface IngestResult {
 }
 
 export type StatusResult = 'updated' | 'unchanged' | 'unknown';
+export type ReactionResult = 'updated' | 'unchanged' | 'unknown';
 
 /** Orden de los estados de un mensaje enviado: nunca se retrocede (los avisos pueden llegar desordenados). */
 const RANK: Readonly<Record<string, number>> = { queued: 0, sent: 1, delivered: 2, read: 3 };
@@ -45,7 +46,7 @@ export class ConversationsService {
     const contact = await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
     // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
     if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
-    const conv = await this.openConversation(tx, contact.id, channelAccountId);
+    const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw);
     const inserted = await tx
       .insert(messages)
       .values({
@@ -74,6 +75,8 @@ export class ConversationsService {
         lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${at}::timestamptz), ${at}::timestamptz)`,
         lastInboundAt: sql`GREATEST(COALESCE(${conversations.lastInboundAt}, ${at}::timestamptz), ${at}::timestamptz)`,
         unreadCount: sql`${conversations.unreadCount} + 1`,
+        // A quien escribió se le responde por el identificador que informó el proveedor (puede cambiar, p. ej. si cambia de número)
+        peerId: m.fromRaw,
         status: sql`CASE WHEN ${conversations.status} = 'waiting' THEN 'working' ELSE ${conversations.status} END`,
         updatedAt: new Date(),
       })
@@ -114,8 +117,34 @@ export class ConversationsService {
     return 'updated';
   }
 
+  /**
+   * Aplica la reacción del cliente al mensaje al que reacciona (de ese canal y de esa empresa: la RLS y el filtro por canal impiden tocar otro). Se guarda en el propio
+   * mensaje (`meta.reaction`, con su hora): la última reacción reemplaza a la anterior y una sin emoji la quita; un aviso más antiguo que lo guardado no la pisa. NO es un
+   * mensaje nuevo: no suma no leídos, no mueve la conversación ni cambia su estado ni abre la ventana de 24 h. Reaccionar a un mensaje que no conocemos (aún no anotado
+   * o de otro lugar) es `unknown`: quien llama decide si vuelve a mirar.
+   */
+  async applyReaction(tx: TenantTx, channelAccountId: string, r: NormalizedReaction): Promise<ReactionResult> {
+    const [row] = await tx
+      .select({ id: messages.id, meta: messages.meta })
+      .from(messages)
+      .where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, r.targetExternalId)))
+      .for('update')
+      .limit(1);
+    if (!row) return 'unknown';
+    const prev = typeof row.meta['reaction_at'] === 'string' ? Date.parse(row.meta['reaction_at']) : Number.NaN;
+    if (!Number.isNaN(prev) && prev > r.at.getTime()) return 'unchanged';
+    const current = typeof row.meta['reaction'] === 'string' ? row.meta['reaction'] : null;
+    if (!Number.isNaN(prev) && prev === r.at.getTime() && current === r.emoji) return 'unchanged';
+    const patch = JSON.stringify(r.emoji ? { reaction: r.emoji, reaction_at: r.at.toISOString() } : { reaction_at: r.at.toISOString() });
+    await tx
+      .update(messages)
+      .set({ meta: r.emoji ? sql`${messages.meta} || ${patch}::jsonb` : sql`(${messages.meta} - 'reaction') || ${patch}::jsonb` })
+      .where(eq(messages.id, row.id));
+    return 'updated';
+  }
+
   /** La conversación abierta del contacto en el canal, o una nueva. Serializa por (contacto, canal): dos mensajes simultáneos no abren dos. */
-  private async openConversation(tx: TenantTx, contactId: string, channelAccountId: string): Promise<{ id: string; created: boolean }> {
+  private async openConversation(tx: TenantTx, contactId: string, channelAccountId: string, peerId: string): Promise<{ id: string; created: boolean }> {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`conversation:${contactId}:${channelAccountId}`}::text || ':' || app_org()::text), 0))`);
     const [open] = await tx
       .select({ id: conversations.id })
@@ -123,7 +152,7 @@ export class ConversationsService {
       .where(and(eq(conversations.contactId, contactId), eq(conversations.channelAccountId, channelAccountId), ne(conversations.status, 'closed')))
       .limit(1);
     if (open) return { id: open.id, created: false };
-    const [c] = await tx.insert(conversations).values({ contactId, channelAccountId }).returning({ id: conversations.id });
+    const [c] = await tx.insert(conversations).values({ contactId, channelAccountId, peerId }).returning({ id: conversations.id });
     await writeAudit(tx, { entityType: 'conversation', entityId: c!.id, newValue: { contact_id: contactId, channel_account_id: channelAccountId, status: 'unassigned' }, source: 'meta' });
     return { id: c!.id, created: true };
   }

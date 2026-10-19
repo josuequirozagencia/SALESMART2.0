@@ -6,6 +6,8 @@
 export type PermissionScope = 'platform' | 'tenant';
 
 export const PERMISSIONS = {
+  // M5.4 (ADR-16/50): ver las conversaciones a las que se tiene acceso (las propias; con `inbox.view_all`, todas). Responder, aceptar, finalizar y escribir notas va con `inbox.reply`.
+  'inbox.read': 'tenant',
   'inbox.view_all': 'tenant',
   'inbox.reply': 'tenant',
   'inbox.transfer': 'tenant',
@@ -87,7 +89,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
   client_admin: tenantKeys,
   // `contacts.write` del asesor es de alcance PROPIO (ADR-32 #3 / ADR-43): crea contactos asignados a sí mismo y edita los suyos.
   // M4.2 (ADR-49): `opportunities.write` del asesor es de alcance PROPIO (sus oportunidades), igual que sus contactos.
-  advisor: ['inbox.reply', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write'],
+  advisor: ['inbox.read', 'inbox.reply', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write'],
 };
 
 /**
@@ -95,7 +97,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
  * y cualquier acceso de agencia o de soporte a una empresa con la prueba vencida (ADR-41). Todo permiso que no está aquí es de escritura.
  * PROVISIONAL: cada módulo nuevo añade aquí sus permisos de lectura.
  */
-export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'commissions.view', 'analytics.view']);
+export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'commissions.view', 'analytics.view']);
 
 export type AccessLevel = 'read' | 'advisor' | 'admin';
 export const isAccessLevel = (v: unknown): v is AccessLevel => v === 'read' || v === 'advisor' || v === 'admin';
