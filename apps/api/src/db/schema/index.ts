@@ -9,5 +9,6 @@ export { customFieldDefinitions, customFieldValues } from './custom-fields';
 export { pipelines, pipelineStages, opportunities, stageHistory } from './pipelines';
 export { channelAccounts, whatsappAccounts, channelRoutes } from './channels';
 export { webhookEvents, conversations, messages, conversationParticipants } from './conversations';
+export { messageTemplates } from './templates';
 export { queues, queueMembers, queueDistributionState } from './queues';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';

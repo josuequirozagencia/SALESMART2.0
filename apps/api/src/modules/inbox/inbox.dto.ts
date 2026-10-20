@@ -17,6 +17,15 @@ const text = (max: number) =>
 export const replySchema = z.object({ text: text(MAX_MESSAGE_LENGTH) }).strict();
 export type ReplyDto = z.infer<typeof replySchema>;
 
+/** Enviar una plantilla: cuál y el valor de cada variable (clave = la `id` de la variable que informa la plantilla, p. ej. `body:1`). El servidor exige justo las que pide. */
+export const sendTemplateSchema = z
+  .object({
+    template_id: z.uuid(),
+    params: z.record(z.string().max(100), z.string().max(2000)).refine((p) => Object.keys(p).length <= 30, 'demasiadas variables').default({}),
+  })
+  .strict();
+export type SendTemplateDto = z.infer<typeof sendTemplateSchema>;
+
 export const noteSchema = z.object({ text: text(MAX_NOTE_LENGTH) }).strict();
 export type NoteDto = z.infer<typeof noteSchema>;
 

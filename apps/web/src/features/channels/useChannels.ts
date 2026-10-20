@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { Channel, ChannelInput, ChannelList } from '../../lib/types';
+import type { Channel, ChannelInput, ChannelList, TemplateList, TemplateSync } from '../../lib/types';
 
 /** Conexiones de canales de la empresa (solo quien administra conexiones; para el resto el servidor responde 403). */
 export function useChannels() {
@@ -30,6 +30,17 @@ export function useUpdateChannel() {
 export function useCheckChannel() {
   const done = useDone();
   return useMutation({ mutationFn: (id: string) => api<Channel>(`/channels/${id}/check`, { method: 'POST' }), onSettled: done });
+}
+
+/** Las plantillas de una conexión con el estado de la última sincronización (solo quien administra conexiones). */
+export function useChannelTemplates(channelId: string) {
+  return useQuery({ queryKey: ['channel-templates', channelId], retry: false, queryFn: () => api<TemplateList>(`/channels/${channelId}/templates`) });
+}
+
+/** Vuelve a pedirle a Meta las plantillas de la conexión. */
+export function useSyncTemplates(channelId: string) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: () => api<TemplateSync>(`/channels/${channelId}/templates/sync`, { method: 'POST' }), onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ['channel-templates', channelId] }), qc.invalidateQueries({ queryKey: ['conversation-templates'] })]) });
 }
 
 export function useDisconnectChannel() {

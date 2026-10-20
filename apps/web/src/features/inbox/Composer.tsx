@@ -2,6 +2,7 @@ import { useRef, useState, type KeyboardEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
 import type { Conversation } from '../../lib/types';
 import { Alert, Button } from '../../ui/controls';
+import { TemplatePicker } from './TemplatePicker';
 import { useSendNote, useSendReply } from './useInbox';
 
 const MAX = 4096;
@@ -14,7 +15,7 @@ export function replyBlock(c: Conversation): string | null {
   if (!c.can.reply && c.my_access === 'collaborator_view') return 'Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente.';
   if (!c.can.reply && c.my_access === 'collaborator_reply' && c.status === 'pending') return `${c.owner?.name ?? 'Quien la tiene'} aún no acepta la conversación: podrás responder cuando lo haga.`;
   if (!c.can.reply) return c.owner ? `Solo ${c.owner.name} puede responder esta conversación.` : 'No puedes responder esta conversación.';
-  if (!c.window.open) return 'Pasaron más de 24 horas desde el último mensaje del cliente: WhatsApp solo permite escribirle con una plantilla aprobada (las plantillas llegan pronto).';
+  if (!c.window.open) return 'Pasaron más de 24 horas desde el último mensaje del cliente: WhatsApp solo permite escribirle con una plantilla aprobada: usa el botón «Plantillas».';
   return null;
 }
 
@@ -27,6 +28,7 @@ export function Composer({ c }: { c: Conversation }) {
   const note = useSendNote(c.id);
   const [mode, setMode] = useState<'reply' | 'note'>('reply');
   const [text, setText] = useState('');
+  const [picker, setPicker] = useState(false);
   const ref = useRef<HTMLTextAreaElement>(null);
   const block = replyBlock(c);
   const noteMode = mode === 'note' || block !== null;
@@ -54,12 +56,18 @@ export function Composer({ c }: { c: Conversation }) {
   return (
     <div className={`grid gap-2 border-t border-line px-3 py-2.5 ${noteMode ? 'bg-warn-soft' : 'bg-surface'}`}>
       {block ? <p role="status" className="text-[12.5px] text-muted">{block}</p> : null}
-      {c.can.reply && c.can.note ? (
+      {c.can.reply ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          {c.can.note ? (
         <div role="group" aria-label="Qué vas a escribir" className="flex gap-1.5">
           <button type="button" aria-pressed={mode === 'reply' && block === null} disabled={block !== null} onClick={() => setMode('reply')} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold disabled:opacity-50 ${mode === 'reply' && block === null ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>Responder</button>
           <button type="button" aria-pressed={noteMode} onClick={() => setMode('note')} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${noteMode ? 'border-warn bg-warn-soft text-warn' : 'border-line text-muted hover:text-fg'}`}>Nota interna</button>
         </div>
+          ) : null}
+          <button type="button" onClick={() => setPicker(true)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${c.window.open ? 'border-line text-muted hover:text-fg' : 'border-accent bg-accent text-accent-ink'}`}>Plantillas</button>
+        </div>
       ) : null}
+      {picker ? <TemplatePicker c={c} onClose={() => setPicker(false)} /> : null}
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       <div className="flex items-end gap-2">
         <textarea

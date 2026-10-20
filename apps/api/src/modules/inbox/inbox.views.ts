@@ -70,6 +70,8 @@ export interface MessageView {
   delivered_at: string | null;
   read_at: string | null;
   is_note: boolean;
+  /** Si es una plantilla (M5.6a): cuál y sus botones. El texto armado va en `text`. */
+  template: { name: string; language: string; category: string; buttons: Array<{ type: string; text: string; url: string | null; phone: string | null }> } | null;
 }
 
 const KIND_LABEL: Readonly<Record<string, string>> = {
@@ -139,7 +141,22 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
 type MessageRow = typeof messages.$inferSelect;
 
 /** `wa_id`, el código del último error de envío y la hora de la reacción son de uso interno: no se muestran (la reacción se muestra aparte). */
-const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at']);
+const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'template', 'auto']);
+
+/** De lo que guarda una plantilla enviada, solo lo que se muestra (nunca los datos de envío). */
+function templateOf(meta: Record<string, unknown>): MessageView['template'] {
+  const t = meta['template'];
+  if (t === null || typeof t !== 'object') return null;
+  const o = t as Record<string, unknown>;
+  if (typeof o['name'] !== 'string' || typeof o['language'] !== 'string') return null;
+  const buttons = Array.isArray(o['buttons']) ? (o['buttons'] as Array<Record<string, unknown>>) : [];
+  return {
+    name: o['name'],
+    language: o['language'],
+    category: typeof o['category'] === 'string' ? o['category'] : 'other',
+    buttons: buttons.map((b) => ({ type: typeof b['type'] === 'string' ? b['type'] : 'other', text: typeof b['text'] === 'string' ? b['text'] : '', url: typeof b['url'] === 'string' ? b['url'] : null, phone: typeof b['phone'] === 'string' ? b['phone'] : null })),
+  };
+}
 
 export function messageView(m: MessageRow, author: { id: string; name: string } | null): MessageView {
   const media = m.media as { mime_type?: unknown; filename?: unknown } | null;
@@ -160,5 +177,6 @@ export function messageView(m: MessageRow, author: { id: string; name: string } 
     delivered_at: iso(m.deliveredAt),
     read_at: iso(m.readAt),
     is_note: m.kind === 'note',
+    template: m.kind === 'template' ? templateOf(m.meta) : null,
   };
 }

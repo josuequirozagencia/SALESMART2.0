@@ -1973,6 +1973,118 @@ test('mensajes automáticos de la cola: el administrador escribe el saludo, el a
   }
 });
 
+test('plantillas de WhatsApp: el administrador sincroniza las de su número; fuera de las 24 h el asesor solo puede escribir con una plantilla, llena sus variables y sale por el proveedor; otra empresa no las ve', async ({ page, request, browser }) => {
+  test.setTimeout(180_000);
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-plantillas-0123456789abcdef';
+  const PHONE_ID = '1090123450033';
+  const FROM = '593984217760';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-plantillas-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('plantillas'));
+  const carlosEmail = uniqueEmail('carlos-plantillas');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const carlosId = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), 'Carlos E2E' FROM users WHERE email = $2 RETURNING id`, [carlosEmail, adminEmail])).rows[0].id as string;
+    await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [carlosId, orgId]);
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    const channel = (await (await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea plantillas', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).json()) as { id: string };
+
+    // 1) El administrador sincroniza las plantillas de su número y revisa su estado
+    await uiLogin(page, adminEmail);
+    await page.getByRole('link', { name: 'Configuración' }).click();
+    await page.getByRole('link', { name: 'Conexiones' }).click();
+    await page.getByRole('button', { name: 'Plantillas de Línea plantillas' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Plantillas de Línea plantillas' });
+    await expect(dlg.getByText('Esta conexión no tiene plantillas todavía.')).toBeVisible();
+    await dlg.getByRole('button', { name: 'Sincronizar ahora' }).click();
+    await expect(dlg.getByText('Sincronizadas 10 plantillas: 10 nuevas, 0 con cambios y 0 que ya no están en Meta.')).toBeVisible();
+    const list = dlg.getByRole('list', { name: 'Plantillas de la conexión' });
+    await expect(list.getByRole('listitem')).toHaveCount(10);
+    await expect(list.getByText('Meta la rechazó: Contenido promocional en una plantilla que no es de marketing')).toBeVisible();
+    await expect(list.getByText('Lleva una imagen en el encabezado: se podrá usar cuando estén los adjuntos')).toBeVisible();
+    expect((await db.query(`SELECT count(*)::int AS n FROM message_templates WHERE organization_id = $1 AND deleted_at IS NULL`, [orgId])).rows[0].n).toBe(10);
+    await dlg.getByRole('button', { name: 'Cerrar' }).click();
+
+    // 2) Un cliente escribe; pasan 30 horas sin que nadie le conteste: ya no se puede escribirle con texto libre
+    const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Ana Plantillas' }, wa_id: FROM }], messages: [{ from: FROM, id: 'wamid.TPL1', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'Hola, ¿tienen cita?' } }] } }] }] });
+    const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+    expect((await request.post(`${apiBase}/v1/channels/meta/webhook`, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    let conv: { id: string } | undefined;
+    for (let i = 0; i < 60 && !conv; i++) {
+      conv = (await db.query(`SELECT id FROM conversations WHERE organization_id = $1 AND owner_id = $2`, [orgId, carlosId])).rows[0] as typeof conv;
+      if (!conv) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(conv).toBeDefined();
+    await db.query(`UPDATE conversations SET last_inbound_at = now() - interval '30 hours' WHERE id = $1`, [conv!.id]);
+
+    // 3) Carlos abre la conversación: el redactor dice que solo vale una plantilla; la elige, llena sus datos y la envía
+    const ctx = await browser.newContext();
+    contexts.push(ctx);
+    const carlos = await ctx.newPage();
+    await uiLogin(carlos, carlosEmail);
+    await carlos.getByRole('link', { name: 'Inbox' }).click();
+    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('link', { name: /^Ana Plantillas/ }).click();
+    const thread = carlos.getByRole('region', { name: 'Conversación con Ana Plantillas' });
+    await expect(thread.getByText(/solo permite escribirle con una plantilla aprobada: usa el botón «Plantillas»/)).toBeVisible();
+    await thread.getByRole('button', { name: 'Plantillas' }).click();
+    const pick = carlos.getByRole('dialog', { name: 'Enviar una plantilla' });
+    await expect(pick.getByRole('list', { name: 'Plantillas' }).getByRole('listitem')).toHaveCount(5);
+    await pick.getByText('No se pueden enviar desde aquí (5)').click();
+    await expect(pick.getByText('Meta todavía la está revisando')).toBeVisible();
+    await pick.getByRole('searchbox', { name: 'Buscar plantilla' }).fill('recordatorio');
+    await pick.getByRole('button', { name: 'Usar la plantilla recordatorio_cita (es)' }).click();
+    const form = carlos.getByRole('dialog', { name: 'Plantilla recordatorio_cita' });
+    await form.getByRole('button', { name: 'Usar primer nombre en Variable 1' }).click();
+    await form.getByLabel('Variable 2', { exact: true }).fill('viernes 24');
+    await form.getByLabel('Variable 3', { exact: true }).fill('10:00');
+    await expect(form.getByRole('group', { name: 'Vista previa' })).toContainText('Hola Ana, te recordamos tu cita el viernes 24 a las 10:00.');
+    await form.getByRole('button', { name: 'Enviar plantilla' }).click();
+    const log = thread.getByRole('log', { name: 'Mensajes' });
+    await expect(log.getByText(/Hola Ana, te recordamos tu cita el viernes 24 a las 10:00\./)).toBeVisible();
+    await expect(log.getByText('recordatorio_cita')).toBeVisible();
+    await expect(log.getByLabel('Botones de la plantilla').getByText('Confirmar')).toBeVisible();
+    await expect(log.getByRole('img', { name: 'Enviado' })).toBeVisible();
+    const sent = (await db.query(`SELECT kind, sender_type, status, created_by, meta->'template'->>'name' AS name, meta->'template'->'send'->0->'parameters' AS params FROM messages WHERE conversation_id = $1 AND direction = 'out'`, [conv!.id])).rows as Array<{ kind: string; sender_type: string; status: string; created_by: string; name: string; params: Array<{ text: string }> }>;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'template', sender_type: 'human', status: 'sent', created_by: carlosId, name: 'recordatorio_cita' });
+    expect(sent[0]!.params.map((p) => p.text)).toEqual(['Ana', 'viernes 24', '10:00']);
+    expect((await db.query(`SELECT status FROM conversations WHERE id = $1`, [conv!.id])).rows[0].status).toBe('waiting'); // enviarla equivale a aceptar y responder
+
+    // 4) Una de marketing con encabezado y botón de enlace: cuatro datos, tres partes
+    await thread.getByRole('button', { name: 'Plantillas' }).click();
+    await carlos.getByRole('dialog', { name: 'Enviar una plantilla' }).getByRole('button', { name: 'Usar la plantilla promo_corte (es)' }).click();
+    const promo = carlos.getByRole('dialog', { name: 'Plantilla promo_corte' });
+    await expect(promo.getByText(/Es una plantilla de marketing/)).toBeVisible();
+    await promo.getByLabel('Encabezado', { exact: true }).fill('Ana');
+    await promo.getByLabel('Variable 1', { exact: true }).fill('CORTE20');
+    await promo.getByLabel('Botón de enlace', { exact: true }).fill('ana-24');
+    await promo.getByRole('button', { name: 'Enviar plantilla' }).click();
+    await expect(log.getByText(/Este mes tu corte tiene 20% de descuento\. Reserva con el código CORTE20\./)).toBeVisible();
+    const parts = (await db.query(`SELECT jsonb_path_query_array(meta->'template'->'send', '$[*].type') AS types FROM messages WHERE conversation_id = $1 AND meta->'template'->>'name' = 'promo_corte'`, [conv!.id])).rows[0].types as string[];
+    expect(parts).toEqual(['header', 'body', 'button']);
+
+    // 5) Otra empresa no ve ni sincroniza las plantillas de esta conexión
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('plantillas-otra')))}`, 'content-type': 'application/json' };
+    expect((await request.get(`${apiBase}/v1/channels/${channel.id}/templates`, { headers: other })).status()).toBe(404);
+    expect((await request.post(`${apiBase}/v1/channels/${channel.id}/templates/sync`, { headers: other })).status()).toBe(404);
+    expect((await request.get(`${apiBase}/v1/conversations/${conv!.id}/templates`, { headers: other })).status()).toBe(404);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

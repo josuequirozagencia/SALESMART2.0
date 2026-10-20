@@ -4,7 +4,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
-import { listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto } from './inbox.dto';
+import { listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, sendTemplateSchema, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
 import { OutboundService } from './outbound.service';
 import { shareSchema, transferSchema, type ShareDto, type TransferDto } from './sharing.dto';
@@ -104,6 +104,23 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   reply(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(replySchema)) b: ReplyDto) {
     return this.outbound.reply(accessOf(req), id, b);
+  }
+
+  /** Las plantillas que se pueden enviar en esta conversación (las de su conexión; las que no se pueden enviar vienen con el motivo). */
+  @RequirePermission('inbox.reply')
+  @Get(':id/templates')
+  @Header('Cache-Control', 'no-store')
+  templates(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.outbound.listTemplates(accessOf(req), id);
+  }
+
+  /** Envía una plantilla aprobada, dentro o fuera de las 24 h. 400 si una variable no vale, 409 `TEMPLATE_NOT_AVAILABLE` si ya no se puede enviar. */
+  @RequirePermission('inbox.reply')
+  @Post(':id/template')
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  sendTemplate(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(sendTemplateSchema)) b: SendTemplateDto) {
+    return this.outbound.sendTemplate(accessOf(req), id, b);
   }
 
   /** Nota interna: nunca sale al cliente. */

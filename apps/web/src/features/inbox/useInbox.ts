@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, RevokeResult, TransferOptions, TransferResult } from '../../lib/types';
+import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, RevokeResult, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /** Cada cuánto se vuelve a mirar (sin tiempo real hasta M5.7): el listado y el hilo abierto. Con la pestaña en segundo plano no se consulta. */
 export const LIST_POLL_MS = 10_000;
@@ -63,6 +63,17 @@ function useRefresh(id: string) {
 export function useSendReply(id: string) {
   const refresh = useRefresh(id);
   return useMutation({ mutationFn: (text: string) => api<ChatMessage>(`/conversations/${id}/messages`, { method: 'POST', body: { text } }), onSettled: refresh });
+}
+
+/** Las plantillas que se pueden enviar en esta conversación (las de su conexión). Solo se piden al abrir el selector. */
+export function useConversationTemplates(id: string, enabled: boolean) {
+  return useQuery({ queryKey: ['conversation-templates', id], enabled, staleTime: 0, retry: false, queryFn: () => api<TemplateList>(`/conversations/${id}/templates`) });
+}
+
+/** Envía una plantilla aprobada con el valor de cada variable (clave = id de la variable). El mensaje vuelve con su estado. */
+export function useSendTemplate(id: string) {
+  const refresh = useRefresh(id);
+  return useMutation({ mutationFn: (input: { template_id: string; params: Record<string, string> }) => api<ChatMessage>(`/conversations/${id}/template`, { method: 'POST', body: input }), onSettled: refresh });
 }
 
 export function useSendNote(id: string) {

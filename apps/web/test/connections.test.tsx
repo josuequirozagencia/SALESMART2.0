@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Channel, ChannelList, Queue } from '../src/lib/types';
+import type { Channel, ChannelList, Queue, Template, TemplateList } from '../src/lib/types';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -243,5 +243,80 @@ describe('Configuración › Conexiones', () => {
     renderApp('/settings/connections');
     expect(await screen.findByRole('alert')).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar las conexiones.');
     expect(screen.queryByRole('button', { name: 'Conectar un número' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Plantillas de una conexión (M5.6a)', () => {
+  const tpl = (over: Partial<Template> = {}): Template => ({
+    id: 't1', channel_id: 'ch1', name: 'recordatorio_cita', language: 'es', category: 'utility', status: 'approved', parameter_format: 'positional', header: null, body: 'Hola {{1}}, tu cita es el {{2}}.', footer: null, buttons: [],
+    variables: [{ id: 'body:1', part: 'body', key: '1', buttonIndex: null, example: 'Ana' }, { id: 'body:2', part: 'body', key: '2', buttonIndex: null, example: 'viernes' }],
+    sendable: true, unsupported_reason: null, rejected_reason: null, synced_at: '2026-10-19T15:00:00.000Z', ...over,
+  });
+  const ITEMS: Template[] = [
+    tpl(),
+    tpl({ id: 't2', name: 'promo_corte', category: 'marketing', body: 'Este mes, 20% de descuento.', variables: [] }),
+    tpl({ id: 't3', name: 'en_revision', status: 'pending', sendable: false, unsupported_reason: 'Meta todavía la está revisando', variables: [] }),
+    tpl({ id: 't4', name: 'rechazada_ejemplo', category: 'marketing', status: 'rejected', sendable: false, unsupported_reason: 'Meta la rechazó: Contenido promocional', rejected_reason: 'Contenido promocional', variables: [] }),
+  ];
+
+  function withTemplates(initial: TemplateList, opts: { syncError?: () => ReturnType<Handler> } = {}) {
+    const s = server([channel()]);
+    const st = { list: initial, syncs: 0 };
+    s.routes['GET /channels/ch1/templates'] = () => ({ body: st.list });
+    s.routes['POST /channels/ch1/templates/sync'] = () => {
+      st.syncs += 1;
+      if (opts.syncError) return opts.syncError();
+      st.list = { items: [...ITEMS, tpl({ id: 't5', name: 'nueva', variables: [] })], synced_at: '2026-10-19T16:00:00.000Z', sync_error: null };
+      return { body: { synced_at: '2026-10-19T16:00:00.000Z', total: 5, added: 1, updated: 0, removed: 0 } };
+    };
+    return { routes: s.routes, st };
+  }
+  const openDialog = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Plantillas de Ventas' }));
+    return within(await screen.findByRole('dialog', { name: 'Plantillas de Ventas' }));
+  };
+
+  it('muestra las plantillas de la conexión con su categoría, su estado y por qué no se pueden enviar las que no', async () => {
+    mockApi(withTemplates({ items: ITEMS, synced_at: '2026-10-19T15:00:00.000Z', sync_error: null }).routes);
+    renderApp('/settings/connections');
+    const d = await openDialog();
+    const list = within(await d.findByRole('list', { name: 'Plantillas de la conexión' }));
+    expect(list.getAllByRole('listitem')).toHaveLength(4);
+    const cita = within(list.getAllByRole('listitem')[0]!);
+    expect(cita.getByText('recordatorio_cita')).toBeInTheDocument();
+    expect(cita.getByText('Utilidad')).toBeInTheDocument();
+    expect(cita.getByText('Aprobada')).toBeInTheDocument();
+    expect(cita.getByText('Se puede enviar')).toBeInTheDocument();
+    const review = within(list.getAllByRole('listitem')[2]!);
+    expect(review.getByText('En revisión')).toBeInTheDocument();
+    expect(review.getByText('Meta todavía la está revisando')).toBeInTheDocument();
+    const rejected = within(list.getAllByRole('listitem')[3]!);
+    expect(rejected.getByText('Rechazada')).toBeInTheDocument();
+    expect(rejected.getByText('Meta la rechazó: Contenido promocional')).toBeInTheDocument();
+    expect(d.getByText(/Última sincronización:/)).toBeInTheDocument();
+  });
+
+  it('«Sincronizar ahora» vuelve a pedirlas a Meta, cuenta lo que cambió y actualiza la lista', async () => {
+    const s = withTemplates({ items: ITEMS, synced_at: '2026-10-19T15:00:00.000Z', sync_error: null });
+    mockApi(s.routes);
+    renderApp('/settings/connections');
+    const d = await openDialog();
+    await d.findByRole('list', { name: 'Plantillas de la conexión' });
+    await userEvent.click(d.getByRole('button', { name: 'Sincronizar ahora' }));
+    expect(await d.findByText('Sincronizadas 5 plantillas: 1 nuevas, 0 con cambios y 0 que ya no están en Meta.')).toBeInTheDocument();
+    expect(s.st.syncs).toBe(1);
+    await waitFor(() => expect(within(d.getByRole('list', { name: 'Plantillas de la conexión' })).getAllByRole('listitem')).toHaveLength(5));
+  });
+
+  it('sin plantillas lo dice; si la última sincronización falló, muestra el motivo; si sincronizar falla, explica por qué', async () => {
+    const s = withTemplates({ items: [], synced_at: null, sync_error: 'Meta rechazó el token: genera uno nuevo y pégalo' }, { syncError: () => err(409, 'CHANNEL_TOKEN_INVALID', 'Meta rechazó el token: genera uno nuevo y pégalo') });
+    mockApi(s.routes);
+    renderApp('/settings/connections');
+    const d = await openDialog();
+    expect(await d.findByText('Esta conexión no tiene plantillas todavía.')).toBeInTheDocument();
+    expect(d.getByText('Aún no se han sincronizado.')).toBeInTheDocument();
+    expect(d.getByText(/La última sincronización falló: Meta rechazó el token/)).toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Sincronizar ahora' }));
+    expect(await d.findAllByText(/Meta rechazó el token: genera uno nuevo y pégalo/)).not.toHaveLength(0);
   });
 });

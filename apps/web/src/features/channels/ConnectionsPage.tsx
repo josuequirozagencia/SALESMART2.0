@@ -7,6 +7,7 @@ import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
 import { useQueues } from '../queues/useQueues';
 import { ChannelDialog } from './ChannelDialog';
+import { TemplatesDialog } from './TemplatesDialog';
 import { useCheckChannel, useChannels, useDisconnectChannel, useUpdateChannel } from './useChannels';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
@@ -17,7 +18,7 @@ function statusPill(c: Channel): { kind: PillKind; label: string } {
   return { kind: 'ok', label: 'Activa' };
 }
 
-function ChannelCard({ channel: c, queueName, onEdit, onError }: { channel: Channel; queueName: string | null; onEdit: () => void; onError: (m: string | undefined) => void }) {
+function ChannelCard({ channel: c, queueName, onEdit, onTemplates, onError }: { channel: Channel; queueName: string | null; onEdit: () => void; onTemplates: () => void; onError: (m: string | undefined) => void }) {
   const check = useCheckChannel();
   const update = useUpdateChannel();
   const disconnect = useDisconnectChannel();
@@ -53,6 +54,7 @@ function ChannelCard({ channel: c, queueName, onEdit, onError }: { channel: Chan
         <div className="flex flex-wrap gap-2">
           <Button className={SMALL} aria-label={`Comprobar ${c.name}`} loading={check.isPending} onClick={() => { onError(undefined); check.mutate(c.id, { onError: fail('No pudimos comprobar la conexión.') }); }}>Comprobar</Button>
           <Button className={SMALL} aria-label={`Editar ${c.name}`} onClick={onEdit}>Editar</Button>
+          <Button className={SMALL} aria-label={`Plantillas de ${c.name}`} onClick={onTemplates}>Plantillas</Button>
           <Button className={SMALL} aria-label={`${c.status === 'active' ? 'Desactivar' : 'Activar'} ${c.name}`} loading={update.isPending} onClick={() => { onError(undefined); update.mutate({ id: c.id, input: { status: c.status === 'active' ? 'disabled' : 'active' } }, { onError: fail('No pudimos cambiar el estado.') }); }}>{c.status === 'active' ? 'Desactivar' : 'Activar'}</Button>
           <Button className={SMALL} aria-label={`Desconectar ${c.name}`} onClick={() => setConfirm(true)}>Desconectar</Button>
         </div>
@@ -71,6 +73,7 @@ export function ConnectionsPage() {
   const queues = useQueues();
   const queueName = (id: string | null): string | null => (id ? (queues.data?.items.find((x) => x.id === id)?.name ?? null) : null);
   const [dialog, setDialog] = useState<{ channel?: Channel } | null>(null);
+  const [templatesOf, setTemplatesOf] = useState<Channel | null>(null);
   const [error, setError] = useState<string>();
   const items = q.data?.items ?? [];
   const vaultOk = q.data?.vault.available !== false;
@@ -95,11 +98,12 @@ export function ConnectionsPage() {
           <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[13.5px] text-muted">Aún no hay números conectados.{vaultOk ? ' Conecta el primero con «Conectar un número».' : ''}</p>
         ) : (
           <ul aria-label="Conexiones" className="grid gap-3">
-            {items.map((c) => <ChannelCard key={c.id} channel={c} queueName={queueName(c.queue_id)} onEdit={() => setDialog({ channel: c })} onError={setError} />)}
+            {items.map((c) => <ChannelCard key={c.id} channel={c} queueName={queueName(c.queue_id)} onEdit={() => setDialog({ channel: c })} onTemplates={() => setTemplatesOf(c)} onError={setError} />)}
           </ul>
         )
       ) : null}
 
+      {templatesOf ? <TemplatesDialog channel={templatesOf} onClose={() => setTemplatesOf(null)} /> : null}
       {dialog ? <ChannelDialog {...(dialog.channel ? { channel: dialog.channel } : {})} onClose={() => setDialog(null)} /> : null}
     </div>
   );

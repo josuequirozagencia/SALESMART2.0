@@ -62,6 +62,9 @@ export const whatsappAccounts = tenantTable(
     lastError: text('last_error'),
     /** Última vez que Meta avisó de algo de este número (mensaje o estado): sirve para saber si el webhook está llegando. */
     lastEventAt: ts('last_event_at'),
+    /** M5.6a: última sincronización de plantillas con Meta y, si la última falló, por qué (sin datos del cliente ni credenciales). */
+    templatesSyncedAt: ts('templates_synced_at'),
+    templatesSyncError: text('templates_sync_error'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },

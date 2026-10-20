@@ -42,7 +42,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo
     case 'HOLIDAY_EXISTS': case 'HOLIDAY_LIMIT': return e.message;
     // Inbox (ADR-16/50): el servidor ya redacta el motivo
-    case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': case 'CONVERSATION_NOT_ACCEPTED': case 'ALREADY_OWNER': case 'PARTICIPANT_LIMIT': case 'TRANSFER_TARGET_NOT_ALLOWED': case 'SHARE_TARGET_NOT_ALLOWED': return e.message;
+    case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': case 'TEMPLATE_NOT_AVAILABLE': case 'CONVERSATION_NOT_ACCEPTED': case 'ALREADY_OWNER': case 'PARTICIPANT_LIMIT': case 'TRANSFER_TARGET_NOT_ALLOWED': case 'SHARE_TARGET_NOT_ALLOWED': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;

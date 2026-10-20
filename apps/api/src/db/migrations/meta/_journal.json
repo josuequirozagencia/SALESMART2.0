@@ -365,6 +365,20 @@
       "when": 1792454603968,
       "tag": "0051_m55c_auto_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1792470216668,
+      "tag": "0052_m56a_templates",
+      "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1792470232378,
+      "tag": "0053_m56a_templates_grants",
+      "breakpoints": true
     }
   ]
 }

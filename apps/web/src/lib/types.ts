@@ -760,6 +760,8 @@ export interface ChatMessage {
   delivered_at: string | null;
   read_at: string | null;
   is_note: boolean;
+  /** Si es una plantilla (M5.6a): cuál y sus botones; el texto armado va en `text`. */
+  template: { name: string; language: string; category: string; buttons: TemplateButton[] } | null;
 }
 export interface ChatMessagePage {
   /** De la más antigua a la más reciente. */
@@ -796,6 +798,53 @@ export interface RevokeResult {
   revoked: true;
   still_visible: boolean;
 }
+// ── Plantillas de WhatsApp (M5.6a, ADR-50) ──
+export interface TemplateButton {
+  type: string;
+  text: string;
+  url: string | null;
+  phone: string | null;
+}
+/** Una variable que la plantilla pide: `id` es la clave con la que se envía su valor (`body:1`, `header:1`, `button:0:1`). */
+export interface TemplateVariable {
+  id: string;
+  part: 'header' | 'body' | 'button';
+  key: string;
+  buttonIndex: number | null;
+  example: string | null;
+}
+export interface Template {
+  id: string;
+  channel_id: string;
+  name: string;
+  language: string;
+  category: string;
+  status: string;
+  parameter_format: string;
+  header: { format: string; text: string | null } | null;
+  body: string;
+  footer: string | null;
+  buttons: TemplateButton[];
+  variables: TemplateVariable[];
+  /** ¿Se puede enviar desde el Inbox? Si no, `unsupported_reason` dice por qué. */
+  sendable: boolean;
+  unsupported_reason: string | null;
+  rejected_reason: string | null;
+  synced_at: string;
+}
+export interface TemplateList {
+  items: Template[];
+  synced_at: string | null;
+  sync_error: string | null;
+}
+export interface TemplateSync {
+  synced_at: string;
+  total: number;
+  added: number;
+  updated: number;
+  removed: number;
+}
+
 export interface InboxOptions {
   queues: Array<{ id: string; name: string; color: string }>;
   channels: Array<{ id: string; name: string; state: 'active' | 'disabled' }>;

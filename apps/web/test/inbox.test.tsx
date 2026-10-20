@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChatMessage, Conversation, ConversationList, InboxOptions } from '../src/lib/types';
+import type { ChatMessage, Conversation, ConversationList, InboxOptions, Template, TemplateList } from '../src/lib/types';
 import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -40,7 +40,7 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
   ...over,
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
-  id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola, ¿tienen cita mañana?', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, ...over,
+  id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola, ¿tienen cita mañana?', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, template: null, ...over,
 });
 const out = (id: string, text: string, status: ChatMessage['status'], over: Partial<ChatMessage> = {}): ChatMessage =>
   msg({ id, direction: 'out', sender_type: 'human', author: { id: 'u2', name: 'Luis Navas' }, text, status, ...over });
@@ -60,6 +60,9 @@ interface World {
   posts: Array<{ path: string; body: unknown }>;
   /** Respuesta de un envío: por omisión, el mensaje enviado. */
   onReply?: (text: string) => ReturnType<Handler>;
+  /** Plantillas de la conexión (M5.6a) y la respuesta al enviar una (por omisión, el mensaje de la plantilla enviado). */
+  templates?: TemplateList;
+  onTemplate?: (body: { template_id: string; params: Record<string, string> }) => ReturnType<Handler>;
 }
 function world(over: Partial<World> = {}): World {
   return { convs: [conv()], counts: { working: 1, pending: 0, closed: 0, unread: 0 }, messages: { c1: [msg()] }, options: OPTIONS, posts: [], ...over };
@@ -95,6 +98,16 @@ function server(w: World, me = ME_ADVISOR) {
       const note = out(`note-${w.posts.length}`, (call.body as { text: string }).text, 'internal', { kind: 'note', is_note: true, sent_at: new Date().toISOString() });
       w.messages[id] = [...(w.messages[id] ?? []), note];
       return { status: 201, body: note };
+    };
+    routes[`GET /conversations/${id}/templates`] = () => ({ body: w.templates ?? { items: [], synced_at: null, sync_error: null } });
+    routes[`POST /conversations/${id}/template`] = (call: Call) => {
+      const body = call.body as { template_id: string; params: Record<string, string> };
+      w.posts.push({ path: `/conversations/${id}/template`, body });
+      if (w.onTemplate) return w.onTemplate(body);
+      const t = w.templates?.items.find((x) => x.id === body.template_id);
+      const sent = out(`tpl-${w.posts.length}`, t?.body ?? 'plantilla', 'sent', { kind: 'template', sent_at: new Date().toISOString(), template: t ? { name: t.name, language: t.language, category: t.category, buttons: t.buttons } : null });
+      w.messages[id] = [...(w.messages[id] ?? []), sent];
+      return { status: 201, body: sent };
     };
     for (const action of ['accept', 'take', 'close', 'read'] as const) {
       routes[`POST /conversations/${id}/${action}`] = () => {
@@ -551,5 +564,182 @@ describe('Inbox · SLA', () => {
     await waitFor(() => expect(api.last('GET /conversations')!.query.get('sla')).toBe('risk'));
     await userEvent.click(screen.getByRole('button', { name: 'Limpiar filtros' }));
     await waitFor(() => expect(api.last('GET /conversations')!.query.get('sla')).toBeNull());
+  });
+});
+
+describe('Inbox · plantillas de WhatsApp', () => {
+  const tpl = (over: Partial<Template> = {}): Template => ({
+    id: 't1',
+    channel_id: 'ch1',
+    name: 'recordatorio_cita',
+    language: 'es',
+    category: 'utility',
+    status: 'approved',
+    parameter_format: 'positional',
+    header: null,
+    body: 'Hola {{1}}, tu cita es el {{2}}.',
+    footer: 'Barbería Norte',
+    buttons: [{ type: 'quick_reply', text: 'Confirmar', url: null, phone: null }],
+    variables: [{ id: 'body:1', part: 'body', key: '1', buttonIndex: null, example: 'Ana' }, { id: 'body:2', part: 'body', key: '2', buttonIndex: null, example: 'viernes 24' }],
+    sendable: true,
+    unsupported_reason: null,
+    rejected_reason: null,
+    synced_at: ago(5 * MIN),
+    ...over,
+  });
+  const list = (items: Template[], over: Partial<TemplateList> = {}): TemplateList => ({ items, synced_at: ago(5 * MIN), sync_error: null, ...over });
+  const welcome = tpl({ id: 't2', name: 'bienvenida', body: 'Hola, gracias por escribirnos.', variables: [], buttons: [], footer: null });
+  const promo = tpl({ id: 't3', name: 'promo_corte', category: 'marketing', body: 'Este mes tu corte tiene 20% de descuento.', variables: [], buttons: [] });
+  const blocked = tpl({ id: 't4', name: 'catalogo_imagen', sendable: false, unsupported_reason: 'Lleva una imagen en el encabezado: se podrá usar cuando estén los adjuntos', variables: [] });
+  const open = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Plantillas' }));
+    return within(await screen.findByRole('dialog', { name: 'Enviar una plantilla' }));
+  };
+  const NO_REPLY: Conversation['can'] = { reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false };
+
+  it('el botón «Plantillas» está para quien puede responder (también dentro de las 24 h)', async () => {
+    mockApi(server(world({ templates: list([tpl()]) })));
+    renderApp('/inbox/c1');
+    expect(await screen.findByRole('button', { name: 'Plantillas' })).toBeInTheDocument();
+  });
+
+  it('quien solo puede mirar y dejar notas no tiene el botón «Plantillas»', async () => {
+    mockApi(server(world({ convs: [conv({ can: NO_REPLY })] })));
+    renderApp('/inbox/c1');
+    await screen.findByRole('heading', { name: 'Ana Torres' });
+    await screen.findByRole('textbox', { name: 'Nota interna' });
+    expect(screen.queryByRole('button', { name: 'Plantillas' })).not.toBeInTheDocument();
+  });
+
+  it('con la ventana de 24 h cerrada, el redactor lo explica y manda a «Plantillas»', async () => {
+    mockApi(server(world({ convs: [conv({ window: { open: false, expires_at: null } })], templates: list([tpl()]) })));
+    renderApp('/inbox/c1');
+    expect(await screen.findByText(/solo permite escribirle con una plantilla aprobada: usa el botón «Plantillas»/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Plantillas' })).toBeEnabled();
+  });
+
+  it('el selector lista las plantillas de la conexión (enviables) y aparte las que no se pueden enviar, con su motivo; busca, filtra por categoría y avisa del cobro', async () => {
+    mockApi(server(world({ templates: list([tpl(), welcome, promo, blocked]) })));
+    renderApp('/inbox/c1');
+    const d = await open();
+    const items = within(await d.findByRole('list', { name: 'Plantillas' }));
+    expect(items.getAllByRole('listitem').map((li) => li.querySelector('b')!.textContent)).toEqual(['recordatorio_cita', 'bienvenida', 'promo_corte']);
+    expect(d.getByText(/Meta cobra cada plantilla que se envía/)).toBeInTheDocument();
+    expect(d.getByText(/Sincronizadas con Meta:/)).toBeInTheDocument();
+    // las que no se envían, con su motivo
+    await userEvent.click(d.getByText('No se pueden enviar desde aquí (1)'));
+    expect(within(d.getByRole('list', { name: 'Plantillas no disponibles' })).getByText('Lleva una imagen en el encabezado: se podrá usar cuando estén los adjuntos')).toBeInTheDocument();
+    // búsqueda y categoría
+    await userEvent.type(d.getByRole('searchbox', { name: 'Buscar plantilla' }), 'descuento');
+    expect(items.getAllByRole('listitem')).toHaveLength(1);
+    await userEvent.clear(d.getByRole('searchbox', { name: 'Buscar plantilla' }));
+    await userEvent.selectOptions(d.getByRole('combobox', { name: 'Categoría' }), 'marketing');
+    expect(items.getAllByRole('listitem')).toHaveLength(1);
+    await userEvent.selectOptions(d.getByRole('combobox', { name: 'Categoría' }), 'authentication');
+    expect(d.getByText(/No hay plantillas que coincidan/)).toBeInTheDocument();
+  });
+
+  it('sin plantillas lo explica', async () => {
+    mockApi(server(world({ templates: list([]) })));
+    renderApp('/inbox/c1');
+    expect(await (await open()).findByText(/Esta conexión aún no tiene plantillas/)).toBeInTheDocument();
+  });
+
+  it('si Meta no pudo actualizarlas, avisa y muestra las que se tenían', async () => {
+    mockApi(server(world({ templates: list([welcome], { sync_error: 'Meta no respondió' }) })));
+    renderApp('/inbox/c1');
+    const d = await open();
+    expect(await d.findByText(/No se pudieron actualizar las plantillas con Meta \(Meta no respondió\)/)).toBeInTheDocument();
+    expect(d.getByRole('button', { name: 'Usar la plantilla bienvenida (es)' })).toBeInTheDocument();
+  });
+
+  it('con variables: la vista previa se llena al escribir, los atajos insertan datos del contacto y de quien escribe, y se envía con los valores recortados', async () => {
+    const w = world({ templates: list([tpl()]) });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    await userEvent.click(await (await open()).findByRole('button', { name: 'Usar la plantilla recordatorio_cita (es)' }));
+    const form = within(await screen.findByRole('dialog', { name: 'Plantilla recordatorio_cita' }));
+    const preview = form.getByRole('group', { name: 'Vista previa' });
+    expect(preview).toHaveTextContent('Hola {{1}}, tu cita es el {{2}}.');
+    expect(preview).toHaveTextContent('Barbería Norte');
+    expect(preview).toHaveTextContent('Confirmar');
+    expect(form.getByText('Ejemplo: Ana')).toBeInTheDocument();
+    await userEvent.click(form.getByRole('button', { name: 'Usar primer nombre en Variable 1' }));
+    expect(form.getByLabelText('Variable 1')).toHaveValue('Ana');
+    await userEvent.type(form.getByLabelText('Variable 2'), '  viernes 24 ');
+    expect(preview).toHaveTextContent('Hola Ana, tu cita es el viernes 24.');
+    await userEvent.click(form.getByRole('button', { name: 'Usar mi nombre en Variable 2' }));
+    expect(form.getByLabelText('Variable 2')).toHaveValue('Luis Navas');
+    await userEvent.clear(form.getByLabelText('Variable 2'));
+    await userEvent.type(form.getByLabelText('Variable 2'), '  viernes 24 ');
+    await userEvent.click(form.getByRole('button', { name: 'Enviar plantilla' }));
+    await waitFor(() => expect(w.posts.at(-1)).toEqual({ path: '/conversations/c1/template', body: { template_id: 't1', params: { 'body:1': 'Ana', 'body:2': 'viernes 24' } } }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    // y aparece en el hilo como plantilla
+    expect(await screen.findByText('recordatorio_cita')).toBeInTheDocument();
+  });
+
+  it('antes de enviar valida que cada variable tenga valor', async () => {
+    const w = world({ templates: list([tpl()]) });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    await userEvent.click(await (await open()).findByRole('button', { name: 'Usar la plantilla recordatorio_cita (es)' }));
+    const form = within(await screen.findByRole('dialog', { name: 'Plantilla recordatorio_cita' }));
+    await userEvent.click(form.getByRole('button', { name: 'Enviar plantilla' }));
+    expect(form.getAllByText('Escribe un valor')).toHaveLength(2);
+    expect(w.posts.filter((p) => p.path.endsWith('/template'))).toEqual([]);
+  });
+
+  it('sin variables se envía directo, y «Volver» regresa a la lista', async () => {
+    const w = world({ templates: list([tpl(), welcome]) });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    await userEvent.click(await (await open()).findByRole('button', { name: 'Usar la plantilla recordatorio_cita (es)' }));
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Plantilla recordatorio_cita' })).getByRole('button', { name: 'Volver' }));
+    await userEvent.click(await within(await screen.findByRole('dialog', { name: 'Enviar una plantilla' })).findByRole('button', { name: 'Usar la plantilla bienvenida (es)' }));
+    const plain = within(await screen.findByRole('dialog', { name: 'Plantilla bienvenida' }));
+    expect(plain.getByText(/no tiene variables: se envía tal como está/)).toBeInTheDocument();
+    await userEvent.click(plain.getByRole('button', { name: 'Enviar plantilla' }));
+    await waitFor(() => expect(w.posts.at(-1)).toEqual({ path: '/conversations/c1/template', body: { template_id: 't2', params: {} } }));
+  });
+
+  it('una de marketing avisa del cobro y del permiso del cliente; fuera de las 24 h lo indica', async () => {
+    mockApi(server(world({ convs: [conv({ window: { open: false, expires_at: null } })], templates: list([promo]) })));
+    renderApp('/inbox/c1');
+    await userEvent.click(await (await open()).findByRole('button', { name: 'Usar la plantilla promo_corte (es)' }));
+    const form = within(await screen.findByRole('dialog', { name: 'Plantilla promo_corte' }));
+    expect(form.getByText(/Es una plantilla de marketing: Meta la cobra por mensaje y el cliente debe haber aceptado recibir promociones/)).toBeInTheDocument();
+    expect(form.getByText('Fuera de las 24 h')).toBeInTheDocument();
+  });
+
+  it('si el servidor dice qué variable no vale, se marca en su campo; si la plantilla ya no está disponible, se explica y no se cierra', async () => {
+    const w = world({
+      templates: list([tpl()]),
+      onTemplate: (b) => (b.params['body:2'] === 'mal' ? { status: 400, body: { error: { code: 'VALIDATION_ERROR', message: 'Revisa los datos', request_id: 'r1', details: [{ path: 'params.body:2', code: 'invalid_param', message: 'No puede tener más de 3 espacios seguidos' }] } } } : err(409, 'TEMPLATE_NOT_AVAILABLE', 'Meta la pausó (suele ser por baja calidad)')),
+    });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    await userEvent.click(await (await open()).findByRole('button', { name: 'Usar la plantilla recordatorio_cita (es)' }));
+    const form = within(await screen.findByRole('dialog', { name: 'Plantilla recordatorio_cita' }));
+    await userEvent.type(form.getByLabelText('Variable 1'), 'Ana');
+    await userEvent.type(form.getByLabelText('Variable 2'), 'mal');
+    await userEvent.click(form.getByRole('button', { name: 'Enviar plantilla' }));
+    expect(await form.findByText('No puede tener más de 3 espacios seguidos')).toBeInTheDocument();
+    await userEvent.clear(form.getByLabelText('Variable 2'));
+    await userEvent.type(form.getByLabelText('Variable 2'), 'viernes');
+    await userEvent.click(form.getByRole('button', { name: 'Enviar plantilla' }));
+    expect(await form.findByRole('alert')).toHaveTextContent('Meta la pausó (suele ser por baja calidad)');
+    expect(screen.getByRole('dialog', { name: 'Plantilla recordatorio_cita' })).toBeInTheDocument();
+  });
+
+  it('en el hilo, una plantilla se ve con su nombre, el texto armado y sus botones', async () => {
+    const sent = out('m9', 'Hola Ana, tu cita es el viernes 24.\n\nBarbería Norte', 'sent', { kind: 'template', template: { name: 'recordatorio_cita', language: 'es', category: 'utility', buttons: [{ type: 'quick_reply', text: 'Confirmar', url: null, phone: null }] } });
+    mockApi(server(world({ messages: { c1: [msg(), sent] } })));
+    renderApp('/inbox/c1');
+    const log = within(await screen.findByRole('log', { name: 'Mensajes' }));
+    expect(await log.findByText('recordatorio_cita')).toBeInTheDocument();
+    expect(log.getByText(/Hola Ana, tu cita es el viernes 24\./)).toBeInTheDocument();
+    expect(within(log.getByLabelText('Botones de la plantilla')).getByText('Confirmar')).toBeInTheDocument();
+    expect(log.getByRole('img', { name: 'Enviado' })).toBeInTheDocument();
   });
 });

@@ -18,7 +18,7 @@ function Ticks({ status }: { status: ChatMessage['status'] }) {
 /** El contenido: texto, o el nombre del tipo de contenido cuando no hay texto (los archivos aún no se descargan: llega en M5.6). */
 function Body({ m }: { m: ChatMessage }) {
   const extra = describeExtra(m);
-  const isText = m.kind === 'text' || m.kind === 'note';
+  const isText = m.kind === 'text' || m.kind === 'note' || m.kind === 'template';
   return (
     <>
       {!isText ? (
@@ -53,7 +53,13 @@ export function MessageBubble({ m, canRetry, retrying, onRetry }: { m: ChatMessa
       <div className={`relative max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-accent-soft text-fg' : 'rounded-tl-sm border border-line bg-surface text-fg'}`}>
         {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{m.author.name.split(' ')[0]}</span> : null}
         {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}
+        {m.template ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Plantilla · <span className="font-mono">{m.template.name}</span></span> : null}
         <Body m={m} />
+        {m.template && m.template.buttons.length > 0 ? (
+          <span className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Botones de la plantilla">
+            {m.template.buttons.map((b, i) => <span key={i} className="rounded-full border border-line bg-surface px-2.5 py-0.5 text-[12px] font-semibold text-accent">{b.text}</span>)}
+          </span>
+        ) : null}
         <span className="mt-0.5 flex items-center justify-end text-[11px] text-muted">
           <time dateTime={m.sent_at}>{bubbleTime(m.sent_at)}</time>
           {out ? <Ticks status={m.status} /> : null}

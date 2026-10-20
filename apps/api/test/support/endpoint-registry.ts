@@ -174,6 +174,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/sla/holidays', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
   { route: 'DELETE /v1/sla/holidays/:id', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
   { route: 'PUT /v1/queues/:id/hours', kind: 'tenant', isolationTest: '../../inbox/sla.test.ts' },
+  // Plantillas de WhatsApp (M5.6a, ADR-50). Pruebas: test/templates/templates.test.ts (A↔B, permisos, sincronización, selector de la conversación, envío con variables, errores de Meta)
+  { route: 'GET /v1/channels/:id/templates', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
+  { route: 'POST /v1/channels/:id/templates/sync', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
+  { route: 'GET /v1/conversations/:id/templates', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
+  { route: 'POST /v1/conversations/:id/template', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

@@ -3,7 +3,7 @@ import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
 import { channelAccounts, contactPhones, conversations, Database, messages, whatsappAccounts } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
+import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
 
 /** Mientras un envío está en curso el mensaje queda «reservado» este tiempo: si el proceso muere a mitad, otra pasada lo retoma. Debe superar el tiempo máximo de espera al proveedor. */
 export const SEND_LEASE_MS = 60_000;
@@ -23,12 +23,15 @@ const ERROR_TEXT: Readonly<Record<WhatsAppErrorCode, string>> = {
   unavailable: 'No pudimos entregarlo a WhatsApp tras varios intentos. Inténtalo de nuevo en unos minutos',
   rate_limited: 'WhatsApp limitó los envíos de este número tras varios intentos. Inténtalo de nuevo en unos minutos',
   window_closed: 'Pasaron más de 24 horas desde el último mensaje del cliente: solo se puede escribirle con una plantilla aprobada',
+  template_unavailable: 'La plantilla ya no está disponible en Meta (pausada, deshabilitada o borrada): sincroniza las plantillas y elige otra',
+  template_params: 'Meta no aceptó los datos de la plantilla: revisa las variables e inténtalo de nuevo',
   recipient_invalid: 'WhatsApp no pudo entregar el mensaje a este número. Revisa que sea correcto y que tenga WhatsApp',
   rejected: 'WhatsApp rechazó el mensaje',
 };
 const CHANNEL_OFF = 'La conexión de WhatsApp está desactivada o desconectada. Actívala y vuelve a intentar';
 const CREDENTIALS_UNREADABLE = 'No se pueden leer las credenciales de la conexión: el administrador debe volver a pegar el token';
 const NO_RECIPIENT = 'El contacto no tiene un teléfono al cual escribir';
+const TEMPLATE_DATA = 'Faltan los datos de la plantilla: vuelve a elegirla y enviarla';
 
 export type DispatchResult =
   /** Salió: el mensaje quedó `sent` con el identificador del proveedor. */
@@ -36,7 +39,7 @@ export type DispatchResult =
   /** Falló de forma pasajera y volverá a intentarse más tarde. */
   | { outcome: 'retry'; code: WhatsAppErrorCode }
   /** Falló para siempre: quedó `failed` con su explicación. */
-  | { outcome: 'failed'; code: WhatsAppErrorCode | 'channel_off' | 'credentials' | 'no_recipient' }
+  | { outcome: 'failed'; code: WhatsAppErrorCode | 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' }
   /** No estaba pendiente, no le tocaba aún, hay un mensaje anterior de la conversación sin salir, o lo tomó otra instancia. */
   | { outcome: 'skipped' };
 
@@ -48,6 +51,8 @@ interface SendPlan {
   to: string;
   phoneNumberId: string;
   accessToken: string;
+  /** Si es una plantilla: lo que se manda en vez del texto. */
+  template: { name: string; language: string; components: readonly TemplateSendComponent[] } | null;
 }
 
 /**
@@ -79,7 +84,8 @@ export class OutboundDispatcher {
     let sentId: string | null = null;
     let code: WhatsAppErrorCode | null = null;
     try {
-      sentId = (await this.provider.sendText({ accessToken: plan.accessToken }, plan.phoneNumberId, { to: plan.to, text: plan.text })).externalId;
+      const credentials = { accessToken: plan.accessToken };
+      sentId = (plan.template ? await this.provider.sendTemplate(credentials, plan.phoneNumberId, { to: plan.to, name: plan.template.name, language: plan.template.language, components: plan.template.components }) : await this.provider.sendText(credentials, plan.phoneNumberId, { to: plan.to, text: plan.text })).externalId;
     } catch (e) {
       code = e instanceof WhatsAppProviderError ? e.code : 'unavailable';
       this.log.warn({ message_id: plan.messageId, attempts: plan.attempts, code }, 'envío de WhatsApp no salió');
@@ -135,7 +141,7 @@ export class OutboundDispatcher {
   }
 
   /** Reserva el mensaje y reúne lo necesario para enviarlo; si no se puede enviar por algo local (conexión apagada, sin teléfono…), lo deja `failed` aquí mismo. */
-  private async claim(messageId: string, now: Date): Promise<{ kind: 'skipped' } | { kind: 'failed'; code: 'channel_off' | 'credentials' | 'no_recipient' } | { kind: 'plan'; plan: SendPlan }> {
+  private async claim(messageId: string, now: Date): Promise<{ kind: 'skipped' } | { kind: 'failed'; code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' } | { kind: 'plan'; plan: SendPlan }> {
     return this.db.withTenant(async (tx) => {
       const rows = await tx
         .update(messages)
@@ -151,7 +157,7 @@ export class OutboundDispatcher {
             sql`NOT EXISTS (SELECT 1 FROM messages o WHERE o.organization_id = ${messages.organizationId} AND o.conversation_id = ${messages.conversationId} AND o.direction = 'out' AND o.status = 'queued' AND (o.sent_at, o.id) < (${messages.sentAt}, ${messages.id}))`,
           ),
         )
-        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts });
+        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, meta: messages.meta });
       const m = rows[0];
       if (!m) return { kind: 'skipped' as const };
 
@@ -171,7 +177,7 @@ export class OutboundDispatcher {
         .where(eq(conversations.id, m.conversationId))
         .limit(1);
 
-      const fail = async (code: 'channel_off' | 'credentials' | 'no_recipient', text: string) => {
+      const fail = async (code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data', text: string) => {
         await tx.update(messages).set({ status: 'failed', nextAttemptAt: null, error: text, meta: sql`${messages.meta} || ${JSON.stringify({ error_code: code })}::jsonb` }).where(eq(messages.id, m.id));
         return { kind: 'failed' as const, code };
       };
@@ -187,7 +193,13 @@ export class OutboundDispatcher {
         to = p ? p.e164.replace(/^\+/, '') : null;
       }
       if (!to || m.body === null) return fail('no_recipient', NO_RECIPIENT);
-      return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body, to, phoneNumberId: ctx.phoneNumberId, accessToken } };
+      let template: SendPlan['template'] = null;
+      if (m.kind === 'template') {
+        const t = m.meta['template'] as { name?: unknown; language?: unknown; send?: unknown } | undefined;
+        if (!t || typeof t.name !== 'string' || typeof t.language !== 'string' || !Array.isArray(t.send)) return fail('template_data', TEMPLATE_DATA);
+        template = { name: t.name, language: t.language, components: t.send as TemplateSendComponent[] };
+      }
+      return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body, to, phoneNumberId: ctx.phoneNumberId, accessToken, template } };
     });
   }
 }

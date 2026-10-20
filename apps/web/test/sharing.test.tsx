@@ -34,7 +34,7 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
   ...over,
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
-  id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, ...over,
+  id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, template: null, ...over,
 });
 const person = (id: string, name: string, over: Partial<PersonOption> = {}): PersonOption => ({ id, name, role: 'advisor', open_count: 0, in_queue: true, is_owner: false, is_self: false, collaborator: null, ...over });
 const OPTIONS: TransferOptions = {
