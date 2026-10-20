@@ -7,6 +7,13 @@ import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, renderApp, resetWorld, type
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
 const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+/** Una hora fija de un día del calendario local (0 = hoy, 1 = ayer): los separadores «Hoy» y «Ayer» no dependen de a qué hora corra la prueba. */
+const onDay = (daysBack: number, hour: number, minute: number): string => {
+  const d = new Date();
+  d.setDate(d.getDate() - daysBack);
+  d.setHours(hour, minute, 0, 0);
+  return d.toISOString();
+};
 const MIN = 60_000;
 const HOUR = 60 * MIN;
 
@@ -205,14 +212,14 @@ describe('Inbox · hilo', () => {
     const w = world({
       messages: {
         c1: [
-          msg({ id: 'm0', text: 'Mensaje de ayer', sent_at: ago(30 * HOUR) }),
-          msg({ id: 'm1', text: 'Hola, ¿tienen cita mañana?', sent_at: ago(20 * MIN) }),
-          out('m2', 'Claro que sí', 'delivered', { sent_at: ago(15 * MIN) }),
-          out('m4', 'Leído por el cliente', 'read', { sent_at: ago(14 * MIN) }),
-          out('m5', 'Aún enviándose', 'queued', { sent_at: ago(13 * MIN) }),
-          out('m6', 'Recordar el descuento', 'internal', { kind: 'note', is_note: true, sent_at: ago(12 * MIN) }),
-          msg({ id: 'm7', kind: 'image', text: null, media: { mime_type: 'image/jpeg', filename: null }, sent_at: ago(11 * MIN) }),
-          msg({ id: 'm8', kind: 'location', text: null, extra: { location: { name: 'Local', address: 'Av. 9 de Octubre' } }, sent_at: ago(10 * MIN) }),
+          msg({ id: 'm0', text: 'Mensaje de ayer', sent_at: onDay(1, 12, 0) }),
+          msg({ id: 'm1', text: 'Hola, ¿tienen cita mañana?', sent_at: onDay(0, 12, 0) }),
+          out('m2', 'Claro que sí', 'delivered', { sent_at: onDay(0, 12, 1) }),
+          out('m4', 'Leído por el cliente', 'read', { sent_at: onDay(0, 12, 2) }),
+          out('m5', 'Aún enviándose', 'queued', { sent_at: onDay(0, 12, 3) }),
+          out('m6', 'Recordar el descuento', 'internal', { kind: 'note', is_note: true, sent_at: onDay(0, 12, 4) }),
+          msg({ id: 'm7', kind: 'image', text: null, media: { mime_type: 'image/jpeg', filename: null }, sent_at: onDay(0, 12, 5) }),
+          msg({ id: 'm8', kind: 'location', text: null, extra: { location: { name: 'Local', address: 'Av. 9 de Octubre' } }, sent_at: onDay(0, 12, 6) }),
         ],
       },
     });
