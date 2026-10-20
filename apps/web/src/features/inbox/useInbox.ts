@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, RevokeResult, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
+import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /** Cada cuánto se vuelve a mirar (sin tiempo real hasta M5.7): el listado y el hilo abierto. Con la pestaña en segundo plano no se consulta. */
 export const LIST_POLL_MS = 10_000;
@@ -68,6 +68,11 @@ export function useSendReply(id: string) {
 /** Las plantillas que se pueden enviar en esta conversación (las de su conexión). Solo se piden al abrir el selector. */
 export function useConversationTemplates(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['conversation-templates', id], enabled, staleTime: 0, retry: false, queryFn: () => api<TemplateList>(`/conversations/${id}/templates`) });
+}
+
+/** Las respuestas rápidas que puede usar quien escribe, ya resueltas con los datos del contacto de la conversación. */
+export function useConversationQuickReplies(id: string, enabled: boolean) {
+  return useQuery({ queryKey: ['conversation-quick-replies', id], enabled, staleTime: 30_000, retry: false, queryFn: () => api<{ items: ResolvedQuickReply[] }>(`/conversations/${id}/quick-replies`) });
 }
 
 /** Envía una plantilla aprobada con el valor de cada variable (clave = id de la variable). El mensaje vuelve con su estado. */

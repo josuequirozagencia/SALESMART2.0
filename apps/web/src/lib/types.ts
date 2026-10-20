@@ -832,6 +832,27 @@ export interface Template {
   rejected_reason: string | null;
   synced_at: string;
 }
+/** Respuesta rápida (M5.6b, ADR-50): texto guardado que se inserta con `/atajo`. El texto trae las variables sin resolver. */
+export interface QuickReply {
+  id: string;
+  shortcut: string;
+  body: string;
+  shared: boolean;
+  mine: boolean;
+  can_edit: boolean;
+  variables: string[];
+  updated_at: string;
+}
+export interface QuickReplyList {
+  items: QuickReply[];
+  access: { share: boolean };
+  built_in_variables: Array<{ key: string; label: string }>;
+}
+/** Una respuesta lista para insertar en una conversación: `text` ya trae lo que se pudo resolver y `missing` lo que falta. */
+export interface ResolvedQuickReply extends QuickReply {
+  text: string;
+  missing: string[];
+}
 export interface TemplateList {
   items: Template[];
   synced_at: string | null;

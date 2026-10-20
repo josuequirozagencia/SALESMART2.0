@@ -2085,6 +2085,126 @@ test('plantillas de WhatsApp: el administrador sincroniza las de su número; fue
   }
 });
 
+test('respuestas rápidas: el administrador crea una compartida con variables; el asesor escribe «/», la inserta ya con los datos del cliente y sale por el proveedor; lo que falta bloquea el envío; otra empresa no las ve', async ({ page, request, browser }) => {
+  test.setTimeout(180_000);
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-respuestas-0123456789abcdef';
+  const PHONE_ID = '1090123450044';
+  const FROM = '593984217770';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-respuestas-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('respuestas'));
+  const carlosEmail = uniqueEmail('carlos-respuestas');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const orgName = (await db.query(`SELECT name FROM organizations WHERE id = $1`, [orgId])).rows[0].name as string;
+    const carlosId = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), 'Carlos E2E' FROM users WHERE email = $2 RETURNING id`, [carlosEmail, adminEmail])).rows[0].id as string;
+    await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [carlosId, orgId]);
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea respuestas', waba_id: '1234567890125', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+    expect((await request.post(`${apiBase}/v1/custom-fields`, { headers: adm, data: { name: 'Ciudad', type: 'text' } })).status()).toBe(201);
+
+    // 1) El administrador crea una respuesta compartida desde Configuración, con variables que inserta con un clic
+    await uiLogin(page, adminEmail);
+    await page.getByRole('link', { name: 'Configuración' }).click();
+    await page.getByRole('link', { name: 'Respuestas rápidas' }).click();
+    await expect(page.getByText('Aún no tienes respuestas rápidas.')).toBeVisible();
+    await page.getByRole('button', { name: 'Nueva respuesta' }).click();
+    const form = page.getByRole('dialog', { name: 'Nueva respuesta rápida' });
+    await form.getByLabel(/Atajo/).fill('/Hola');
+    await form.getByLabel(/Mensaje/).fill('Hola ');
+    await form.getByRole('button', { name: 'Insertar Primer nombre del contacto' }).click();
+    await form.getByLabel(/Mensaje/).pressSequentially(', soy ');
+    await form.getByRole('button', { name: 'Insertar Mi nombre (quien escribe)' }).click();
+    await form.getByLabel(/Mensaje/).pressSequentially(' de ');
+    await form.getByRole('button', { name: 'Insertar Nombre de la empresa' }).click();
+    await form.getByLabel(/Compartir con toda la empresa/).check();
+    await form.getByRole('button', { name: 'Crear respuesta' }).click();
+    const rows = page.getByRole('list', { name: 'Respuestas rápidas' });
+    await expect(rows.getByText('/hola')).toBeVisible();
+    await expect(rows.getByText('Compartida')).toBeVisible();
+    await expect(rows.getByText('Hola {{primer_nombre}}, soy {{mi_nombre}} de {{empresa}}')).toBeVisible();
+    expect((await db.query(`SELECT shortcut, shared, body FROM quick_replies WHERE organization_id = $1`, [orgId])).rows).toEqual([{ shortcut: 'hola', shared: true, body: 'Hola {{primer_nombre}}, soy {{mi_nombre}} de {{empresa}}' }]);
+
+    // 2) Un cliente escribe y la conversación llega a Carlos
+    const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890125', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Ana Respuestas' }, wa_id: FROM }], messages: [{ from: FROM, id: 'wamid.QR1', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'Hola, ¿tienen cita?' } }] } }] }] });
+    const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+    expect((await request.post(`${apiBase}/v1/channels/meta/webhook`, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    let conv: { id: string } | undefined;
+    for (let i = 0; i < 60 && !conv; i++) {
+      conv = (await db.query(`SELECT id FROM conversations WHERE organization_id = $1 AND owner_id = $2`, [orgId, carlosId])).rows[0] as typeof conv;
+      if (!conv) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(conv).toBeDefined();
+
+    // 3) Carlos escribe «/ho», elige la respuesta con Enter (se inserta con SUS datos y los del cliente) y la envía
+    const ctx = await browser.newContext();
+    contexts.push(ctx);
+    const carlos = await ctx.newPage();
+    await uiLogin(carlos, carlosEmail);
+    await carlos.getByRole('link', { name: 'Inbox' }).click();
+    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('link', { name: /^Ana Respuestas/ }).click();
+    const thread = carlos.getByRole('region', { name: 'Conversación con Ana Respuestas' });
+    const box = thread.getByRole('textbox', { name: 'Mensaje' });
+    await box.pressSequentially('/ho');
+    const options = thread.getByRole('listbox', { name: 'Respuestas rápidas' });
+    await expect(options.getByText('/hola')).toBeVisible();
+    await expect(options.getByText('Compartida')).toBeVisible();
+    await box.press('Enter');
+    await expect(box).toHaveValue(`Hola Ana, soy Carlos E2E de ${orgName}`);
+    await thread.getByRole('button', { name: 'Enviar' }).click();
+    const log = thread.getByRole('log', { name: 'Mensajes' });
+    await expect(log.getByText(`Hola Ana, soy Carlos E2E de ${orgName}`)).toBeVisible();
+    await expect(log.getByRole('img', { name: 'Enviado' })).toBeVisible();
+    const sent = (await db.query(`SELECT kind, sender_type, status, body, created_by FROM messages WHERE conversation_id = $1 AND direction = 'out'`, [conv!.id])).rows;
+    expect(sent).toEqual([{ kind: 'text', sender_type: 'human', status: 'sent', body: `Hola Ana, soy Carlos E2E de ${orgName}`, created_by: carlosId }]);
+
+    // 4) Carlos crea una respuesta SUYA con un dato que este cliente no tiene: se marca, no deja enviar y se completa a mano
+    await thread.getByRole('button', { name: 'Respuestas rápidas' }).click();
+    const manage = carlos.getByRole('dialog', { name: 'Respuestas rápidas' });
+    await manage.getByRole('button', { name: 'Nueva respuesta' }).click();
+    const mine = carlos.getByRole('dialog', { name: 'Nueva respuesta rápida' });
+    await expect(mine.getByLabel(/Compartir con toda la empresa/)).toHaveCount(0); // el asesor no comparte
+    await mine.getByLabel(/Atajo/).fill('sede');
+    await mine.getByLabel(/Mensaje/).fill('Estamos cerca de ti en ');
+    await mine.getByRole('button', { name: 'Insertar Ciudad' }).click();
+    await mine.getByRole('button', { name: 'Crear respuesta' }).click();
+    await expect(manage.getByText('/sede')).toBeVisible();
+    await expect(manage.getByText('Solo mía')).toBeVisible();
+    await manage.getByRole('button', { name: 'Cerrar' }).click();
+    await box.pressSequentially('/se');
+    await expect(thread.getByRole('listbox').getByText('Falta: ciudad')).toBeVisible();
+    await box.press('Enter');
+    await expect(box).toHaveValue('Estamos cerca de ti en {{contact.ciudad}}');
+    await expect(thread.getByText(/Falta completar \{\{contact\.ciudad\}\}/)).toBeVisible();
+    await expect(thread.getByRole('button', { name: 'Enviar' })).toBeDisabled();
+    await box.fill('Estamos cerca de ti en Quito');
+    await expect(thread.getByRole('button', { name: 'Enviar' })).toBeEnabled();
+    await thread.getByRole('button', { name: 'Enviar' }).click();
+    await expect(log.getByText('Estamos cerca de ti en Quito')).toBeVisible();
+
+    // 5) Las de Carlos son suyas: el administrador no las ve; otra empresa no ve ninguna
+    const admList = (await (await request.get(`${apiBase}/v1/quick-replies`, { headers: adm })).json()) as { items: Array<{ shortcut: string }> };
+    expect(admList.items.map((q) => q.shortcut)).toEqual(['hola']);
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('respuestas-otra')))}`, 'content-type': 'application/json' };
+    expect(((await (await request.get(`${apiBase}/v1/quick-replies`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    expect((await request.get(`${apiBase}/v1/conversations/${conv!.id}/quick-replies`, { headers: other })).status()).toBe(404);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

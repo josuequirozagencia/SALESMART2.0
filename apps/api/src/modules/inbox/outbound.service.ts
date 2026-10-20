@@ -1,11 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
-import { conversations, Database, messages, type TenantTx } from '../../db';
+import { and, eq, isNull, sql } from 'drizzle-orm';
+import { contactPhones, conversations, Database, messages, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
 import { OrgDirectoryService, OrgMembersService } from '../organizations';
+import { QuickRepliesService, type ResolvedQuickReplyView } from '../quick-replies';
 import { SlaService } from '../sla';
 import { renderedText, TemplatesService, type TemplateList } from '../templates';
 import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
@@ -43,6 +44,7 @@ export class OutboundService {
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(TemplatesService) private readonly templates: TemplatesService,
+    @Inject(QuickRepliesService) private readonly quickReplies: QuickRepliesService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -60,6 +62,23 @@ export class OutboundService {
       return c.channelAccountId;
     });
     return this.templates.forChannel(channelId);
+  }
+
+  /**
+   * Las respuestas rápidas que esta persona puede usar (las suyas y las compartidas) ya resueltas para el contacto de ESTA conversación (M5.6b). Basta con poder verla y
+   * tener permiso de responder: el selector se ofrece mientras se escribe, y quien lo use verá igual los avisos de por qué no puede enviar. Los datos de identidad (nombre de quien
+   * escribe y de la empresa) se leen antes de la transacción.
+   */
+  async listQuickReplies(access: InboxAccess, conversationId: string): Promise<{ items: ResolvedQuickReplyView[] }> {
+    const scope = scopeOf(access);
+    if (!scope.canReply) throw new ForbiddenError();
+    const [orgName, labels] = await Promise.all([this.directory.organizationName(), this.members.labels([scope.userId])]);
+    const agentName = labels.get(scope.userId)?.name ?? '';
+    return this.db.withTenant(async (tx) => {
+      const { c, contactName } = await loadConversation(tx, scope, conversationId);
+      const [phone] = await tx.select({ e164: contactPhones.e164 }).from(contactPhones).where(and(eq(contactPhones.contactId, c.contactId), isNull(contactPhones.deletedAt), eq(contactPhones.isPrimary, true))).limit(1);
+      return this.quickReplies.resolvedFor(tx, c.contactId, { contactName, contactPhone: phone?.e164 ?? null, agentName, orgName });
+    });
   }
 
   /** Envía una plantilla aprobada de la conexión de la conversación. 404 si no es de esa conexión, 409 si ya no se puede enviar, 400 con el campo si una variable no vale. */

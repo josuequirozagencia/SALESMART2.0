@@ -114,6 +114,14 @@ export class InboxController {
     return this.outbound.listTemplates(accessOf(req), id);
   }
 
+  /** Las respuestas rápidas que puede usar quien escribe, ya resueltas con los datos del contacto de esta conversación (M5.6b). */
+  @RequirePermission('inbox.reply')
+  @Get(':id/quick-replies')
+  @Header('Cache-Control', 'no-store')
+  quickReplies(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.outbound.listQuickReplies(accessOf(req), id);
+  }
+
   /** Envía una plantilla aprobada, dentro o fuera de las 24 h. 400 si una variable no vale, 409 `TEMPLATE_NOT_AVAILABLE` si ya no se puede enviar. */
   @RequirePermission('inbox.reply')
   @Post(':id/template')

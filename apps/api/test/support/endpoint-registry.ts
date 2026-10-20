@@ -179,6 +179,12 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/channels/:id/templates/sync', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
   { route: 'GET /v1/conversations/:id/templates', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
   { route: 'POST /v1/conversations/:id/template', kind: 'tenant', isolationTest: '../../templates/templates.test.ts' },
+  // Respuestas rápidas con variables (M5.6b, ADR-50). Pruebas: test/quick-replies/quick-replies.test.ts (A↔B, personales y compartidas, permisos, variables, resolución en la conversación)
+  { route: 'GET /v1/quick-replies', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
+  { route: 'POST /v1/quick-replies', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
+  { route: 'PATCH /v1/quick-replies/:id', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
+  { route: 'DELETE /v1/quick-replies/:id', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
+  { route: 'GET /v1/conversations/:id/quick-replies', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

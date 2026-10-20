@@ -40,6 +40,13 @@ export class OrgDirectoryService {
     return value;
   }
 
+  /** El nombre de la empresa del contexto, para las variables de las respuestas rápidas (`{{empresa}}`). Se lee ANTES de la transacción de negocio. */
+  async organizationName(): Promise<string> {
+    const org = TenantContext.current().organizationId;
+    const [row] = await this.db.withIdentity((tx) => tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, org)).limit(1));
+    return row?.name ?? '';
+  }
+
   invalidate(): void {
     this.cache.clear();
   }

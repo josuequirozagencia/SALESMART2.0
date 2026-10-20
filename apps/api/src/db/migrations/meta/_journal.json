@@ -379,6 +379,20 @@
       "when": 1792470232378,
       "tag": "0053_m56a_templates_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1792497378688,
+      "tag": "0054_m56b_quick_replies",
+      "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "7",
+      "when": 1792497407453,
+      "tag": "0055_m56b_quick_replies_grants",
+      "breakpoints": true
     }
   ]
 }
