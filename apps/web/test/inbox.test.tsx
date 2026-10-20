@@ -456,6 +456,28 @@ describe('Inbox · acciones', () => {
   });
 });
 
+describe('Inbox · mensajes automáticos', () => {
+  it('un mensaje automático de la cola (saludo, fuera de horario) se ve como «Mensaje automático», sin nombre de persona, y con su estado de envío', async () => {
+    const w = world({ messages: { c1: [msg({ id: 'm1' }), msg({ id: 'm2', direction: 'out', sender_type: 'automation', author: null, text: 'Hola, gracias por escribir a Barbería Norte.', status: 'sent', sent_at: ago(4 * MIN) })] } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const log = within(await screen.findByRole('log', { name: 'Mensajes' }));
+    expect(await log.findByText('Hola, gracias por escribir a Barbería Norte.')).toBeInTheDocument();
+    expect(log.getByText('Mensaje automático')).toBeInTheDocument();
+    expect(log.getByRole('img', { name: 'Enviado' })).toBeInTheDocument();
+  });
+
+  it('uno que no salió muestra el motivo y se puede reintentar, igual que los demás', async () => {
+    const w = world({ messages: { c1: [msg({ id: 'm1' }), msg({ id: 'm3', direction: 'out', sender_type: 'automation', author: null, text: 'Estamos fuera de horario.', status: 'failed', error: 'WhatsApp rechazó el mensaje' })] } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const log = within(await screen.findByRole('log', { name: 'Mensajes' }));
+    expect(await log.findByText('WhatsApp rechazó el mensaje')).toBeInTheDocument();
+    expect(log.getByText('Mensaje automático')).toBeInTheDocument();
+    expect(log.getByRole('button', { name: 'Reintentar' })).toBeInTheDocument();
+  });
+});
+
 describe('Inbox · SLA', () => {
   const sla = (state: NonNullable<Conversation['sla']>['state'], dueInMs: number | null, over: Partial<NonNullable<Conversation['sla']>> = {}): NonNullable<Conversation['sla']> => ({
     kind: 'first',

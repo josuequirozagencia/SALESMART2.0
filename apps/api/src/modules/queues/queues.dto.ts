@@ -11,12 +11,23 @@ const color = z.string().trim().regex(/^#[0-9a-fA-F]{6}$/, 'color en formato #RR
 const mode = z.enum(['equal', 'weighted', 'load']);
 const batch = z.number().int().min(1).max(50);
 const dailyCap = z.number().int().min(0).max(1000);
+/** Largo máximo de un mensaje automático de la cola (WhatsApp admite 4096; un saludo largo no se lee). */
+export const MAX_AUTO_MESSAGE = 1000;
+/** Texto plano que sale al cliente: sin espacios al borde ni caracteres de control (salvo saltos de línea); vacío = no se envía (null). */
+const autoText = z
+  .string()
+  .max(MAX_AUTO_MESSAGE * 2)
+  .transform((v) => v.replace(/\r\n?/g, '\n').trim())
+  .refine((v) => v.length <= MAX_AUTO_MESSAGE, `usa como máximo ${MAX_AUTO_MESSAGE} caracteres`)
+  .refine((v) => !/\p{Cc}/u.test(v.replace(/[\n\t]/g, '')), 'caracteres no permitidos')
+  .transform((v) => (v === '' ? null : v))
+  .nullable();
 
 export const createQueueSchema = z.object({ name, color: color.optional() }).strict();
 export type CreateQueueDto = z.infer<typeof createQueueSchema>;
 
 export const updateQueueSchema = z
-  .object({ name: name.optional(), color: color.optional(), distribution_on: z.boolean().optional(), mode: mode.optional(), batch: batch.optional(), daily_cap: dailyCap.optional(), only_unassigned: z.boolean().optional(), respect_hours: z.boolean().optional(), reassign_minutes: z.number().int().min(0).max(1440).optional(), max_rotations: z.number().int().min(1).max(10).optional() })
+  .object({ name: name.optional(), color: color.optional(), distribution_on: z.boolean().optional(), mode: mode.optional(), batch: batch.optional(), daily_cap: dailyCap.optional(), only_unassigned: z.boolean().optional(), respect_hours: z.boolean().optional(), reassign_minutes: z.number().int().min(0).max(1440).optional(), max_rotations: z.number().int().min(1).max(10).optional(), greeting: autoText.optional(), out_of_hours_message: autoText.optional(), auto_close_hours: z.number().int().min(0).max(720).optional() })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });
 export type UpdateQueueDto = z.infer<typeof updateQueueSchema>;

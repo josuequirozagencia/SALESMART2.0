@@ -314,7 +314,7 @@ export class InboxService {
     const lastRows = await tx
       .selectDistinctOn([messages.conversationId], { conversationId: messages.conversationId, direction: messages.direction, kind: messages.kind, body: messages.body, status: messages.status, sentAt: messages.sentAt })
       .from(messages)
-      .where(and(inArray(messages.conversationId, convIds), sql`${messages.kind} <> 'note'`))
+      .where(and(inArray(messages.conversationId, convIds), sql`${messages.kind} <> 'note'`, sql`${messages.senderType} <> 'automation'`))
       .orderBy(messages.conversationId, desc(messages.sentAt), desc(messages.id));
     const last = new Map(lastRows.map((m) => [m.conversationId, m]));
     const partRows = await tx

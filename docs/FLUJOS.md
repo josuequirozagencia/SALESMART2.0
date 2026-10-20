@@ -39,7 +39,7 @@ Estado: **borrador para validar** contra el prototipo v8. Cada flujo indica acto
 
 ### F04. Conectar canal oficial (WhatsApp Cloud API, Messenger, Instagram)
 - **Actor:** AD.
-- **Pasos:** Conexiones › «Nueva conexión» › tipo → autorizar con Meta (OAuth/embedded signup) o pegar credenciales → elegir número/página → webhook verificado (firma) → cola destino, agente IA (opcional), saludo/despedida → prueba de envío → estado «Conectado».
+- **Pasos:** Conexiones › «Nueva conexión» › tipo → autorizar con Meta (OAuth/embedded signup) o pegar credenciales → elegir número/página → webhook verificado (firma) → cola destino, agente IA (opcional), saludo/despedida (el saludo y el aviso de fuera de horario de la COLA ya existen desde M5.5c; los de la conexión llegan después) → prueba de envío → estado «Conectado».
 - **Reglas:** múltiples números por organización; fuera de 24 h solo plantillas aprobadas; los tokens se guardan cifrados por organización; todo webhook valida firma y es idempotente por `(channel_account_id, external_id)`.
 - **Errores:** token vencido → estado «Requiere reconexión» + aviso a AD; webhook con firma inválida → 401 y registro; plantilla rechazada por Meta → estado visible.
 - **Prototipo:** pantalla Conexiones (maqueta).
@@ -78,6 +78,7 @@ Estado: **borrador para validar** contra el prototipo v8. Cada flujo indica acto
 - **Reglas:** SLA 15 min (configurable) con horario laboral, días laborales, feriados y zona horaria; si no acepta/responde en N min → reasignación (con máximo de rotaciones); «respuesta humana» = mensaje de un humano, no automático, no nota.
 - **Errores:** contacto bloqueado → no entra al reparto; sin asesor disponible → «Sin asignar» + alerta; mensaje duplicado → ignorado.
 - **Implementación del SLA (M5.5b, ADR-50):** el cronómetro de primera respuesta corre desde que la conversación se asigna (reparto, «Asignarme», transferir o reasignar) y mide solo tiempo abierto (horario de la empresa o el propio de la cola, feriados, zona horaria); sin horario guardado, abierta siempre. Si la cola reasigna, al pasar N minutos abiertos sin respuesta humana la conversación pasa a otra persona de la cola (nunca repite en el ciclo, hasta el máximo de rotaciones) con el lead, una nota automática y auditoría como acción automática; con «respetar el horario» la cola cerrada no reparte y lo hace al abrir. Aceptar no detiene el reloj; escribir al cliente sí.
+- **Mensajes automáticos de la cola (M5.5c, ADR-50):** al llegar el mensaje, si la cola tiene saludo y el mensaje abre una conversación nueva con la cola abierta, sale el saludo; si la cola está cerrada y tiene aviso de fuera de horario, sale el aviso (en lugar del saludo; no se repite mientras no abra). Son mensajes automáticos: no detienen el SLA ni cambian la conversación. Si una conversación queda «esperando al cliente» más horas que las de su cola, se finaliza sola (nota interna, sin mensaje al cliente).
 - **Prototipo:** pestañas Trabajando/Esperando/Finalizadas, chip de SLA, aceptar.
 
 ### F09. Atender una conversación

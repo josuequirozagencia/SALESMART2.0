@@ -6,6 +6,7 @@ import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { SlaService } from '../sla';
 import { SystemTagsService } from '../tags';
+import { AutoMessagesService } from './auto-messages.service';
 import type { NormalizedMessage, NormalizedReaction, NormalizedStatus } from './normalized';
 
 export interface IngestResult {
@@ -34,6 +35,7 @@ export class ConversationsService {
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(SlaService) private readonly sla: SlaService,
+    @Inject(AutoMessagesService) private readonly autoMessages: AutoMessagesService,
   ) {}
 
   /**
@@ -87,6 +89,8 @@ export class ConversationsService {
     const a = await this.assignment.assignConversation(tx, conv.id, assign);
     // Si ya tenía dueño, el cliente espera una respuesta POSTERIOR (el cronómetro corre desde su mensaje, no desde que lo procesamos); si acaba de asignarse, ya corre el de primera respuesta
     if (!a.assigned && a.ownerId) await this.sla.startFollowup(tx, { id: conv.id, ownerId: a.ownerId, queueId: a.queueId }, { now: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, timeZone: assign.timeZone });
+    // Saludo o aviso de fuera de horario de la cola (M5.5c): salen al cliente como mensaje automático, que no es una respuesta humana
+    await this.autoMessages.afterInbound(tx, { conversationId: conv.id, channelAccountId, queueId: a.queueId, created: conv.created, receivedAt: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, inboundAt: m.sentAt, now: assign.now, timeZone: assign.timeZone });
     return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
   }
 

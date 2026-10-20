@@ -1847,6 +1847,132 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
   }
 });
 
+test('mensajes automáticos de la cola: el administrador escribe el saludo, el aviso de fuera de horario y el cierre por inactividad; el cliente los recibe, el asesor los ve como automáticos y una conversación inactiva se finaliza sola', async ({ page, request, browser }) => {
+  test.setTimeout(240_000);
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-auto-0123456789abcdef';
+  const PHONE_ID = '1090123450044';
+  const GREETING = 'Hola, gracias por escribir a Barbería E2E. ¿En qué podemos ayudarte?';
+  const OOH = 'Estamos fuera de horario. Te respondemos mañana desde las 08:30.';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-auto-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('auto'));
+  const carlosEmail = uniqueEmail('carlos-auto');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const carlosId = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), 'Carlos E2E' FROM users WHERE email = $2 RETURNING id`, [carlosEmail, adminEmail])).rows[0].id as string;
+    await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [carlosId, orgId]);
+
+    // La cola con Carlos y el número conectado (por la API: ya hay E2E de esas pantallas)
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea auto', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+
+    // 1) El administrador escribe los mensajes en la configuración de la cola
+    await uiLogin(page, adminEmail);
+    await page.getByRole('link', { name: 'Configuración' }).click();
+    await page.getByRole('link', { name: 'Colas' }).click();
+    await page.getByRole('button', { name: 'Configurar Ventas' }).click();
+    const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
+    const auto = cfg.getByRole('region', { name: 'Mensajes automáticos' });
+    await expect(auto.getByLabel('Saludo')).toHaveValue('');
+    await auto.getByLabel('Saludo').fill(GREETING);
+    await auto.getByLabel('Mensaje fuera de horario').fill(OOH);
+    await auto.getByLabel('Finalizar por inactividad (horas)').fill('24');
+    await cfg.getByRole('button', { name: 'Guardar' }).click();
+    await expect(cfg.getByText('Cambios guardados.')).toBeVisible();
+    expect((await db.query(`SELECT greeting_text, out_of_hours_text, auto_close_hours FROM queues WHERE id = $1`, [queue.id])).rows).toEqual([{ greeting_text: GREETING, out_of_hours_text: OOH, auto_close_hours: 24 }]);
+
+    // 2) Un cliente escribe: se le reparte a Carlos y recibe el saludo (mensaje automático enviado por el proveedor)
+    const hook = `${apiBase}/v1/channels/meta/webhook`;
+    const incoming = async (from: string, id: string, name: string, text = 'Hola, quiero una cita'): Promise<void> => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name }, wa_id: from }], messages: [{ from, id, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } }] } }] }] });
+      const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+      expect((await request.post(hook, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    };
+    const autoMessages = async (contactName: string): Promise<Array<{ body: string; status: string; auto: string; conversation_id: string }>> =>
+      (await db.query(`SELECT m.body, m.status, m.meta->>'auto' AS auto, m.conversation_id FROM messages m JOIN conversations c ON c.id = m.conversation_id AND c.organization_id = m.organization_id JOIN contacts k ON k.id = c.contact_id AND k.organization_id = c.organization_id WHERE m.organization_id = $1 AND k.name = $2 AND m.sender_type = 'automation' ORDER BY m.sent_at, m.id`, [orgId, contactName])).rows as Array<{ body: string; status: string; auto: string; conversation_id: string }>;
+    const waitFor = async <T,>(what: string, probe: () => Promise<T | undefined>, tries = 90): Promise<T> => {
+      for (let i = 0; i < tries; i++) {
+        const v = await probe();
+        if (v !== undefined) return v;
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+      throw new Error(`no ocurrió a tiempo: ${what}`);
+    };
+    await incoming('593984217750', 'wamid.AUTO1', 'Cliente Uno');
+    const greeted = await waitFor('el saludo enviado', async () => (await autoMessages('Cliente Uno')).find((m) => m.status === 'sent'));
+    expect(greeted).toMatchObject({ body: GREETING, auto: 'greeting' });
+    const convOne = greeted.conversation_id;
+    expect((await db.query(`SELECT status, owner_id, unread_count FROM conversations WHERE id = $1`, [convOne])).rows[0]).toEqual({ status: 'pending', owner_id: carlosId, unread_count: 1 }); // el saludo no la mueve
+
+    // 3) Carlos ve el saludo como mensaje automático; en el listado se lee lo que escribió el cliente, no el saludo
+    const ctx = await browser.newContext();
+    contexts.push(ctx);
+    const carlos = await ctx.newPage();
+    await uiLogin(carlos, carlosEmail);
+    await carlos.getByRole('link', { name: 'Inbox' }).click();
+    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    const row = carlos.getByRole('link', { name: /^Cliente Uno/ });
+    await expect(row.getByText('Hola, quiero una cita')).toBeVisible();
+    await expect(row.getByText(GREETING)).toHaveCount(0);
+    await row.click();
+    const thread = carlos.getByRole('region', { name: 'Conversación con Cliente Uno' });
+    const log = thread.getByRole('log', { name: 'Mensajes' });
+    await expect(log.getByText(GREETING)).toBeVisible();
+    await expect(log.getByText('Mensaje automático')).toBeVisible();
+    await expect(log.getByRole('img', { name: 'Enviado' })).toBeVisible();
+    await expect(thread.getByText('Por aceptar')).toBeVisible();
+
+    // 4) La cola cierra (abre solo un minuto al día): el siguiente cliente recibe el aviso de fuera de horario, no el saludo, y una sola vez
+    const closedWeek = Object.fromEntries(['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].map((d) => [d, [['00:00', '00:01']]]));
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/hours`, { headers: adm, data: { days: closedWeek } })).status()).toBe(200);
+    await incoming('593984217751', 'wamid.AUTO2', 'Cliente Dos');
+    const notice = await waitFor('el aviso de fuera de horario', async () => (await autoMessages('Cliente Dos')).find((m) => m.status === 'sent'));
+    expect(notice).toMatchObject({ body: OOH, auto: 'out_of_hours' });
+    await incoming('593984217751', 'wamid.AUTO3', 'Cliente Dos', 'Hola, ¿alguien me atiende?');
+    await waitFor('el segundo mensaje del cliente', async () => ((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'in'`, [notice.conversation_id])).rows[0].n === 2 ? true : undefined));
+    expect(await autoMessages('Cliente Dos')).toHaveLength(1); // sigue cerrada: no se repite
+    await carlos.getByRole('link', { name: 'Inbox' }).click();
+    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('link', { name: /^Cliente Dos/ }).click();
+    await expect(carlos.getByRole('region', { name: 'Conversación con Cliente Dos' }).getByRole('log', { name: 'Mensajes' }).getByText(OOH)).toBeVisible();
+
+    // 5) La conversación de «Cliente Uno» queda esperando al cliente por más de 24 h: la tarea la finaliza sola y deja su aviso
+    await db.query(`UPDATE conversations SET status = 'waiting', last_message_at = now() - interval '30 hours' WHERE id = $1`, [convOne]);
+    await waitFor('la finalización automática', async () => ((await db.query(`SELECT status FROM conversations WHERE id = $1`, [convOne])).rows[0].status === 'closed' ? true : undefined), 120);
+    expect((await db.query(`SELECT body FROM messages WHERE conversation_id = $1 AND kind = 'note' AND sender_type = 'system'`, [convOne])).rows.map((r: { body: string }) => r.body)).toEqual(['Finalizada automáticamente: pasaron 24 h sin mensajes del cliente después de la última respuesta.']);
+    expect((await db.query(`SELECT old_value, new_value, source FROM audit_logs WHERE entity_id = $1 AND field = 'status' ORDER BY at DESC, id DESC LIMIT 1`, [convOne])).rows[0]).toEqual({ old_value: 'waiting', new_value: 'closed', source: 'automation' });
+    await carlos.getByRole('link', { name: 'Inbox' }).click();
+    await carlos.getByRole('tab', { name: /Finalizadas/ }).click();
+    await carlos.getByRole('link', { name: /^Cliente Uno/ }).click();
+    await expect(carlos.getByRole('region', { name: 'Conversación con Cliente Uno' }).getByText('Finalizada automáticamente: pasaron 24 h sin mensajes del cliente después de la última respuesta.')).toBeVisible();
+
+    // 6) Si el cliente vuelve a escribir con la cola abierta, se abre otra conversación y se le saluda de nuevo
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/hours`, { headers: adm, data: { days: null } })).status()).toBe(200);
+    await incoming('593984217750', 'wamid.AUTO4', 'Cliente Uno', 'Volví');
+    await waitFor('el segundo saludo', async () => ((await autoMessages('Cliente Uno')).filter((m) => m.auto === 'greeting').length === 2 ? true : undefined));
+    expect((await db.query(`SELECT status FROM conversations WHERE organization_id = $1 AND contact_id = (SELECT contact_id FROM conversations WHERE id = $2) ORDER BY created_at`, [orgId, convOne])).rows.map((r: { status: string }) => r.status)).toEqual(['closed', 'pending']);
+
+    // 7) Otra empresa no ve ni toca la cola ni sus mensajes
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('auto-otra')))}`, 'content-type': 'application/json' };
+    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: other, data: { greeting: 'robado' } })).status()).toBe(404);
+    expect((await db.query(`SELECT greeting_text FROM queues WHERE id = $1`, [queue.id])).rows[0].greeting_text).toBe(GREETING);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

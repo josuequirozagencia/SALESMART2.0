@@ -16,6 +16,11 @@ export const MODE_LABEL: Record<QueueMode, string> = { equal: 'Rotación', weigh
 export const MODE_SHORT: Record<QueueMode, string> = { equal: 'Rotación', weighted: 'Ponderado', load: 'Por carga' };
 const ROLE_LABEL: Record<string, string> = { client_admin: 'Administrador', advisor: 'Asesor' };
 const SIM_COUNT = 20;
+/** Largo máximo de un mensaje automático (el servidor lo vuelve a exigir). */
+const MAX_AUTO = 1000;
+const textareaCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg placeholder:text-muted/70 aria-[invalid=true]:border-crit';
+/** Lo escrito como lo guarda el servidor: sin espacios al borde; vacío = apagado (null). */
+const autoText = (v: string): string | null => (v.trim() === '' ? null : v.replace(/\r\n?/g, '\n').trim());
 
 interface MemberState { active: boolean; weight: string }
 const toMemberState = (q: Queue): Record<string, MemberState> => Object.fromEntries(q.members.map((m) => [m.user_id, { active: m.active, weight: String(m.weight) }]));
@@ -24,7 +29,7 @@ const intIn = (v: string, min: number, max: number): number | null => (/^\d+$/.t
 /**
  * Configuración de una cola (M5.3, ADR-07): nombre y color, quiénes participan y con qué peso, cómo se reparten las conversaciones nuevas, un simulador y los
  * «sin asignar». Con M5.5b también su horario propio, si respeta el horario al repartir y cuándo reasigna si nadie responde. Lo que se edita se guarda con
- * «Guardar»; el simulador usa lo que hay en pantalla (no guarda nada). Los mensajes automáticos de la cola (saludo, fuera de horario) llegan con M5.5c.
+ * «Guardar»; el simulador usa lo que hay en pantalla (no guarda nada). M5.5c: sus mensajes automáticos (saludo, fuera de horario) y finalizar por inactividad.
  */
 export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => void }) {
   const [name, setName] = useState(queue.name);
@@ -37,10 +42,13 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
   const [respect, setRespect] = useState(queue.respect_hours);
   const [reassign, setReassign] = useState(String(queue.reassign_minutes));
   const [rotations, setRotations] = useState(String(queue.max_rotations));
+  const [greeting, setGreeting] = useState(queue.greeting ?? '');
+  const [outOfHours, setOutOfHours] = useState(queue.out_of_hours_message ?? '');
+  const [autoClose, setAutoClose] = useState(String(queue.auto_close_hours));
   const [ownHours, setOwnHours] = useState(queue.hours !== null);
   const [week, setWeek] = useState<WeekHours>(() => (queue.hours ? cloneWeek(queue.hours) : defaultWeek()));
   const [members, setMembers] = useState(() => toMemberState(queue));
-  const [errors, setErrors] = useState<Partial<Record<'name' | 'batch' | 'cap' | 'weights' | 'reassign' | 'rotations' | 'hours', string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<'name' | 'batch' | 'cap' | 'weights' | 'reassign' | 'rotations' | 'hours' | 'greeting' | 'outOfHours' | 'autoClose', string>>>({});
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
   const [sim, setSim] = useState<QueueSimulation>();
@@ -59,7 +67,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     if (synced.current === queue.updated_at) return;
     synced.current = queue.updated_at;
     setName(queue.name); setColor(queue.color); setOn(queue.distribution_on); setMode(queue.mode); setBatch(String(queue.batch)); setCap(String(queue.daily_cap)); setOnlyNew(queue.only_unassigned); setMembers(toMemberState(queue));
-    setRespect(queue.respect_hours); setReassign(String(queue.reassign_minutes)); setRotations(String(queue.max_rotations)); setOwnHours(queue.hours !== null); setWeek(queue.hours ? cloneWeek(queue.hours) : defaultWeek());
+    setRespect(queue.respect_hours); setReassign(String(queue.reassign_minutes)); setRotations(String(queue.max_rotations)); setGreeting(queue.greeting ?? ''); setOutOfHours(queue.out_of_hours_message ?? ''); setAutoClose(String(queue.auto_close_hours)); setOwnHours(queue.hours !== null); setWeek(queue.hours ? cloneWeek(queue.hours) : defaultWeek());
   }, [queue]);
 
   const active = queue.members.filter((m) => members[m.user_id]?.active);
@@ -82,6 +90,10 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     if (re === null) next.reassign = 'Un número entero de minutos entre 0 y 1440 (0 = no reasignar)';
     const ro = intIn(rotations, 1, 10);
     if (ro === null) next.rotations = 'Un número entero entre 1 y 10';
+    if (greeting.length > MAX_AUTO) next.greeting = `Usa como máximo ${MAX_AUTO} caracteres`;
+    if (outOfHours.length > MAX_AUTO) next.outOfHours = `Usa como máximo ${MAX_AUTO} caracteres`;
+    const ac = intIn(autoClose, 0, 720);
+    if (ac === null) next.autoClose = 'Un número entero de horas entre 0 y 720 (0 = no finalizar)';
     if (ownHours) {
       const problem = validateWeek(week);
       if (problem) next.hours = problem;
@@ -99,6 +111,9 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     if (respect !== queue.respect_hours) settings.respect_hours = respect;
     if (re !== queue.reassign_minutes) settings.reassign_minutes = re!;
     if (ro !== queue.max_rotations) settings.max_rotations = ro!;
+    if (autoText(greeting) !== queue.greeting) settings.greeting = autoText(greeting);
+    if (autoText(outOfHours) !== queue.out_of_hours_message) settings.out_of_hours_message = autoText(outOfHours);
+    if (ac !== queue.auto_close_hours) settings.auto_close_hours = ac!;
     return { settings, members: list, hours: ownHours ? week : null };
   }
 
@@ -236,6 +251,32 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
           </label>
           {ownHours ? <HoursEditor value={week} onChange={setWeek} /> : null}
           {errors.hours ? <span role="alert" className="text-[12px] font-medium text-crit">{errors.hours}</span> : null}
+        </section>
+
+        <section className="grid gap-3 rounded-2xl border border-line p-4" aria-label="Mensajes automáticos">
+          <div>
+            <span className="text-[13.5px] font-semibold">Mensajes automáticos</span>
+            <p className="text-[12.5px] text-muted">Salen al cliente por WhatsApp como mensajes automáticos: no cuentan como respuesta de una persona (no detienen el SLA). Déjalos vacíos para no enviarlos.</p>
+          </div>
+          <Field label="Saludo" error={errors.greeting} hint="Se envía una vez, cuando el cliente abre una conversación nueva y la cola está abierta.">
+            {(p) => (
+              <>
+                <textarea {...p} rows={3} maxLength={MAX_AUTO} value={greeting} onChange={(e) => setGreeting(e.target.value)} placeholder="Hola, gracias por escribir. ¿En qué podemos ayudarte?" className={textareaCls} />
+                <span className="text-right font-mono text-[11px] font-normal text-muted">{greeting.length}/{MAX_AUTO}</span>
+              </>
+            )}
+          </Field>
+          <Field label="Mensaje fuera de horario" error={errors.outOfHours} hint="Se envía, en lugar del saludo, cuando el cliente escribe con la cola cerrada (horario y feriados de «SLA y horario»). No se repite mientras siga cerrada.">
+            {(p) => (
+              <>
+                <textarea {...p} rows={3} maxLength={MAX_AUTO} value={outOfHours} onChange={(e) => setOutOfHours(e.target.value)} placeholder="Estamos fuera de horario. Te respondemos mañana desde las 08:30." className={textareaCls} />
+                <span className="text-right font-mono text-[11px] font-normal text-muted">{outOfHours.length}/{MAX_AUTO}</span>
+              </>
+            )}
+          </Field>
+          <Field label="Finalizar por inactividad (horas)" error={errors.autoClose} hint="Finaliza sola una conversación «esperando al cliente» cuando pasan estas horas sin mensajes tras la última respuesta. 0 = no finalizar. Si el cliente vuelve a escribir, se abre otra conversación.">
+            {(p) => <Input {...p} inputMode="numeric" value={autoClose} onChange={(e) => setAutoClose(e.target.value)} className="max-w-[140px]" />}
+          </Field>
         </section>
 
         <section className="grid gap-2 rounded-2xl border border-line p-4" aria-label="Sin asignar">

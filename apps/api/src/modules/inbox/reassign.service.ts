@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
-import { conversations, Database, messages, queues, responseTimers, type TenantTx } from '../../db';
+import { conversations, Database, queues, responseTimers, type TenantTx } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
@@ -9,6 +9,7 @@ import { OpportunitiesService } from '../opportunities';
 import { OrgMembersService, type OrgDirectory } from '../organizations';
 import { DistributionService, QueuesService, type AssignmentContext } from '../queues';
 import { SlaService } from '../sla';
+import { addSystemNote } from './system-note';
 
 export const REASSIGN_BATCH = 20;
 /** Si una pasada falla con una conversación, se vuelve a intentar con ella en este tiempo (no en un bucle). */
@@ -138,7 +139,7 @@ export class ReassignService {
   }
 
   /** Aviso automático en el historial: nota interna del sistema, sin autor (la hizo la propia empresa). */
-  private async note(tx: TenantTx, c: Pick<typeof conversations.$inferSelect, 'id' | 'channelAccountId'>, text: string, now: Date): Promise<void> {
-    await tx.insert(messages).values({ conversationId: c.id, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: text.slice(0, 2000), status: 'internal', sentAt: now });
+  private note(tx: TenantTx, c: Pick<typeof conversations.$inferSelect, 'id' | 'channelAccountId'>, text: string, now: Date): Promise<void> {
+    return addSystemNote(tx, c, text, now);
   }
 }

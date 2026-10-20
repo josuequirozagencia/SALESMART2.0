@@ -40,6 +40,12 @@ export interface QueueView {
   reassign_minutes: number;
   /** Veces como máximo que se reasigna una misma conversación. */
   max_rotations: number;
+  /** Saludo que se envía al cliente al abrir una conversación nueva (M5.5c); null = no se envía. */
+  greeting: string | null;
+  /** Aviso que se envía al cliente que escribe con la cola cerrada (M5.5c); null = no se envía. */
+  out_of_hours_message: string | null;
+  /** Horas sin mensajes tras la última respuesta después de las cuales se finaliza sola una conversación «esperando al cliente» (0 = no finalizar). */
+  auto_close_hours: number;
   /** Horario propio de la cola; null = usa el de la empresa. */
   hours: WeekView | null;
   /** ¿La cola está abierta ahora (con su horario o el de la empresa, y los feriados)? */
@@ -82,6 +88,9 @@ const view = (q: QueueRow, members: QueueMemberView[], channels: QueueView['chan
   respect_hours: q.respectHours,
   reassign_minutes: q.reassignMinutes,
   max_rotations: q.maxRotations,
+  greeting: q.greetingText,
+  out_of_hours_message: q.outOfHoursText,
+  auto_close_hours: q.autoCloseHours,
   hours,
   open_now: openNow,
   members,
@@ -150,6 +159,9 @@ export class QueuesService {
         change('respect_hours', 'respectHours', q.respectHours, input.respect_hours);
         change('reassign_minutes', 'reassignMinutes', q.reassignMinutes, input.reassign_minutes);
         change('max_rotations', 'maxRotations', q.maxRotations, input.max_rotations);
+        change('greeting', 'greetingText', q.greetingText, input.greeting);
+        change('out_of_hours_message', 'outOfHoursText', q.outOfHoursText, input.out_of_hours_message);
+        change('auto_close_hours', 'autoCloseHours', q.autoCloseHours, input.auto_close_hours);
         if (audits.length === 0) return;
         set.updatedAt = new Date();
         await tx.update(queues).set(set).where(eq(queues.id, id));

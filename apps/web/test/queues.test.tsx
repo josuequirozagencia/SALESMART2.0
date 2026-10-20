@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Queue, QueueMember, QueueSimulation, WeekHours } from '../src/lib/types';
@@ -9,7 +9,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const member = (user_id: string, name: string, over: Partial<QueueMember> = {}): QueueMember => ({ user_id, name, role: 'advisor', active: false, weight: 1, open_count: 0, today_count: 0, ...over });
 const people = (): QueueMember[] => [member('u1', 'Alicia Torres', { role: 'client_admin' }), member('u2', 'Carolina Vera'), member('u3', 'Eva Mora')];
 const queue = (over: Partial<Queue> = {}): Queue => ({
-  id: 'q1', name: 'Ventas', color: '#7c5cfa', distribution_on: false, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, respect_hours: false, reassign_minutes: 0, max_rotations: 3, hours: null, open_now: true, members: people(), channels: [], unassigned_count: 0,
+  id: 'q1', name: 'Ventas', color: '#7c5cfa', distribution_on: false, mode: 'equal', batch: 1, daily_cap: 0, only_unassigned: true, respect_hours: false, reassign_minutes: 0, max_rotations: 3, greeting: null, out_of_hours_message: null, auto_close_hours: 0, hours: null, open_now: true, members: people(), channels: [], unassigned_count: 0,
   created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z', ...over,
 });
 
@@ -327,6 +327,87 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     expect(await d.findByText('No había cambios que guardar.')).toBeInTheDocument();
     expect([s.st.calls.patches, s.st.calls.puts, s.st.calls.hours]).toEqual([[], [], []]);
+  });
+});
+
+describe('Mensajes automáticos de una cola (M5.5c)', () => {
+  const GREETING = 'Hola, gracias por escribir a Barbería Norte. ¿En qué podemos ayudarte?';
+  const OOH = 'Estamos fuera de horario. Te respondemos mañana desde las 08:30.';
+
+  it('por omisión no hay mensajes (vacíos) ni cierre por inactividad; explica cuándo sale cada uno', async () => {
+    mockApi(server([queue()]).routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    const sec = within(d.getByRole('region', { name: 'Mensajes automáticos' }));
+    expect(sec.getByLabelText('Saludo')).toHaveValue('');
+    expect(sec.getByLabelText('Mensaje fuera de horario')).toHaveValue('');
+    expect(sec.getByLabelText('Finalizar por inactividad (horas)')).toHaveValue('0');
+    expect(sec.getByText(/cuando el cliente abre una conversación nueva y la cola está abierta/)).toBeInTheDocument();
+    expect(sec.getByText(/en lugar del saludo, cuando el cliente escribe con la cola cerrada/)).toBeInTheDocument();
+    expect(sec.getByText(/no detienen el SLA/)).toBeInTheDocument();
+    expect(sec.getAllByText(/\/1000/)).toHaveLength(2);
+  });
+
+  it('guarda SOLO lo que cambió: saludo, fuera de horario y horas de inactividad (un PATCH, con los textos recortados)', async () => {
+    const s = server([queue()]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.type(d.getByLabelText('Saludo'), `  ${GREETING}  `);
+    await userEvent.type(d.getByLabelText('Mensaje fuera de horario'), OOH);
+    await userEvent.clear(d.getByLabelText('Finalizar por inactividad (horas)'));
+    await userEvent.type(d.getByLabelText('Finalizar por inactividad (horas)'), '24');
+    expect(d.getByText(`${GREETING.length + 4}/1000`)).toBeInTheDocument(); // el contador cuenta lo escrito
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+    expect(s.st.calls.patches).toEqual([{ greeting: GREETING, out_of_hours_message: OOH, auto_close_hours: 24 }]);
+    expect([s.st.calls.puts, s.st.calls.hours]).toEqual([[], []]);
+  });
+
+  it('con textos ya guardados se ven; borrarlos los apaga (null) y espacios en blanco equivalen a nada', async () => {
+    const s = server([queue({ greeting: GREETING, out_of_hours_message: OOH, auto_close_hours: 12 })]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    expect(d.getByLabelText('Saludo')).toHaveValue(GREETING);
+    expect(d.getByLabelText('Mensaje fuera de horario')).toHaveValue(OOH);
+    expect(d.getByLabelText('Finalizar por inactividad (horas)')).toHaveValue('12');
+    await userEvent.clear(d.getByLabelText('Saludo'));
+    await userEvent.clear(d.getByLabelText('Mensaje fuera de horario'));
+    await userEvent.type(d.getByLabelText('Mensaje fuera de horario'), '   ');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+    expect(s.st.calls.patches).toEqual([{ greeting: null, out_of_hours_message: null }]);
+  });
+
+  it('sin cambios (o solo espacios en vacíos) no envía nada', async () => {
+    const s = server([queue()]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.type(d.getByLabelText('Saludo'), '   ');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('No había cambios que guardar.')).toBeInTheDocument();
+    expect(s.st.calls.patches).toEqual([]);
+  });
+
+  it('valida en pantalla: horas enteras de 0 a 720 y textos de hasta 1000 caracteres', async () => {
+    const s = server([queue()]);
+    mockApi(s.routes);
+    renderApp('/settings/queues');
+    const d = await open('Ventas');
+    await userEvent.clear(d.getByLabelText('Finalizar por inactividad (horas)'));
+    await userEvent.type(d.getByLabelText('Finalizar por inactividad (horas)'), '721');
+    fireEvent.change(d.getByLabelText('Saludo'), { target: { value: 'x'.repeat(1001) } });
+    fireEvent.change(d.getByLabelText('Mensaje fuera de horario'), { target: { value: 'y'.repeat(1001) } });
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Un número entero de horas entre 0 y 720 (0 = no finalizar)')).toBeInTheDocument();
+    expect(d.getAllByText('Usa como máximo 1000 caracteres')).toHaveLength(2);
+    expect(s.st.calls.patches).toEqual([]);
+    await userEvent.clear(d.getByLabelText('Finalizar por inactividad (horas)'));
+    await userEvent.type(d.getByLabelText('Finalizar por inactividad (horas)'), 'abc');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText('Un número entero de horas entre 0 y 720 (0 = no finalizar)')).toBeInTheDocument();
   });
 });
 

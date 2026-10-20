@@ -6,6 +6,7 @@ import { OrganizationsModule } from '../organizations';
 import { QueuesModule } from '../queues';
 import { SlaModule } from '../sla';
 import { TagsModule } from '../tags';
+import { AutoCloseService } from './auto-close.service';
 import { InboxController, MessagesController } from './inbox.controller';
 import { InboxService } from './inbox.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
@@ -22,7 +23,7 @@ import { SlaSweepJob } from './sla-sweep.job';
 @Module({
   imports: [ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, SlaModule, TagsModule],
   controllers: [InboxController, MessagesController],
-  providers: [InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, SlaSweepJob],
-  exports: [OutboundJob, OutboundDispatcher, ReassignService, SlaSweepJob],
+  providers: [InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob],
+  exports: [OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob],
 })
 export class InboxModule {}

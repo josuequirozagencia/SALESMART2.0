@@ -618,6 +618,12 @@ export interface Queue {
   reassign_minutes: number;
   /** Cuántas veces se reasigna una conversación como máximo. */
   max_rotations: number;
+  /** Saludo que se envía al cliente al abrir una conversación nueva (M5.5c); null = no se envía. */
+  greeting: string | null;
+  /** Aviso que se envía al cliente que escribe con la cola cerrada (M5.5c); null = no se envía. */
+  out_of_hours_message: string | null;
+  /** Horas sin mensajes tras la última respuesta después de las cuales se finaliza sola una conversación «esperando al cliente»; 0 = no finalizar. */
+  auto_close_hours: number;
   /** Horario propio de la cola (siempre los siete días); null = usa el de la empresa. */
   hours: WeekHours | null;
   /** ¿La cola está abierta ahora (con su horario o el de la empresa)? */
@@ -650,6 +656,9 @@ export interface QueueSettings {
   respect_hours?: boolean;
   reassign_minutes?: number;
   max_rotations?: number;
+  greeting?: string | null;
+  out_of_hours_message?: string | null;
+  auto_close_hours?: number;
 }
 export interface QueueMemberInput {
   user_id: string;

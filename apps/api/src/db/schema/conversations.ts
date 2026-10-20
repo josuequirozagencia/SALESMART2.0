@@ -72,6 +72,8 @@ export const conversations = tenantTable(
     rotations: integer('rotations').notNull().default(0),
     triedOwners: uuid('tried_owners').array().notNull().default(sql`'{}'::uuid[]`),
     lastMessageAt: ts('last_message_at'),
+    /** M5.5c: cuándo se le avisó al cliente que la cola estaba cerrada (el último aviso de fuera de horario): no se repite mientras no haya abierto la cola entre tanto. */
+    outOfHoursNoticeAt: ts('out_of_hours_notice_at'),
     /** Último mensaje del CLIENTE: de aquí sale la ventana de 24 h de WhatsApp oficial. */
     lastInboundAt: ts('last_inbound_at'),
     unreadCount: integer('unread_count').notNull().default(0),
