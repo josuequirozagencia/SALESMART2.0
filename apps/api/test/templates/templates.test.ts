@@ -430,11 +430,11 @@ describe('enviar una plantilla', () => {
     expect(fake().outbox).toEqual([]);
   });
 
-  it('quién puede enviar: su dueño; un colaborador con permiso de responder solo cuando el dueño ya aceptó; no el de solo ver, ni un administrador que no es el dueño, ni en una sin asignar', async () => {
+  it('quién puede enviar: su dueño o quien ve todo; un colaborador con permiso de responder solo cuando el dueño ya aceptó; no el de solo ver, ni en una sin asignar', async () => {
     const { conv, list } = await prep();
     const id = byName(list, 'bienvenida').id;
     const send = (token: string, c = conv) => sendTpl(token, c, { template_id: id, params: {} });
-    expect((await send(T.alice)).status).toBe(403); // administrador que no es el dueño: solo mira
+    expect((await send(T.alice)).status).toBe(201); // administrador que no es el dueño: ve todo y puede responder
     expect((await send(T.eve)).status).toBe(404); // no la ve
     await ok(await call('POST', `/conversations/${conv}/share`, T.carol, { user_id: IDS.eve, permission: 'view' }));
     expect((await send(T.eve)).status).toBe(403);

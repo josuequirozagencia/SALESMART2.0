@@ -132,6 +132,8 @@ export class ScheduledMessagesService {
   async runDue(now: Date, dir: OrgDirectory, batch = SCHEDULED_BATCH): Promise<number> {
     const at = now.toISOString();
     const sent: string[] = [];
+    // Quién sigue en el equipo y con qué rol (identidad: se lee ANTES de la transacción). Un administrador envía como quien ve todas las conversaciones, igual que al programar.
+    const roles = new Map((await this.members.assignable()).map((p) => [p.id, p.role]));
     const resolved = await this.db.withTenant(async (tx) => {
       let n = 0;
       // El cliente escribió después de programarlo (por la hora en que LLEGÓ su mensaje, no la que informa WhatsApp, que va en segundos): ya no hace falta y su respuesta merece una persona, no un mensaje viejo
@@ -159,10 +161,11 @@ export class ScheduledMessagesService {
       for (const s of due) {
         await tx.execute(sql`SAVEPOINT scheduled_one`);
         try {
-          if (!dir.assignable.has(s.createdBy)) {
+          const role = roles.get(s.createdBy);
+          if (!role) {
             await this.resolve(tx, s.id, 'cancelled', 'not_allowed', now);
           } else {
-            const scope: InboxScope = { userId: s.createdBy, canReply: true, viewAll: false, canTransfer: false, canShare: false };
+            const scope: InboxScope = { userId: s.createdBy, canReply: true, viewAll: role === 'client_admin', canTransfer: false, canShare: false };
             const messageId = await this.outbound.enqueueText(tx, scope, s.conversationId, s.body, now, dir.timeZone);
             await tx.update(scheduledMessages).set({ status: 'sent', messageId, resolvedAt: now }).where(eq(scheduledMessages.id, s.id));
             sent.push(messageId);

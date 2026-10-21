@@ -170,15 +170,18 @@ describe('permisos y aislamiento', () => {
     expect((await row(a.id)).status).toBe('scheduled');
   });
 
-  it('quien no ve la conversación recibe 404; el administrador (ve todo) la ve pero no puede programar en una ajena (409/403 con motivo)', async () => {
+  it('quien no ve la conversación recibe 404; el administrador (ve todo) programa en una ajena y sale en su nombre', async () => {
     const conv = await mkConv(); // de Carolina
     expect((await call('GET', `/conversations/${conv}/scheduled`, T.eve)).status).toBe(404);
     expect((await schedule(T.eve, conv, { text: 'hola', send_at: inMs(HOUR) })).status).toBe(404);
     await mk(T.carol, conv);
     expect((await list(T.alice, conv)).length).toBe(1); // ve todas las conversaciones
-    const r = await schedule(T.alice, conv, { text: 'hola', send_at: inMs(HOUR) });
-    expect(r.status).toBe(403);
-    expect(await code(r)).toBe('NOT_OWNER');
+    const mine = await ok<Sch>(await schedule(T.alice, conv, { text: 'Del administrador', send_at: inMs(HOUR) }), 201);
+    expect(mine).toMatchObject({ mine: true, can_cancel: true, author: { id: IDS.alice } });
+    await makeDue(mine.id);
+    await runDue();
+    expect(await row(mine.id)).toMatchObject({ status: 'sent' });
+    expect((await msgs(conv)).map((m) => [m.body, m.created_by])).toEqual([['Del administrador', IDS.alice]]); // sale en nombre del administrador
   });
 
   it('un colaborador que solo ve y deja notas ve los pendientes pero no programa (403) ni cancela; con permiso de responder programa y ve los de los demás', async () => {

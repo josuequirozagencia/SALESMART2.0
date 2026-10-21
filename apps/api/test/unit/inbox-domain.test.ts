@@ -47,11 +47,13 @@ describe('qué puede hacer cada persona con una conversación', () => {
   const admin: InboxScope = { userId: 'u-2', viewAll: true, canReply: true, canTransfer: true, canShare: true };
   const reader: InboxScope = { userId: 'u-3', viewAll: true, canReply: false, canTransfer: false, canShare: false };
 
-  it('el dueño responde y acepta lo pendiente; nadie más responde', () => {
+  it('el dueño responde y acepta lo pendiente; también quien ve todo; nadie más', () => {
     expect(abilities(advisor, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
     expect(abilities(advisor, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true });
     expect(abilities(advisor, { status: 'waiting', ownerId: me }, 'active').reply).toBe(true);
-    expect(abilities(admin, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: true, transfer: true, share: true });
+    // quien ve todo (administrador) responde y acepta igual que el dueño (enmienda de ADR-50 en M5.6c); el que solo lee no
+    expect(abilities(admin, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true });
+    expect(abilities(admin, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
   });
 
   it('lo sin asignar solo lo toma quien ve todo; lo finalizado no admite nada salvo notas', () => {

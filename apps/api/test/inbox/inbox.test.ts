@@ -467,8 +467,8 @@ describe('listado', () => {
     });
     expect(Date.parse(row!.window.expires_at!)).toBeGreaterThan(Date.now() + 21 * HOUR);
     expect(Date.parse(row!.window.expires_at!)).toBeLessThanOrEqual(Date.now() + 22 * HOUR);
-    // el administrador ve lo mismo, pero no puede responder una conversación que no es suya
-    expect((await list(T.alice, '?tab=pending')).items[0]!.can).toEqual({ reply: false, note: true, accept: false, take: false, close: true, transfer: true, share: true });
+    // el administrador ve lo mismo y, como ve todo, también puede aceptarla y responderla aunque no sea suya
+    expect((await list(T.alice, '?tab=pending')).items[0]!.can).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
     // un texto largo con saltos de línea se resume en una línea
     await admin.query(`UPDATE messages SET body = $1 WHERE conversation_id = $2 AND body LIKE 'Hola%'`, ['Hola\n\n   ' + 'x'.repeat(300), c.id]);
     await admin.query(`UPDATE messages SET status = 'received', sent_at = now() WHERE conversation_id = $1 AND kind = 'image'`, [c.id]);
@@ -572,19 +572,21 @@ describe('responder', () => {
     expect(thread.items.map((x) => x.text)).toEqual(['uno', 'dos', 'tres', 'cuatro']);
   });
 
-  it('solo responde su dueño, con la conversación abierta y asignada', async () => {
+  it('responde su dueño o quien ve todo, con la conversación abierta y asignada; un colaborador solo con permiso; el resto no la ve', async () => {
     const mine = await mkConv({ owner: IDS.carol });
     const free = await mkConv({});
     const done = await mkConv({ owner: IDS.carol, status: 'closed' });
-    const r1 = await reply(T.alice, mine.id, 'Hola'); // el administrador la ve, pero no es suya
-    expect([r1.status, await code(r1)]).toEqual([403, 'NOT_OWNER']);
+    const r1 = await reply(T.alice, mine.id, 'Hola'); // el administrador ve todo: responde aunque no sea suya (ADR-50, enmienda de M5.6c)
+    expect(r1.status).toBe(201);
     const r2 = await reply(T.alice, free.id, 'Hola');
     expect([r2.status, await code(r2)]).toEqual([409, 'CONVERSATION_UNASSIGNED']);
     const r3 = await reply(T.carol, done.id, 'Hola');
     expect([r3.status, await code(r3)]).toEqual([409, 'CONVERSATION_CLOSED']);
     expect((await reply(T.eve, mine.id, 'Hola')).status).toBe(404);
-    expect(fake().outbox).toEqual([]);
-    expect(await msgCount(mine.id)).toBe(0);
+    expect(fake().outbox.map((x) => x.text)).toEqual(['Hola']); // solo salió el del administrador
+    expect(await msgCount(mine.id)).toBe(1);
+    expect(await msgCount(free.id)).toBe(0);
+    expect(await msgCount(done.id)).toBe(0);
   });
 
   it('pasadas las 24 h del último mensaje del cliente responde 409 WINDOW_CLOSED y no guarda nada; dentro de la ventana, sí', async () => {
@@ -675,15 +677,15 @@ describe('envío: fallos y reintentos', () => {
     expect(fake().outbox).toEqual([]);
   });
 
-  it('reintentar un mensaje fallido lo vuelve a enviar; solo su dueño, y solo si falló', async () => {
+  it('reintentar un mensaje fallido lo vuelve a enviar; su dueño o quien ve todo, y solo si falló', async () => {
     const c = await mkConv({ owner: IDS.carol });
     const m = await ok<Msg>(await reply(T.carol, c.id, '[fallar:rechazo] hola'), 201);
     expect(m.status).toBe('failed');
     expect(fake().outbox).toEqual([]);
-    // el administrador la ve pero no es suya; otra asesora no la ve
-    const r1 = await call('POST', `/messages/${m.id}/retry`, T.alice);
-    expect([r1.status, await code(r1)]).toEqual([403, 'NOT_OWNER']);
+    // otra asesora no la ve; el administrador (ve todo) sí puede reintentar
     expect((await call('POST', `/messages/${m.id}/retry`, T.eve)).status).toBe(404);
+    expect((await ok<Msg>(await call('POST', `/messages/${m.id}/retry`, T.alice))).status).toBe('failed');
+    expect((await msgRow(m.id)).attempts).toBe(1);
     // mientras siga igual, vuelve a fallar
     expect((await ok<Msg>(await call('POST', `/messages/${m.id}/retry`, T.carol))).status).toBe('failed');
     expect((await msgRow(m.id)).attempts).toBe(1); // el contador se reinicia con cada reintento manual
@@ -846,23 +848,23 @@ describe('notas internas', () => {
 
 // ═════════════════════════════════════════════════════════════════════════════
 describe('estados: aceptar, tomar, finalizar, leída', () => {
-  it('aceptar: el dueño pasa «pendiente» a «trabajando» (auditado); repetirlo no cambia nada; los demás no pueden', async () => {
+  it('aceptar: el dueño o quien ve todo pasa «pendiente» a «trabajando» (auditado); repetirlo no cambia nada; una sin asignar no se acepta; los demás no la ven', async () => {
     const c = await mkConv({ owner: IDS.carol, status: 'pending' });
     const v = await ok<Conv>(await call('POST', `/conversations/${c.id}/accept`, T.carol));
     expect(v).toMatchObject({ status: 'working', can: { accept: false, reply: true } });
     await ok(await call('POST', `/conversations/${c.id}/accept`, T.carol));
     expect((await audits(c.id)).map((a) => [a.field, a.old_value, a.new_value])).toEqual([['status', 'pending', 'working']]);
     const other = await mkConv({ owner: IDS.carol, status: 'pending' });
-    const r = await call('POST', `/conversations/${other.id}/accept`, T.alice);
-    expect([r.status, await code(r)]).toEqual([403, 'NOT_OWNER']);
     expect((await call('POST', `/conversations/${other.id}/accept`, T.eve)).status).toBe(404);
+    const byAdmin = await ok<Conv>(await call('POST', `/conversations/${other.id}/accept`, T.alice)); // ve todo: puede aceptarla
+    expect(byAdmin.status).toBe('working');
     const free = await mkConv({});
     expect((await call('POST', `/conversations/${free.id}/accept`, T.carol)).status).toBe(404); // no la ve
     const rf = await call('POST', `/conversations/${free.id}/accept`, T.alice);
-    expect([rf.status, await code(rf)]).toEqual([403, 'NOT_OWNER']);
+    expect([rf.status, await code(rf)]).toEqual([409, 'CONVERSATION_STATE']); // sin asignar: se toma, no se acepta
     const done = await mkConv({ owner: IDS.carol, status: 'closed' });
     expect(await code(await call('POST', `/conversations/${done.id}/accept`, T.carol))).toBe('CONVERSATION_STATE');
-    expect((await convRow(other.id)).status).toBe('pending');
+    expect((await convRow(other.id)).status).toBe('working');
   });
 
   it('tomar: quien ve todo toma una conversación sin asignar, que queda a su nombre «trabajando»; si el contacto no tenía responsable, se lo queda', async () => {
