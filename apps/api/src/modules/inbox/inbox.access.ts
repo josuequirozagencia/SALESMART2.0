@@ -101,7 +101,8 @@ const OPEN_OWNED = new Set(['pending', 'working', 'waiting']);
 
 export function abilities(scope: InboxScope, c: Pick<ConversationRow, 'status' | 'ownerId'>, channel: ChannelState, collab: Collab = null): Abilities {
   const mine = c.ownerId === scope.userId;
-  const speaks = mine ? OPEN_OWNED.has(c.status) : collab === 'reply' && (c.status === 'working' || c.status === 'waiting');
+  // viewAll (administrador/super_admin) puede responder cualquier conversación abierta, igual que el dueño
+  const speaks = mine || scope.viewAll ? OPEN_OWNED.has(c.status) : collab === 'reply' && (c.status === 'working' || c.status === 'waiting');
   const open = c.status !== 'closed';
   return {
     reply: scope.canReply && speaks && channel === 'active',
