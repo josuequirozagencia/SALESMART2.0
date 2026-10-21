@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
+import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /** Cada cuánto se vuelve a mirar (sin tiempo real hasta M5.7): el listado y el hilo abierto. Con la pestaña en segundo plano no se consulta. */
 export const LIST_POLL_MS = 10_000;
@@ -73,6 +73,22 @@ export function useConversationTemplates(id: string, enabled: boolean) {
 /** Las respuestas rápidas que puede usar quien escribe, ya resueltas con los datos del contacto de la conversación. */
 export function useConversationQuickReplies(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['conversation-quick-replies', id], enabled, staleTime: 30_000, retry: false, queryFn: () => api<{ items: ResolvedQuickReply[] }>(`/conversations/${id}/quick-replies`) });
+}
+
+/** Los mensajes programados de la conversación (pendientes y, 24 h, los que no salieron). Se vuelven a pedir con el hilo. */
+export function useScheduledMessages(id: string) {
+  return useQuery({ queryKey: ['scheduled', id], staleTime: 5_000, retry: false, refetchInterval: THREAD_POLL_MS, queryFn: () => api<{ items: ScheduledMessage[] }>(`/conversations/${id}/scheduled`) });
+}
+
+/** Programa un texto para que salga solo a la hora indicada (instante ISO con zona). */
+export function useScheduleMessage(id: string) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (input: { text: string; send_at: string }) => api<ScheduledMessage>(`/conversations/${id}/scheduled`, { method: 'POST', body: input }), onSettled: () => qc.invalidateQueries({ queryKey: ['scheduled', id] }) });
+}
+
+export function useCancelScheduled(id: string) {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (scheduledId: string) => api<ScheduledMessage>(`/conversations/${id}/scheduled/${scheduledId}`, { method: 'DELETE' }), onSettled: () => qc.invalidateQueries({ queryKey: ['scheduled', id] }) });
 }
 
 /** Envía una plantilla aprobada con el valor de cada variable (clave = id de la variable). El mensaje vuelve con su estado. */

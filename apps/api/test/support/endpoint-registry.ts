@@ -185,6 +185,10 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/quick-replies/:id', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
   { route: 'DELETE /v1/quick-replies/:id', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
   { route: 'GET /v1/conversations/:id/quick-replies', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
+  // Mensajes programados (M5.6c, ADR-50). Pruebas: test/scheduled/scheduled.test.ts (A↔B, permisos, ventana de 24 h, límites, cancelar, envío a su hora, cancelación automática, concurrencia)
+  { route: 'GET /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
+  { route: 'POST /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
+  { route: 'DELETE /v1/conversations/:id/scheduled/:scheduledId', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Etiquetas personalizadas, listas y filtros (M3.4, ADR-46). Pruebas: test/lists/lists.test.ts
   { route: 'POST /v1/tags', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },
   { route: 'PATCH /v1/tags/:id', kind: 'tenant', isolationTest: '../../lists/lists.test.ts' },

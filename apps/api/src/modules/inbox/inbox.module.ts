@@ -15,6 +15,8 @@ import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundJob } from './outbound.job';
 import { OutboundService } from './outbound.service';
 import { ReassignService } from './reassign.service';
+import { ScheduledMessagesJob } from './scheduled-messages.job';
+import { ScheduledMessagesService } from './scheduled-messages.service';
 import { SharingService } from './sharing.service';
 import { SlaSweepJob } from './sla-sweep.job';
 
@@ -25,7 +27,7 @@ import { SlaSweepJob } from './sla-sweep.job';
 @Module({
   imports: [ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, MessagesController],
-  providers: [InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob],
-  exports: [OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob],
+  providers: [InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
+  exports: [OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
 })
 export class InboxModule {}

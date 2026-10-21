@@ -4,6 +4,8 @@ import type { Conversation, ResolvedQuickReply } from '../../lib/types';
 import { Alert, Button } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
+import { ScheduleDialog } from './ScheduleDialog';
+import { ScheduledList } from './ScheduledList';
 import { TemplatePicker } from './TemplatePicker';
 import { useConversationQuickReplies, useSendNote, useSendReply } from './useInbox';
 
@@ -52,6 +54,7 @@ export function Composer({ c }: { c: Conversation }) {
   const [caret, setCaret] = useState(0);
   const [picker, setPicker] = useState(false);
   const [manage, setManage] = useState(false);
+  const [scheduling, setScheduling] = useState(false);
   const [active, setActive] = useState(0);
   const [closedAt, setClosedAt] = useState<number | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -142,6 +145,8 @@ export function Composer({ c }: { c: Conversation }) {
       ) : null}
       {picker ? <TemplatePicker c={c} onClose={() => setPicker(false)} /> : null}
       {manage ? <QuickRepliesDialog onClose={() => setManage(false)} /> : null}
+      {scheduling ? <ScheduleDialog c={c} text={trimmed} onClose={() => setScheduling(false)} onDone={() => { setText(''); setCaret(0); }} /> : null}
+      <ScheduledList conversationId={c.id} />
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
       <div className="relative flex items-end gap-2">
@@ -180,6 +185,7 @@ export function Composer({ c }: { c: Conversation }) {
           onKeyDown={onKey}
           className="max-h-40 min-h-[44px] flex-1 resize-none rounded-[14px] border border-line bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted/70 disabled:opacity-60"
         />
+        {!noteMode && c.can.reply && c.window.open ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
         <Button variant="primary" loading={send.isPending} disabled={!trimmed || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : 'Enviar'}</Button>
       </div>
     </div>

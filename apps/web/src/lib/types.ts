@@ -832,6 +832,20 @@ export interface Template {
   rejected_reason: string | null;
   synced_at: string;
 }
+/** Mensaje programado (M5.6c, ADR-50): un texto que sale solo a una hora, dentro de la ventana de 24 h. `reason` explica por qué no salió. */
+export interface ScheduledMessage {
+  id: string;
+  text: string;
+  send_at: string;
+  status: 'scheduled' | 'sent' | 'cancelled' | 'failed';
+  reason: string | null;
+  created_at: string;
+  resolved_at: string | null;
+  author: { id: string; name: string };
+  mine: boolean;
+  can_cancel: boolean;
+}
+
 /** Respuesta rápida (M5.6b, ADR-50): texto guardado que se inserta con `/atajo`. El texto trae las variables sin resolver. */
 export interface QuickReply {
   id: string;

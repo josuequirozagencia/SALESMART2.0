@@ -71,6 +71,8 @@ Una sola aplicación de Meta para todas las empresas; solo el Súper Admin la co
 
 6. **VALIDAR las plantillas con Meta real** (M5.6a; hasta hoy solo se probaron con un Meta simulado): que Configuración › Conexiones › «Plantillas» liste lo mismo que WhatsApp Manager (nombre, idioma, categoría, estado y motivo de rechazo); que una plantilla sin variables, una con variables en el cuerpo y una con botón de URL salgan al celular y pasen a Enviado, Entregado y Leído; que una pendiente o rechazada aparezca como «no se puede enviar» con su motivo; que una plantilla pausada o borrada en Meta falle con el texto de «ya no está disponible» (códigos 132001/132015/132016) y una con datos que no coinciden con el de «Meta no aceptó los datos» (132000/132005/132007/132012); que un mensaje que Meta no entrega por calidad (131049) quede «fallido»; que fuera de las 24 h solo se pueda enviar una plantilla; y el cobro por mensaje en la cuenta de Meta (la cuenta necesita medio de pago).
 
+> **Estado de la validación (2026-10-21):** el responsable de producto probó a mano en staging, con el número de Growth Consulting y Meta real, los puntos 4 a 6 y reportó que «aparentemente todo está OK». No hay informe detallado por punto: si algo falla después, se reabre el punto correspondiente. Una duda abierta: Meta muestra dos identificadores para la cuenta (uno para los números y otro para las plantillas); conviene anotar aquí cuál se usó como «WABA ID» en Conexiones.
+
 ## 5. Lista de comprobación posterior al despliegue
 1. `GET https://<dominio>/health/ready` → `{"status":"ok"}`.
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.

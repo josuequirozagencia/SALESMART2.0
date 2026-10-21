@@ -45,6 +45,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': case 'TEMPLATE_NOT_AVAILABLE': case 'CONVERSATION_NOT_ACCEPTED': case 'ALREADY_OWNER': case 'PARTICIPANT_LIMIT': case 'TRANSFER_TARGET_NOT_ALLOWED': case 'SHARE_TARGET_NOT_ALLOWED': return e.message;
     // Respuestas rápidas (ADR-50): el servidor ya redacta el motivo
     case 'QUICK_REPLY_EXISTS': case 'QUICK_REPLY_LIMIT': case 'QUICK_REPLY_NOT_YOURS': case 'QUICK_REPLY_SHARE_NOT_ALLOWED': return e.message;
+    // Mensajes programados (ADR-50): el servidor ya redacta el motivo
+    case 'SCHEDULE_OUTSIDE_WINDOW': case 'SCHEDULE_LIMIT': case 'SCHEDULE_NOT_PENDING': case 'SCHEDULE_NOT_YOURS': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;

@@ -26,6 +26,10 @@ export const sendTemplateSchema = z
   .strict();
 export type SendTemplateDto = z.infer<typeof sendTemplateSchema>;
 
+/** Programar un texto: cuál y a qué hora (instante ISO con zona). Que la hora sea futura y caiga dentro de la ventana de 24 h lo decide el servidor. */
+export const createScheduledSchema = z.object({ text: text(MAX_MESSAGE_LENGTH), send_at: z.iso.datetime({ offset: true }) }).strict();
+export type CreateScheduledDto = z.infer<typeof createScheduledSchema>;
+
 export const noteSchema = z.object({ text: text(MAX_NOTE_LENGTH) }).strict();
 export type NoteDto = z.infer<typeof noteSchema>;
 

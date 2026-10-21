@@ -4,9 +4,10 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
-import { listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, sendTemplateSchema, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto, type SendTemplateDto } from './inbox.dto';
+import { createScheduledSchema, listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
 import { OutboundService } from './outbound.service';
+import { ScheduledMessagesService } from './scheduled-messages.service';
 import { shareSchema, transferSchema, type ShareDto, type TransferDto } from './sharing.dto';
 import { SharingService } from './sharing.service';
 
@@ -31,6 +32,7 @@ export class InboxController {
     @Inject(InboxService) private readonly inbox: InboxService,
     @Inject(OutboundService) private readonly outbound: OutboundService,
     @Inject(SharingService) private readonly sharing: SharingService,
+    @Inject(ScheduledMessagesService) private readonly scheduledMessages: ScheduledMessagesService,
   ) {}
 
   @RequirePermission('inbox.read')
@@ -112,6 +114,31 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   templates(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
     return this.outbound.listTemplates(accessOf(req), id);
+  }
+
+  /** Los mensajes programados de la conversación (pendientes, y por 24 h los que no salieron con su motivo). */
+  @RequirePermission('inbox.read')
+  @Get(':id/scheduled')
+  @Header('Cache-Control', 'no-store')
+  scheduled(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.scheduledMessages.list(accessOf(req), id);
+  }
+
+  /** Programa un texto para que salga solo a una hora, dentro de la ventana de 24 h. 409 `SCHEDULE_OUTSIDE_WINDOW` / `SCHEDULE_LIMIT`, 400 si la hora no es futura. */
+  @RequirePermission('inbox.reply')
+  @Post(':id/scheduled')
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  schedule(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(createScheduledSchema)) b: CreateScheduledDto) {
+    return this.scheduledMessages.create(accessOf(req), id, b);
+  }
+
+  /** Cancela un mensaje programado pendiente: quien lo programó, o quien ve todas las conversaciones. */
+  @RequirePermission('inbox.reply')
+  @Delete(':id/scheduled/:scheduledId')
+  @Header('Cache-Control', 'no-store')
+  cancelScheduled(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Param('scheduledId', idParam) scheduledId: string) {
+    return this.scheduledMessages.cancel(accessOf(req), id, scheduledId);
   }
 
   /** Las respuestas rápidas que puede usar quien escribe, ya resueltas con los datos del contacto de esta conversación (M5.6b). */

@@ -1,6 +1,8 @@
 export { InboxModule } from './inbox.module';
 export { OutboundJob } from './outbound.job';
 export { SlaSweepJob } from './sla-sweep.job';
+export { ScheduledMessagesJob } from './scheduled-messages.job';
+export { ScheduledMessagesService, MIN_LEAD_MS, WINDOW_MARGIN_MS, MAX_PENDING_PER_CONVERSATION, type ScheduledView } from './scheduled-messages.service';
 export { ReassignService, REASSIGN_BATCH, type ReassignResult } from './reassign.service';
 export { AutoCloseService, CLOSE_BATCH } from './auto-close.service';
 export { OutboundDispatcher, backoffMs, SEND_BATCH, SEND_LEASE_MS, SEND_MAX_ATTEMPTS, type DispatchResult } from './outbound-dispatcher.service';

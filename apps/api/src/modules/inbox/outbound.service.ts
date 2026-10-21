@@ -96,27 +96,38 @@ export class OutboundService {
     if (!scope.canReply) throw new ForbiddenError();
     const now = new Date();
     const timeZone = (await this.directory.current()).timeZone;
-    const messageId = await this.db.withTenant(async (tx) => {
-      const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
-      assertCanReply(scope, c, channel.state, collab);
-      const out = await make(tx, c);
-      if (out.needsWindow) assertWindowOpen(c.lastInboundAt, now);
-      const [m] = await tx
-        .insert(messages)
-        .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: out.kind, body: out.body, meta: out.meta, status: 'queued', sentAt: now, createdBy: scope.userId, attempts: 0, nextAttemptAt: now })
-        .returning({ id: messages.id });
-      const at = now.toISOString();
-      await tx
-        .update(conversations)
-        .set({ status: 'waiting', lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${at}::timestamptz), ${at}::timestamptz)`, unreadCount: 0, updatedAt: now })
-        .where(eq(conversations.id, conversationId));
-      // El primer mensaje HUMANO detiene el cronómetro de respuesta (no una nota ni un mensaje automático) y guarda cuánto tardó
-      await this.sla.stopOnReply(tx, conversationId, m!.id, { now, timeZone });
-      // Responder sin haber aceptado equivale a aceptar: queda en la auditoría como el cambio de estado que es
-      if (c.status === 'pending') await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'status', oldValue: 'pending', newValue: 'waiting' });
-      return m!.id;
-    });
+    const messageId = await this.db.withTenant((tx) => this.enqueue(tx, scope, conversationId, now, timeZone, make));
     return this.sendNow(messageId);
+  }
+
+  /**
+   * Guarda un mensaje humano en cola dentro de la transacción de quien llama: permisos, ventana, mover la conversación, detener el SLA. Lo comparten responder y los mensajes
+   * programados (que salen en nombre de quien los programó).
+   */
+  private async enqueue(tx: TenantTx, scope: InboxScope, conversationId: string, now: Date, timeZone: string, make: (tx: TenantTx, c: ConversationRow) => Promise<Outgoing>): Promise<string> {
+    const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
+    assertCanReply(scope, c, channel.state, collab);
+    const out = await make(tx, c);
+    if (out.needsWindow) assertWindowOpen(c.lastInboundAt, now);
+    const [m] = await tx
+      .insert(messages)
+      .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: out.kind, body: out.body, meta: out.meta, status: 'queued', sentAt: now, createdBy: scope.userId, attempts: 0, nextAttemptAt: now })
+      .returning({ id: messages.id });
+    const at = now.toISOString();
+    await tx
+      .update(conversations)
+      .set({ status: 'waiting', lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${at}::timestamptz), ${at}::timestamptz)`, unreadCount: 0, updatedAt: now })
+      .where(eq(conversations.id, conversationId));
+    // El primer mensaje HUMANO detiene el cronómetro de respuesta (no una nota ni un mensaje automático) y guarda cuánto tardó
+    await this.sla.stopOnReply(tx, conversationId, m!.id, { now, timeZone });
+    // Responder sin haber aceptado equivale a aceptar: queda en la auditoría como el cambio de estado que es
+    if (c.status === 'pending') await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'status', oldValue: 'pending', newValue: 'waiting' });
+    return m!.id;
+  }
+
+  /** Un texto libre en cola, en nombre de `scope` (mensajes programados). Mismas reglas que responder; lanza lo mismo (404, 403, 409). Devuelve el id del mensaje. */
+  enqueueText(tx: TenantTx, scope: InboxScope, conversationId: string, text: string, now: Date, timeZone: string): Promise<string> {
+    return this.enqueue(tx, scope, conversationId, now, timeZone, () => Promise.resolve({ kind: 'text', body: text, meta: {}, needsWindow: true }));
   }
 
   async note(access: InboxAccess, conversationId: string, dto: NoteDto): Promise<MessageView> {
@@ -156,7 +167,7 @@ export class OutboundService {
   }
 
   /** Intenta enviar de inmediato y devuelve el mensaje tal como quedó. Un fallo inesperado del envío no tumba la petición: el mensaje ya está guardado y la tarea lo retoma. */
-  private async sendNow(messageId: string): Promise<MessageView> {
+  async sendNow(messageId: string): Promise<MessageView> {
     try {
       await this.dispatcher.dispatchOne(messageId);
     } catch (e) {

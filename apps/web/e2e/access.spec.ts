@@ -2205,6 +2205,112 @@ test('respuestas rápidas: el administrador crea una compartida con variables; e
   }
 });
 
+test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, cancela otro; a su hora sale por el proveedor y, si el cliente contesta antes, se cancela solo; otra empresa no los ve', async ({ request, browser }) => {
+  test.setTimeout(240_000);
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-programados-0123456789abcdef';
+  const PHONE_ID = '1090123450011';
+  const WABA = '1234567890126';
+  const FROM = '593984217780';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-programados-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('programados'));
+  const carlosEmail = uniqueEmail('carlos-programados');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const carlosId = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), 'Carlos E2E' FROM users WHERE email = $2 RETURNING id`, [carlosEmail, adminEmail])).rows[0].id as string;
+    await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [carlosId, orgId]);
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea programados', waba_id: WABA, phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+
+    // Un cliente escribe y la conversación llega a Carlos
+    const inbound = async (id: string, text: string) => {
+      const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: WABA, changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Ana Programados' }, wa_id: FROM }], messages: [{ from: FROM, id, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } }] } }] }] });
+      const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+      expect((await request.post(`${apiBase}/v1/channels/meta/webhook`, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    };
+    await inbound('wamid.PR1', 'Hola, ¿tienen cita?');
+    let conv: { id: string } | undefined;
+    for (let i = 0; i < 60 && !conv; i++) {
+      conv = (await db.query(`SELECT id FROM conversations WHERE organization_id = $1 AND owner_id = $2`, [orgId, carlosId])).rows[0] as typeof conv;
+      if (!conv) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(conv).toBeDefined();
+
+    // 1) Carlos programa un mensaje para dentro de 30 minutos: queda pendiente, con su hora, y el redactor se vacía
+    const ctx = await browser.newContext();
+    contexts.push(ctx);
+    const carlos = await ctx.newPage();
+    await uiLogin(carlos, carlosEmail);
+    await carlos.getByRole('link', { name: 'Inbox' }).click();
+    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('link', { name: /^Ana Programados/ }).click();
+    const thread = carlos.getByRole('region', { name: 'Conversación con Ana Programados' });
+    const box = thread.getByRole('textbox', { name: 'Mensaje' });
+    await expect(thread.getByRole('button', { name: 'Programar mensaje' })).toBeDisabled();
+    await box.fill('Hola Ana, te recuerdo tu cita de hoy');
+    await thread.getByRole('button', { name: 'Programar mensaje' }).click();
+    const dlg = carlos.getByRole('dialog', { name: 'Programar mensaje' });
+    await dlg.getByRole('button', { name: 'En 30 minutos' }).click();
+    await dlg.getByRole('button', { name: 'Programar' }).click();
+    const pending = thread.getByRole('region', { name: 'Mensajes programados' });
+    await expect(pending.getByText('Programado')).toBeVisible();
+    await expect(pending.getByText('Hola Ana, te recuerdo tu cita de hoy')).toBeVisible();
+    await expect(box).toHaveValue('');
+    const first = (await db.query(`SELECT id, status, created_by, body FROM scheduled_messages WHERE organization_id = $1`, [orgId])).rows as Array<{ id: string; status: string; created_by: string; body: string }>;
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ status: 'scheduled', created_by: carlosId, body: 'Hola Ana, te recuerdo tu cita de hoy' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'out' AND kind = 'text'`, [conv!.id])).rows[0].n).toBe(0); // todavía no sale nada
+
+    // 2) Programa otro y lo cancela desde la lista
+    await box.fill('Este no debe salir');
+    await thread.getByRole('button', { name: 'Programar mensaje' }).click();
+    await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'En 1 hora' }).click();
+    await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'Programar' }).click();
+    await expect(pending.getByText('Este no debe salir')).toBeVisible();
+    await pending.getByRole('listitem').filter({ hasText: 'Este no debe salir' }).getByRole('button', { name: /Cancelar el mensaje programado/ }).click();
+    await expect(pending.getByText('Se canceló.')).toBeVisible();
+
+    // 3) Llega su hora (se adelanta en la base): la tarea lo envía por el proveedor, en nombre de Carlos, y aparece en el hilo sin recargar
+    await db.query(`UPDATE scheduled_messages SET send_at = now() - interval '5 seconds', created_at = (SELECT max(created_at) FROM messages WHERE conversation_id = $2 AND direction = 'in') + interval '1 second' WHERE id = $1`, [first[0]!.id, conv!.id]); // programado después del último mensaje del cliente
+    const log = thread.getByRole('log', { name: 'Mensajes' });
+    await expect(log.getByText('Hola Ana, te recuerdo tu cita de hoy')).toBeVisible({ timeout: 60_000 });
+    await expect(log.getByRole('img', { name: 'Enviado' })).toBeVisible({ timeout: 30_000 });
+    const sent = (await db.query(`SELECT kind, sender_type, status, created_by FROM messages WHERE conversation_id = $1 AND direction = 'out' AND kind = 'text'`, [conv!.id])).rows;
+    expect(sent).toEqual([{ kind: 'text', sender_type: 'human', status: 'sent', created_by: carlosId }]);
+    expect((await db.query(`SELECT status, message_id IS NOT NULL AS linked FROM scheduled_messages WHERE id = $1`, [first[0]!.id])).rows[0]).toEqual({ status: 'sent', linked: true });
+    await expect(pending.getByText('Hola Ana, te recuerdo tu cita de hoy')).toHaveCount(0); // ya es un mensaje del hilo
+
+    // 4) Programa uno más y el cliente contesta antes: se cancela solo y la lista dice por qué
+    await box.fill('Si no respondes te escribo mañana');
+    await thread.getByRole('button', { name: 'Programar mensaje' }).click();
+    await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'En 1 hora' }).click();
+    await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'Programar' }).click();
+    await expect(pending.getByText('Si no respondes te escribo mañana')).toBeVisible();
+    await inbound('wamid.PR2', 'Sí, mañana a las 10');
+    await expect(pending.getByText('Se canceló porque el cliente escribió antes.')).toBeVisible({ timeout: 60_000 });
+    expect((await db.query(`SELECT status, reason FROM scheduled_messages WHERE body = 'Si no respondes te escribo mañana'`)).rows[0]).toEqual({ status: 'cancelled', reason: 'customer_replied' });
+    expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'out' AND kind = 'text'`, [conv!.id])).rows[0].n).toBe(1); // solo salió el primero
+
+    // 5) Otra empresa no los ve ni los toca
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('programados-otra')))}`, 'content-type': 'application/json' };
+    expect((await request.get(`${apiBase}/v1/conversations/${conv!.id}/scheduled`, { headers: other })).status()).toBe(404);
+    expect((await request.post(`${apiBase}/v1/conversations/${conv!.id}/scheduled`, { headers: other, data: { text: 'hola', send_at: new Date(Date.now() + 3_600_000).toISOString() } })).status()).toBe(404);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

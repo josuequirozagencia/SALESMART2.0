@@ -11,5 +11,6 @@ export { channelAccounts, whatsappAccounts, channelRoutes } from './channels';
 export { webhookEvents, conversations, messages, conversationParticipants } from './conversations';
 export { messageTemplates } from './templates';
 export { quickReplies } from './quick-replies';
+export { scheduledMessages } from './scheduled-messages';
 export { queues, queueMembers, queueDistributionState } from './queues';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';
