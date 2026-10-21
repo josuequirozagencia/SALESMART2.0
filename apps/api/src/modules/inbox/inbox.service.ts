@@ -181,7 +181,7 @@ export class InboxService {
     this.requireReply(scope);
     await this.db.withTenant(async (tx) => {
       const { c } = await loadConversation(tx, scope, id, true);
-      if (c.ownerId !== scope.userId) throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación puede aceptarla');
+      if (c.ownerId !== scope.userId && !scope.viewAll) throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación puede aceptarla');
       if (c.status === 'working' || c.status === 'waiting') return; // ya aceptada
       if (c.status !== 'pending') throw new ConflictError('CONVERSATION_STATE', 'La conversación no está pendiente de aceptar');
       await tx.update(conversations).set({ status: 'working', updatedAt: new Date() }).where(eq(conversations.id, id));

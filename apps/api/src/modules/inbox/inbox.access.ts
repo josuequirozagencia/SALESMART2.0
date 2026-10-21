@@ -119,7 +119,7 @@ export function abilities(scope: InboxScope, c: Pick<ConversationRow, 'status' |
 export function assertCanReply(scope: InboxScope, c: Pick<ConversationRow, 'status' | 'ownerId'>, channel: ChannelState, collab: Collab = null): void {
   if (c.status === 'closed') throw new ConflictError('CONVERSATION_CLOSED', 'La conversación está finalizada');
   if (c.status === 'unassigned') throw new ConflictError('CONVERSATION_UNASSIGNED', 'La conversación aún no tiene asesor: asígnala o tómala antes de responder');
-  if (c.ownerId !== scope.userId) {
+  if (c.ownerId !== scope.userId && !scope.viewAll) {
     if (collab === 'view') throw new ForbiddenError('NOT_OWNER', 'Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente');
     if (collab !== 'reply') throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación, o quien la comparte con permiso para responder, puede responder');
     if (c.status === 'pending') throw new ConflictError('CONVERSATION_NOT_ACCEPTED', 'Quien tiene asignada la conversación aún no la acepta: podrás responder cuando lo haga');
