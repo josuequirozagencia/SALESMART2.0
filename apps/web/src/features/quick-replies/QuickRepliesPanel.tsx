@@ -37,9 +37,10 @@ function QuickReplyForm({ reply, canShare, variables, onClose }: { reply?: Quick
     const next = `${body.slice(0, start)}${at}${body.slice(end)}`;
     if (next.length > MAX) return;
     setBody(next);
+    // El cursor solo se mueve si el texto sigue siendo el que se acaba de armar: si la persona ya siguió escribiendo, moverlo mezclaría lo que escribió
     requestAnimationFrame(() => {
       el?.focus();
-      el?.setSelectionRange(start + at.length, start + at.length);
+      if (el && el.value === next) el.setSelectionRange(start + at.length, start + at.length);
     });
   };
 

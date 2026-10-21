@@ -2122,11 +2122,15 @@ test('respuestas rápidas: el administrador crea una compartida con variables; e
     const form = page.getByRole('dialog', { name: 'Nueva respuesta rápida' });
     await form.getByLabel(/Atajo/).fill('/Hola');
     await form.getByLabel(/Mensaje/).fill('Hola ');
+    // Cada inserción se espera antes de seguir escribiendo: así el cursor y el texto no compiten
     await form.getByRole('button', { name: 'Insertar Primer nombre del contacto' }).click();
+    await expect(form.getByLabel(/Mensaje/)).toHaveValue('Hola {{primer_nombre}}');
     await form.getByLabel(/Mensaje/).pressSequentially(', soy ');
     await form.getByRole('button', { name: 'Insertar Mi nombre (quien escribe)' }).click();
+    await expect(form.getByLabel(/Mensaje/)).toHaveValue('Hola {{primer_nombre}}, soy {{mi_nombre}}');
     await form.getByLabel(/Mensaje/).pressSequentially(' de ');
     await form.getByRole('button', { name: 'Insertar Nombre de la empresa' }).click();
+    await expect(form.getByLabel(/Mensaje/)).toHaveValue('Hola {{primer_nombre}}, soy {{mi_nombre}} de {{empresa}}');
     await form.getByLabel(/Compartir con toda la empresa/).check();
     await form.getByRole('button', { name: 'Crear respuesta' }).click();
     const rows = page.getByRole('list', { name: 'Respuestas rápidas' });

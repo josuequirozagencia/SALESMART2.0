@@ -91,9 +91,10 @@ export function Composer({ c }: { c: Conversation }) {
     setCaret(at);
     setActive(0);
     if (send.isError) send.reset();
+    // El cursor solo se mueve si el texto sigue siendo el que se acaba de armar (si ya siguió escribiendo, moverlo mezclaría lo escrito)
     requestAnimationFrame(() => {
       ref.current?.focus();
-      ref.current?.setSelectionRange(at, at);
+      if (ref.current && ref.current.value === next) ref.current.setSelectionRange(at, at);
     });
   };
 
