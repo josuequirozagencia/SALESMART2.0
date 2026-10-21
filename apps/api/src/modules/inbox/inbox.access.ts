@@ -107,7 +107,7 @@ export function abilities(scope: InboxScope, c: Pick<ConversationRow, 'status' |
   return {
     reply: scope.canReply && speaks && channel === 'active',
     note: scope.canReply,
-    accept: scope.canReply && mine && c.status === 'pending',
+    accept: scope.canReply && (mine || scope.viewAll) && c.status === 'pending',
     take: scope.canReply && scope.viewAll && c.status === 'unassigned',
     close: scope.canReply && open && (mine || scope.viewAll),
     transfer: scope.canTransfer && open && (mine || scope.viewAll),
