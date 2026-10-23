@@ -41,7 +41,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
   return (
     <header className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line bg-surface px-3 py-2.5">
       <div className="flex items-center gap-2.5">
-        <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-9 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 lg:hidden">←</Link>
+        <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 lg:hidden">←</Link>
         <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>

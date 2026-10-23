@@ -14,9 +14,10 @@ import { OpportunitiesModule } from './modules/opportunities';
 import { OrganizationsModule } from './modules/organizations';
 import { PipelinesModule } from './modules/pipelines';
 import { QueuesModule } from './modules/queues';
+import { RealtimeModule } from './modules/realtime';
 import { SlaModule } from './modules/sla';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, InboxModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, InboxModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

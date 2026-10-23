@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ContextBanner } from '../context/ContextBanner';
+import { useInboxRealtime } from '../inbox/useInboxRealtime';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { TrialBanner } from '../trial/TrialBanner';
 import { ROLE_LABEL } from '../../lib/format';
@@ -17,6 +18,8 @@ const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex
 export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Trial | null; onLogout: () => void; children: ReactNode }) {
   // «Configuración» solo para quien puede administrar los campos (el servidor lo dice; no se replica la matriz de permisos aquí)
   const manageFields = useCustomFields().data?.access.manage === true;
+  // Conexión en vivo del Inbox: una por persona y empresa; al cambiar de empresa (agencia, soporte) se cierra y se abre la de la nueva
+  useInboxRealtime(me.user.id, me.organization.id);
   // El Inbox necesita más ancho que el resto de las secciones: lista y hilo, uno al lado del otro
   const wide = useLocation().pathname.startsWith('/inbox');
   return (

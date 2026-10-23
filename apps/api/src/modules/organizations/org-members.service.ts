@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
-import { Database, organizationMembers, users } from '../../db';
+import { Database, organizationMembers, permissions, rolePermissions, roles, users } from '../../db';
 import { TenantContext } from '../../tenant';
 
 export interface OrgPerson {
@@ -36,6 +36,22 @@ export class OrgMembersService {
   /** ¿Puede esta persona recibir trabajo en la organización del contexto? */
   async canBeAssigned(userId: string): Promise<boolean> {
     return (await this.assignable()).some((p) => p.id === userId);
+  }
+
+  /** Miembros vigentes de la organización del CONTEXTO que tienen el permiso dado, por su rol (M5.7: a quién emitir un evento). Solo lectura. */
+  async withPermission(permissionKey: string): Promise<string[]> {
+    const org = TenantContext.current().organizationId;
+    const rows = await this.db.withIdentity((tx) =>
+      tx
+        .select({ id: users.id })
+        .from(organizationMembers)
+        .innerJoin(users, eq(users.id, organizationMembers.userId))
+        .innerJoin(roles, eq(roles.key, organizationMembers.role))
+        .innerJoin(rolePermissions, eq(rolePermissions.roleKey, roles.key))
+        .innerJoin(permissions, and(eq(permissions.key, rolePermissions.permissionKey), eq(permissions.key, permissionKey), eq(roles.scope, permissions.scope)))
+        .where(and(eq(organizationMembers.organizationId, org), isNull(organizationMembers.revokedAt), eq(users.status, 'active'), isNull(users.deletedAt))),
+    );
+    return [...new Set(rows.map((r) => r.id))];
   }
 
   /** Nombre y correo para MOSTRAR (aunque la persona ya no sea miembro: un contacto puede seguir llevando su nombre). Solo de los ids pedidos. */

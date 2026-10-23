@@ -1,10 +1,22 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
+import { useRealtimeStatus } from '../../lib/realtime';
 import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
-/** Cada cuánto se vuelve a mirar (sin tiempo real hasta M5.7): el listado y el hilo abierto. Con la pestaña en segundo plano no se consulta. */
+/**
+ * Cada cuánto se vuelve a mirar el listado y el hilo abierto cuando NO hay conexión en vivo (respaldo). Con la conexión en vivo los cambios llegan solos y
+ * solo queda una consulta lenta por si algún aviso se perdió. Con la pestaña en segundo plano no se consulta.
+ */
 export const LIST_POLL_MS = 10_000;
 export const THREAD_POLL_MS = 5_000;
+export const LIVE_LIST_POLL_MS = 60_000;
+export const LIVE_THREAD_POLL_MS = 30_000;
+
+/** Intervalos de consulta según haya o no conexión en vivo. */
+function usePolling(): { list: number; thread: number } {
+  const live = useRealtimeStatus() === 'live';
+  return live ? { list: LIVE_LIST_POLL_MS, thread: LIVE_THREAD_POLL_MS } : { list: LIST_POLL_MS, thread: THREAD_POLL_MS };
+}
 
 export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, sla: '' };
 
@@ -24,28 +36,31 @@ function listQuery(f: InboxFilters, cursor: string | undefined): string {
 
 /** Conversaciones que la persona puede ver, con la pestaña y los filtros puestos. La primera página trae además los conteos de las pestañas. */
 export function useConversations(f: InboxFilters) {
+  const poll = usePolling();
   return useInfiniteQuery({
     queryKey: ['conversations', f],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api<ConversationList>(`/conversations${listQuery(f, pageParam)}`),
     getNextPageParam: (last) => last.next_cursor ?? undefined,
-    refetchInterval: LIST_POLL_MS,
+    refetchInterval: poll.list,
     placeholderData: keepPreviousData,
   });
 }
 
 export function useConversation(id: string) {
-  return useQuery({ queryKey: ['conversation', id], queryFn: () => api<Conversation>(`/conversations/${id}`), refetchInterval: THREAD_POLL_MS });
+  const poll = usePolling();
+  return useQuery({ queryKey: ['conversation', id], queryFn: () => api<Conversation>(`/conversations/${id}`), refetchInterval: poll.thread });
 }
 
 /** El hilo: la primera página es la más reciente; las siguientes, más antiguas. */
 export function useMessages(id: string) {
+  const poll = usePolling();
   return useInfiniteQuery({
     queryKey: ['messages', id],
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api<ChatMessagePage>(`/conversations/${id}/messages?limit=50${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
     getNextPageParam: (last) => last.next_cursor ?? undefined,
-    refetchInterval: THREAD_POLL_MS,
+    refetchInterval: poll.thread,
   });
 }
 
@@ -77,7 +92,8 @@ export function useConversationQuickReplies(id: string, enabled: boolean) {
 
 /** Los mensajes programados de la conversación (pendientes y, 24 h, los que no salieron). Se vuelven a pedir con el hilo. */
 export function useScheduledMessages(id: string) {
-  return useQuery({ queryKey: ['scheduled', id], staleTime: 5_000, retry: false, refetchInterval: THREAD_POLL_MS, queryFn: () => api<{ items: ScheduledMessage[] }>(`/conversations/${id}/scheduled`) });
+  const poll = usePolling();
+  return useQuery({ queryKey: ['scheduled', id], staleTime: 5_000, retry: false, refetchInterval: poll.thread, queryFn: () => api<{ items: ScheduledMessage[] }>(`/conversations/${id}/scheduled`) });
 }
 
 /** Programa un texto para que salga solo a la hora indicada (instante ISO con zona). */

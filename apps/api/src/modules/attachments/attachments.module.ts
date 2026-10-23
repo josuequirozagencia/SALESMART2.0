@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RealtimeModule } from '../realtime';
 import type { AppConfig } from '../../config';
 import { WEB_MEDIA_ORIGINS } from '../../http';
 import { APP_CONFIG } from '../../tokens';
@@ -31,7 +32,7 @@ export function buildTranscoder(cfg: AppConfig): AudioTranscoder {
  * mundo (almacenamiento, antivirus, conversor) son adaptadores elegidos por configuración. Lo que depende de las conversaciones (subir, enviar, entregar) vive en `inbox`.
  */
 @Module({
-  imports: [ChannelsModule, OrganizationsModule, PlatformModule],
+  imports: [ChannelsModule, OrganizationsModule, PlatformModule, RealtimeModule],
   providers: [
     StorageGateway,
     AttachmentsService,

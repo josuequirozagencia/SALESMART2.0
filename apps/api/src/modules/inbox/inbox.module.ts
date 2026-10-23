@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { RealtimeModule } from '../realtime';
 import { AttachmentsModule } from '../attachments';
 import { ChannelsModule } from '../channels';
 import { ContactsModule } from '../contacts';
@@ -28,7 +29,7 @@ import { SlaSweepJob } from './sla-sweep.job';
  * entra por los canales) porque envía por el proveedor de `channels`, que a su vez usa `conversations`: así no hay dependencias en círculo.
  */
 @Module({
-  imports: [AttachmentsModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, SlaModule, TagsModule, TemplatesModule],
+  imports: [AttachmentsModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, MessagesController, ConversationAttachmentsController, AttachmentsController],
   providers: [ConversationAttachmentsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],

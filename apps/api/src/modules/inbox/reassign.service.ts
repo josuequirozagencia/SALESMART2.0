@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
 import { conversations, Database, queues, responseTimers, type TenantTx } from '../../db';
 import type { AppLogger } from '../../logger';
@@ -7,6 +7,7 @@ import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { OpportunitiesService } from '../opportunities';
 import { OrgMembersService, type OrgDirectory } from '../organizations';
+import { RealtimeService } from '../realtime';
 import { DistributionService, QueuesService, type AssignmentContext } from '../queues';
 import { SlaService } from '../sla';
 import { addSystemNote } from './system-note';
@@ -40,6 +41,7 @@ export class ReassignService {
     @Inject(OpportunitiesService) private readonly opportunities: OpportunitiesService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   /** Reasigna las conversaciones cuya hora ya llegó. Devuelve cuántas tocó. `dir` (zona horaria y quién recibe trabajo) lo lee quien llama ANTES de la transacción. */
@@ -135,6 +137,7 @@ export class ReassignService {
     await this.contacts.reassignOwner(tx, c.contactId, pick.ownerId, 'automation');
     await this.opportunities.reassignOpenOwner(tx, c.contactId, prev, pick.ownerId, 'automation');
     await this.note(tx, c, `La conversación pasó de ${who(prev)} a ${who(pick.ownerId)}: no hubo respuesta en ${q.reassignMinutes} min de horario laboral.`, now);
+    this.realtime?.touchHere(c.id, { alsoUsers: prev ? [prev] : [] });
     return 'reassigned';
   }
 

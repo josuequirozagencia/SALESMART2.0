@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, count, eq, gt, or, sql } from 'drizzle-orm';
 import { conversations, Database, messages, scheduledMessages, type TenantTx } from '../../db';
 import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
@@ -6,6 +6,7 @@ import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
 import { OrgDirectoryService, OrgMembersService, type OrgDirectory } from '../organizations';
+import { RealtimeService } from '../realtime';
 import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, WINDOW_MS, type InboxAccess, type InboxScope } from './inbox.access';
 import type { CreateScheduledDto } from './inbox.dto';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
@@ -66,6 +67,7 @@ export class ScheduledMessagesService {
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   /** Los pendientes de la conversación y, 24 h, los que no salieron. Los enviados ya son mensajes del hilo. 404 si la persona no puede ver la conversación. */
@@ -142,15 +144,15 @@ export class ScheduledMessagesService {
           .update(scheduledMessages)
           .set({ status: 'cancelled', reason: 'customer_replied', resolvedAt: now })
           .where(and(eq(scheduledMessages.status, 'scheduled'), sql`EXISTS (SELECT 1 FROM ${messages} m WHERE m.organization_id = ${scheduledMessages.organizationId} AND m.conversation_id = ${scheduledMessages.conversationId} AND m.direction = 'in' AND m.created_at > ${scheduledMessages.createdAt})`))
-          .returning({ id: scheduledMessages.id })
-      ).length;
+          .returning({ id: scheduledMessages.id, conversationId: scheduledMessages.conversationId })
+      ).map((r) => this.announce(r.conversationId)).length;
       n += (
         await tx
           .update(scheduledMessages)
           .set({ status: 'cancelled', reason: 'conversation_closed', resolvedAt: now })
           .where(and(eq(scheduledMessages.status, 'scheduled'), sql`EXISTS (SELECT 1 FROM ${conversations} c WHERE c.organization_id = ${scheduledMessages.organizationId} AND c.id = ${scheduledMessages.conversationId} AND c.status = 'closed')`))
-          .returning({ id: scheduledMessages.id })
-      ).length;
+          .returning({ id: scheduledMessages.id, conversationId: scheduledMessages.conversationId })
+      ).map((r) => this.announce(r.conversationId)).length;
       const due = await tx
         .select()
         .from(scheduledMessages)
@@ -171,6 +173,7 @@ export class ScheduledMessagesService {
             sent.push(messageId);
           }
           await tx.execute(sql`RELEASE SAVEPOINT scheduled_one`);
+          this.announce(s.conversationId);
           n += 1;
         } catch (e) {
           await tx.execute(sql`ROLLBACK TO SAVEPOINT scheduled_one`);
@@ -196,6 +199,10 @@ export class ScheduledMessagesService {
       }
     }
     return resolved;
+  }
+
+  private announce(conversationId: string): void {
+    this.realtime?.touchHere(conversationId, { scheduled: true });
   }
 
   private async resolve(tx: TenantTx, id: string, status: 'cancelled' | 'failed', reason: string, now: Date): Promise<void> {

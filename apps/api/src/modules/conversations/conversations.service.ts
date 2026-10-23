@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
+import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
 import { SystemTagsService } from '../tags';
 import { AutoMessagesService } from './auto-messages.service';
@@ -45,6 +46,7 @@ export class ConversationsService {
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(AutoMessagesService) private readonly autoMessages: AutoMessagesService,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   /**
@@ -80,6 +82,8 @@ export class ConversationsService {
       .returning({ id: messages.id });
     // Dos entregas del mismo mensaje a la vez: gana una y la otra no toca la conversación
     if (inserted.length === 0) return { duplicate: true, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
+
+    this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: inserted[0]!.id, kind: 'created' } });
 
     // Adjunto entrante (M5.6d): el mensaje queda, y aparte el archivo en `message_attachments` para que la tarea `attachments` lo descargue y lo revise (no bloquea la ingesta)
     if (m.media && FILE_KINDS.has(m.kind)) {
@@ -126,7 +130,7 @@ export class ConversationsService {
    */
   async applyStatus(tx: TenantTx, channelAccountId: string, s: NormalizedStatus): Promise<StatusResult> {
     const [row] = await tx
-      .select({ id: messages.id, status: messages.status, deliveredAt: messages.deliveredAt, readAt: messages.readAt })
+      .select({ id: messages.id, conversationId: messages.conversationId, status: messages.status, deliveredAt: messages.deliveredAt, readAt: messages.readAt })
       .from(messages)
       .where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, s.externalId), eq(messages.direction, 'out')))
       .for('update')
@@ -148,6 +152,7 @@ export class ConversationsService {
     }
     if (Object.keys(set).length === 0) return 'unchanged';
     await tx.update(messages).set(set).where(eq(messages.id, row.id));
+    this.realtime?.touchHere(row.conversationId, { message: { id: row.id, kind: 'updated' } });
     return 'updated';
   }
 
@@ -159,7 +164,7 @@ export class ConversationsService {
    */
   async applyReaction(tx: TenantTx, channelAccountId: string, r: NormalizedReaction): Promise<ReactionResult> {
     const [row] = await tx
-      .select({ id: messages.id, meta: messages.meta })
+      .select({ id: messages.id, conversationId: messages.conversationId, meta: messages.meta })
       .from(messages)
       .where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, r.targetExternalId)))
       .for('update')
@@ -174,6 +179,7 @@ export class ConversationsService {
       .update(messages)
       .set({ meta: r.emoji ? sql`${messages.meta} || ${patch}::jsonb` : sql`(${messages.meta} - 'reaction') || ${patch}::jsonb` })
       .where(eq(messages.id, row.id));
+    this.realtime?.touchHere(row.conversationId, { message: { id: row.id, kind: 'updated' } });
     return 'updated';
   }
 

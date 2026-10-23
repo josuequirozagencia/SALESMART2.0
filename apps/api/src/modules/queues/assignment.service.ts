@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, isNull } from 'drizzle-orm';
 import { channelAccounts, conversations, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
+import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
 import { DistributionService } from './distribution.service';
 import type { AssignmentContext } from './queues.types';
@@ -25,6 +26,7 @@ export class AssignmentService {
     @Inject(DistributionService) private readonly distribution: DistributionService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(SlaService) private readonly sla: SlaService,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   async assignConversation(tx: TenantTx, conversationId: string, ctx: AssignmentContext): Promise<AssignResult> {
@@ -49,6 +51,7 @@ export class AssignmentService {
     if (a.reason === 'distributed') await this.contacts.assignOwnerIfNone(tx, conv.contactId, a.ownerId);
     // El cronómetro de primera respuesta corre desde que se asigna (F08)
     await this.sla.startFirst(tx, { id: conv.id, ownerId: a.ownerId, queueId }, ctx);
+    this.realtime?.touchHere(conv.id);
     return { assigned: true, ownerId: a.ownerId, queueId };
   }
 }

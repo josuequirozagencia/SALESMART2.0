@@ -8,8 +8,8 @@ const api = process.env['API_URL'] ?? 'http://127.0.0.1:3000';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  server: { port: 5173, proxy: { '/v1': { target: api } } },
-  preview: { port: 4173, proxy: { '/v1': { target: api } } },
+  server: { port: 5173, proxy: { '/v1': { target: api, ws: true } } },
+  preview: { port: 4173, proxy: { '/v1': { target: api, ws: true } } },
   test: {
     environment: 'jsdom',
     setupFiles: ['./test/setup.ts'],

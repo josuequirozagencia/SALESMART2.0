@@ -1,10 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { channelAccounts, conversations, Database, messageAttachments } from '../../db';
 import { AppError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { TenantContext } from '../../tenant';
 import { APP_LOGGER } from '../../tokens';
+import { RealtimeService } from '../realtime';
 import { ChannelVault, WHATSAPP_PROVIDER, WhatsAppProviderError, type WhatsAppProvider } from '../channels';
 import { AttachmentsService } from './attachments.service';
 import { baseMime, MAX_BYTES, type AttachmentKind } from './attachment-rules';
@@ -54,6 +55,7 @@ export class InboundMediaService {
     @Inject(ChannelVault) private readonly vault: ChannelVault,
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   /** Una pasada para la empresa del contexto. Devuelve cuántos adjuntos tocó. */
@@ -61,6 +63,8 @@ export class InboundMediaService {
     let touched = 0;
     for (const a of await this.claim(now, batch)) {
       await this.process(a);
+      // Listo, fallido o infectado: lo que ve la persona en el mensaje cambió (un reintento pendiente no avisa de más: solo vuelve a pedir)
+      this.realtime?.touchHere(a.conversationId);
       touched += 1;
     }
     touched += await this.expireOrphans(now);

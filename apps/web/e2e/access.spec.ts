@@ -2315,6 +2315,20 @@ test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, canc
   }
 });
 
+test('tiempo real: al entrar a la empresa el navegador abre la conexión en vivo con la sesión (sin que la política de contenido la bloquee) y sin errores de consola', async ({ page, request }) => {
+  const email = await createAccount(request, uniqueEmail('envivo'));
+  const errors: string[] = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  const opened = page.waitForEvent('websocket', { predicate: (ws) => ws.url().includes('/v1/realtime'), timeout: 15_000 });
+  await uiLogin(page, email);
+  await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+  const ws = await opened;
+  expect(ws.isClosed()).toBe(false);
+  await page.goto('/inbox');
+  await expect(page.getByText('Elige una conversación')).toBeVisible();
+  expect(errors.filter((e) => /Content Security Policy|realtime|WebSocket/i.test(e))).toEqual([]);
+});
+
 test('el Súper Admin entra a la consola de plataforma', async ({ page }) => {
   const s = state();
   await uiLogin(page, s.rootEmail, s.rootPassword);

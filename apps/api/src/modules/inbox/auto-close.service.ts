@@ -1,9 +1,10 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, gt, isNull, sql } from 'drizzle-orm';
 import { conversations, Database, queues } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
+import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
 import { addSystemNote } from './system-note';
 
@@ -23,6 +24,7 @@ export class AutoCloseService {
     @Inject(Database) private readonly db: Database,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   /** Finaliza las conversaciones vencidas. Devuelve cuántas finalizó. */
@@ -46,6 +48,7 @@ export class AutoCloseService {
           await writeAudit(tx, { entityType: 'conversation', entityId: c.id, field: 'status', oldValue: 'waiting', newValue: 'closed', source: 'automation' });
           await addSystemNote(tx, c, `Finalizada automáticamente: pasaron ${c.hours} h sin mensajes del cliente después de la última respuesta.`, now);
           await tx.execute(sql`RELEASE SAVEPOINT auto_close_one`);
+          this.realtime?.touchHere(c.id);
           closed += 1;
         } catch (e) {
           await tx.execute(sql`ROLLBACK TO SAVEPOINT auto_close_one`);

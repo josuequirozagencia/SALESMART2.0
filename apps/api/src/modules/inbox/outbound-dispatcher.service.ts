@@ -1,10 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
 import { channelAccounts, contactPhones, conversations, Database, messageAttachments, messages, whatsappAccounts } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type MediaKind, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
 import { AttachmentsService } from '../attachments';
+import { RealtimeService } from '../realtime';
 
 /** Mientras un envío está en curso el mensaje queda «reservado» este tiempo: si el proceso muere a mitad, otra pasada lo retoma. Debe superar el tiempo máximo de espera al proveedor. */
 export const SEND_LEASE_MS = 60_000;
@@ -86,10 +87,28 @@ export class OutboundDispatcher {
     @Inject(ChannelVault) private readonly vault: ChannelVault,
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   /** Intenta enviar UN mensaje ahora (si está pendiente y le toca). No lanza por un fallo del proveedor: lo anota en el mensaje. */
   async dispatchOne(messageId: string, now: Date = new Date()): Promise<DispatchResult> {
+    const result = await this.attempt(messageId, now);
+    if (result.outcome === 'sent' || result.outcome === 'failed') await this.announce(messageId);
+    return result;
+  }
+
+  /** Avisa en tiempo real que el mensaje salió o falló (lo que ve la persona cambia: ✓ o «no se envió»). Nunca rompe el envío. */
+  private async announce(messageId: string): Promise<void> {
+    if (!this.realtime) return;
+    try {
+      const [m] = await this.db.withTenant((tx) => tx.select({ conversationId: messages.conversationId }).from(messages).where(eq(messages.id, messageId)).limit(1));
+      if (m) this.realtime.touchHere(m.conversationId, { message: { id: messageId, kind: 'updated' } });
+    } catch {
+      // el aviso es opcional
+    }
+  }
+
+  private async attempt(messageId: string, now: Date): Promise<DispatchResult> {
     const claimed = await this.claim(messageId, now);
     if (claimed.kind === 'skipped') return { outcome: 'skipped' };
     if (claimed.kind === 'failed') return { outcome: 'failed', code: claimed.code };
