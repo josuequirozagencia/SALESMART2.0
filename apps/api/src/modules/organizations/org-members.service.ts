@@ -3,6 +3,10 @@ import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { Database, organizationMembers, permissions, rolePermissions, roles, users } from '../../db';
 import { TenantContext } from '../../tenant';
 
+/** Persona aún sin nombre: dentro de una transacción de negocio no se pueden leer las tablas de identidad (ADR-25); `hydrate` los pone al terminar. */
+export const pendingPerson = (id: string | null): { id: string; name: string } | null => (id ? { id, name: '' } : null);
+const WHO_KEYS: ReadonlySet<string> = new Set(['seller', 'owner', 'by', 'requested_by', 'resolved_by']);
+
 export interface OrgPerson {
   id: string;
   name: string;
@@ -18,6 +22,32 @@ export interface OrgPerson {
 @Injectable()
 export class OrgMembersService {
   constructor(@Inject(Database) private readonly db: Database) {}
+
+  /**
+   * Pone el nombre a cada persona marcada con `pendingPerson` (vendedor, responsable, autores…) con UNA lectura de identidad. Se llama FUERA de toda transacción de negocio,
+   * sobre lo que esa transacción devolvió. Quien ya no existe queda con nombre vacío.
+   */
+  async hydrate<T>(value: T): Promise<T> {
+    const ids = new Set<string>();
+    const walk = (v: unknown, key?: string): void => {
+      if (Array.isArray(v)) return v.forEach((x) => walk(x, key));
+      if (v === null || typeof v !== 'object') return;
+      const o = v as Record<string, unknown>;
+      if (key && WHO_KEYS.has(key) && typeof o['id'] === 'string' && o['name'] === '') ids.add(o['id']);
+      for (const [k, x] of Object.entries(o)) walk(x, k);
+    };
+    walk(value);
+    if (ids.size === 0) return value;
+    const people = await this.labels([...ids]);
+    const fill = (v: unknown, key?: string): unknown => {
+      if (Array.isArray(v)) return v.map((x) => fill(x, key));
+      if (v === null || typeof v !== 'object') return v;
+      const o = v as Record<string, unknown>;
+      if (key && WHO_KEYS.has(key) && typeof o['id'] === 'string' && o['name'] === '') return people.get(o['id']) ?? { id: o['id'], name: '' };
+      return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, fill(x, k)]));
+    };
+    return fill(value) as T;
+  }
 
   /** Personas a las que se puede ASIGNAR trabajo (administradores y asesores vigentes con usuario activo), por nombre. */
   async assignable(): Promise<OrgPerson[]> {

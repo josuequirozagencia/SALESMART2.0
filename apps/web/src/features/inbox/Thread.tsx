@@ -7,6 +7,7 @@ import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
+import { AppointmentDialog } from '../appointments/AppointmentDialog';
 import { SaleDialog } from '../sales/SaleDialog';
 import { Composer } from './Composer';
 import { SlaPill } from './SlaPill';
@@ -33,6 +34,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
   const [confirm, setConfirm] = useState(false);
   const [dialog, setDialog] = useState(false);
   const [sale, setSale] = useState(false);
+  const [appointment, setAppointment] = useState(false);
   const now = useNow(30_000);
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
@@ -70,11 +72,13 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
             {c.can.take ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('take', 'No pudimos asignarte la conversación.')}>Asignarme</Button> : null}
             {c.can.transfer || c.can.share ? <Button className={SMALL} onClick={() => setDialog(true)}>Transferir</Button> : null}
             {collaborator ? <Button className={SMALL} loading={leave.isPending} onClick={() => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</Button> : null}
+            {c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setAppointment(true)}>Agendar</Button> : null}
             {c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setSale(true)}>Registrar venta</Button> : null}
             {c.can.close ? <Button className={SMALL} onClick={() => setConfirm(true)}>Finalizar</Button> : null}
           </>
         )}
         </div>
+        {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
         {sale ? <SaleDialog c={c} onClose={() => setSale(false)} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
       </div>

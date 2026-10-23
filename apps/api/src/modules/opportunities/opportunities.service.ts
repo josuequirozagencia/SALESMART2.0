@@ -121,6 +121,32 @@ export class OpportunitiesService {
     return opp.id;
   }
 
+  /**
+   * Se agenda una cita (M6.3, ADR-18): la oportunidad ABIERTA más reciente del contacto pasa a la «etapa de cita» de su pipeline, si el pipeline tiene una vigente y visible. Si ya está
+   * en esa etapa, o más adelante en el embudo, no se retrocede. Historial con origen `system` y auditoría. Devuelve el id de la oportunidad movida (o la que ya estaba lista), o null.
+   */
+  async moveToAppointmentStage(tx: TenantTx, contactId: string, userId: string | null): Promise<string | null> {
+    const [opp] = await tx
+      .select()
+      .from(opportunities)
+      .where(and(eq(opportunities.contactId, contactId), eq(opportunities.status, 'open'), isNull(opportunities.deletedAt)))
+      .orderBy(desc(opportunities.createdAt))
+      .limit(1)
+      .for('update');
+    if (!opp) return null;
+    const [pipe] = await tx.select({ stageId: pipelines.appointmentStageId }).from(pipelines).where(eq(pipelines.id, opp.pipelineId)).limit(1);
+    if (!pipe?.stageId) return opp.id;
+    const [target] = await tx.select().from(pipelineStages).where(and(eq(pipelineStages.id, pipe.stageId), eq(pipelineStages.pipelineId, opp.pipelineId), isNull(pipelineStages.deletedAt))).limit(1);
+    if (!target || target.isHidden || target.kind !== 'open') return opp.id;
+    const [cur] = await tx.select({ position: pipelineStages.position }).from(pipelineStages).where(eq(pipelineStages.id, opp.stageId)).limit(1);
+    if (cur && cur.position >= target.position) return opp.id;
+    const now = new Date();
+    await tx.update(opportunities).set({ stageId: target.id, stageEnteredAt: now, updatedAt: now }).where(eq(opportunities.id, opp.id));
+    await tx.insert(stageHistory).values({ opportunityId: opp.id, fromStageId: opp.stageId, toStageId: target.id, userId, origin: 'system' });
+    await writeAudit(tx, { entityType: AUDIT, entityId: opp.id, field: 'stage_id', oldValue: opp.stageId, newValue: { stage_id: target.id, status: 'open' }, source: 'automation' });
+    return opp.id;
+  }
+
   async list(scope: ContactScope, q: ListOpportunitiesQuery): Promise<{ items: OpportunityView[]; next_cursor: string | null }> {
     const sc = this.scope(scope);
     const page = await this.db.withTenant(async (tx) => {

@@ -36,6 +36,10 @@ export const PERMISSIONS = {
   'sales.register_payment': 'tenant',
   'sales.manage': 'tenant',
   'appointments.manage': 'tenant',
+  // M6.3 (ADR-51): ver y gestionar las citas PROPIAS (las de sus conversaciones), y ver/gestionar las de toda la empresa.
+  'appointments.read': 'tenant',
+  'appointments.write': 'tenant',
+  'appointments.view_all': 'tenant',
   'queues.manage': 'tenant',
   // M5.5b: política de respuesta (SLA), horario laboral y feriados de la empresa.
   'sla.manage': 'tenant',
@@ -98,7 +102,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
   client_admin: tenantKeys,
   // `contacts.write` del asesor es de alcance PROPIO (ADR-32 #3 / ADR-43): crea contactos asignados a sí mismo y edita los suyos.
   // M4.2 (ADR-49): `opportunities.write` del asesor es de alcance PROPIO (sus oportunidades), igual que sus contactos.
-  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write', 'sales.read', 'sales.create', 'sales.register_payment'],
+  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write', 'sales.read', 'sales.create', 'sales.register_payment', 'appointments.read', 'appointments.write'],
 };
 
 /**
@@ -106,7 +110,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
  * y cualquier acceso de agencia o de soporte a una empresa con la prueba vencida (ADR-41). Todo permiso que no está aquí es de escritura.
  * PROVISIONAL: cada módulo nuevo añade aquí sus permisos de lectura.
  */
-export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'commissions.view', 'analytics.view']);
+export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view']);
 
 export type AccessLevel = 'read' | 'advisor' | 'admin';
 export const isAccessLevel = (v: unknown): v is AccessLevel => v === 'read' || v === 'advisor' || v === 'admin';

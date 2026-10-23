@@ -7,7 +7,7 @@ import { AttributionService } from '../attribution';
 import { writeAudit } from '../audit';
 import { loadConversation, scopeOf, type InboxAccess } from '../inbox';
 import { OpportunitiesService } from '../opportunities';
-import { OrgDirectoryService, OrgMembersService } from '../organizations';
+import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
 import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
 import {
@@ -112,9 +112,7 @@ const PAID = sql<string>`COALESCE((SELECT SUM(CASE WHEN p.kind = 'payment' THEN 
 const OPEN_REQ = sql<number>`(SELECT count(*)::int FROM ${saleChangeRequests} r WHERE r.organization_id = "sales"."organization_id" AND r.sale_id = "sales"."id" AND r.status = 'open')`;
 
 type Idem = { sale: SaleRow };
-/** Persona aún sin nombre: dentro de la transacción de negocio no se pueden leer las tablas de identidad (ADR-25); `hydrate` los pone al terminar. */
-const who = (id: string | null): { id: string; name: string } | null => (id ? { id, name: '' } : null);
-const WHO_KEYS: ReadonlySet<string> = new Set(['seller', 'by', 'requested_by', 'resolved_by']);
+const who = pendingPerson;
 type Created = { sale: SaleView; created: boolean };
 
 /**
@@ -517,27 +515,8 @@ export class SalesService {
     }));
   }
 
-  /** Pone el nombre a cada persona marcada (vendedor, autores…) con UNA lectura de identidad, fuera de toda transacción de negocio. */
-  private async hydrate<T>(value: T): Promise<T> {
-    const ids = new Set<string>();
-    const walk = (v: unknown, key?: string): void => {
-      if (Array.isArray(v)) return v.forEach((x) => walk(x, key));
-      if (v === null || typeof v !== 'object') return;
-      const o = v as Record<string, unknown>;
-      if (key && WHO_KEYS.has(key) && typeof o['id'] === 'string' && o['name'] === '') ids.add(o['id']);
-      for (const [k, x] of Object.entries(o)) walk(x, k);
-    };
-    walk(value);
-    if (ids.size === 0) return value;
-    const people = await this.members.labels([...ids]);
-    const fill = (v: unknown, key?: string): unknown => {
-      if (Array.isArray(v)) return v.map((x) => fill(x, key));
-      if (v === null || typeof v !== 'object') return v;
-      const o = v as Record<string, unknown>;
-      if (key && WHO_KEYS.has(key) && typeof o['id'] === 'string' && o['name'] === '') return people.get(o['id']) ?? { id: o['id'], name: '' };
-      return Object.fromEntries(Object.entries(o).map(([k, x]) => [k, fill(x, k)]));
-    };
-    return fill(value) as T;
+  private hydrate<T>(value: T): Promise<T> {
+    return this.members.hydrate(value);
   }
 
   private encodeCursor(iso: string, id: string): string {

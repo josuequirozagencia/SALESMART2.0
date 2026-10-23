@@ -40,6 +40,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         <nav aria-label="Secciones" className="flex gap-1 overflow-x-auto whitespace-nowrap border-b border-line">
           <NavLink to="/" end className={tab}>Inicio</NavLink>
           <NavLink to="/inbox" className={tab}>Inbox</NavLink>
+          <NavLink to="/agenda" className={tab}>Agenda</NavLink>
           <NavLink to="/sales" className={tab}>Ventas</NavLink>
           <NavLink to="/contacts" className={tab}>Contactos</NavLink>
           <NavLink to="/companies" className={tab}>Empresas</NavLink>

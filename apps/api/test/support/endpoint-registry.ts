@@ -163,6 +163,14 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/sales/:id/corrections', kind: 'tenant', isolationTest: '../../sales/sales.test.ts' },
   { route: 'POST /v1/sales/:id/cancel', kind: 'tenant', isolationTest: '../../sales/sales.test.ts' },
   { route: 'POST /v1/sales/:id/change-requests', kind: 'tenant', isolationTest: '../../sales/sales.test.ts' },
+  // Citas y recordatorios (M6.3, ADR-13/51). Pruebas: test/appointments/appointments.test.ts (A↔B, permisos, topes, ventana de 24 h, recordatorios)
+  { route: 'GET /v1/appointments/options', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  { route: 'POST /v1/appointments', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  { route: 'GET /v1/appointments', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  { route: 'GET /v1/appointments/:id', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  { route: 'PATCH /v1/appointments/:id', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  { route: 'POST /v1/appointments/:id/cancel', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  { route: 'POST /v1/appointments/:id/complete', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
   // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
   { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },

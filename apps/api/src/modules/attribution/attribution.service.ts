@@ -124,6 +124,39 @@ export class AttributionService {
     return { eventId, status };
   }
 
+  /**
+   * Se agenda una cita (M6.3, ADR-18): el sistema pone la etiqueta `Cita agendada` y se encola el evento `Schedule` por la CITA (no por la etapa del pipeline), sin ventana de
+   * gracia. Sin clic de anuncio no hay a quién atribuir: queda `skipped`. Dentro de la transacción de quien llama; idempotente por cita.
+   */
+  async onAppointmentCreated(tx: TenantTx, appt: { contactId: string; appointmentId: string; startsAt: Date }, now = new Date()): Promise<{ eventId: string; status: 'pending' | 'skipped' }> {
+    await this.tags.apply(tx, appt.contactId, 'appointment');
+    const who = await this.contacts.channelIdentity(tx, appt.contactId);
+    const eventId = `schedule:${appt.appointmentId}`;
+    const attributable = who !== null && who.ctwaClId !== null && who.primaryPhone !== null;
+    const status = attributable ? 'pending' : 'skipped';
+    await tx
+      .insert(metaEvents)
+      .values({
+        eventId,
+        type: 'Schedule',
+        contactId: appt.contactId,
+        status,
+        sendAfter: now,
+        lastError: attributable ? null : 'El contacto no llegó por un anuncio de Meta: no hay a quién atribuir la cita',
+        payload: {
+          event_name: 'Schedule',
+          event_time: Math.floor(now.getTime() / 1000),
+          event_id: eventId,
+          action_source: 'business_messaging',
+          messaging_channel: 'whatsapp',
+          user_data: attributable ? { ph: [phoneHash(who.primaryPhone!)], ctwa_clid: who.ctwaClId } : {},
+          custom_data: { appointment_time: appt.startsAt.toISOString() },
+        },
+      })
+      .onConflictDoNothing();
+    return { eventId, status };
+  }
+
   /** Cancela el Purchase de una venta si aún está pendiente (dentro de la ventana de gracia). Devuelve true solo si lo canceló ahora. */
   async cancelPurchase(tx: TenantTx, saleId: string): Promise<boolean> {
     const rows = await tx

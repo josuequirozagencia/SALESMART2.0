@@ -15,4 +15,5 @@ export { scheduledMessages } from './scheduled-messages';
 export { messageAttachments } from './attachments';
 export { queues, queueMembers, queueDistributionState, queueProducts } from './queues';
 export { sales, salePayments, saleStatusHistory, saleChangeRequests } from './sales';
+export { appointments, appointmentReminders } from './appointments';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';
