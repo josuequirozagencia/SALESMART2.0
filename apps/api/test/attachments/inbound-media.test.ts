@@ -88,7 +88,7 @@ async function mkPendingInbound(o: { org?: string; mediaId?: string; kind?: stri
   const mediaId = o.mediaId ?? `media-${seq}`;
   const attachment = (await admin.query(
     `INSERT INTO message_attachments(id, organization_id, conversation_id, direction, kind, mime_type, state, scan_status, source_media_id, next_attempt_at)
-     VALUES (gen_random_uuid(), $1, $2, 'in', $3, 'image/jpeg', 'pending', 'pending', $4, now()) RETURNING id`,
+     VALUES (gen_random_uuid(), $1, $2, 'in', $3, 'image/jpeg', 'pending', 'pending', $4, now() - interval '1 minute') RETURNING id`,
     [org, conv, o.kind ?? 'image', mediaId],
   )).rows[0].id as string;
   return { attachmentId: attachment, conversationId: conv, mediaId };
