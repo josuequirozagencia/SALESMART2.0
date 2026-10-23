@@ -681,7 +681,7 @@ Migraciones `0015_plans` y `0016_plans_grants_permissions`; módulo `organizatio
 ---
 
 ## ADR-39 — «Nueva empresa» con invitación al dueño (M2.3, flujo F01)
-**Estado: PROPUESTO (2026-10-14); los dos valores marcados «recomendado» (país obligatorio con Ecuador por defecto y caducidad de 7 días) los aprobó el responsable de producto el 2026-10-14. El resto lo revisa en la aprobación del hito.**
+**Estado: APROBADO. Los dos valores marcados «recomendado» (país obligatorio con Ecuador por defecto y caducidad de 7 días) los aprobó el responsable de producto el 2026-10-14; el resto, con las recomendaciones tal como están escritas, el 2026-10-22 al responder «Aprobado» a la auditoría de estado.**
 
 ### Decisión
 1. **`invitations` es una tabla de IDENTIDAD** (rol `app_identity`: `SELECT/INSERT/UPDATE`, sin `DELETE`; `app_rw` y `app_platform` sin acceso). Una fila por `(organización, correo)` normalizado (índice único): reenviar **reemplaza** el `id` y el token (el enlace anterior deja de existir) y suma `sent_count`. Columnas: `organization_id`, `email`, `role` (`client_admin` hoy; `advisor` cuando llegue «Invitar» de F-equipo), `token_hash` (SHA-256 del secreto), `expires_at`, `consumed_at`, `accepted_user_id`, `invited_by`, `sent_count`, `last_sent_at`. Mismo esquema de token que el restablecimiento de contraseña (ADR-28): opaco `<id>.<secreto de 32 bytes>`, de un solo uso, solo se guarda su hash.
@@ -712,7 +712,7 @@ Migraciones `0017_invitations` (tabla, `organizations.country`, clave `i` del li
 ---
 
 ## ADR-40 — Agencias y carteras: alta de agencias, administración de clientes y acceso por membresía (M2.4)
-**Estado: PROPUESTO (2026-10-15); pendiente de aprobación. Los puntos 3 (nivel «admin» por defecto), 4 (suspender revoca los accesos) y 7 (alcance diferido) son decisiones de producto que necesito que confirmes.**
+**Estado: APROBADO (2026-10-22) por el responsable de producto, con las recomendaciones tal como están escritas (puntos 3 —nivel «admin» por defecto—, 4 —suspender revoca los accesos— y 7 —alcance diferido—), al responder «Aprobado» a la auditoría de estado. Propuesto el 2026-10-15.**
 
 ### Contexto
 ADR-11 y ADR-22 fijan qué es una agencia y que solo el Súper Admin mueve clientes entre carteras. Faltaba convertirlo en datos y reglas verificables. M2 exige: «la agencia no entra a clientes fuera de su cartera» y «quitar un cliente cierra el acceso al instante».
@@ -738,7 +738,7 @@ Derivar el acceso de la agencia solo de `parent_agency_id` sin filas de membres�
 Migraciones `0019_agencies_carteras` (tabla `organization_ownership_history`, CHECK de `access_level`, rol `agency` en invitaciones) y `0020_agencies_grants_triggers` (permisos append-only y trigger); módulo `organizations` (`AgencyAccessService`, `AgenciesService`, controlador de plataforma; la lista de empresas muestra la agencia y filtra por ella); módulo `auth` (alta de agencia, aceptación con acceso a la cartera); módulo `src/mail`; consola web (pestaña «Agencias», «Nueva agencia», cartera con historial, «Administración» en Empresas); Build Spec §6.1/§7, FLUJOS F02 y el auditor de BD.
 
 ## ADR-41 — Cambio de contexto, soporte del Súper Admin y registro de accesos (M2.5)
-**Estado: PROPUESTO (2026-10-15); pendiente de aprobación. Los puntos 3 (alcance del soporte), 4 (qué incluye cada nivel de acceso), 5 (prueba vencida = solo lectura), 6 (la marca «actuando como» visible para el cliente) y 10 (alcance diferido) son decisiones de producto que necesito que confirmes.**
+**Estado: APROBADO (2026-10-22) por el responsable de producto, con las recomendaciones tal como están escritas (puntos 3 —alcance del soporte—, 4 —qué incluye cada nivel de acceso—, 5 —prueba vencida = solo lectura—, 6 —marca «actuando como» visible para el cliente— y 10 —alcance diferido—), al responder «Aprobado» a la auditoría de estado. Propuesto el 2026-10-15.**
 
 ### Contexto
 ADR-11, ADR-21 y ADR-22 fijan que una agencia entra a los clientes de su cartera y el Súper Admin a cualquier cuenta **sin cerrar sesión**, que cada acción queda marcada «actuando como» en la auditoría del cliente y que el historial de accesos es solo del Súper Admin. ADR-40 dejó el acceso de la agencia como membresías por cliente. Faltaba el cambio de contexto en sí, el modo soporte, el historial y la consola de la agencia. M2 exige: «la agencia no entra a clientes fuera de su cartera; quitar un cliente cierra el acceso al instante; solo `super_admin` lee `access_sessions` (test de rol de BD)».
