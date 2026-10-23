@@ -51,6 +51,7 @@ function server(initial: Queue[], o: { max?: number; sim?: QueueSimulation; dist
     };
     routes[`DELETE /queues/${id}`] = o.del ?? (() => { st.calls.deletes.push(id); st.items = st.items.filter((q) => q.id !== id); return { body: { id, archived: true } }; });
     routes[`POST /queues/${id}/simulate`] = ({ body }) => { st.calls.sims.push(body); return { body: o.sim ?? { sequence: [], counts: [], stopped_early: true } }; };
+    routes[`GET /queues/${id}/products`] = () => ({ body: { items: [], currency: 'USD', limits: { max_products: 200 } } });
     routes[`POST /queues/${id}/distribute`] = () => { st.calls.distributes.push(id); return { body: o.distribute ?? { assigned: 0, remaining: 0 } }; };
   }
   return { st, routes };

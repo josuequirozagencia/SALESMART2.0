@@ -603,6 +603,22 @@ export interface QueueMember {
   /** Conversaciones que recibió hoy de esta cola. */
   today_count: number;
 }
+/** Producto o servicio del catálogo de una cola (M6.1). `price` es texto con 2 decimales en la moneda de la empresa. */
+export interface QueueProduct {
+  id: string;
+  queue_id: string;
+  name: string;
+  kind: 'product' | 'service';
+  price: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export interface QueueProductList {
+  items: QueueProduct[];
+  currency: string;
+  limits: { max_products: number };
+}
 export interface Queue {
   id: string;
   name: string;

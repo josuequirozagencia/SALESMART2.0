@@ -9,6 +9,7 @@ import { cloneWeek, defaultWeek, sameWeek, summarizeWeek, validateWeek } from '.
 import { HoursEditor } from '../sla/HoursEditor';
 import { useSaveQueueHours } from '../sla/useSla';
 import { ColorPicker } from './ColorPicker';
+import { ProductsSection } from './ProductsSection';
 import { useArchiveQueue, useDistributeQueue, useSetQueueMembers, useSimulateQueue, useUpdateQueue } from './useQueues';
 
 export const MODE_LABEL: Record<QueueMode, string> = { equal: 'Rotación', weighted: 'Ponderado por peso', load: 'Menos conversaciones abiertas' };
@@ -278,6 +279,8 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
             {(p) => <Input {...p} inputMode="numeric" value={autoClose} onChange={(e) => setAutoClose(e.target.value)} className="max-w-[140px]" />}
           </Field>
         </section>
+
+        <ProductsSection queueId={queue.id} />
 
         <section className="grid gap-2 rounded-2xl border border-line p-4" aria-label="Sin asignar">
           <span className="text-[13.5px] font-semibold">Conversaciones sin asignar: {queue.unassigned_count}</span>

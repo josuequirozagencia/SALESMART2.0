@@ -86,6 +86,8 @@ export const organizations = identityTable(
     timezone: text('timezone').notNull(),
     /** País (ISO 3166-1 alfa-2). NULL en las empresas del registro propio; el alta por invitación (M2.3, ADR-39) lo exige. */
     country: text('country'),
+    /** Moneda de la empresa (ISO 4217): en ella se muestran los precios del catálogo y las ventas (M6, ADR-51). */
+    currency: text('currency').notNull().default('USD'),
     /** Nivel con el que el personal de la agencia entra a ESTE cliente (M2.5, ADR-41): read | advisor | admin. Solo tiene efecto si hay `parent_agency_id`. */
     agencyAccessLevel: text('agency_access_level').notNull().default('admin'),
     createdAt: ts('created_at').notNull().defaultNow(),
@@ -94,6 +96,7 @@ export const organizations = identityTable(
   },
   (t) => [
     check('organizations_agency_access_level_valid', sql`${t.agencyAccessLevel} IN ('read', 'advisor', 'admin')`),
+    check('organizations_currency_iso4217', sql`${t.currency} ~ '^[A-Z]{3}$'`),
     check('organizations_country_iso2', sql`${t.country} IS NULL OR ${t.country} ~ '^[A-Z]{2}$'`),
     check('organizations_kind_valid',sql`${t.kind} IN ('platform', 'agency', 'client')`),
     check('organizations_platform_standalone', sql`${t.kind} <> 'platform' OR (${t.parentAgencyId} IS NULL AND ${t.createdByAgencyId} IS NULL)`),

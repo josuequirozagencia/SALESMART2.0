@@ -1326,3 +1326,24 @@ Cuarta y última rebanada de M5.6 (ver DECIDE 1 de M5.6a). Cierra lo que ADR-50 
 6. **Consulta de respaldo:** con la conexión en vivo el listado se consulta cada 60 s y el hilo cada 30 s (antes 10 s y 5 s); sin conexión vuelven los intervalos de antes.
 7. **Móvil:** la vista apilada con «Volver» y el redactor de 44 px ya existían desde M5.4; aquí solo se agrandó el botón «Volver». **No se hizo el cajón de filtros** del ADR (los filtros siguen en la misma columna): se propone dejarlo para una pasada de pulido del móvil.
 8. **Sin validar:** el WebSocket detrás del proxy de Railway, varias instancias (hace falta el adaptador de Redis), un E2E en navegador con vista móvil y Safari antiguo (<15.4) con `connect-src 'self'` (cae a consulta periódica).
+
+## ADR-51 — Citas, ventas y salida a Meta (M6)
+**Estado: decisiones del plan APROBADAS el 2026-10-23 por el responsable de producto, con las recomendaciones de `docs/M6_PLAN.md` §7.** Aplica ADR-08, ADR-13, ADR-18, ADR-32 (+enmienda 1) y ADR-45. Las precisiones de cada rebanada se añaden al construirla y se marcan PROPUESTAS hasta tu aprobación.
+
+### Decisiones tomadas (2026-10-23)
+1. **Cinco rebanadas:** M6.1 catálogo por cola · M6.2 ventas, abonos y saldo · M6.3 citas y recordatorios · M6.4 salida real a Meta (CAPI) · M6.5 dashboard y analítica con CSV.
+2. **Moneda:** una por empresa (`organizations.currency`, ISO 4217, `USD` por omisión); los precios y las ventas se guardan en `numeric(14,2)` y se muestran en ella.
+3. **Una línea por venta:** un producto, cantidad y total editable.
+4. **Anular una venta:** solo el administrador (`sales.cancel`), con motivo; el asesor pide corrección (`sale_change_requests`, ADR-32). Anular después de la ventana de gracia deja el Purchase ya enviado y se anota en la venta, hasta la prueba en Events Manager (decisión abierta #7).
+5. **Abonos:** el asesor registra los de sus ventas y el administrador los de todas; ninguno se edita ni se borra; una corrección es un abono negativo del administrador con motivo.
+6. **Recordatorios fuera de las 24 h de WhatsApp:** exigen elegir una plantilla aprobada al agendar.
+7. **Ventana de gracia del Purchase:** 30 min por omisión, configurable por empresa de 0 a 24 h.
+8. **Agenda:** una por empresa, filtrable por asesor; la cita pertenece al dueño de la conversación; sin detección de choques por ahora.
+9. **Dashboard:** últimos 30 días por omisión y zona horaria de la empresa; el asesor ve solo lo suyo.
+
+### Precisiones al construir M6.1 — Catálogo de productos por cola (2026-10-23; **APROBADAS el 2026-10-23** por el responsable de producto)
+- **Datos.** Migraciones `0060`–`0061`: tabla `queue_products` (negocio; RLS forzada; FK compuesta a la cola; `app_rw` solo SELECT/INSERT/UPDATE, sin DELETE: un producto que ya no se vende se desactiva) y `organizations.currency`. Nombre único por cola sin distinguir mayúsculas **incluidos los desactivados** (se reactiva en vez de duplicar); tipo `product|service`; precio `numeric(14,2)` entre 0 y menos de mil millones; hasta **200 productos por cola** (cuentan los desactivados).
+- **API.** `GET|POST /v1/queues/:id/products` y `PATCH /v1/queues/:id/products/:productId`, todo con `queues.manage` (el administrador). El precio viaja como **texto con 2 decimales** (nunca flotante) y se acepta número o texto con hasta 2 decimales. Cola archivada, de otra empresa o producto de otra cola: 404 uniforme. Cada cambio por campo queda en `audit_logs`; un `PATCH` sin cambios reales no deja rastro. **Quién lee el catálogo para vender** (los asesores) llega con M6.2 en el endpoint de ventas, sin ampliar `queues.manage`.
+- **Moneda.** Por ahora solo se lee (`OrgDirectoryService.currency()`); la pantalla para cambiarla llega con M6.2, cuando haya ventas que dependan de ella. Cambiarla con ventas existentes exigirá reglas propias.
+- **Web.** Configuración › Colas › cada cola: sección «Catálogo de productos y servicios» con alta, edición y activar/desactivar que se guardan al instante (no dependen del «Guardar» de la cola).
+- **Pruebas.** API 11 (A↔B, permisos, precios exactos, duplicados, tope, auditoría, sin DELETE, RLS) y web 5.

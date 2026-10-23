@@ -150,6 +150,10 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/queues/:id', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'POST /v1/queues/:id/simulate', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'POST /v1/queues/:id/distribute', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
+  { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
+  { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
+  { route: 'PATCH /v1/queues/:id/products/:productId', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   // Inbox (M5.4, ADR-16/50). Pruebas: test/inbox/inbox.test.ts (A↔B, visibilidad por persona, permisos, ventana de 24 h, envío con reintentos, notas, concurrencia)
   { route: 'GET /v1/conversations', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'GET /v1/conversations/options', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },

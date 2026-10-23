@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, foreignKey, index, integer, jsonb, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, foreignKey, index, integer, jsonb, numeric, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { tenantTable } from './helpers';
 import { users } from './identity';
@@ -96,5 +96,34 @@ export const queueDistributionState = tenantTable(
   (t) => [
     primaryKey({ name: 'queue_distribution_state_pk', columns: [t['organizationId']!, t['queueId']!] }),
     foreignKey({ name: 'queue_distribution_state_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
+  ],
+);
+
+/**
+ * Catálogo de productos y servicios de una cola (M6.1, ADR-08 #4/ADR-51). Cada departamento vende cosas distintas: el catálogo vive en la cola, no en la empresa. El precio
+ * es el sugerido; la venta guarda su propio total (M6.2). Sin DELETE: un producto que ya no se vende se desactiva (las ventas pasadas lo siguen mostrando). Dinero en
+ * `numeric(14,2)`; la moneda es la de la empresa.
+ */
+export const queueProducts = tenantTable(
+  'queue_products',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    queueId: uuid('queue_id').notNull(),
+    name: text('name').notNull(),
+    kind: text('kind').notNull().default('product'),
+    price: numeric('price', { precision: 14, scale: 2 }).notNull(),
+    active: boolean('active').notNull().default(true),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'queue_products_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
+    check('queue_products_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 120`),
+    check('queue_products_kind_valid', sql`${t['kind']!} IN ('product', 'service')`),
+    check('queue_products_price_valid', sql`${t['price']!} >= 0 AND ${t['price']!} < 1000000000`),
+    // Un nombre una sola vez por cola (incluidos los desactivados: se reactiva en vez de duplicar)
+    uniqueIndex('queue_products_queue_name_uq').on(t['organizationId']!, t['queueId']!, sql`lower(${t['name']!})`),
+    index('queue_products_queue_idx').on(t['organizationId']!, t['queueId']!),
   ],
 );

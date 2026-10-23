@@ -4,5 +4,7 @@ export { AssignmentService, type AssignResult } from './assignment.service';
 export { DistributionService } from './distribution.service';
 export type { AssignmentContext, AssignReason, Assignment } from './queues.types';
 export { MAX_QUEUES } from './queues.dto';
+export { ProductsService, type ProductView, type ProductList } from './products.service';
+export { MAX_PRODUCTS_PER_QUEUE } from './products.dto';
 export { pickNext, simulate, parseState, EMPTY_STATE, DIST_MODES, type Candidate, type DistMode, type DistRules, type DistState } from './distribution';
 export { startOfLocalDay } from './local-day';

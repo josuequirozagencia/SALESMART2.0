@@ -339,6 +339,7 @@ Pipelines múltiples, etapas editables/ocultables, Kanban con colores pastel y f
 **M6 — Citas, ventas y Meta**
 Citas con recordatorios (topes por fuente), ventas con abono y catálogo por cola, dashboard, **outbox + atribución Meta** (Lead/Schedule/Purchase con ventana de gracia), analítica con CSV.
 *Aceptación:* Purchase anulado dentro de la ventana nunca se envía; mismo `event_id` en reintentos; saldo = total − pagos.
+*Avance:* plan por rebanadas en `docs/M6_PLAN.md` (ADR-51, decisiones APROBADAS el 2026-10-23). **M6.1 (catálogo de productos por cola) construida 2026-10-23**: tabla `queue_products` (migraciones 0060–0061; sin DELETE, se desactiva; precio `numeric(14,2)` como texto; hasta 200 por cola), `organizations.currency` (USD por omisión), `GET|POST /v1/queues/:id/products` y `PATCH …/:productId` (`queues.manage`) y en la web la sección «Catálogo de productos y servicios» de cada cola.
 
 **M7 — GoHighLevel**
 `PrivateTokenProvider`, webhook con secreto en tiempo constante, mensajes entrantes/salientes, etiquetas bidireccionales, inscripción a flujos.

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { Queue, QueueList, QueueMemberInput, QueueMode, QueueSettings, QueueSimulation } from '../../lib/types';
+import type { Queue, QueueList, QueueMemberInput, QueueMode, QueueProduct, QueueProductList, QueueSettings, QueueSimulation } from '../../lib/types';
 
 /** Colas de la empresa con sus asesores, conexiones y cifras (solo quien administra colas; para el resto el servidor responde 403). */
 export function useQueues() {
@@ -31,6 +31,28 @@ export function useSetQueueMembers() {
 export function useArchiveQueue() {
   const done = useDone();
   return useMutation({ mutationFn: (id: string) => api<{ id: string; archived: true }>(`/queues/${id}`, { method: 'DELETE' }), onSettled: done });
+}
+
+/** Catálogo de productos y servicios de una cola (M6.1). */
+export function useQueueProducts(queueId: string) {
+  return useQuery({ queryKey: ['queue-products', queueId], retry: false, queryFn: () => api<QueueProductList>(`/queues/${queueId}/products`) });
+}
+
+export function useCreateProduct(queueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { name: string; kind: QueueProduct['kind']; price: string }) => api<QueueProduct>(`/queues/${queueId}/products`, { method: 'POST', body: input }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['queue-products', queueId] }),
+  });
+}
+
+export function useUpdateProduct(queueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ productId, input }: { productId: string; input: Partial<{ name: string; kind: QueueProduct['kind']; price: string; active: boolean }> }) =>
+      api<QueueProduct>(`/queues/${queueId}/products/${productId}`, { method: 'PATCH', body: input }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['queue-products', queueId] }),
+  });
 }
 
 /** Simula el reparto con lo que hay en pantalla (sin guardar nada). */
