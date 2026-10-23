@@ -54,6 +54,12 @@ export class OrgDirectoryService {
     return row?.currency ?? 'USD';
   }
 
+  /** Cambia la moneda de la empresa del contexto (la regla de cuándo se puede la aplica ventas). */
+  async setCurrency(currency: string): Promise<void> {
+    const org = TenantContext.current().organizationId;
+    await this.db.withIdentity((tx) => tx.update(organizations).set({ currency, updatedAt: new Date() }).where(eq(organizations.id, org)));
+  }
+
   invalidate(): void {
     this.cache.clear();
   }

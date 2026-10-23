@@ -44,7 +44,7 @@ export interface SlaView {
   response_seconds: number | null;
 }
 
-type StopReason = 'human_reply' | 'closed' | 'transferred' | 'reassigned';
+type StopReason = 'human_reply' | 'closed' | 'transferred' | 'reassigned' | 'sale';
 
 /**
  * Cronómetros de respuesta y calendario laboral (M5.5b, ADR-07/50; F08, F09). Todo va DENTRO de la transacción y el TenantContext de quien llama; la zona horaria viene de

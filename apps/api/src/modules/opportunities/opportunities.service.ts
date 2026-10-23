@@ -99,6 +99,28 @@ export class OpportunitiesService {
     return rows.filter((r) => r.ownerId !== to).length;
   }
 
+  /**
+   * Una venta se registra (M6.2, F14): la oportunidad ABIERTA más reciente del contacto pasa a la etapa ganada de su pipeline, con su historial (origen `system`) y
+   * auditoría. Dentro de la transacción de quien llama. Sin oportunidad abierta o sin etapa ganada vigente no hace nada. Devuelve el id de la oportunidad ganada.
+   */
+  async markWon(tx: TenantTx, contactId: string, userId: string | null): Promise<string | null> {
+    const [opp] = await tx
+      .select()
+      .from(opportunities)
+      .where(and(eq(opportunities.contactId, contactId), eq(opportunities.status, 'open'), isNull(opportunities.deletedAt)))
+      .orderBy(desc(opportunities.createdAt))
+      .limit(1)
+      .for('update');
+    if (!opp) return null;
+    const [won] = await tx.select().from(pipelineStages).where(and(eq(pipelineStages.pipelineId, opp.pipelineId), eq(pipelineStages.kind, 'won'), isNull(pipelineStages.deletedAt))).limit(1);
+    if (!won) return null;
+    const now = new Date();
+    await tx.update(opportunities).set({ stageId: won.id, status: 'won', lostReason: null, closedAt: now, stageEnteredAt: now, updatedAt: now }).where(eq(opportunities.id, opp.id));
+    await tx.insert(stageHistory).values({ opportunityId: opp.id, fromStageId: opp.stageId, toStageId: won.id, userId, origin: 'system' });
+    await writeAudit(tx, { entityType: AUDIT, entityId: opp.id, field: 'stage_id', oldValue: opp.stageId, newValue: { stage_id: won.id, status: 'won' }, source: 'automation' });
+    return opp.id;
+  }
+
   async list(scope: ContactScope, q: ListOpportunitiesQuery): Promise<{ items: OpportunityView[]; next_cursor: string | null }> {
     const sc = this.scope(scope);
     const page = await this.db.withTenant(async (tx) => {

@@ -4,6 +4,7 @@ import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
+import { SalesPage } from './features/sales/SalesPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
 import { QuickRepliesPage } from './features/quick-replies/QuickRepliesPage';
@@ -103,6 +104,7 @@ export function App() {
       <Route element={<AppGate />}>
         <Route path="/" element={<Home />} />
         <Route path="/inbox/:id?" element={<InboxPage />} />
+        <Route path="/sales" element={<SalesPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/companies" element={<ClientCompaniesPage />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />

@@ -99,7 +99,7 @@ export const responseTimers = tenantTable(
     foreignKey({ name: 'response_timers_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'response_timers_message_fk', columns: [t['organizationId']!, t['repliedMessageId']!], foreignColumns: [messages.organizationId, messages.id] }),
     check('response_timers_kind_valid', sql`${t['kind']!} IN ('first', 'followup')`),
-    check('response_timers_stop_reason_valid', sql`${t['stopReason']!} IS NULL OR ${t['stopReason']!} IN ('human_reply', 'closed', 'transferred', 'reassigned')`),
+    check('response_timers_stop_reason_valid', sql`${t['stopReason']!} IS NULL OR ${t['stopReason']!} IN ('human_reply', 'closed', 'transferred', 'reassigned', 'sale')`),
     check('response_timers_stopped_pair', sql`(${t['stoppedAt']!} IS NULL) = (${t['stopReason']!} IS NULL)`),
     check('response_timers_response_pair', sql`(${t['responseSeconds']!} IS NOT NULL) = (${t['stopReason']!} IS NOT DISTINCT FROM 'human_reply')`),
     check('response_timers_response_valid', sql`${t['responseSeconds']!} IS NULL OR ${t['responseSeconds']!} >= 0`),

@@ -6,5 +6,5 @@ export { ScheduledMessagesService, MIN_LEAD_MS, WINDOW_MARGIN_MS, MAX_PENDING_PE
 export { ReassignService, REASSIGN_BATCH, type ReassignResult } from './reassign.service';
 export { AutoCloseService, CLOSE_BATCH } from './auto-close.service';
 export { OutboundDispatcher, backoffMs, SEND_BATCH, SEND_LEASE_MS, SEND_MAX_ATTEMPTS, type DispatchResult } from './outbound-dispatcher.service';
-export { WINDOW_MS } from './inbox.access';
+export { WINDOW_MS, loadConversation, scopeOf, type InboxAccess, type InboxScope } from './inbox.access';
 export type { ConversationView, MessageView } from './inbox.views';
