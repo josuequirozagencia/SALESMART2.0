@@ -51,6 +51,15 @@ export const envSchema = z.object({
   CAPTCHA_PROVIDER: z.enum(['none', 'fake', 'turnstile']).default('none'),
   /** Adaptador de WhatsApp (M5, ADR-50): 'meta' = Cloud API real; 'fake' es solo desarrollo y pruebas y se rechaza en producción. */
   WHATSAPP_PROVIDER: z.enum(['meta', 'fake']).default('meta'),
+  /** Adjuntos (M5.6d, ADR-50). Almacenamiento: 's3' = el servicio S3-compatible que el Súper Admin configura en «Proveedores»; 'fake' (memoria) es solo desarrollo y pruebas y se rechaza en producción. */
+  STORAGE_PROVIDER: z.enum(['s3', 'fake']).default('s3'),
+  /** Antivirus: 'clamav' = clamd por TCP (CLAMAV_HOST/CLAMAV_PORT); 'none' = sin revisión (los archivos quedan «sin revisar»: solo para pruebas del piloto); 'fake' solo desarrollo y pruebas. */
+  VIRUS_SCANNER: z.enum(['none', 'clamav', 'fake']).default('none'),
+  CLAMAV_HOST: z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'host inválido').optional(),
+  CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
+  /** Conversión de audio a OGG/Opus (notas de voz de WhatsApp): 'ffmpeg' = el ejecutable FFMPEG_PATH; 'none' = no se aceptan grabaciones que no vengan ya en un formato de WhatsApp. */
+  AUDIO_TRANSCODER: z.enum(['none', 'ffmpeg', 'fake']).default('none'),
+  FFMPEG_PATH: z.string().min(1).max(300).default('ffmpeg'),
   /** Claves de los proveedores: sin valor por defecto, obligatorias solo si el proveedor está elegido, y sin espacios (se envían en cabeceras). */
   RESEND_API_KEY: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'formato inválido').optional(),
   /** Remitente verificado en Resend: «Sales Smart <no-reply@dominio>» o solo la dirección. */

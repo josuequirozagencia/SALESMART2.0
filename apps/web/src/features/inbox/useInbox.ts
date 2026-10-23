@@ -1,5 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
 import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /** Cada cuánto se vuelve a mirar (sin tiempo real hasta M5.7): el listado y el hilo abierto. Con la pestaña en segundo plano no se consulta. */
@@ -170,4 +170,36 @@ export function useRevoke(id: string) {
 export function useRetryMessage(conversationId: string) {
   const refresh = useRefresh(conversationId);
   return useMutation({ mutationFn: (messageId: string) => api<ChatMessage>(`/messages/${messageId}/retry`, { method: 'POST' }), onSettled: refresh });
+}
+
+export interface UploadedAttachment {
+  id: string;
+  kind: string;
+  mime_type: string;
+  filename: string | null;
+  size_bytes: number;
+  scan_status: string;
+}
+
+export function useUploadAttachment(conversationId: string) {
+  return useMutation({
+    mutationFn: async (file: File): Promise<UploadedAttachment> => {
+      const res = await fetch(`/v1/conversations/${conversationId}/attachments`, {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/octet-stream', 'x-filename': encodeURIComponent(file.name), 'x-requested-by': 'sales-smart-web', ...(tokens.get() ? { authorization: `Bearer ${tokens.get()}` } : {}) },
+        body: await file.arrayBuffer(),
+        credentials: 'same-origin',
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string; details?: unknown } } | null;
+        throw new ApiError(res.status, body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? `Error ${res.status}`, undefined, undefined, (body?.error?.details as ErrorDetail[]) ?? []);
+      }
+      return (await res.json()) as UploadedAttachment;
+    },
+  });
+}
+
+export function useSendMedia(conversationId: string) {
+  const refresh = useRefresh(conversationId);
+  return useMutation({ mutationFn: (input: { attachment_id: string; caption?: string }) => api<ChatMessage>(`/conversations/${conversationId}/media`, { method: 'POST', body: input }), onSettled: refresh });
 }

@@ -4,10 +4,11 @@ import type { Conversation, ResolvedQuickReply } from '../../lib/types';
 import { Alert, Button } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
+import { AttachmentPicker } from './AttachmentPicker';
 import { ScheduleDialog } from './ScheduleDialog';
 import { ScheduledList } from './ScheduledList';
 import { TemplatePicker } from './TemplatePicker';
-import { useConversationQuickReplies, useSendNote, useSendReply } from './useInbox';
+import { useConversationQuickReplies, useSendMedia, useSendNote, useSendReply } from './useInbox';
 
 const MAX = 4096;
 const MAX_SUGGESTIONS = 6;
@@ -49,12 +50,15 @@ export function suggest(items: readonly ResolvedQuickReply[], query: string): Re
 export function Composer({ c }: { c: Conversation }) {
   const reply = useSendReply(c.id);
   const note = useSendNote(c.id);
+  const media = useSendMedia(c.id);
   const [mode, setMode] = useState<'reply' | 'note'>('reply');
   const [text, setText] = useState('');
   const [caret, setCaret] = useState(0);
   const [picker, setPicker] = useState(false);
   const [manage, setManage] = useState(false);
   const [scheduling, setScheduling] = useState(false);
+  const [attaching, setAttaching] = useState(false);
+  const [pendingAttachment, setPendingAttachment] = useState<{ id: string; filename: string; kind: string } | null>(null);
   const [active, setActive] = useState(0);
   const [closedAt, setClosedAt] = useState<number | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -62,7 +66,7 @@ export function Composer({ c }: { c: Conversation }) {
   const block = replyBlock(c);
   const noteMode = mode === 'note' || block !== null;
   const canWrite = noteMode ? c.can.note : true;
-  const send = noteMode ? note : reply;
+  const send = noteMode ? note : pendingAttachment ? (media as unknown as typeof reply) : reply;
   const trimmed = text.trim();
   const quick = useConversationQuickReplies(c.id, c.can.reply && !noteMode);
   const slash = !noteMode && c.can.reply ? slashAt(text, caret) : null;
@@ -73,13 +77,20 @@ export function Composer({ c }: { c: Conversation }) {
   if (!c.can.reply && !c.can.note) return block ? <p className="border-t border-line bg-surface px-4 py-3 text-[13px] text-muted">{block}</p> : null;
 
   const submit = (): void => {
-    if (!trimmed || send.isPending || !canWrite || pending.length > 0) return;
-    // El texto se limpia al enviar (no al terminar de refrescar la lista): si no, lo que la persona ya empezó a escribir después —una nota, el siguiente mensaje— se borraría
-    // cuando llegue la respuesta. Si el envío falla, el texto vuelve, salvo que ya haya escrito otra cosa.
+    if ((!trimmed && !pendingAttachment) || send.isPending || !canWrite || pending.length > 0) return;
+    const caption = trimmed || undefined;
+    const attachmentId = pendingAttachment?.id ?? null;
+    const savedText = trimmed;
+    const savedAttachment = pendingAttachment;
     setText('');
     setCaret(0);
+    setPendingAttachment(null);
     ref.current?.focus();
-    send.mutate(trimmed, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
+    if (attachmentId) {
+      (media as ReturnType<typeof useSendMedia>).mutate({ attachment_id: attachmentId, caption }, { onError: () => { setText((cur) => (cur === '' ? savedText : cur)); setPendingAttachment(savedAttachment); } });
+    } else {
+      send.mutate(trimmed, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
+    }
   };
 
   /** Pone la respuesta (ya resuelta) en lugar de «/atajo» y deja el cursor al final de lo insertado. */
@@ -147,8 +158,15 @@ export function Composer({ c }: { c: Conversation }) {
       {picker ? <TemplatePicker c={c} onClose={() => setPicker(false)} /> : null}
       {manage ? <QuickRepliesDialog onClose={() => setManage(false)} /> : null}
       {scheduling ? <ScheduleDialog c={c} text={trimmed} onClose={() => setScheduling(false)} onDone={() => { setText(''); setCaret(0); }} /> : null}
+      {attaching ? <AttachmentPicker conversationId={c.id} onClose={() => setAttaching(false)} onPicked={(a) => { setPendingAttachment({ id: a.id, filename: a.filename ?? 'archivo', kind: a.kind }); setAttaching(false); }} /> : null}
+      {pendingAttachment ? (
+        <div className="flex items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-[12.5px]">
+          <span className="truncate">📎 {pendingAttachment.filename} <span className="text-muted">· {pendingAttachment.kind}</span></span>
+          <button type="button" onClick={() => setPendingAttachment(null)} className="ml-auto text-muted hover:text-fg">Quitar</button>
+        </div>
+      ) : null}
       <ScheduledList conversationId={c.id} />
-      {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
+      {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : pendingAttachment ? 'No pudimos enviar el archivo.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
       <div className="relative flex items-end gap-2">
         {open ? (
@@ -180,14 +198,15 @@ export function Composer({ c }: { c: Conversation }) {
           disabled={!canWrite}
           aria-label={noteMode ? 'Nota interna' : 'Mensaje'}
           {...(open && options.length > 0 ? { 'aria-controls': listId, 'aria-activedescendant': `${listId}-${Math.min(active, options.length - 1)}`, 'aria-expanded': true } : {})}
-          placeholder={noteMode ? 'Nota interna: solo la ve tu equipo' : 'Escribe un mensaje o «/» para una respuesta rápida'}
+          placeholder={noteMode ? 'Nota interna: solo la ve tu equipo' : pendingAttachment ? 'Pie del archivo (opcional)' : 'Escribe un mensaje o «/» para una respuesta rápida'}
           onChange={onChange}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={onKey}
           className="max-h-40 min-h-[44px] flex-1 resize-none rounded-[14px] border border-line bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted/70 disabled:opacity-60"
         />
-        {!noteMode && c.can.reply && c.window.open ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
-        <Button variant="primary" loading={send.isPending} disabled={!trimmed || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : 'Enviar'}</Button>
+        {!noteMode && c.can.reply ? <Button aria-label="Adjuntar archivo" disabled={!!block || !!pendingAttachment} onClick={() => setAttaching(true)}>Adjuntar</Button> : null}
+        {!noteMode && c.can.reply && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
+        <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
       </div>
     </div>
   );

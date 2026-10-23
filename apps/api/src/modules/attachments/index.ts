@@ -1,0 +1,11 @@
+export { AttachmentsModule, buildScanner, buildTranscoder } from './attachments.module';
+export { AttachmentsService, URL_TTL_SECONDS, extensionOf, type PreparedFile } from './attachments.service';
+export { AttachmentsJob } from './attachments.job';
+export { InboundMediaService, DOWNLOAD_BATCH, DOWNLOAD_MAX_ATTEMPTS, DOWNLOAD_LEASE_MS, ORPHAN_TTL_MS } from './inbound-media.service';
+export { StorageGateway } from './storage.gateway';
+export { FakeStorage } from './storage.fake';
+export { S3Storage, type S3StorageConfig } from './storage.s3';
+export { StorageError, STORAGE, type StorageAdapter, type SignedUrlOptions } from './storage.port';
+export { VIRUS_SCANNER, ClamAvScanner, FakeScanner, NoScanner, ScanError, EICAR, type VirusScanner, type ScanResult } from './scanner';
+export { AUDIO_TRANSCODER, FfmpegTranscoder, FakeTranscoder, NoTranscoder, TranscodeError, type AudioTranscoder } from './transcoder';
+export { MAX_BYTES, MAX_UPLOAD_BYTES, ACCEPTED_MIMES, baseMime, checkUpload, inlineAllowed, kindOfInbound, outboundKind, safeFilename, sniff, storageKey, type AttachmentKind, type Signature } from './attachment-rules';

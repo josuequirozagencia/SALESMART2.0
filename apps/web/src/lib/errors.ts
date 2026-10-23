@@ -47,6 +47,10 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'QUICK_REPLY_EXISTS': case 'QUICK_REPLY_LIMIT': case 'QUICK_REPLY_NOT_YOURS': case 'QUICK_REPLY_SHARE_NOT_ALLOWED': return e.message;
     // Mensajes programados (ADR-50): el servidor ya redacta el motivo
     case 'SCHEDULE_OUTSIDE_WINDOW': case 'SCHEDULE_LIMIT': case 'SCHEDULE_NOT_PENDING': case 'SCHEDULE_NOT_YOURS': return e.message;
+    // Adjuntos y audio (ADR-50): el servidor ya redacta el motivo (tipo, tamaño, antivirus, almacenamiento no configurado…)
+    case 'ATTACHMENT_UNSUPPORTED_TYPE': case 'ATTACHMENT_TOO_LARGE': case 'ATTACHMENT_EMPTY': case 'ATTACHMENT_TYPE_MISMATCH': case 'ATTACHMENT_INFECTED': case 'ATTACHMENT_SCAN_UNAVAILABLE': case 'ATTACHMENT_UPLOAD_FAILED':
+    case 'ATTACHMENT_NOT_READY': case 'ATTACHMENT_EXPIRED': case 'ATTACHMENT_FAILED': case 'ATTACHMENT_ALREADY_SENT': case 'ATTACHMENT_CAPTION_INVALID':
+    case 'STORAGE_NOT_CONFIGURED': case 'STORAGE_UNAVAILABLE': case 'AUDIO_CONVERSION_UNAVAILABLE': case 'AUDIO_CONVERSION_FAILED': return e.message;
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;

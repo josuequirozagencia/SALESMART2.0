@@ -1,5 +1,5 @@
 import { DynamicModule, Inject, Module, OnApplicationBootstrap, Type } from '@nestjs/common';
-import { HttpAdapterHost } from '@nestjs/core';
+import { HttpAdapterHost, ModuleRef } from '@nestjs/core';
 import type { Express, NextFunction, Request, Response } from 'express';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import type { AppConfig } from '../config';
@@ -8,7 +8,7 @@ import { APP_CONFIG } from '../tokens';
 import { AccessGuard } from './access.guard';
 import { AccessResolver, DenyAllAccessResolver } from './access-resolver';
 import { ContextInterceptor } from './context.interceptor';
-import { mountWeb } from './web-static';
+import { mountWeb, WEB_MEDIA_ORIGINS, type MediaOrigins } from './web-static';
 
 export interface HttpModuleOptions {
   /** Implementación del puerto de acceso. Por defecto DENIEGA todo (hasta M1). */
@@ -22,6 +22,7 @@ export class HttpModule implements OnApplicationBootstrap {
   constructor(
     @Inject(HttpAdapterHost) private readonly host: HttpAdapterHost,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
+    @Inject(ModuleRef) private readonly refs: ModuleRef,
   ) {}
 
   /**
@@ -32,7 +33,16 @@ export class HttpModule implements OnApplicationBootstrap {
   onApplicationBootstrap(): void {
     const express = this.host.httpAdapter.getInstance<Express>();
     // Con WEB_DIST_DIR la API también sirve la web (mismo origen, ADR-36); si no, solo el 404 JSON estándar
-    if (this.cfg.web.distDir) return mountWeb(express, { distDir: this.cfg.web.distDir, production: this.cfg.nodeEnv === 'production' });
+    if (this.cfg.web.distDir) {
+      // Orígenes desde donde se leen los archivos de los clientes: los ofrece el módulo de adjuntos si está cargado (opcional: sin él, política base)
+      let mediaOrigins: MediaOrigins | undefined;
+      try {
+        mediaOrigins = this.refs.get<MediaOrigins>(WEB_MEDIA_ORIGINS, { strict: false });
+      } catch {
+        mediaOrigins = undefined;
+      }
+      return mountWeb(express, { distDir: this.cfg.web.distDir, production: this.cfg.nodeEnv === 'production', ...(mediaOrigins ? { mediaOrigins } : {}) });
+    }
     express.use((req: Request & { requestId?: string }, res: Response, _next: NextFunction) => {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Recurso no encontrado', request_id: req.requestId ?? 'unknown', details: [] } });
     });

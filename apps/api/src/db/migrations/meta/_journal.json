@@ -407,6 +407,20 @@
       "when": 1792554368334,
       "tag": "0057_m56c_scheduled_messages_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1792563495666,
+      "tag": "0058_m56d_attachments",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1792563508966,
+      "tag": "0059_m56d_attachments_grants",
+      "breakpoints": true
     }
   ]
 }

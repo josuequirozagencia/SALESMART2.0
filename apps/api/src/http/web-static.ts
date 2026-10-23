@@ -20,24 +20,45 @@ export interface WebStaticOptions {
   distDir: string;
   /** En producción se añade HSTS (Railway termina TLS delante). */
   production: boolean;
+  /** Orígenes extra para imágenes, audio y video (almacenamiento de archivos). Si falla, la web se sirve con la política base. */
+  mediaOrigins?: MediaOrigins;
 }
 
-export const CSP = [
-  "default-src 'self'",
-  "script-src 'self' https://challenges.cloudflare.com",
-  "frame-src https://challenges.cloudflare.com",
-  "style-src 'self' https://fonts.googleapis.com",
-  "font-src 'self' https://fonts.gstatic.com",
-  "img-src 'self' data:",
-  "connect-src 'self'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-].join('; ');
+/** Token con el que un módulo (adjuntos) ofrece los orígenes desde donde el navegador puede leer imágenes, audio y video (la URL firmada del almacenamiento). `HttpModule` lo busca sin depender de ese módulo. */
+export const WEB_MEDIA_ORIGINS = Symbol('WEB_MEDIA_ORIGINS');
+export type MediaOrigins = () => Promise<readonly string[]>;
 
-function securityHeaders(res: Response, production: boolean): void {
-  res.setHeader('Content-Security-Policy', CSP);
+/** Solo se acepta un origen (esquema + servidor + puerto): nada que pueda colar otra directiva o un comodín en la CSP. */
+const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]{1,253}(:\d{1,5})?$/;
+export const safeOrigins = (list: readonly string[]): string[] => [...new Set(list.filter((o) => ORIGIN.test(o)))];
+
+/**
+ * La política de la web. Los archivos de los clientes (imágenes, audio, video) se leen directamente del almacenamiento con una URL firmada, que es OTRO origen: sin
+ * permitirlo en `img-src` y `media-src` el navegador los bloquearía. Es el único origen añadido, y solo para esas dos directivas (no scripts, no conexiones).
+ */
+export function buildCsp(mediaOrigins: readonly string[] = []): string {
+  const extra = safeOrigins(mediaOrigins).join(' ');
+  const withExtra = (base: string): string => (extra === '' ? base : `${base} ${extra}`);
+  return [
+    "default-src 'self'",
+    "script-src 'self' https://challenges.cloudflare.com",
+    "frame-src https://challenges.cloudflare.com",
+    "style-src 'self' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    withExtra("img-src 'self' data:"),
+    withExtra("media-src 'self'"),
+    "connect-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+  ].join('; ');
+}
+
+export const CSP = buildCsp();
+
+function securityHeaders(res: Response, production: boolean, csp: string = CSP): void {
+  res.setHeader('Content-Security-Policy', csp);
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer'); // el enlace de restablecer lleva el token en el fragmento: nunca sale en Referer
   res.setHeader('X-Frame-Options', 'DENY');
@@ -75,10 +96,15 @@ export function mountWeb(express: Express, opts: WebStaticOptions): void {
   express.use((req: Request & { requestId?: string }, res: Response, next: NextFunction) => {
     const isPage = (req.method === 'GET' || req.method === 'HEAD') && !path.extname(req.path) && Boolean(req.accepts('html'));
     if (!isPage) return notFound(req, res);
-    securityHeaders(res, opts.production);
-    res.setHeader('Cache-Control', 'no-store');
-    res.sendFile(indexFile, { dotfiles: 'deny' }, (err) => {
-      if (err) next(err);
-    });
+    const send = (csp: string): void => {
+      securityHeaders(res, opts.production, csp);
+      res.setHeader('Cache-Control', 'no-store');
+      res.sendFile(indexFile, { dotfiles: 'deny' }, (err) => {
+        if (err) next(err);
+      });
+    };
+    // La política depende de la configuración del almacenamiento (se lee con caché corta); si no se puede leer, la web igual se sirve con la base
+    if (!opts.mediaOrigins) return send(CSP);
+    opts.mediaOrigins().then((origins) => send(buildCsp(origins)), () => send(CSP));
   });
 }

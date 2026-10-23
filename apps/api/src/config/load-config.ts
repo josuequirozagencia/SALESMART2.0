@@ -41,6 +41,15 @@ export interface AppConfig {
     /** Adaptador de WhatsApp (M5, ADR-50). */
     readonly whatsappProvider: 'meta' | 'fake';
   };
+  readonly attachments: {
+    /** Almacenamiento de archivos (M5.6d, ADR-50). */
+    readonly storageProvider: 's3' | 'fake';
+    readonly virusScanner: 'none' | 'clamav' | 'fake';
+    readonly clamavHost: string | undefined;
+    readonly clamavPort: number;
+    readonly audioTranscoder: 'none' | 'ffmpeg' | 'fake';
+    readonly ffmpegPath: string;
+  };
   readonly frontend: {
     /** Base explícita (sin barra final) o undefined si no se configuró. Nunca se deriva de la petición. */
     readonly baseUrl: string | undefined;
@@ -146,6 +155,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   if (e.MAIL_PROVIDER === 'resend' && e.RESEND_API_KEY === undefined) issues.push('RESEND_API_KEY: obligatoria cuando MAIL_PROVIDER es "resend"');
   if (e.MAIL_PROVIDER === 'resend' && e.MAIL_FROM === undefined) issues.push('MAIL_FROM: obligatoria cuando MAIL_PROVIDER es "resend" (remitente de un dominio verificado en Resend)');
+  if (e.VIRUS_SCANNER === 'clamav' && e.CLAMAV_HOST === undefined) issues.push('CLAMAV_HOST: obligatoria cuando VIRUS_SCANNER es "clamav"');
   if (e.CAPTCHA_PROVIDER === 'turnstile' && e.TURNSTILE_SECRET_KEY === undefined) issues.push('TURNSTILE_SECRET_KEY: obligatoria cuando CAPTCHA_PROVIDER es "turnstile"');
   if (e.MAIL_PROVIDER !== 'none' && e.FRONTEND_BASE_URL === undefined) issues.push('FRONTEND_BASE_URL: obligatoria cuando MAIL_PROVIDER no es "none" (los enlaces de los correos no se derivan de la petición)');
   if (!/^\/[A-Za-z0-9._~/-]*$/.test(e.RESET_LINK_PATH) || e.RESET_LINK_PATH.includes('//') || e.RESET_LINK_PATH.includes('..')) issues.push('RESET_LINK_PATH: debe empezar por "/" y contener solo caracteres de ruta seguros');
@@ -154,6 +164,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.MAIL_PROVIDER === 'console' || e.MAIL_PROVIDER === 'memory') issues.push(`MAIL_PROVIDER: "${e.MAIL_PROVIDER}" es solo para desarrollo/pruebas y no se permite en producción`);
     if (e.CAPTCHA_PROVIDER === 'fake') issues.push('CAPTCHA_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.WHATSAPP_PROVIDER === 'fake') issues.push('WHATSAPP_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.STORAGE_PROVIDER === 'fake') issues.push('STORAGE_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.VIRUS_SCANNER === 'fake') issues.push('VIRUS_SCANNER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.AUDIO_TRANSCODER === 'fake') issues.push('AUDIO_TRANSCODER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
   }
   // Bóveda de credenciales de proveedores (ADR-42): 32 bytes exactos, distinta de la clave de intentos; la anterior (rotación) exige su versión menor
   let credentialsKeys: AppConfig['providers']['credentialsKeys'];
@@ -204,6 +217,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, credentialsKeys },
     channels: { whatsappProvider: e.WHATSAPP_PROVIDER },
+    attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },
     frontend: {
       baseUrl: frontendBase,
       resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH,

@@ -73,6 +73,22 @@ Una sola aplicación de Meta para todas las empresas; solo el Súper Admin la co
 
 > **Estado de la validación (2026-10-21):** el responsable de producto probó a mano en staging, con el número de Growth Consulting y Meta real, los puntos 4 a 6 y reportó que «aparentemente todo está OK». No hay informe detallado por punto: si algo falla después, se reabre el punto correspondiente. Una duda abierta: Meta muestra dos identificadores para la cuenta (uno para los números y otro para las plantillas); conviene anotar aquí cuál se usó como «WABA ID» en Conexiones.
 
+## 4c. Archivos y audio de las conversaciones (M5.6d, ADR-50)
+
+Variables del servicio «app» (todas con valor seguro por omisión; `fake` se rechaza en producción):
+
+| Variable | Valores | Piloto |
+|---|---|---|
+| `STORAGE_PROVIDER` | `s3` o `none` | `s3` (recomendado: Cloudflare R2) |
+| `VIRUS_SCANNER` | `none` o `clamav` | `none` (los archivos quedan «sin revisar», con aviso visible) |
+| `CLAMAV_HOST` / `CLAMAV_PORT` | host y puerto del servicio ClamAV | solo con `clamav` (obligatorio si se activa) |
+| `AUDIO_TRANSCODER` | `none` o `ffmpeg` | `none` (las grabaciones WebM se rechazan con explicación) |
+| `FFMPEG_PATH` | ruta del binario | solo con `ffmpeg` |
+
+Pasos: (1) crear el bucket (privado) y una llave de acceso solo a ese bucket; (2) en la web, **Proveedores › Almacenamiento**, cargar endpoint, región, bucket y llaves (se guardan cifradas); (3) la política de contenido de la web ya permite el origen del endpoint para imágenes y audio/video, no hace falta tocar nada más; (4) para antivirus, desplegar ClamAV como servicio aparte y activar `VIRUS_SCANNER=clamav`; para audio, instalar ffmpeg en la imagen y activar `AUDIO_TRANSCODER=ffmpeg`.
+
+**A validar la primera vez (no probado fuera de fakes):** subir y ver una imagen desde el Inbox (URL firmada con CSP), recibir una imagen, un audio y un documento reales por WhatsApp y verlos, enviar un documento y una nota de voz a un número real, EICAR con ClamAV activo (debe quedar «infectado» y no abrirse) y que un archivo subido y no enviado se retire a las 24 h.
+
 ## 5. Lista de comprobación posterior al despliegue
 1. `GET https://<dominio>/health/ready` → `{"status":"ok"}`.
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.

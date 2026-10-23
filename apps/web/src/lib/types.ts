@@ -743,6 +743,17 @@ export interface ConversationList {
   counts: { working: number; pending: number; closed: number; unread: number } | null;
 }
 export type MessageStatus = 'received' | 'queued' | 'sent' | 'delivered' | 'read' | 'failed' | 'internal';
+export interface ChatAttachment {
+  id: string;
+  kind: string;
+  mime_type: string;
+  filename: string | null;
+  size_bytes: number | null;
+  scan_status: 'pending' | 'clean' | 'skipped' | 'infected' | 'error';
+  error: string | null;
+  url: string | null;
+  expires_at: string | null;
+}
 export interface ChatMessage {
   id: string;
   direction: 'in' | 'out';
@@ -751,6 +762,7 @@ export interface ChatMessage {
   kind: string;
   text: string | null;
   media: { mime_type: string | null; filename: string | null } | null;
+  attachment: ChatAttachment | null;
   extra: Record<string, unknown> | null;
   /** Reacción del cliente a este mensaje (un emoji), o null. */
   reaction: string | null;

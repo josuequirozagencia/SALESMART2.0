@@ -23,9 +23,10 @@ export interface NumberInfo {
  * `invalid_token` el proveedor no acepta el token · `number_not_found` no encuentra el número · `unavailable` no respondió o falló de su lado (se puede reintentar) ·
  * `rate_limited` límite de envíos (se puede reintentar) · `window_closed` pasaron las 24 h: solo plantillas · `recipient_invalid` el destinatario no puede recibir
  * (número inválido, sin WhatsApp, fuera de la lista de prueba) · `template_unavailable` la plantilla ya no existe o está en pausa o deshabilitada · `template_params` las
- * variables enviadas no coinciden con lo que la plantilla pide · `rejected` cualquier otro rechazo del proveedor.
+ * variables enviadas no coinciden con lo que la plantilla pide · `media_rejected` el proveedor no aceptó el archivo (tipo o tamaño) · `media_unavailable` el archivo que el
+ * cliente mandó ya no está en el proveedor (vence) · `rejected` cualquier otro rechazo del proveedor.
  */
-export type WhatsAppErrorCode = 'invalid_token' | 'number_not_found' | 'unavailable' | 'rate_limited' | 'window_closed' | 'recipient_invalid' | 'template_unavailable' | 'template_params' | 'rejected';
+export type WhatsAppErrorCode = 'invalid_token' | 'number_not_found' | 'unavailable' | 'rate_limited' | 'window_closed' | 'recipient_invalid' | 'template_unavailable' | 'template_params' | 'media_rejected' | 'media_unavailable' | 'rejected';
 
 /** ¿Tiene sentido volver a intentar el mismo envío más tarde? Solo si el fallo fue pasajero. */
 export const isRetryableError = (code: WhatsAppErrorCode): boolean => code === 'unavailable' || code === 'rate_limited';
@@ -119,6 +120,28 @@ export interface SendTemplateInput {
   readonly components: readonly TemplateSendComponent[];
 }
 
+// ── Archivos adjuntos (M5.6d) ───────────────────────────────────────────────
+
+export type MediaKind = 'image' | 'video' | 'audio' | 'document' | 'sticker';
+
+/** Un archivo a enviar: el adaptador lo sube al proveedor y manda el mensaje que lo referencia. `caption` no aplica al audio ni a los stickers. */
+export interface SendMediaInput {
+  /** Teléfono de destino en dígitos (sin «+»). */
+  readonly to: string;
+  readonly kind: MediaKind;
+  readonly bytes: Buffer;
+  readonly mimeType: string;
+  /** Solo documentos: el nombre con el que lo ve el cliente. */
+  readonly filename: string | null;
+  readonly caption: string | null;
+}
+
+/** Un archivo que el cliente mandó, ya descargado del proveedor. */
+export interface DownloadedMedia {
+  readonly bytes: Buffer;
+  readonly mimeType: string | null;
+}
+
 export interface SentMessage {
   /** Identificador que el proveedor le dio al mensaje: con él llegarán sus estados de entrega. */
   readonly externalId: string;
@@ -134,6 +157,10 @@ export interface WhatsAppProvider {
   listTemplates(credentials: WhatsAppCredentials, wabaId: string): Promise<readonly NormalizedTemplate[]>;
   /** Envía una plantilla aprobada desde el número (dentro o fuera de las 24 h). Lanza `WhatsAppProviderError` (mensaje seguro) si no se pudo. */
   sendTemplate(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendTemplateInput): Promise<SentMessage>;
+  /** Sube un archivo al proveedor y lo envía en un mensaje desde el número. Lanza `WhatsAppProviderError` (mensaje seguro: sin token, teléfono ni contenido) si no se pudo. */
+  sendMedia(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendMediaInput): Promise<SentMessage>;
+  /** Descarga un archivo que el cliente mandó. `maxBytes` acota lo que se acepta leer. Lanza `WhatsAppProviderError` (`media_unavailable` si ya no existe o supera el tope). */
+  downloadMedia(credentials: WhatsAppCredentials, mediaId: string, maxBytes: number): Promise<DownloadedMedia>;
   /** ¿El aviso entrante lo firmó de verdad el proveedor? `rawBody` es el cuerpo EXACTO recibido; `appSecret`, el secreto de la aplicación de la plataforma. */
   verifyWebhook(rawBody: Buffer, signature: string | undefined, appSecret: string): boolean;
   /** Lee un aviso entrante (ya verificado) y lo traduce a eventos normalizados, uno por número. Nunca lanza por un contenido mal formado. */

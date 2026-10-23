@@ -60,6 +60,8 @@ export interface MessageView {
   text: string | null;
   /** Adjunto entrante: solo la referencia; hasta M5.6 no se descarga. */
   media: { mime_type: string | null; filename: string | null } | null;
+  /** Adjunto asociado (M5.6d): su estado y URL firmada si está listo. Null si no hay adjunto. */
+  attachment: AttachmentInfo | null;
   /** Datos propios del tipo (ubicación, cantidad de contactos…). */
   extra: Record<string, unknown> | null;
   /** Reacción del cliente a este mensaje (un emoji), o null. */
@@ -72,6 +74,22 @@ export interface MessageView {
   is_note: boolean;
   /** Si es una plantilla (M5.6a): cuál y sus botones. El texto armado va en `text`. */
   template: { name: string; language: string; category: string; buttons: Array<{ type: string; text: string; url: string | null; phone: string | null }> } | null;
+}
+
+export interface AttachmentInfo {
+  id: string;
+  kind: string;
+  mime_type: string;
+  filename: string | null;
+  size_bytes: number | null;
+  scan_status: string;
+  error: string | null;
+  url: string | null;
+  expires_at: string | null;
+}
+
+export function attachmentInfo(row: { id: string; kind: string; mimeType: string; filename: string | null; sizeBytes: number | null; scanStatus: string; error: string | null }): AttachmentInfo {
+  return { id: row.id, kind: row.kind, mime_type: row.mimeType, filename: row.filename, size_bytes: row.sizeBytes, scan_status: row.scanStatus, error: row.error, url: null, expires_at: null };
 }
 
 const KIND_LABEL: Readonly<Record<string, string>> = {
@@ -158,7 +176,7 @@ function templateOf(meta: Record<string, unknown>): MessageView['template'] {
   };
 }
 
-export function messageView(m: MessageRow, author: { id: string; name: string } | null): MessageView {
+export function messageView(m: MessageRow, author: { id: string; name: string } | null, attachment: MessageView['attachment'] = null): MessageView {
   const media = m.media as { mime_type?: unknown; filename?: unknown } | null;
   const extra = Object.fromEntries(Object.entries(m.meta).filter(([k]) => !HIDDEN_META.has(k)));
   return {
@@ -169,6 +187,7 @@ export function messageView(m: MessageRow, author: { id: string; name: string } 
     kind: m.kind,
     text: m.body,
     media: media ? { mime_type: typeof media.mime_type === 'string' ? media.mime_type : null, filename: typeof media.filename === 'string' ? media.filename : null } : null,
+    attachment,
     extra: Object.keys(extra).length > 0 ? extra : null,
     reaction: typeof m.meta['reaction'] === 'string' ? m.meta['reaction'] : null,
     status: m.status,

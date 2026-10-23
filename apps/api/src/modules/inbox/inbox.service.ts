@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messages, queues, responseTimers, type TenantTx } from '../../db';
+import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messageAttachments, messages, queues, responseTimers, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { writeAudit } from '../audit';
+import { AttachmentsService } from '../attachments';
 import { ContactsService } from '../contacts';
 import { likeEscape, OrgDirectoryService, OrgMembersService } from '../organizations';
 import { SlaService, type TimerContext } from '../sla';
@@ -107,6 +108,7 @@ export class InboxService {
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
+    @Inject(AttachmentsService) private readonly files: AttachmentsService,
   ) {}
 
   async list(access: InboxAccess, q: ListConversationsQuery): Promise<ConversationList> {
@@ -158,7 +160,22 @@ export class InboxService {
       return { page: page.map((r) => r.m).reverse(), next };
     });
     const authors = await this.members.labels(data.page.map((m) => m.createdBy).filter((x): x is string => x !== null));
-    return { items: data.page.map((m) => messageView(m, m.createdBy ? (authors.get(m.createdBy) ?? { id: m.createdBy, name: 'Persona desconocida' }) : null)), next_cursor: data.next };
+    // Adjuntos: resolver URL firmada por lote para los que tienen attachment (M5.6d)
+    const attRows = data.page.length > 0 ? await this.db.withTenant((tx) => tx.select().from(messageAttachments).where(inArray(messageAttachments.messageId, data.page.map((m) => m.id)))) : [];
+    const attByMsg = new Map<string, typeof messageAttachments.$inferSelect>();
+    for (const a of attRows) if (a.messageId) attByMsg.set(a.messageId, a);
+    const attachments = await Promise.all(data.page.map(async (m) => {
+      const a = attByMsg.get(m.id);
+      if (!a || a.state !== 'ready' || !a.storageKey) return { id: m.id, attachment: a ? { id: a.id, kind: a.kind, mime_type: a.mimeType, filename: a.filename, size_bytes: a.sizeBytes, scan_status: a.scanStatus, error: a.error, url: null, expires_at: null } : null };
+      try {
+        const signed = await this.files.signedUrl(a.storageKey, a.kind as 'image', a.mimeType, a.filename);
+        return { id: m.id, attachment: { id: a.id, kind: a.kind, mime_type: a.mimeType, filename: a.filename, size_bytes: a.sizeBytes, scan_status: a.scanStatus, error: a.error, url: signed.url, expires_at: signed.expiresAt.toISOString() } };
+      } catch {
+        return { id: m.id, attachment: { id: a.id, kind: a.kind, mime_type: a.mimeType, filename: a.filename, size_bytes: a.sizeBytes, scan_status: a.scanStatus, error: a.error, url: null, expires_at: null } };
+      }
+    }));
+    const attMap = new Map(attachments.map((x) => [x.id, x.attachment]));
+    return { items: data.page.map((m) => messageView(m, m.createdBy ? (authors.get(m.createdBy) ?? { id: m.createdBy, name: 'Persona desconocida' }) : null, attMap.get(m.id) ?? null)), next_cursor: data.next };
   }
 
   /** Lo que la pantalla necesita para sus filtros. */

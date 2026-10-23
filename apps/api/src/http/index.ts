@@ -4,3 +4,4 @@ export { Public, PlatformOnly, SelfService, AllowWhenPaused, ACCESS_KEY, ALLOW_P
 export { ZodValidationPipe } from './zod-validation.pipe';
 export { WindowLimiter } from './window-limiter';
 export { configureApp, API_PREFIX, UNVERSIONED_ROUTES } from './configure-app';
+export { buildCsp, WEB_MEDIA_ORIGINS, type MediaOrigins } from './web-static';

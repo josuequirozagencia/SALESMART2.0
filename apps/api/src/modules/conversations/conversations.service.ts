@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
-import { conversations, messages, type TenantTx } from '../../db';
+import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
@@ -8,6 +8,15 @@ import { SlaService } from '../sla';
 import { SystemTagsService } from '../tags';
 import { AutoMessagesService } from './auto-messages.service';
 import type { NormalizedMessage, NormalizedReaction, NormalizedStatus } from './normalized';
+
+/** Tipos de mensaje entrante que traen un archivo para descargar (M5.6d). Vive aquí y no en `attachments`: ese módulo depende de `channels`, que depende de este (sería un ciclo). */
+const FILE_KINDS: ReadonlySet<string> = new Set(['image', 'video', 'audio', 'document', 'sticker']);
+
+/** Texto del cliente listo para guardarse en una columna acotada: sin caracteres de control y con el largo máximo; null si queda vacío. */
+function clean(raw: string | null | undefined, max: number): string | null {
+  const t = (raw ?? '').replace(/\p{Cc}/gu, '').trim().slice(0, max);
+  return t === '' ? null : t;
+}
 
 export interface IngestResult {
   /** El mensaje ya estaba registrado (mismo canal y mismo identificador): no se cambió nada. */
@@ -71,6 +80,23 @@ export class ConversationsService {
       .returning({ id: messages.id });
     // Dos entregas del mismo mensaje a la vez: gana una y la otra no toca la conversación
     if (inserted.length === 0) return { duplicate: true, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
+
+    // Adjunto entrante (M5.6d): el mensaje queda, y aparte el archivo en `message_attachments` para que la tarea `attachments` lo descargue y lo revise (no bloquea la ingesta)
+    if (m.media && FILE_KINDS.has(m.kind)) {
+      await tx.insert(messageAttachments).values({
+        conversationId: conv.id,
+        messageId: inserted[0]!.id,
+        direction: 'in',
+        kind: m.kind,
+        // Lo que manda el cliente se acota ANTES de guardarlo: una restricción de la base que falle aquí tumbaría la ingesta de todo el mensaje
+        mimeType: clean((m.media.mimeType ?? '').split(';')[0], 127)?.toLowerCase() ?? 'application/octet-stream',
+        filename: clean(m.media.filename, 200),
+        sourceMediaId: clean(m.media.id, 200),
+        state: 'pending',
+        scanStatus: 'pending',
+        nextAttemptAt: new Date(),
+      });
+    }
 
     const at = m.sentAt.toISOString();
     await tx

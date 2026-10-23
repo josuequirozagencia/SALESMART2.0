@@ -19,16 +19,27 @@ function Ticks({ status }: { status: ChatMessage['status'] }) {
 function Body({ m }: { m: ChatMessage }) {
   const extra = describeExtra(m);
   const isText = m.kind === 'text' || m.kind === 'note' || m.kind === 'template';
+  const att = m.attachment;
   return (
     <>
       {!isText ? (
         <span className="mb-0.5 block text-[12px] font-semibold opacity-80">
-          {kindLabel(m.kind)}{m.media?.filename ? ` · ${m.media.filename}` : ''}
+          {kindLabel(m.kind)}{m.media?.filename || att?.filename ? ` · ${att?.filename ?? m.media?.filename}` : ''}
         </span>
       ) : null}
       {m.text ? <span className="block whitespace-pre-wrap break-words">{m.text}</span> : null}
       {extra ? <span className="block text-[12.5px] opacity-80">{extra}</span> : null}
-      {m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null}
+      {att ? (
+        att.scan_status === 'infected' ? <span className="mt-0.5 block text-[12px] font-semibold text-crit">El antivirus bloqueó este archivo{att.error ? `: ${att.error}` : ''}</span>
+        : att.scan_status === 'pending' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo se está revisando…</span>
+        : att.url ? (
+          att.mime_type?.startsWith('image/') ? <a href={att.url} target="_blank" rel="noopener noreferrer" className="mt-1 block"><img src={att.url} alt={att.filename ?? 'imagen'} className="max-w-[260px] rounded-lg" loading="lazy" /></a>
+          : att.mime_type?.startsWith('video/') ? <video src={att.url} controls className="mt-1 max-w-[260px] rounded-lg" />
+          : att.mime_type?.startsWith('audio/') ? <audio src={att.url} controls className="mt-1 w-full max-w-[260px]" />
+          : <a href={att.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[12.5px] font-semibold text-accent">Descargar {att.filename ?? 'archivo'}</a>
+        ) : att.scan_status === 'skipped' && m.kind !== 'text' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí{att.filename ? ` · ${att.filename}` : ''} · sin revisar</span>
+        : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null
+      ) : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null}
     </>
   );
 }

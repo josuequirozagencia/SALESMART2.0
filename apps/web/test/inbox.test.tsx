@@ -40,7 +40,7 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
   ...over,
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({
-  id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola, ¿tienen cita mañana?', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, template: null, ...over,
+  id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola, ¿tienen cita mañana?', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, template: null, attachment: null, ...over,
 });
 const out = (id: string, text: string, status: ChatMessage['status'], over: Partial<ChatMessage> = {}): ChatMessage =>
   msg({ id, direction: 'out', sender_type: 'human', author: { id: 'u2', name: 'Luis Navas' }, text, status, ...over });

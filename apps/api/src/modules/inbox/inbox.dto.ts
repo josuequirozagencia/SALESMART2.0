@@ -17,6 +17,10 @@ const text = (max: number) =>
 export const replySchema = z.object({ text: text(MAX_MESSAGE_LENGTH) }).strict();
 export type ReplyDto = z.infer<typeof replySchema>;
 
+/** Enviar un adjunto ya subido ( `attachment_id` de `POST …/attachments` ), con pie opcional. */
+export const sendMediaSchema = z.object({ attachment_id: z.uuid(), caption: z.string().trim().max(1024).optional() }).strict();
+export type SendMediaDto = z.infer<typeof sendMediaSchema>;
+
 /** Enviar una plantilla: cuál y el valor de cada variable (clave = la `id` de la variable que informa la plantilla, p. ej. `body:1`). El servidor exige justo las que pide. */
 export const sendTemplateSchema = z
   .object({

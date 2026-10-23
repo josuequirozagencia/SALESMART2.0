@@ -1,5 +1,5 @@
 import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
-import { WhatsAppProviderError, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendTemplateInput, type SendTextInput, type SentMessage, type TemplateSendComponent, type WhatsAppCredentials, type WhatsAppErrorCode, type WhatsAppProvider } from './whatsapp.port';
+import { WhatsAppProviderError, type DownloadedMedia, type MediaKind, type SendMediaInput, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendTemplateInput, type SendTextInput, type SentMessage, type TemplateSendComponent, type WhatsAppCredentials, type WhatsAppErrorCode, type WhatsAppProvider } from './whatsapp.port';
 
 /** Token que el fake da por válido (solo desarrollo y pruebas; la configuración prohíbe el fake en producción). */
 export const FAKE_WHATSAPP_TOKEN = 'fake-valid-token';
@@ -24,6 +24,8 @@ export interface FakeSent {
   readonly text: string;
   readonly externalId: string;
   readonly template?: { readonly name: string; readonly language: string; readonly components: readonly TemplateSendComponent[] };
+  /** Si fue un archivo: de qué tipo, cuánto pesó, su nombre y su pie. `text` es `[archivo] <tipo>` (más el pie, si lo hubo). */
+  readonly media?: { readonly kind: MediaKind; readonly mimeType: string; readonly size: number; readonly filename: string | null; readonly caption: string | null; readonly bytes: Buffer };
 }
 
 const ex = (o: Record<string, string>): Readonly<Record<string, string>> => o;
@@ -59,6 +61,10 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
   templates: NormalizedTemplate[] = [...FAKE_TEMPLATES];
   /** Las cuentas (WABA) cuyas plantillas se pidieron. */
   readonly listed: string[] = [];
+  /** Los archivos que «tienen» los clientes en el proveedor, por identificador (las pruebas los llenan). */
+  readonly media = new Map<string, { bytes: Buffer; mimeType: string | null }>();
+  /** Los archivos que se pidieron descargar, en orden. */
+  readonly downloaded: string[] = [];
   private counter = 0;
 
   sendText(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendTextInput): Promise<SentMessage> {
@@ -77,6 +83,35 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     const externalId = `wamid.FAKE.${this.counter}`;
     this.outbox.push({ phoneNumberId, to: input.to, text: input.text, externalId });
     return Promise.resolve({ externalId });
+  }
+
+  sendMedia(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendMediaInput): Promise<SentMessage> {
+    if (phoneNumberId === FAKE_UNAVAILABLE_ID) return Promise.reject(new WhatsAppProviderError('unavailable', 'El proveedor no responde'));
+    if (!/^[0-9]{8,15}$/.test(input.to)) return Promise.reject(new WhatsAppProviderError('recipient_invalid', 'El número de destino no es válido'));
+    if (input.bytes.length === 0) return Promise.reject(new WhatsAppProviderError('media_rejected', 'El archivo no es válido para WhatsApp'));
+    if (credentials.accessToken !== FAKE_WHATSAPP_TOKEN) return Promise.reject(new WhatsAppProviderError('invalid_token', 'El proveedor rechazó el token'));
+    if (phoneNumberId.startsWith(FAKE_UNKNOWN_PREFIX)) return Promise.reject(new WhatsAppProviderError('number_not_found', 'El proveedor no encontró el número de la conexión'));
+    const caption = input.caption !== null && input.caption !== '' && (input.kind === 'image' || input.kind === 'video' || input.kind === 'document') ? input.caption : null;
+    const tag = caption === null ? undefined : Object.keys(FAKE_SEND_FAILURES).find((k) => caption.startsWith(k));
+    if (tag) {
+      const [code, message] = FAKE_SEND_FAILURES[tag]!;
+      return Promise.reject(new WhatsAppProviderError(code, message));
+    }
+    if (input.bytes.toString('latin1').includes('FAKE-REJECTED-MEDIA')) return Promise.reject(new WhatsAppProviderError('media_rejected', 'El proveedor no aceptó el archivo'));
+    this.counter += 1;
+    const externalId = `wamid.FAKE.${this.counter}`;
+    this.outbox.push({ phoneNumberId, to: input.to, text: `[archivo] ${input.kind}${caption ? ` ${caption}` : ''}`, externalId, media: { kind: input.kind, mimeType: input.mimeType, size: input.bytes.length, filename: input.filename, caption, bytes: Buffer.from(input.bytes) } });
+    return Promise.resolve({ externalId });
+  }
+
+  downloadMedia(credentials: WhatsAppCredentials, mediaId: string, maxBytes: number): Promise<DownloadedMedia> {
+    this.downloaded.push(mediaId);
+    if (credentials.accessToken !== FAKE_WHATSAPP_TOKEN) return Promise.reject(new WhatsAppProviderError('invalid_token', 'El proveedor rechazó el token'));
+    if (mediaId === 'down') return Promise.reject(new WhatsAppProviderError('unavailable', 'El proveedor no responde'));
+    const m = this.media.get(mediaId);
+    if (!m) return Promise.reject(new WhatsAppProviderError('media_unavailable', 'El archivo ya no está disponible en el proveedor'));
+    if (m.bytes.length > maxBytes) return Promise.reject(new WhatsAppProviderError('media_rejected', 'El archivo pesa más de lo permitido'));
+    return Promise.resolve({ bytes: Buffer.from(m.bytes), mimeType: m.mimeType });
   }
 
   listTemplates(credentials: WhatsAppCredentials, wabaId: string): Promise<readonly NormalizedTemplate[]> {

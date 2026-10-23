@@ -4,7 +4,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
-import { createScheduledSchema, listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto, type SendTemplateDto } from './inbox.dto';
+import { createScheduledSchema, listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
 import { OutboundService } from './outbound.service';
 import { ScheduledMessagesService } from './scheduled-messages.service';
@@ -156,6 +156,15 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   sendTemplate(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(sendTemplateSchema)) b: SendTemplateDto) {
     return this.outbound.sendTemplate(accessOf(req), id, b);
+  }
+
+  /** Envía un adjunto ya subido (M5.6d): un mensaje cuyo contenido es el archivo. Un adjunto por mensaje. */
+  @RequirePermission('inbox.reply')
+  @Post(':id/media')
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  sendMedia(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(sendMediaSchema)) b: SendMediaDto) {
+    return this.outbound.sendMedia(accessOf(req), id, b);
   }
 
   /** Nota interna: nunca sale al cliente. */

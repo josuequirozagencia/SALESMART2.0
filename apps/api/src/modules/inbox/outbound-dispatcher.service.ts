@@ -1,9 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
-import { channelAccounts, contactPhones, conversations, Database, messages, whatsappAccounts } from '../../db';
+import { channelAccounts, contactPhones, conversations, Database, messageAttachments, messages, whatsappAccounts } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
+import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type MediaKind, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
+import { AttachmentsService } from '../attachments';
 
 /** Mientras un envío está en curso el mensaje queda «reservado» este tiempo: si el proceso muere a mitad, otra pasada lo retoma. Debe superar el tiempo máximo de espera al proveedor. */
 export const SEND_LEASE_MS = 60_000;
@@ -17,7 +18,7 @@ export const SEND_BATCH = 20;
 export const backoffMs = (attempts: number): number => Math.min(15_000 * 2 ** Math.max(attempts - 1, 0), MAX_BACKOFF_MS);
 
 /** Lo que se le muestra a la persona cuando un mensaje no salió (sin datos del cliente ni del proveedor). */
-const ERROR_TEXT: Readonly<Record<WhatsAppErrorCode, string>> = {
+const ERROR_TEXT: Readonly<Record<string, string>> = {
   invalid_token: 'WhatsApp rechazó la conexión: el administrador debe actualizar el token en Configuración › Conexiones',
   number_not_found: 'La conexión de WhatsApp ya no existe en Meta: el administrador debe revisarla en Configuración › Conexiones',
   unavailable: 'No pudimos entregarlo a WhatsApp tras varios intentos. Inténtalo de nuevo en unos minutos',
@@ -27,19 +28,29 @@ const ERROR_TEXT: Readonly<Record<WhatsAppErrorCode, string>> = {
   template_params: 'Meta no aceptó los datos de la plantilla: revisa las variables e inténtalo de nuevo',
   recipient_invalid: 'WhatsApp no pudo entregar el mensaje a este número. Revisa que sea correcto y que tenga WhatsApp',
   rejected: 'WhatsApp rechazó el mensaje',
+  media_rejected: 'WhatsApp no aceptó el archivo',
+  media_unavailable: 'El archivo ya no está disponible',
+  channel_off: 'La conexión de WhatsApp está desactivada o desconectada. Actívala y vuelve a intentar',
+  credentials: 'No se pueden leer las credenciales de la conexión: el administrador debe volver a pegar el token',
+  no_recipient: 'El contacto no tiene un teléfono al cual escribir',
+  template_data: 'Faltan los datos de la plantilla: vuelve a elegirla y enviarla',
+  attachment_data: 'Faltan los datos del archivo: súbelo de nuevo e inténtalo',
+  storage_unavailable: 'No pudimos leer el archivo del almacenamiento: inténtalo de nuevo en unos minutos',
 };
 const CHANNEL_OFF = 'La conexión de WhatsApp está desactivada o desconectada. Actívala y vuelve a intentar';
 const CREDENTIALS_UNREADABLE = 'No se pueden leer las credenciales de la conexión: el administrador debe volver a pegar el token';
 const NO_RECIPIENT = 'El contacto no tiene un teléfono al cual escribir';
 const TEMPLATE_DATA = 'Faltan los datos de la plantilla: vuelve a elegirla y enviarla';
+const ATTACHMENT_DATA = 'Faltan los datos del archivo: súbelo de nuevo e inténtalo';
+const STORAGE_UNAVAILABLE = 'No pudimos leer el archivo del almacenamiento: inténtalo de nuevo en unos minutos';
 
 export type DispatchResult =
   /** Salió: el mensaje quedó `sent` con el identificador del proveedor. */
   | { outcome: 'sent' }
   /** Falló de forma pasajera y volverá a intentarse más tarde. */
-  | { outcome: 'retry'; code: WhatsAppErrorCode }
+  | { outcome: 'retry'; code: string }
   /** Falló para siempre: quedó `failed` con su explicación. */
-  | { outcome: 'failed'; code: WhatsAppErrorCode | 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' }
+  | { outcome: 'failed'; code: string }
   /** No estaba pendiente, no le tocaba aún, hay un mensaje anterior de la conversación sin salir, o lo tomó otra instancia. */
   | { outcome: 'skipped' };
 
@@ -53,6 +64,8 @@ interface SendPlan {
   accessToken: string;
   /** Si es una plantilla: lo que se manda en vez del texto. */
   template: { name: string; language: string; components: readonly TemplateSendComponent[] } | null;
+  /** Si es un adjunto: el archivo que se sube al proveedor y luego el mensaje que lo referencia. */
+  media: { kind: MediaKind; mimeType: string; filename: string | null; bytes: Buffer; caption: string | null } | null;
 }
 
 /**
@@ -71,6 +84,7 @@ export class OutboundDispatcher {
     @Inject(Database) private readonly db: Database,
     @Inject(WHATSAPP_PROVIDER) private readonly provider: WhatsAppProvider,
     @Inject(ChannelVault) private readonly vault: ChannelVault,
+    @Inject(AttachmentsService) private readonly files: AttachmentsService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -82,12 +96,17 @@ export class OutboundDispatcher {
     const plan = claimed.plan;
 
     let sentId: string | null = null;
-    let code: WhatsAppErrorCode | null = null;
+    let code: string | null = null;
     try {
       const credentials = { accessToken: plan.accessToken };
-      sentId = (plan.template ? await this.provider.sendTemplate(credentials, plan.phoneNumberId, { to: plan.to, name: plan.template.name, language: plan.template.language, components: plan.template.components }) : await this.provider.sendText(credentials, plan.phoneNumberId, { to: plan.to, text: plan.text })).externalId;
+      if (plan.media) {
+        sentId = (await this.provider.sendMedia(credentials, plan.phoneNumberId, { to: plan.to, kind: plan.media.kind, bytes: plan.media.bytes, mimeType: plan.media.mimeType, filename: plan.media.filename, caption: plan.media.caption })).externalId;
+      } else {
+        sentId = (plan.template ? await this.provider.sendTemplate(credentials, plan.phoneNumberId, { to: plan.to, name: plan.template.name, language: plan.template.language, components: plan.template.components }) : await this.provider.sendText(credentials, plan.phoneNumberId, { to: plan.to, text: plan.text })).externalId;
+      }
     } catch (e) {
-      code = e instanceof WhatsAppProviderError ? e.code : 'unavailable';
+      if (e instanceof WhatsAppProviderError) code = e.code;
+      else code = 'unavailable';
       this.log.warn({ message_id: plan.messageId, attempts: plan.attempts, code }, 'envío de WhatsApp no salió');
     }
 
@@ -97,14 +116,14 @@ export class OutboundDispatcher {
       return { outcome: 'sent' };
     }
     const failure = code ?? 'unavailable';
-    if (isRetryableError(failure) && plan.attempts < SEND_MAX_ATTEMPTS) {
+    if (failure !== 'attachment_data' && failure !== 'storage_unavailable' && isRetryableError(failure as WhatsAppErrorCode) && plan.attempts < SEND_MAX_ATTEMPTS) {
       await this.db.withTenant((tx) => tx.update(messages).set({ nextAttemptAt: new Date(done.getTime() + backoffMs(plan.attempts)) }).where(and(eq(messages.id, plan.messageId), eq(messages.status, 'queued'))));
       return { outcome: 'retry', code: failure };
     }
     await this.db.withTenant(async (tx) => {
       await tx
         .update(messages)
-        .set({ status: 'failed', nextAttemptAt: null, error: ERROR_TEXT[failure], meta: sql`${messages.meta} || ${JSON.stringify({ error_code: failure })}::jsonb` })
+        .set({ status: 'failed', nextAttemptAt: null, error: (ERROR_TEXT as Record<string, string>)[failure] ?? (ERROR_TEXT as Record<string, string>).rejected!, meta: sql`${messages.meta} || ${JSON.stringify({ error_code: failure })}::jsonb` })
         .where(and(eq(messages.id, plan.messageId), eq(messages.status, 'queued')));
       // Un token rechazado o un número que ya no existe es un problema de la CONEXIÓN: queda visible donde el administrador la revisa
       if (failure === 'invalid_token' || failure === 'number_not_found') {
@@ -141,8 +160,8 @@ export class OutboundDispatcher {
   }
 
   /** Reserva el mensaje y reúne lo necesario para enviarlo; si no se puede enviar por algo local (conexión apagada, sin teléfono…), lo deja `failed` aquí mismo. */
-  private async claim(messageId: string, now: Date): Promise<{ kind: 'skipped' } | { kind: 'failed'; code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' } | { kind: 'plan'; plan: SendPlan }> {
-    return this.db.withTenant(async (tx) => {
+  private async claim(messageId: string, now: Date): Promise<{ kind: 'skipped' } | { kind: 'failed'; code: string } | { kind: 'plan'; plan: SendPlan }> {
+    const result = await this.db.withTenant(async (tx) => {
       const rows = await tx
         .update(messages)
         .set({ nextAttemptAt: new Date(now.getTime() + SEND_LEASE_MS), attempts: sql`${messages.attempts} + 1` })
@@ -177,7 +196,7 @@ export class OutboundDispatcher {
         .where(eq(conversations.id, m.conversationId))
         .limit(1);
 
-      const fail = async (code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data', text: string) => {
+      const fail = async (code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' | 'attachment_data', text: string) => {
         await tx.update(messages).set({ status: 'failed', nextAttemptAt: null, error: text, meta: sql`${messages.meta} || ${JSON.stringify({ error_code: code })}::jsonb` }).where(eq(messages.id, m.id));
         return { kind: 'failed' as const, code };
       };
@@ -192,14 +211,38 @@ export class OutboundDispatcher {
         const [p] = await tx.select({ e164: contactPhones.e164 }).from(contactPhones).where(and(eq(contactPhones.contactId, ctx.contactId), isNull(contactPhones.deletedAt), eq(contactPhones.isPrimary, true))).limit(1);
         to = p ? p.e164.replace(/^\+/, '') : null;
       }
-      if (!to || m.body === null) return fail('no_recipient', NO_RECIPIENT);
+      const isMedia = m.kind === 'image' || m.kind === 'video' || m.kind === 'audio' || m.kind === 'document' || m.kind === 'sticker';
+      if (!to || (!isMedia && m.body === null)) return fail('no_recipient', NO_RECIPIENT);
       let template: SendPlan['template'] = null;
       if (m.kind === 'template') {
         const t = m.meta['template'] as { name?: unknown; language?: unknown; send?: unknown } | undefined;
         if (!t || typeof t.name !== 'string' || typeof t.language !== 'string' || !Array.isArray(t.send)) return fail('template_data', TEMPLATE_DATA);
         template = { name: t.name, language: t.language, components: t.send as TemplateSendComponent[] };
       }
-      return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body, to, phoneNumberId: ctx.phoneNumberId, accessToken, template } };
+      // Adjunto: resolver su archivo (la lectura del storage va FUERA de la transacción, abajo)
+      let attInfo: { storageKey: string; mimeType: string; filename: string | null; kind: MediaKind } | null = null;
+      if (isMedia) {
+        const [att] = await tx.select({ storageKey: messageAttachments.storageKey, mimeType: messageAttachments.mimeType, filename: messageAttachments.filename, kind: messageAttachments.kind, state: messageAttachments.state, scanStatus: messageAttachments.scanStatus }).from(messageAttachments).where(and(eq(messageAttachments.messageId, m.id), eq(messageAttachments.direction, 'out'))).limit(1);
+        if (!att || att.state !== 'ready' || !att.storageKey) return fail('attachment_data', ATTACHMENT_DATA);
+        attInfo = { storageKey: att.storageKey, mimeType: att.mimeType, filename: att.filename, kind: att.kind as MediaKind };
+      }
+      return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body ?? '', to, phoneNumberId: ctx.phoneNumberId, accessToken, template, attInfo } as unknown as SendPlan & { attInfo: typeof attInfo } };
     });
+    if (result.kind !== 'plan') return result;
+    const plan = result.plan;
+    if (plan.attInfo) {
+      let mediaBytes: Buffer;
+      const mediaInfo = { kind: plan.attInfo.kind, mimeType: plan.attInfo.mimeType, filename: plan.attInfo.filename, caption: plan.text || null };
+      try {
+        mediaBytes = await this.files.read(plan.attInfo.storageKey);
+      } catch {
+        await this.db.withTenant((tx) => tx.update(messages).set({ status: 'failed', nextAttemptAt: null, error: STORAGE_UNAVAILABLE, meta: sql`${messages.meta} || ${JSON.stringify({ error_code: 'storage_unavailable' })}::jsonb` }).where(eq(messages.id, plan.messageId)));
+        return { kind: 'failed', code: 'storage_unavailable' as const };
+      }
+      // caption solo para imagen/video/documento; audio/sticker no llevan
+      const captionable = mediaInfo.kind === 'image' || mediaInfo.kind === 'video' || mediaInfo.kind === 'document';
+      return { kind: 'plan' as const, plan: { messageId: plan.messageId, channelAccountId: plan.channelAccountId, attempts: plan.attempts, text: plan.text, to: plan.to, phoneNumberId: plan.phoneNumberId, accessToken: plan.accessToken, template: null, media: { kind: mediaInfo.kind, mimeType: mediaInfo.mimeType, filename: mediaInfo.filename, bytes: mediaBytes, caption: captionable ? mediaInfo.caption : null } } };
+    }
+    return { kind: 'plan' as const, plan: { messageId: plan.messageId, channelAccountId: plan.channelAccountId, attempts: plan.attempts, text: plan.text, to: plan.to, phoneNumberId: plan.phoneNumberId, accessToken: plan.accessToken, template: plan.template, media: null } };
   }
 }

@@ -439,7 +439,7 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(new Set((await msgs()).map((m) => m.conversation_id)).size).toBe(2);
   });
 
-  it('adjuntos: queda la referencia y el pie, sin archivo (se descargarán en M5.6); una reacción no es un mensaje; lo desconocido queda como «no compatible»', async () => {
+  it('adjuntos: queda la referencia y el pie (el archivo lo descarga la tarea de adjuntos); una reacción no es un mensaje; lo desconocido queda como «no compatible»', async () => {
     const mk = (id: string, ts: number, message: Record<string, unknown>) => post(wa({ id, ts, message: { type: message['type'], ...message } }));
     await mk('wamid.IMG', T0, { type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg', caption: 'mi corte' }, text: undefined });
     await mk('wamid.AUD', T0 + 1, { type: 'audio', audio: { id: 'media-2', mime_type: 'audio/ogg' }, text: undefined });
@@ -451,6 +451,36 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(m[0]!.media).toEqual({ id: 'media-1', mime_type: 'image/jpeg', filename: null });
     // la reacción es a un mensaje que no conocemos (A0): se vuelve a mirar unos segundos; los demás avisos terminaron
     expect((await events()).map((e) => e.status)).toEqual(['done', 'done', 'pending', 'done']);
+  });
+
+  it('un archivo del cliente deja un adjunto PENDIENTE ligado a su mensaje (la tarea de adjuntos lo descarga); repetir el aviso no lo duplica', async () => {
+    await post(wa({ id: 'wamid.IMG2', ts: T0, message: { type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg', caption: 'mi corte' } } }));
+    await post(wa({ id: 'wamid.AUD2', ts: T0 + 1, message: { type: 'audio', audio: { id: 'media-2', mime_type: 'audio/ogg; codecs=opus' } } }));
+    await post(wa({ id: 'wamid.TXT2', ts: T0 + 2, message: { type: 'text', text: { body: 'hola' } } }));
+    await runJob();
+    await post(wa({ id: 'wamid.IMG2', ts: T0 + 10, message: { type: 'image', image: { id: 'media-1', mime_type: 'image/jpeg', caption: 'mi corte' } } })); // Meta reintenta la entrega
+    await runJob();
+    const rows = (await admin.query(`SELECT a.kind, a.mime_type, a.filename, a.source_media_id, a.state, a.scan_status, a.direction, m.external_id FROM message_attachments a JOIN messages m ON m.id = a.message_id AND m.organization_id = a.organization_id WHERE a.organization_id = $1 ORDER BY m.sent_at`, [ORG_A])).rows as Array<Record<string, unknown>>;
+    expect(rows).toEqual([
+      { kind: 'image', mime_type: 'image/jpeg', filename: null, source_media_id: 'media-1', state: 'pending', scan_status: 'pending', direction: 'in', external_id: 'wamid.IMG2' },
+      { kind: 'audio', mime_type: 'audio/ogg', filename: null, source_media_id: 'media-2', state: 'pending', scan_status: 'pending', direction: 'in', external_id: 'wamid.AUD2' }, // sin los parámetros del tipo
+    ]);
+  });
+
+  it('un nombre larguísimo, con caracteres de control o un tipo vacío no tumban la entrada del mensaje: se acotan antes de guardarse', async () => {
+    const longName = `${'ñ'.repeat(300)}.pdf`;
+    await post(wa({ id: 'wamid.DOC1', ts: T0, message: { type: 'document', document: { id: 'media-3', mime_type: 'application/pdf', filename: longName, caption: 'lista' } } }));
+    await post(wa({ id: 'wamid.DOC2', ts: T0 + 1, message: { type: 'document', document: { id: 'media-4', mime_type: '', filename: 'a\u0007b\u0000c.txt' } } }));
+    await post(wa({ id: 'wamid.DOC3', ts: T0 + 2, message: { type: 'document', document: { id: 'media-5', filename: '   ' } } }));
+    await runJob();
+    // los tres avisos se procesaron (ninguno quedó reintentándose por una restricción de la base) y los tres mensajes existen
+    expect((await events()).map((e) => e.status)).toEqual(['done', 'done', 'done']);
+    expect((await msgs()).map((x) => x.external_id)).toEqual(['wamid.DOC1', 'wamid.DOC2', 'wamid.DOC3']);
+    const rows = (await admin.query(`SELECT a.mime_type, a.filename, a.source_media_id FROM message_attachments a JOIN messages m ON m.id = a.message_id AND m.organization_id = a.organization_id WHERE a.organization_id = $1 ORDER BY m.sent_at`, [ORG_A])).rows as Array<{ mime_type: string; filename: string | null; source_media_id: string }>;
+    expect(rows[0]!.filename!.length).toBe(200);
+    expect(rows[0]!.mime_type).toBe('application/pdf');
+    expect(rows[1]).toEqual({ mime_type: 'application/octet-stream', filename: 'abc.txt', source_media_id: 'media-4' });
+    expect(rows[2]).toEqual({ mime_type: 'application/octet-stream', filename: null, source_media_id: 'media-5' });
   });
 
   it('un teléfono que no tiene forma de E.164 se descarta sin romper el aviso ni crear contacto', async () => {

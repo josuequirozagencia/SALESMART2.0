@@ -8,7 +8,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { configureApp, Public, HttpModule } from '../../src/http';
-import { CSP } from '../../src/http/web-static';
+import { buildCsp, CSP } from '../../src/http/web-static';
 import { TEST_AUTH_KEY } from '../support/constants';
 
 @Controller()
@@ -157,5 +157,16 @@ describe('web servida por la API — producción y errores de configuración', (
     expect(CSP).toContain("frame-ancestors 'none'");
     expect(CSP).toContain("object-src 'none'");
     expect(CSP).toContain("default-src 'self'");
+  });
+
+  it('buildCsp añade el origen del almacenamiento solo a img-src y media-src; descarta lo que no sea un origen limpio', () => {
+    const csp = buildCsp(['https://files.example.com', 'https://x.com; script-src *', '*', 'javascript:alert(1)', 'https://files.example.com']);
+    expect(csp).toContain("img-src 'self' data: https://files.example.com;");
+    expect(csp).toContain("media-src 'self' https://files.example.com;");
+    expect(csp).not.toContain('script-src *');
+    expect(csp).not.toContain('javascript:');
+    expect(csp).toContain("script-src 'self' https://challenges.cloudflare.com;");
+    expect(csp).toContain("connect-src 'self';");
+    expect(buildCsp([])).toBe(CSP);
   });
 });

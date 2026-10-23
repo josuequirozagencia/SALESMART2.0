@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { contactPhones, conversations, Database, messages, type TenantTx } from '../../db';
+import { contactPhones, conversations, Database, messageAttachments, messages, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
@@ -10,7 +10,7 @@ import { QuickRepliesService, type ResolvedQuickReplyView } from '../quick-repli
 import { SlaService } from '../sla';
 import { renderedText, TemplatesService, type TemplateList } from '../templates';
 import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
-import type { NoteDto, ReplyDto, SendTemplateDto } from './inbox.dto';
+import type { NoteDto, ReplyDto, SendMediaDto, SendTemplateDto } from './inbox.dto';
 import { messageView, type MessageView } from './inbox.views';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 
@@ -50,6 +50,47 @@ export class OutboundService {
 
   async reply(access: InboxAccess, conversationId: string, dto: ReplyDto): Promise<MessageView> {
     return this.send(scopeOf(access), conversationId, () => Promise.resolve({ kind: 'text', body: dto.text, meta: {}, needsWindow: true }));
+  }
+
+  /** Envía un adjunto ya subido (M5.6d): un mensaje cuyo contenido sale de `message_attachments`. Un adjunto por mensaje. */
+  async sendMedia(access: InboxAccess, conversationId: string, dto: SendMediaDto): Promise<MessageView> {
+    const scope = scopeOf(access);
+    if (!scope.canReply) throw new ForbiddenError();
+    const now = new Date();
+    const timeZone = (await this.directory.current()).timeZone;
+    const messageId = await this.db.withTenant(async (tx) => {
+      const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
+      assertCanReply(scope, c, channel.state, collab);
+      assertWindowOpen(c.lastInboundAt, now);
+      const [att] = await tx.select({ id: messageAttachments.id, conversationId: messageAttachments.conversationId, kind: messageAttachments.kind, mimeType: messageAttachments.mimeType, filename: messageAttachments.filename, state: messageAttachments.state, scanStatus: messageAttachments.scanStatus, storageKey: messageAttachments.storageKey, messageId: messageAttachments.messageId }).from(messageAttachments).where(and(eq(messageAttachments.id, dto.attachment_id), eq(messageAttachments.conversationId, conversationId), eq(messageAttachments.direction, 'out'))).limit(1);
+      // 404 uniforme: un archivo de OTRA conversación (aunque sea de la misma empresa y la persona no la vea) no se distingue de uno que no existe
+      if (!att) throw new NotFoundError();
+      if (att.messageId !== null) throw new ConflictError('ATTACHMENT_ALREADY_SENT', 'El archivo ya se envió');
+      if (att.state !== 'ready' || att.scanStatus === 'infected' || att.scanStatus === 'pending' || att.scanStatus === 'error' || !att.storageKey) {
+        if (att.scanStatus === 'infected' || att.state === 'infected') throw new ConflictError('ATTACHMENT_INFECTED', 'El antivirus bloqueó este archivo');
+        if (att.state === 'expired') throw new ConflictError('ATTACHMENT_EXPIRED', 'El archivo venció');
+        if (att.state === 'failed') throw new ConflictError('ATTACHMENT_FAILED', 'El archivo no se pudo obtener: súbelo de nuevo');
+        throw new ConflictError('ATTACHMENT_NOT_READY', 'El archivo todavía no está listo');
+      }
+      const body = (dto.caption?.trim() ?? '') || null;
+      const captionable = att.kind === 'image' || att.kind === 'video' || att.kind === 'document';
+      if (body !== null && /\p{Cc}/u.test(body.replace(/[\n\r\t]/g, ''))) throw new ConflictError('ATTACHMENT_CAPTION_INVALID', 'El pie contiene caracteres no permitidos');
+      const finalBody = captionable ? body : null;
+      if (att.kind === 'audio' || att.kind === 'sticker') {
+        // audio y sticker no llevan pie
+      }
+      const [m] = await tx
+        .insert(messages)
+        .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: att.kind, body: finalBody, meta: {}, status: 'queued', sentAt: now, createdBy: scope.userId, attempts: 0, nextAttemptAt: now })
+        .returning({ id: messages.id });
+      await tx.update(messageAttachments).set({ messageId: m!.id, updatedAt: now }).where(eq(messageAttachments.id, att.id));
+      const at = now.toISOString();
+      await tx.update(conversations).set({ status: 'waiting', lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${at}::timestamptz), ${at}::timestamptz)`, unreadCount: 0, updatedAt: now }).where(eq(conversations.id, conversationId));
+      await this.sla.stopOnReply(tx, conversationId, m!.id, { now, timeZone });
+      if (c.status === 'pending') await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'status', oldValue: 'pending', newValue: 'waiting' });
+      return m!.id;
+    });
+    return this.sendNow(messageId);
   }
 
   /** Las plantillas que esta persona puede enviar en esta conversación (las de SU conexión). Mismas reglas de acceso que responder. */
@@ -180,6 +221,8 @@ export class OutboundService {
     const row = await this.db.withTenant(async (tx) => (await tx.select().from(messages).where(eq(messages.id, messageId)).limit(1))[0]);
     if (!row) throw new NotFoundError();
     const author = row.createdBy ? ((await this.members.labels([row.createdBy])).get(row.createdBy) ?? { id: row.createdBy, name: 'Persona desconocida' }) : null;
-    return messageView(row, author);
+    const att = await this.db.withTenant(async (tx) => (await tx.select().from(messageAttachments).where(eq(messageAttachments.messageId, messageId)).limit(1))[0] ?? null);
+    const attachment: MessageView['attachment'] = att ? { id: att.id, kind: att.kind, mime_type: att.mimeType, filename: att.filename, size_bytes: att.sizeBytes, scan_status: att.scanStatus, error: att.error, url: null, expires_at: null } : null;
+    return messageView(row, author, attachment);
   }
 }
