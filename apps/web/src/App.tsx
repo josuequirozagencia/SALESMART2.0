@@ -5,6 +5,7 @@ import { AppShell } from './features/app/AppShell';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
+import { MetaPage } from './features/meta/MetaPage';
 import { SalesPage } from './features/sales/SalesPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
@@ -114,6 +115,7 @@ export function App() {
         <Route path="/settings/fields" element={<CustomFieldsPage />} />
         <Route path="/settings/tags" element={<TagsPage />} />
         <Route path="/settings/attribution" element={<AttributionPage />} />
+        <Route path="/settings/meta" element={<MetaPage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/queues" element={<QueuesPage />} />
         <Route path="/settings/sla" element={<SlaPage />} />

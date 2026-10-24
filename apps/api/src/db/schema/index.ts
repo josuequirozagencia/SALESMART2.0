@@ -16,4 +16,5 @@ export { messageAttachments } from './attachments';
 export { queues, queueMembers, queueDistributionState, queueProducts } from './queues';
 export { sales, salePayments, saleStatusHistory, saleChangeRequests } from './sales';
 export { appointments, appointmentReminders } from './appointments';
+export { metaSettings } from './meta';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';

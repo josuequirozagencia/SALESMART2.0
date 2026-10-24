@@ -89,6 +89,12 @@ Pasos: (1) crear el bucket (privado) y una llave de acceso solo a ese bucket; (2
 
 **A validar la primera vez (no probado fuera de fakes):** subir y ver una imagen desde el Inbox (URL firmada con CSP), recibir una imagen, un audio y un documento reales por WhatsApp y verlos, enviar un documento y una nota de voz a un número real, EICAR con ClamAV activo (debe quedar «infectado» y no abrirse) y que un archivo subido y no enviado se retire a las 24 h.
 
+## 4d. Eventos a Meta: API de Conversiones (M6.4, ADR-45/51)
+
+Variable del servicio «app»: `CAPI_PROVIDER` (`meta` por omisión; `none` para no enviar nada; `fake` solo desarrollo y se rechaza en producción). Requiere `PROVIDER_CREDENTIALS_KEY` (el dataset y el token de CADA empresa se guardan cifrados con ella; sin la clave no se pueden guardar).
+
+Cada empresa pega su dataset y su token en **Configuración › API de Conversiones** (el token se comprueba contra Meta antes de guardarse y no se vuelve a mostrar). **Validar la primera vez con tu dataset:** (1) «Probar conexión»; (2) poner un código de «Eventos de prueba» de Events Manager; (3) generar un Lead, una cita y una venta de un contacto que llegó por un anuncio y ver en Events Manager › Eventos de prueba que llegan con la cuenta de WhatsApp Business y el `ctwa_clid`; (4) quitar el código de prueba para producción. Si Meta rechaza el formato, ajustar `user_data` en `AttributionService`/`CapiSenderService`.
+
 ## 5. Lista de comprobación posterior al despliegue
 1. `GET https://<dominio>/health/ready` → `{"status":"ok"}`.
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.

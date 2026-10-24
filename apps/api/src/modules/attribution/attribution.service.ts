@@ -9,6 +9,7 @@ import { ContactsService } from '../contacts';
 import { AttributionEndpointsService } from '../organizations';
 import { SystemTagsService } from '../tags';
 import type { CtwaWebhookDto } from './attribution.dto';
+import { MetaSettingsService } from './meta-settings.service';
 
 /** Ventana de gracia del Purchase (ADR-18/45): por defecto 30 min, máximo 24 h. Su pantalla de configuración llega en M6. */
 export const DEFAULT_GRACE_MS = 30 * 60_000;
@@ -36,6 +37,7 @@ export class AttributionService {
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(AttributionEndpointsService) private readonly endpoints: AttributionEndpointsService,
+    @Inject(MetaSettingsService) private readonly settings: MetaSettingsService,
   ) {}
 
   /**
@@ -93,7 +95,8 @@ export class AttributionService {
    * Dentro de la transacción del que llama (la venta). Idempotente por venta.
    */
   async onSaleTagSet(tx: TenantTx, sale: { contactId: string; saleId: string; amount: number; currency: string; graceMs?: number }, now = new Date()): Promise<{ eventId: string; status: 'pending' | 'skipped' }> {
-    const grace = sale.graceMs ?? DEFAULT_GRACE_MS;
+    // La ventana de gracia la define cada empresa (Configuración › Meta); sin configurar, la de por omisión
+    const grace = sale.graceMs ?? (await this.settings.graceMs(tx)) ?? DEFAULT_GRACE_MS;
     if (!Number.isFinite(grace) || grace < 0 || grace > MAX_GRACE_MS) throw new ValidationError([{ path: 'graceMs', code: 'invalid', message: 'La ventana de gracia debe estar entre 0 y 24 horas' }]);
     if (!Number.isFinite(sale.amount) || sale.amount < 0) throw new ValidationError([{ path: 'amount', code: 'invalid', message: 'El monto de la venta no es válido' }]);
     await this.tags.apply(tx, sale.contactId, 'sale');

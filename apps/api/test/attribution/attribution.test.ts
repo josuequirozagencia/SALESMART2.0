@@ -13,6 +13,7 @@ import {
   AttributionService,
   CapiSenderJob,
   CapiSenderService,
+  MetaSettingsService,
   CapiSendError,
   CAPI_MAX_ATTEMPTS,
   FakeCapiProvider,
@@ -446,7 +447,7 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
 
   it('sin proveedor configurado no se envía nada y los eventos siguen pendientes', async () => {
     await attributed();
-    const sender = new CapiSenderService(app.get(Database), new NoCapiProvider());
+    const sender = new CapiSenderService(app.get(Database), new NoCapiProvider(), app.get(MetaSettingsService));
     expect(sender.enabled).toBe(false);
     expect(await inOrg(ORG_A, () => sender.runDue(new Date(NOW.getTime() + DAY)))).toBe(0);
     expect((await events(ORG_A, 'Lead'))[0]).toMatchObject({ status: 'pending', attempts: 0 });

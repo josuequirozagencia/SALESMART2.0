@@ -3,4 +3,6 @@ export { AttributionService, DEFAULT_GRACE_MS, MAX_GRACE_MS, phoneHash, type Rec
 export { CapiSenderService, CAPI_BATCH, CAPI_MAX_ATTEMPTS, CAPI_MAX_AGE_MS } from './capi-sender.service';
 export { CapiSenderJob } from './capi-sender.job';
 export { FakeCapiProvider } from './capi.fake';
-export { CAPI_PROVIDER, CapiSendError, NoCapiProvider, type CapiEvent, type CapiEventType, type CapiProvider } from './capi.ports';
+export { CAPI_PROVIDER, CapiSendError, NoCapiProvider, type CapiCredentials, type CapiEvent, type CapiEventType, type CapiProvider } from './capi.ports';
+export { MetaCapiProvider, GRAPH_VERSION } from './meta-capi.provider';
+export { MetaSettingsService, DEFAULT_GRACE_MINUTES, type MetaSettingsView, type MetaEventView } from './meta-settings.service';

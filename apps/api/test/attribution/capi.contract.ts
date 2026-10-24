@@ -1,5 +1,8 @@
 import { expect } from 'vitest';
-import { CapiSendError, type CapiEvent, type CapiProvider } from '../../src/modules/attribution';
+import { CapiSendError, type CapiCredentials, type CapiEvent, type CapiProvider } from '../../src/modules/attribution';
+
+/** Credenciales de prueba de una empresa (el adaptador no guarda ninguna: las recibe en cada llamada). */
+export const CREDS: CapiCredentials = { datasetId: '1234567890123', accessToken: 'EAAB-token-de-prueba-0123456789abcdef', testEventCode: null };
 
 /**
  * Contract test del puerto `CapiProvider` (CLAUDE.md: cada adaptador tiene fake y contract test). Lo cumplen el fake y, en M6, el adaptador real
@@ -16,16 +19,16 @@ export const sampleEvent = (over: Partial<CapiEvent> = {}): CapiEvent => ({
 export async function capiProviderContract(make: () => { provider: CapiProvider; failNext: (e: CapiSendError) => void }): Promise<void> {
   const { provider, failNext } = make();
   // 1) un envío correcto resuelve sin devolver nada
-  await expect(provider.send(sampleEvent())).resolves.toBeUndefined();
+  await expect(provider.send(sampleEvent(), CREDS)).resolves.toBeUndefined();
   // 2) un fallo reintentable y uno definitivo llegan como CapiSendError con su bandera, sin perder el mensaje
   failNext(new CapiSendError('límite de peticiones', true));
-  const retry = await provider.send(sampleEvent({ eventId: 'e2' })).catch((e: unknown) => e);
+  const retry = await provider.send(sampleEvent({ eventId: 'e2' }), CREDS).catch((e: unknown) => e);
   expect(retry).toBeInstanceOf(CapiSendError);
   expect((retry as CapiSendError).retryable).toBe(true);
   failNext(new CapiSendError('token rechazado', false));
-  const fatal = await provider.send(sampleEvent({ eventId: 'e3' })).catch((e: unknown) => e);
+  const fatal = await provider.send(sampleEvent({ eventId: 'e3' }), CREDS).catch((e: unknown) => e);
   expect((fatal as CapiSendError).retryable).toBe(false);
   expect((fatal as CapiSendError).message).toBe('token rechazado');
   // 3) tras un fallo el siguiente envío vuelve a funcionar
-  await expect(provider.send(sampleEvent({ eventId: 'e4' }))).resolves.toBeUndefined();
+  await expect(provider.send(sampleEvent({ eventId: 'e4' }), CREDS)).resolves.toBeUndefined();
 }

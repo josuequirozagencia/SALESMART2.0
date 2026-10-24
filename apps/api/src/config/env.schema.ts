@@ -51,6 +51,8 @@ export const envSchema = z.object({
   CAPTCHA_PROVIDER: z.enum(['none', 'fake', 'turnstile']).default('none'),
   /** Adaptador de WhatsApp (M5, ADR-50): 'meta' = Cloud API real; 'fake' es solo desarrollo y pruebas y se rechaza en producción. */
   WHATSAPP_PROVIDER: z.enum(['meta', 'fake']).default('meta'),
+  /** Salida de eventos a la API de Conversiones de Meta (M6.4): `meta` = real con las credenciales de cada empresa; `none` = no enviar nada; `fake` solo para desarrollo/pruebas. */
+  CAPI_PROVIDER: z.enum(['meta', 'none', 'fake']).default('meta'),
   /** Adjuntos (M5.6d, ADR-50). Almacenamiento: 's3' = el servicio S3-compatible que el Súper Admin configura en «Proveedores»; 'fake' (memoria) es solo desarrollo y pruebas y se rechaza en producción. */
   STORAGE_PROVIDER: z.enum(['s3', 'fake']).default('s3'),
   /** Antivirus: 'clamav' = clamd por TCP (CLAMAV_HOST/CLAMAV_PORT); 'none' = sin revisión (los archivos quedan «sin revisar»: solo para pruebas del piloto); 'fake' solo desarrollo y pruebas. */

@@ -171,6 +171,12 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/appointments/:id', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
   { route: 'POST /v1/appointments/:id/cancel', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
   { route: 'POST /v1/appointments/:id/complete', kind: 'tenant', isolationTest: '../../appointments/appointments.test.ts' },
+  // Conexión con la API de Conversiones de Meta y panel de eventos (M6.4, ADR-45/51). Pruebas: test/attribution/meta.test.ts (A↔B, permisos, token jamás devuelto, envío por empresa)
+  { route: 'GET /v1/meta/settings', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'PUT /v1/meta/settings', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'POST /v1/meta/settings/test', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'GET /v1/meta/events', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'POST /v1/meta/events/:id/retry', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
   { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },

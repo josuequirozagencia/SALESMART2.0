@@ -11,6 +11,7 @@ export function SettingsNav() {
         <NavLink to="/settings/fields" className={tab}>Campos personalizados</NavLink>
         <NavLink to="/settings/tags" className={tab}>Etiquetas</NavLink>
         <NavLink to="/settings/attribution" className={tab}>Atribución de Meta</NavLink>
+        <NavLink to="/settings/meta" className={tab}>API de Conversiones</NavLink>
         <NavLink to="/settings/connections" className={tab}>Conexiones</NavLink>
         <NavLink to="/settings/queues" className={tab}>Colas</NavLink>
         <NavLink to="/settings/sla" className={tab}>SLA y horario</NavLink>
