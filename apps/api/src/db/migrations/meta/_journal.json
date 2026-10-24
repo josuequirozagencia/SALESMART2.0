@@ -498,6 +498,20 @@
       "when": 1792839666076,
       "tag": "0070_m65_analytics_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1792844698623,
+      "tag": "0071_m71_ghl_connection",
+      "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1792844717390,
+      "tag": "0072_m71_ghl_grants",
+      "breakpoints": true
     }
   ]
 }

@@ -451,3 +451,25 @@ export const attributionEndpoints = identityTable(
     uniqueIndex('attribution_endpoints_org_uq').on(t.organizationId),
   ],
 );
+
+/**
+ * Punto de entrada del webhook de GoHighLevel de una empresa (M7.1, ADR-52). Igual que `attribution_endpoints`: tabla de IDENTIDAD porque el Workflow de GHL llega SIN sesión y hay
+ * que saber de qué empresa es antes de que exista contexto. Identificador opaco (v4 aleatorio) en la URL; una fila por empresa (rotar reemplaza el secreto); el secreto solo se guarda
+ * como hash SHA-256 y se muestra una vez.
+ */
+export const ghlRoutes = identityTable(
+  'ghl_routes',
+  {
+    id: uuid('id').primaryKey(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    secretHash: text('secret_hash').notNull(),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    rotatedAt: ts('rotated_at'),
+    lastUsedAt: ts('last_used_at'),
+  },
+  (t) => [
+    check('ghl_routes_secret_hash_hex', sql`${t.secretHash} ~ '^[0-9a-f]{64}$'`),
+    uniqueIndex('ghl_routes_org_uq').on(t.organizationId),
+  ],
+);

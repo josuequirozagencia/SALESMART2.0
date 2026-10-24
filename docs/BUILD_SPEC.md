@@ -344,7 +344,7 @@ Citas con recordatorios (topes por fuente), ventas con abono y catálogo por col
 **M7 — GoHighLevel**
 `PrivateTokenProvider`, webhook con secreto en tiempo constante, mensajes entrantes/salientes, etiquetas bidireccionales, inscripción a flujos.
 *Aceptación:* contract tests con fake de GHL; token cifrado y jamás devuelto.
-*Avance:* plan por rebanadas en `docs/M7_PLAN.md` (ADR-52, APROBADO el 2026-10-24). Aún sin código.
+*Avance:* plan por rebanadas en `docs/M7_PLAN.md` (ADR-52, APROBADO el 2026-10-24). M7.1 (conexión) construida 2026-10-24 (precisiones APROBADAS en ADR-52): tabla `ghl_connections` y ruta de identidad `ghl_routes` (migraciones 0071–0072), puerto `GhlProvider` con fake y `PrivateTokenProvider`, `GET|PUT /v1/ghl/connection`, `POST /v1/ghl/connection/test|disconnect` y `POST /v1/ghl/webhook/secret`, y en la web Configuración › GoHighLevel. Pendiente de validar con una subcuenta real de GHL.
 
 **M8 — IA: agentes, conocimiento y créditos**
 Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con RAG (pgvector), créditos con libro y recarga, `ToolRegistry` con permisos y auditoría.

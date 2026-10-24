@@ -41,6 +41,7 @@ export interface AppConfig {
     /** Adaptador de WhatsApp (M5, ADR-50). */
     readonly whatsappProvider: 'meta' | 'fake';
     readonly capiProvider: 'meta' | 'none' | 'fake';
+    readonly ghlProvider: 'ghl' | 'none' | 'fake';
   };
   readonly attachments: {
     /** Almacenamiento de archivos (M5.6d, ADR-50). */
@@ -165,6 +166,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.MAIL_PROVIDER === 'console' || e.MAIL_PROVIDER === 'memory') issues.push(`MAIL_PROVIDER: "${e.MAIL_PROVIDER}" es solo para desarrollo/pruebas y no se permite en producción`);
     if (e.CAPTCHA_PROVIDER === 'fake') issues.push('CAPTCHA_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.CAPI_PROVIDER === 'fake') issues.push('CAPI_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.GHL_PROVIDER === 'fake') issues.push('GHL_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.WHATSAPP_PROVIDER === 'fake') issues.push('WHATSAPP_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.STORAGE_PROVIDER === 'fake') issues.push('STORAGE_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.VIRUS_SCANNER === 'fake') issues.push('VIRUS_SCANNER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
@@ -218,7 +220,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, credentialsKeys },
-    channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER },
+    channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER },
     attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },
     frontend: {
       baseUrl: frontendBase,

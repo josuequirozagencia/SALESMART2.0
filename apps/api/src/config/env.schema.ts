@@ -53,6 +53,8 @@ export const envSchema = z.object({
   WHATSAPP_PROVIDER: z.enum(['meta', 'fake']).default('meta'),
   /** Salida de eventos a la API de Conversiones de Meta (M6.4): `meta` = real con las credenciales de cada empresa; `none` = no enviar nada; `fake` solo para desarrollo/pruebas. */
   CAPI_PROVIDER: z.enum(['meta', 'none', 'fake']).default('meta'),
+  /** GoHighLevel (M7, ADR-52): `ghl` = Private Token real con las credenciales de cada empresa; `none` = sin adaptador; `fake` solo para desarrollo/pruebas. */
+  GHL_PROVIDER: z.enum(['ghl', 'none', 'fake']).default('ghl'),
   /** Adjuntos (M5.6d, ADR-50). Almacenamiento: 's3' = el servicio S3-compatible que el Súper Admin configura en «Proveedores»; 'fake' (memoria) es solo desarrollo y pruebas y se rechaza en producción. */
   STORAGE_PROVIDER: z.enum(['s3', 'fake']).default('s3'),
   /** Antivirus: 'clamav' = clamd por TCP (CLAMAV_HOST/CLAMAV_PORT); 'none' = sin revisión (los archivos quedan «sin revisar»: solo para pruebas del piloto); 'fake' solo desarrollo y pruebas. */

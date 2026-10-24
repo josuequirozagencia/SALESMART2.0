@@ -184,6 +184,12 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/analytics/exports', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/settings', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'PUT /v1/analytics/settings', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
+  // GoHighLevel (M7.1, ADR-52). Pruebas: test/ghl/ghl.test.ts (A↔B, token jamás devuelto, secreto del webhook)
+  { route: 'GET /v1/ghl/connection', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
+  { route: 'PUT /v1/ghl/connection', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
+  { route: 'POST /v1/ghl/connection/test', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
+  { route: 'POST /v1/ghl/connection/disconnect', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
+  { route: 'POST /v1/ghl/webhook/secret', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
   // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
   { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },

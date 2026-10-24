@@ -43,7 +43,7 @@ describe('configuración validada', () => {
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
   it('WhatsApp (ADR-50): por defecto el adaptador de Meta; el fake solo fuera de producción; un valor desconocido se rechaza', () => {
-    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta', capiProvider: 'meta' });
+    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta', capiProvider: 'meta', ghlProvider: 'ghl' });
     expect(loadConfig({ ...good, WHATSAPP_PROVIDER: 'fake' }).channels.whatsappProvider).toBe('fake');
     expect(loadConfig({ ...good, NODE_ENV: 'production' }).channels.whatsappProvider).toBe('meta');
     expect(() => loadConfig({ ...good, NODE_ENV: 'production', WHATSAPP_PROVIDER: 'fake' })).toThrow(/WHATSAPP_PROVIDER/);
@@ -55,6 +55,13 @@ describe('configuración validada', () => {
     expect(loadConfig({ ...good, NODE_ENV: 'production' }).channels.capiProvider).toBe('meta');
     expect(() => loadConfig({ ...good, NODE_ENV: 'production', CAPI_PROVIDER: 'fake' })).toThrow(/CAPI_PROVIDER/);
     expect(() => loadConfig({ ...good, CAPI_PROVIDER: 'graph' })).toThrow(/CAPI_PROVIDER/);
+  });
+  it('GoHighLevel (ADR-52): por defecto el adaptador real; none lo apaga; el fake solo fuera de producción; un valor desconocido se rechaza', () => {
+    expect(loadConfig({ ...good, GHL_PROVIDER: 'none' }).channels.ghlProvider).toBe('none');
+    expect(loadConfig({ ...good, GHL_PROVIDER: 'fake' }).channels.ghlProvider).toBe('fake');
+    expect(loadConfig({ ...good, NODE_ENV: 'production' }).channels.ghlProvider).toBe('ghl');
+    expect(() => loadConfig({ ...good, NODE_ENV: 'production', GHL_PROVIDER: 'fake' })).toThrow(/GHL_PROVIDER/);
+    expect(() => loadConfig({ ...good, GHL_PROVIDER: 'oauth' })).toThrow(/GHL_PROVIDER/);
   });
   describe('proveedores reales: Resend y Turnstile (ADR-37)', () => {
     const real = { MAIL_PROVIDER: 'resend', RESEND_API_KEY: 're_test_1234567890abcdef', MAIL_FROM: 'Sales Smart <no-reply@growthconsulting.digital>', FRONTEND_BASE_URL: 'https://app.growthconsulting.digital', CAPTCHA_PROVIDER: 'turnstile', TURNSTILE_SECRET_KEY: '0x4AAAAAAAbcdefgh1234567' };

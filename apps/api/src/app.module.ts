@@ -6,6 +6,7 @@ import { HttpModule } from './http';
 import { JobsModule } from './jobs';
 import { AuthModule, LocalAccessResolver } from './modules/auth';
 import { AttributionModule } from './modules/attribution';
+import { GhlModule } from './modules/ghl';
 import { ChannelsModule } from './modules/channels';
 import { InboxModule } from './modules/inbox';
 import { ContactsModule } from './modules/contacts';
@@ -22,5 +23,5 @@ import { SlaModule } from './modules/sla';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), GhlModule.register(), JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

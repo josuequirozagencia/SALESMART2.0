@@ -10,4 +10,5 @@ export { PLAN_FEATURES, PLAN_FEATURE_KEYS, normalizeFeatures, type PlanFeatureKe
 export { TrialExpiryJob, TRIAL_EXPIRY_BATCH } from './trial-expiry.job';
 export { isTrialExpired, extendedEnd, canRequestExtension, type ExtensionStatus, type TrialStatus } from './trial.domain';
 export { AttributionEndpointsService, type EndpointStatus } from './attribution-endpoints.service';
+export { GhlRoutesService } from './ghl-routes.service';
 export { ChannelRoutesService, type ChannelRoute } from './channel-routes.service';
