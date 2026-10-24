@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GhlConnection, GhlStatus } from '../src/features/ghl/useGhl';
+import type { GhlConnection, GhlEvent, GhlStatus } from '../src/features/ghl/useGhl';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -14,7 +14,9 @@ const none = (over: Partial<GhlConnection> = {}): GhlConnection => ({ configured
 const live = (status: GhlStatus = 'active', over: Partial<GhlConnection> = {}): GhlConnection => none({ configured: true, status, location_id: LOC, token_last4: status === 'disconnected' ? null : '6789', last_check_at: NOW, ...over });
 const hooked = { configured: true, id: ID, path: `/v1/integrations/ghl/webhook/${ID}`, created_at: NOW, rotated_at: null, last_used_at: null };
 
-interface World { conn: GhlConnection; calls: Array<{ method: string; path: string; body: unknown }>; saveFails?: () => ReturnType<Handler>; testFails?: boolean }
+const event = (over: Partial<GhlEvent> = {}): GhlEvent => ({ id: 'e1', type: 'contact', ghl_contact_id: 'GHL-ANA', status: 'done', outcome: 'contact_created', note: null, contact: { id: 'k1', name: 'Ana Torres' }, attempts: 1, last_error: null, received_at: NOW, processed_at: NOW, ...over });
+
+interface World { events?: GhlEvent[]; statusQueries?: string[]; conn: GhlConnection; calls: Array<{ method: string; path: string; body: unknown }>; saveFails?: () => ReturnType<Handler>; testFails?: boolean }
 const world = (conn: GhlConnection = none(), over: Partial<World> = {}): World => ({ conn, calls: [], ...over });
 const reject = (message: string) => err(400, 'VALIDATION_ERROR', 'x', { body: { error: { code: 'VALIDATION_ERROR', message: 'x', request_id: 'r', details: [{ path: 'access_token', code: 'rejected', message }] } } });
 
@@ -23,6 +25,7 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
   return {
     ...authed(me),
     'GET /ghl/connection': () => ({ body: w.conn }),
+    'GET /ghl/events': (c) => { (w.statusQueries ??= []).push(c.query.get('status') ?? ''); const st = c.query.get('status'); return { body: { items: (w.events ?? []).filter((e) => !st || e.status === st), next_cursor: null } }; },
     'PUT /ghl/connection': (c) => {
       rec(c);
       if (w.saveFails) return w.saveFails();
@@ -225,5 +228,71 @@ describe('Configuración › GoHighLevel · punto de entrada del Workflow', () =
     await userEvent.click(await screen.findByRole('button', { name: 'Generar punto de entrada' }));
     expect(await screen.findByText('Tuvimos un problema de nuestro lado. Inténtalo en unos minutos.')).toBeInTheDocument();
     expect(screen.queryByRole('region', { name: 'Datos del punto de entrada' })).toBeNull();
+  });
+});
+
+describe('Configuración › GoHighLevel · avisos recibidos', () => {
+  it('sin punto de entrada no muestra el panel de avisos, pero sí la guía para armar el Workflow', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const how = within(await screen.findByRole('region', { name: 'Cómo conectarlo' }));
+    expect(how.getByText(/X-Webhook-Secret/)).toBeInTheDocument();
+    expect(how.getByText(/contact_id/, { selector: 'pre' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Avisos recibidos' })).toBeNull();
+    expect(w.statusQueries).toBeUndefined();
+  });
+
+  it('con punto de entrada lista los avisos con su estado, lo que se hizo y por qué se omitieron; sin teléfonos ni correos', async () => {
+    const w = world(live('active', { webhook: hooked }), {
+      events: [
+        event(),
+        event({ id: 'e2', ghl_contact_id: 'SIN-TEL', contact: null, status: 'skipped', outcome: null, note: 'El contacto de GoHighLevel no trae teléfono: no se pudo identificar' }),
+        event({ id: 'e3', ghl_contact_id: 'PEND', contact: null, status: 'pending', outcome: null, attempts: 2 }),
+        event({ id: 'e4', ghl_contact_id: 'ROTO', contact: null, status: 'failed', outcome: null, attempts: 5, last_error: 'Error:23505' }),
+        event({ id: 'e5', type: 'message_in', status: 'skipped', outcome: null, note: 'Los mensajes entrantes de GoHighLevel se procesan en una versión posterior' }),
+      ],
+    });
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Avisos recibidos' }));
+    const rows = within(await panel.findByRole('list', { name: 'Avisos' })).getAllByRole('listitem');
+    expect(rows).toHaveLength(5);
+    expect(within(rows[0]!).getByText(/Ana Torres/)).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Procesado')).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Contacto creado')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('SIN-TEL')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(/no trae teléfono/)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('Omitido')).toBeInTheDocument();
+    expect(within(rows[2]!).getByText('Pendiente')).toBeInTheDocument();
+    expect(within(rows[2]!).getByText(/2 intento\(s\); se reintenta solo/)).toBeInTheDocument();
+    expect(within(rows[3]!).getByText('Falló')).toBeInTheDocument();
+    expect(within(rows[3]!).getByText(/No se pudo procesar tras 5 intentos \(Error:23505\)/)).toBeInTheDocument();
+    expect(within(rows[4]!).getByText('Mensaje entrante')).toBeInTheDocument();
+  });
+
+  it('filtrar por estado vuelve a pedir al servidor solo esos avisos', async () => {
+    const w = world(live('active', { webhook: hooked }), { events: [event(), event({ id: 'e2', status: 'skipped', outcome: null, note: 'x' })] });
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Avisos recibidos' }));
+    await panel.findAllByRole('listitem');
+    await userEvent.selectOptions(panel.getByLabelText('Estado'), 'skipped');
+    await waitFor(() => expect(w.statusQueries).toContain('skipped'));
+    await waitFor(() => expect(within(panel.getByRole('list', { name: 'Avisos' })).getAllByRole('listitem')).toHaveLength(1));
+  });
+
+  it('sin avisos lo dice', async () => {
+    mockApi(server(world(live('active', { webhook: hooked }), { events: [] })));
+    renderApp('/settings/ghl');
+    expect(await screen.findByText(/Todavía no ha llegado ningún aviso/)).toBeInTheDocument();
+  });
+
+  it('si el servidor no puede dar los avisos lo explica sin romper el resto de la pantalla', async () => {
+    mockApi({ ...server(world(live('active', { webhook: hooked }))), 'GET /ghl/events': () => err(500, 'INTERNAL') });
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Avisos recibidos' }));
+    expect(await panel.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Conexión con GoHighLevel' })).toBeInTheDocument();
   });
 });

@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Header, HttpCode, Inject, Post, Put } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Inject, Post, Put, Query } from '@nestjs/common';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { GhlConnectionService } from './ghl-connection.service';
-import { saveConnectionSchema, type SaveConnectionDto } from './ghl.dto';
+import { GhlEventsService } from './ghl-events.service';
+import { eventsQuerySchema, saveConnectionSchema, type EventsQuery, type SaveConnectionDto } from './ghl.dto';
 
 /**
  * Conexión de la empresa con GoHighLevel (M7.1, ADR-52). Solo quien administra integraciones (`integrations.manage`); `no-store`: son credenciales. El token jamás se devuelve (solo sus
@@ -10,7 +11,10 @@ import { saveConnectionSchema, type SaveConnectionDto } from './ghl.dto';
  */
 @Controller('ghl')
 export class GhlController {
-  constructor(@Inject(GhlConnectionService) private readonly ghl: GhlConnectionService) {}
+  constructor(
+    @Inject(GhlConnectionService) private readonly ghl: GhlConnectionService,
+    @Inject(GhlEventsService) private readonly events: GhlEventsService,
+  ) {}
 
   @RequirePermission('integrations.manage')
   @Get('connection')
@@ -51,5 +55,13 @@ export class GhlController {
   @Header('Cache-Control', 'no-store')
   secret() {
     return this.ghl.issueWebhookSecret();
+  }
+
+  /** Últimos avisos que llegaron del Workflow, con su estado y por qué se omitieron. */
+  @RequirePermission('integrations.manage')
+  @Get('events')
+  @Header('Cache-Control', 'no-store')
+  eventsList(@Query(new ZodValidationPipe(eventsQuerySchema)) q: EventsQuery) {
+    return this.events.list(q);
   }
 }

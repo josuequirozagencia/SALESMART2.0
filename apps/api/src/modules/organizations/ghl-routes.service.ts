@@ -24,6 +24,12 @@ export class GhlRoutesService {
     @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
+  /** Empresas que tienen punto de entrada de GoHighLevel: la tarea que procesa los avisos solo recorre estas, no todas las empresas. */
+  async organizationIds(): Promise<string[]> {
+    const rows = await this.db.withIdentity((tx) => tx.selectDistinct({ id: ghlRoutes.organizationId }).from(ghlRoutes));
+    return rows.map((r) => r.id);
+  }
+
   async status(): Promise<EndpointStatus> {
     const org = TenantContext.current().organizationId;
     const [row] = await this.db.withIdentity((tx) => tx.select().from(ghlRoutes).where(eq(ghlRoutes.organizationId, org)).limit(1));

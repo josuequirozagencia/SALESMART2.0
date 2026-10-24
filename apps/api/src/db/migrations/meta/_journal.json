@@ -512,6 +512,20 @@
       "when": 1792844717390,
       "tag": "0072_m71_ghl_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1792852339756,
+      "tag": "0073_m72_ghl_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1792852356885,
+      "tag": "0074_m72_ghl_events_grants",
+      "breakpoints": true
     }
   ]
 }

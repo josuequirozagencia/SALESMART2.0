@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
 export type GhlStatus = 'active' | 'needs_reconnect' | 'disconnected';
@@ -46,4 +46,33 @@ export function useDisconnectGhl() {
 export function useIssueGhlSecret() {
   const done = useDone();
   return useMutation({ mutationFn: () => api<GhlWebhookIssued>('/ghl/webhook/secret', { method: 'POST' }), onSettled: done });
+}
+
+export type GhlEventStatus = 'pending' | 'done' | 'skipped' | 'failed';
+export type GhlEventOutcome = 'contact_created' | 'contact_linked' | 'contact_updated' | 'contact_unchanged';
+export interface GhlEvent {
+  id: string;
+  type: 'contact' | 'message_in';
+  ghl_contact_id: string;
+  status: GhlEventStatus;
+  outcome: GhlEventOutcome | null;
+  note: string | null;
+  contact: { id: string; name: string } | null;
+  attempts: number;
+  last_error: string | null;
+  received_at: string;
+  processed_at: string | null;
+}
+export interface GhlEventList { items: GhlEvent[]; next_cursor: string | null }
+export type GhlEventFilter = GhlEventStatus | '';
+
+/** Avisos recibidos del Workflow. Se refrescan solos cada 10 s mientras la pantalla está abierta (el proceso es asíncrono). */
+export function useGhlEvents(status: GhlEventFilter, limit: number) {
+  return useQuery({
+    queryKey: ['ghl-events', status, limit],
+    retry: false,
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+    queryFn: () => api<GhlEventList>(`/ghl/events?limit=${limit}${status ? `&status=${status}` : ''}`),
+  });
 }

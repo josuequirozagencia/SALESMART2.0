@@ -190,6 +190,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/ghl/connection/test', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
   { route: 'POST /v1/ghl/connection/disconnect', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
   { route: 'POST /v1/ghl/webhook/secret', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
+  // Avisos del Workflow de GHL (M7.2, ADR-52). Pública: id opaco + secreto en cabecera. Pruebas: test/ghl/ghl-events.test.ts
+  { route: 'POST /v1/integrations/ghl/webhook/:routeId', kind: 'public' },
+  { route: 'GET /v1/ghl/events', kind: 'tenant', isolationTest: '../../ghl/ghl-events.test.ts' },
   // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
   { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },

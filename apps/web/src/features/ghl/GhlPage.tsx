@@ -6,7 +6,7 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { CopyField } from '../../ui/CopyField';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
-import { useDisconnectGhl, useGhlConnection, useIssueGhlSecret, useSaveGhl, useTestGhl, type GhlConnection, type GhlStatus, type GhlWebhookIssued } from './useGhl';
+import { useDisconnectGhl, useGhlConnection, useGhlEvents, useIssueGhlSecret, useSaveGhl, useTestGhl, type GhlConnection, type GhlEvent, type GhlEventFilter, type GhlEventOutcome, type GhlEventStatus, type GhlStatus, type GhlWebhookIssued } from './useGhl';
 
 const STATUS: Record<GhlStatus, { label: string; kind: PillKind }> = {
   active: { label: 'Conectada', kind: 'ok' },
@@ -14,6 +14,22 @@ const STATUS: Record<GhlStatus, { label: string; kind: PillKind }> = {
   disconnected: { label: 'Desconectada', kind: 'muted' },
 };
 const LOCATION = /^[A-Za-z0-9]{8,64}$/;
+const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
+const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
+const EVENT_STATUS: Record<GhlEventStatus, { label: string; kind: PillKind }> = {
+  pending: { label: 'Pendiente', kind: 'info' },
+  done: { label: 'Procesado', kind: 'ok' },
+  skipped: { label: 'Omitido', kind: 'muted' },
+  failed: { label: 'Falló', kind: 'crit' },
+};
+const OUTCOME: Record<GhlEventOutcome, string> = { contact_created: 'Contacto creado', contact_linked: 'Vinculado a un contacto existente', contact_updated: 'Contacto completado', contact_unchanged: 'Sin cambios' };
+const TYPE_LABEL: Record<GhlEvent['type'], string> = { contact: 'Contacto', message_in: 'Mensaje entrante' };
+const EXAMPLE = `{
+  "contact_id": "{{contact.id}}",
+  "full_name": "{{contact.name}}",
+  "phone": "{{contact.phone}}",
+  "email": "{{contact.email}}"
+}`;
 
 /** El motivo que dio GoHighLevel (viaja como detalle de la validación) o, si no hay, el aviso genérico. */
 const ghlReason = (e: unknown, fallback: string): string => (e instanceof ApiError && e.details[0]?.message ? e.details[0].message : friendlyError(e, fallback));
@@ -136,7 +152,64 @@ function WebhookSection({ s }: { s: GhlConnection }) {
         </>
       )}
       {error ? <Alert>{error}</Alert> : null}
-      <p className="text-[12.5px] text-muted">Pega la URL en la acción «Webhook» (método POST) y agrega la cabecera <code className="rounded bg-surface2 px-1">X-Webhook-Secret</code> con el secreto. Los avisos que entiende Sales Smart llegan en las siguientes versiones: por ahora solo queda lista la conexión.</p>
+      <p className="text-[12.5px] text-muted">Pega la URL en la acción «Webhook» (método POST) y agrega la cabecera <code className="rounded bg-surface2 px-1">X-Webhook-Secret</code> con el secreto. Los datos que Sales Smart usa se describen abajo.</p>
+    </section>
+  );
+}
+
+/** Cómo armar la acción «Webhook» del Workflow de GoHighLevel. */
+function HowTo() {
+  return (
+    <section aria-label="Cómo conectarlo" className="grid gap-2 rounded-2xl border border-line bg-surface p-4 text-[13.5px]">
+      <h2 className="text-[15px] font-bold">Cómo conectarlo en GoHighLevel</h2>
+      <ol className="grid list-decimal gap-1 pl-5">
+        <li>En el Workflow que quieras (por ejemplo, cuando se crea o cambia un contacto), agrega la acción «Webhook» con método POST.</li>
+        <li>Pega la URL del punto de entrada y agrega la cabecera <code className="rounded bg-surface2 px-1">X-Webhook-Secret</code> con el secreto.</li>
+        <li>En «Custom Data» (o en el cuerpo) envía estos campos; los que falten se ignoran y el resto de lo que mande GoHighLevel no se guarda:</li>
+      </ol>
+      <pre className="overflow-x-auto rounded-xl bg-surface2 p-3 text-[12.5px]">{EXAMPLE}</pre>
+      <p className="text-muted">Obligatorio solo <code className="rounded bg-surface2 px-1">contact_id</code>. Para crear un contacto nuevo hace falta el teléfono en formato internacional (+593…); si el teléfono ya existe, se vincula sin tocar el nombre ni el responsable, y solo se completa el correo si estaba vacío. Opcional: <code className="rounded bg-surface2 px-1">event_id</code> (evita procesar dos veces el mismo aviso) y <code className="rounded bg-surface2 px-1">location.id</code> (debe ser la Location conectada). Las etiquetas y los mensajes entrantes llegan en las siguientes versiones.</p>
+    </section>
+  );
+}
+
+/** Avisos que llegaron del Workflow: su estado, qué se hizo y por qué se omitieron. Se actualiza solo. */
+function EventsPanel() {
+  const [status, setStatus] = useState<GhlEventFilter>('');
+  const [limit, setLimit] = useState(30);
+  const q = useGhlEvents(status, limit);
+  const items = q.data?.items ?? [];
+  return (
+    <section aria-label="Avisos recibidos" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <b className="text-[15px]">Avisos recibidos</b>
+        <label className="flex items-center gap-2 text-[13px]">Estado
+          <select value={status} onChange={(e) => { setStatus(e.target.value as GhlEventFilter); setLimit(30); }} className={selectCls}>
+            <option value="">Todos</option>
+            {Object.entries(EVENT_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </label>
+      </div>
+      {q.isPending ? <div className="grid place-items-center py-6 text-muted"><Spinner label="Cargando avisos" /></div> : null}
+      {q.isError ? <Alert>{friendlyError(q.error, 'No se pudieron cargar los avisos')}</Alert> : null}
+      {q.isSuccess && items.length === 0 ? <p className="py-4 text-center text-[13px] text-muted">Todavía no ha llegado ningún aviso. Aparecen cuando un Workflow de GoHighLevel llama al punto de entrada.</p> : null}
+      {items.length > 0 ? (
+        <ul className="grid gap-2" aria-label="Avisos">
+          {items.map((e) => (
+            <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line px-3 py-2 text-[13px]">
+              <span className="min-w-0">
+                <b>{TYPE_LABEL[e.type]}</b> · {e.contact?.name ?? <span className="font-mono text-[12px]">{e.ghl_contact_id}</span>} <span className="text-muted">· {shortDateTime(e.received_at)}</span>
+                {e.outcome ? <span className="block text-[12px] text-muted">{OUTCOME[e.outcome]}</span> : null}
+                {e.note ? <span className="block text-[12px] text-muted">{e.note}</span> : null}
+                {e.status === 'pending' && e.attempts > 0 ? <span className="block text-[12px] text-muted">{e.attempts} intento(s); se reintenta solo</span> : null}
+                {e.status === 'failed' ? <span className="block text-[12px] text-crit">No se pudo procesar tras {e.attempts} intentos{e.last_error ? ` (${e.last_error})` : ''}</span> : null}
+              </span>
+              <Pill kind={EVENT_STATUS[e.status].kind}>{EVENT_STATUS[e.status].label}</Pill>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {q.data?.next_cursor ? <div className="grid place-items-center"><Button className={SMALL} onClick={() => setLimit(Math.min(limit + 30, 50))} disabled={limit >= 50}>Ver más</Button></div> : null}
     </section>
   );
 }
@@ -151,6 +224,8 @@ export function GhlPage() {
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
       {q.data ? <ConnectionForm s={q.data} /> : null}
       {q.data ? <WebhookSection s={q.data} /> : null}
+      {q.data ? <HowTo /> : null}
+      {q.data?.webhook.configured ? <EventsPanel /> : null}
     </div>
   );
 }

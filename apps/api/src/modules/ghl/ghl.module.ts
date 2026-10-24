@@ -1,8 +1,13 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
+import { ContactsModule } from '../contacts';
 import { OrganizationsModule } from '../organizations';
 import { GhlConnectionService } from './ghl-connection.service';
+import { GhlEventsJob } from './ghl-events.job';
+import { GhlEventsService } from './ghl-events.service';
+import { GhlWebhookController } from './ghl-webhook.controller';
+import { GhlWebhookService } from './ghl-webhook.service';
 import { GhlController } from './ghl.controller';
 import { FakeGhlProvider } from './ghl.fake';
 import { GHL_PROVIDER, NoGhlProvider, type GhlProvider } from './ghl.ports';
@@ -20,15 +25,18 @@ export class GhlModule {
     if (!opts.provider && GhlModule.standard) return GhlModule.standard;
     const mod: DynamicModule = {
       module: GhlModule,
-      imports: [OrganizationsModule],
-      controllers: [GhlController],
+      imports: [OrganizationsModule, ContactsModule],
+      controllers: [GhlController, GhlWebhookController],
       providers: [
         GhlConnectionService,
+        GhlEventsService,
+        GhlWebhookService,
+        GhlEventsJob,
         opts.provider
           ? { provide: GHL_PROVIDER, useValue: opts.provider }
           : { provide: GHL_PROVIDER, useFactory: (cfg: AppConfig): GhlProvider => (cfg.channels.ghlProvider === 'ghl' ? new PrivateTokenProvider() : cfg.channels.ghlProvider === 'fake' ? new FakeGhlProvider() : new NoGhlProvider()), inject: [APP_CONFIG] },
       ],
-      exports: [GhlConnectionService],
+      exports: [GhlConnectionService, GhlEventsService, GhlEventsJob],
     };
     if (!opts.provider) GhlModule.standard = mod;
     return mod;

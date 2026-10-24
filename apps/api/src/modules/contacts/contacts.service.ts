@@ -3,7 +3,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { contactPhones, contacts, Database, opportunities, type TenantTx } from '../../db';
 import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
-import { writeAudit } from '../audit';
+import { writeAudit, type AuditSource } from '../audit';
 import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OrgMembersService, type OrgPerson } from '../organizations';
 import { ContactTaggingService, SystemTagsService, type TagView } from '../tags';
@@ -278,7 +278,7 @@ export class ContactsService {
    * Para los canales de entrada (atribución, mensajes): el contacto de la empresa activa con ese teléfono, o uno nuevo con el origen del canal, sin consentimiento
    * y sin responsable. Un contacto nuevo se llama como su perfil (`name`) si el canal lo informa; si no, como su teléfono. Serializa por teléfono para que dos llamadas simultáneas no creen dos contactos. Va DENTRO de la transacción del que llama.
    */
-  async findOrCreateByPhone(tx: TenantTx, e164: string, source: string, name?: string | null): Promise<{ id: string; created: boolean }> {
+  async findOrCreateByPhone(tx: TenantTx, e164: string, source: string, name?: string | null, audit: AuditSource = 'meta'): Promise<{ id: string; created: boolean }> {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`contact_phone:${e164}`}::text || ':' || app_org()::text), 0))`);
     const existing = await this.repo.idByPhone(tx, e164);
     if (existing) return { id: existing, created: false };
@@ -287,8 +287,33 @@ export class ContactsService {
     const finalName = profile === '' ? e164 : profile;
     const [c] = await tx.insert(contacts).values({ name: finalName, source, consent: 'unknown', createdBy: null }).returning();
     await tx.insert(contactPhones).values({ contactId: c!.id, e164, isPrimary: true });
-    await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: finalName, source, consent: 'unknown', phones: [e164] }, source: 'meta' });
+    await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: finalName, source, consent: 'unknown', phones: [e164] }, source: audit });
     return { id: c!.id, created: true };
+  }
+
+  /**
+   * Completa el perfil de un contacto con lo que informa un canal externo (GoHighLevel, M7.2) SIN pisar lo que la empresa ya tiene: el correo solo si está vacío, y el nombre solo si el
+   * contacto aún se llama como su teléfono (el nombre de reserva). Devuelve true si cambió algo. Dentro de la transacción del que llama; audita cada campo con su origen.
+   */
+  async completeProfile(tx: TenantTx, id: string, input: { name?: string | null; email?: string | null }, audit: AuditSource): Promise<boolean> {
+    const row = await this.repo.lockById(tx, id);
+    if (!row) return false;
+    const set: Partial<typeof contacts.$inferInsert> = {};
+    const changes: Array<[string, unknown, unknown]> = [];
+    if (input.email && !row.email) {
+      set.email = input.email;
+      changes.push(['email', null, input.email]);
+    }
+    const placeholder = /^\+\d{8,15}$/.test(row.name);
+    if (input.name && placeholder && input.name !== row.name) {
+      set.name = input.name;
+      changes.push(['name', row.name, input.name]);
+    }
+    if (changes.length === 0) return false;
+    set.updatedAt = new Date();
+    await tx.update(contacts).set(set).where(eq(contacts.id, id));
+    for (const [field, before, after] of changes) await writeAudit(tx, { entityType: 'contact', entityId: id, field, oldValue: before, newValue: after, source: audit });
+    return true;
   }
 
   /**

@@ -13,3 +13,12 @@ export const saveConnectionSchema = z
   })
   .strict();
 export type SaveConnectionDto = z.infer<typeof saveConnectionSchema>;
+
+export const eventsQuerySchema = z
+  .object({
+    status: z.enum(['pending', 'done', 'skipped', 'failed']).optional(),
+    cursor: z.string().max(200).optional(),
+    limit: z.coerce.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+export type EventsQuery = z.infer<typeof eventsQuerySchema>;
