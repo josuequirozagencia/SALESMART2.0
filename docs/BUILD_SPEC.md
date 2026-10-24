@@ -344,6 +344,7 @@ Citas con recordatorios (topes por fuente), ventas con abono y catálogo por col
 **M7 — GoHighLevel**
 `PrivateTokenProvider`, webhook con secreto en tiempo constante, mensajes entrantes/salientes, etiquetas bidireccionales, inscripción a flujos.
 *Aceptación:* contract tests con fake de GHL; token cifrado y jamás devuelto.
+*Avance:* plan por rebanadas en `docs/M7_PLAN.md` (ADR-52, APROBADO el 2026-10-24). Aún sin código.
 
 **M8 — IA: agentes, conocimiento y créditos**
 Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con RAG (pgvector), créditos con libro y recarga, `ToolRegistry` con permisos y auditoría.
