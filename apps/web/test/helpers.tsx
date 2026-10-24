@@ -95,4 +95,12 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   // La pantalla de contactos pide además las etiquetas y las listas guardadas
   'GET /tags': () => ({ body: { items: [], access: { manage: false } } }),
   'GET /contact-lists': () => ({ body: { items: [] } }),
+  // El Inicio muestra el tablero del periodo (vacío por omisión en las pruebas que solo pasan por ahí)
+  'GET /analytics/summary': () => ({ body: EMPTY_SUMMARY }),
 });
+
+export const EMPTY_SUMMARY = {
+  period: { from: '2026-09-24T00:00:00.000Z', to: '2026-10-24T00:00:00.000Z' }, timezone: 'America/Guayaquil', currency: 'USD', scope: 'all' as const,
+  leads: 0, appointments: { total: 0, scheduled: 0, completed: 0, cancelled: 0 }, sales: { count: 0, cancelled: 0, revenue: '0.00', paid: '0.00', balance: '0.00' },
+  funnel: [], response: { count: 0, avg_seconds: 0, median_seconds: 0 }, series: [], access: { export: false, manage: false },
+};

@@ -5,7 +5,7 @@ import { TenantContext } from '../../tenant';
 
 /** Persona aún sin nombre: dentro de una transacción de negocio no se pueden leer las tablas de identidad (ADR-25); `hydrate` los pone al terminar. */
 export const pendingPerson = (id: string | null): { id: string; name: string } | null => (id ? { id, name: '' } : null);
-const WHO_KEYS: ReadonlySet<string> = new Set(['seller', 'owner', 'by', 'requested_by', 'resolved_by']);
+const WHO_KEYS: ReadonlySet<string> = new Set(['seller', 'owner', 'advisor', 'by', 'requested_by', 'resolved_by']);
 
 export interface OrgPerson {
   id: string;

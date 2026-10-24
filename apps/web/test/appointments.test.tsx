@@ -166,7 +166,7 @@ describe('Agendar desde el chat', () => {
   });
 
   it('si el envío falla y se reintenta se reutiliza la MISMA llave', async () => {
-    const w = world({ failFirst: true });
+    const w = world({ failFirst: true, options: { ...OPTIONS, window: { open: true, expires_at: new Date(Date.now() + 60 * HOUR).toISOString() } } }); // ventana abierta de sobra: el resultado no depende de la hora a la que corra la prueba
     mockApi(server(w));
     renderApp('/inbox/c1');
     const d = await openDialog();

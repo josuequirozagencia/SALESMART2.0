@@ -17,4 +17,5 @@ export { queues, queueMembers, queueDistributionState, queueProducts } from './q
 export { sales, salePayments, saleStatusHistory, saleChangeRequests } from './sales';
 export { appointments, appointmentReminders } from './appointments';
 export { metaSettings } from './meta';
+export { analyticsSettings, analyticsExports } from './analytics';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';

@@ -21,6 +21,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'INVITATION_EXPIRED': return 'La invitación venció. Pide que te la reenvíen.';
     case 'INVALID_PASSWORD': return 'La contraseña no es correcta.';
     case 'INVITATIONS_UNAVAILABLE': return 'Las invitaciones no están disponibles: falta configurar la URL de la aplicación en el servidor.';
+    // Analítica (ADR-51): el servidor redacta el motivo
+    case 'EXPORT_DISABLED': return e.message;
     case 'AGENCY_NOT_FOUND': case 'AGENCY_SUSPENDED': case 'NO_AGENCY': return e.message;
     // Proveedores (ADR-42): el servidor ya redacta el motivo para el Súper Admin (sin datos secretos)
     case 'PROVIDER_NOT_CONFIGURED': case 'PROVIDER_ACTIVE': case 'PROVIDER_VAULT_UNAVAILABLE': case 'PROVIDER_VAULT_MISMATCH': case 'SERVICE_NOT_CONFIGURABLE': return e.message;

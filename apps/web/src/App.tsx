@@ -2,6 +2,7 @@ import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { AgencyShell } from './features/agency/AgencyShell';
 import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
+import { AnalyticsPage } from './features/analytics/AnalyticsPage';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
@@ -108,6 +109,7 @@ export function App() {
         <Route path="/inbox/:id?" element={<InboxPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />
+        <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/companies" element={<ClientCompaniesPage />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />
