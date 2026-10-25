@@ -15,7 +15,7 @@ const bad = (body: unknown) => {
 
 describe('normalizeGhlPayload · lo que entiende', () => {
   it('un cuerpo mínimo: solo el contacto; el tipo por omisión es «contact» y no inventa datos', () => {
-    expect(ok({ contact_id: 'abc123' })).toEqual({ type: 'contact', ghlContactId: 'abc123', name: null, phone: null, phoneInvalid: false, email: null, tags: [], locationId: null, eventId: null });
+    expect(ok({ contact_id: 'abc123' })).toEqual({ type: 'contact', ghlContactId: 'abc123', name: null, phone: null, phoneInvalid: false, email: null, tags: null, locationId: null, eventId: null });
   });
 
   it('nivel superior: nombre, teléfono, correo, etiquetas, Location y event_id', () => {
@@ -67,7 +67,7 @@ describe('normalizeGhlPayload · datos sucios', () => {
 
   it('etiquetas: sin repetidas (sin distinguir mayúsculas), acotadas a 100 caracteres y a un máximo', () => {
     expect(ok({ contact_id: 'C1', tags: Array.from({ length: 120 }, (_, i) => `t${i}`) }).tags).toHaveLength(MAX_TAGS);
-    expect(ok({ contact_id: 'C1', tags: ['x'.repeat(300)] }).tags[0]).toHaveLength(100);
+    expect(ok({ contact_id: 'C1', tags: ['x'.repeat(300)] }).tags?.[0]).toHaveLength(100);
     expect(ok({ contact_id: 'C1', tags: [{ a: 1 }, null, 5, 'ok'] }).tags).toEqual(['5', 'ok']);
   });
 

@@ -5,6 +5,7 @@ import { ConflictError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import type { CreateTagDto, UpdateTagDto } from './tags.dto';
 import { SystemTagsService, toTagView, type TagView } from './system-tags.service';
+import { TagChangeBus } from './tag-change.bus';
 
 export const MAX_CUSTOM_TAGS = 100;
 const AUDIT = 'tag';
@@ -18,6 +19,7 @@ export class TagsService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(SystemTagsService) private readonly system: SystemTagsService,
+    @Inject(TagChangeBus) private readonly bus: TagChangeBus,
   ) {}
 
   async create(input: CreateTagDto): Promise<TagView> {
@@ -64,7 +66,7 @@ export class TagsService {
     return toTagView(row);
   }
 
-  /** Borrado lógico: la etiqueta deja de verse y de poder ponerse; los contactos conservan el vínculo pero ya no lo muestran. */
+  /** Borrado lógico: la etiqueta deja de verse y de poder ponerse; los contactos conservan el vínculo pero ya no lo muestran. Se anuncia en el `TagChangeBus` (M7.3: GoHighLevel la elimina también). */
   async remove(id: string): Promise<{ id: string; deleted: true }> {
     await this.db.withTenant(async (tx) => {
       const [cur] = await tx.select().from(tags).where(and(eq(tags.id, id), isNull(tags.deletedAt))).for('update').limit(1);
@@ -72,6 +74,7 @@ export class TagsService {
       if (cur.isSystem) throw this.systemTag();
       await tx.update(tags).set({ deletedAt: new Date() }).where(eq(tags.id, id));
       await writeAudit(tx, { entityType: AUDIT, entityId: id, oldValue: { name: cur.name, color: cur.color }, source: 'manual' });
+      await this.bus.emitDeleted(tx, { tagName: cur.name, origin: 'local' }); // un canal externo (GoHighLevel) también la borra
     });
     return { id, deleted: true };
   }

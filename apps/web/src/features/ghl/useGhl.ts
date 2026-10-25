@@ -76,3 +76,37 @@ export function useGhlEvents(status: GhlEventFilter, limit: number) {
     queryFn: () => api<GhlEventList>(`/ghl/events?limit=${limit}${status ? `&status=${status}` : ''}`),
   });
 }
+
+export type GhlOutboxStatus = 'pending' | 'done' | 'skipped' | 'failed';
+export interface GhlOutboxItem {
+  id: string;
+  op: 'tag_add' | 'tag_remove' | 'tag_delete';
+  tag: string;
+  tag_kind: 'system' | 'custom';
+  status: GhlOutboxStatus;
+  contact: { id: string; name: string } | null;
+  note: string | null;
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+  processed_at: string | null;
+  can_retry: boolean;
+}
+export interface GhlOutboxList { items: GhlOutboxItem[]; next_cursor: string | null; counts: Record<string, number> }
+export type GhlOutboxFilter = GhlOutboxStatus | '';
+
+/** Etiquetas enviadas (o por enviar) a GoHighLevel. Se refrescan solas cada 10 s mientras la pantalla está abierta (el envío es asíncrono). */
+export function useGhlOutbox(status: GhlOutboxFilter, limit: number) {
+  return useQuery({
+    queryKey: ['ghl-outbox', status, limit],
+    retry: false,
+    placeholderData: keepPreviousData,
+    refetchInterval: 10_000,
+    queryFn: () => api<GhlOutboxList>(`/ghl/outbox?limit=${limit}${status ? `&status=${status}` : ''}`),
+  });
+}
+
+export function useRetryGhlOutbox() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (id: string) => api<{ id: string; status: 'pending' }>(`/ghl/outbox/${id}/retry`, { method: 'POST' }), onSettled: () => qc.invalidateQueries({ queryKey: ['ghl-outbox'] }) });
+}

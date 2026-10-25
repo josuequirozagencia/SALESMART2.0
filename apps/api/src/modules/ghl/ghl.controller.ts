@@ -1,9 +1,11 @@
-import { Body, Controller, Get, Header, HttpCode, Inject, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Put, Query } from '@nestjs/common';
+import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { GhlConnectionService } from './ghl-connection.service';
 import { GhlEventsService } from './ghl-events.service';
-import { eventsQuerySchema, saveConnectionSchema, type EventsQuery, type SaveConnectionDto } from './ghl.dto';
+import { GhlOutboxService } from './ghl-outbox.service';
+import { eventsQuerySchema, outboxQuerySchema, saveConnectionSchema, type EventsQuery, type OutboxQuery, type SaveConnectionDto } from './ghl.dto';
 
 /**
  * Conexión de la empresa con GoHighLevel (M7.1, ADR-52). Solo quien administra integraciones (`integrations.manage`); `no-store`: son credenciales. El token jamás se devuelve (solo sus
@@ -14,6 +16,7 @@ export class GhlController {
   constructor(
     @Inject(GhlConnectionService) private readonly ghl: GhlConnectionService,
     @Inject(GhlEventsService) private readonly events: GhlEventsService,
+    @Inject(GhlOutboxService) private readonly outbox: GhlOutboxService,
   ) {}
 
   @RequirePermission('integrations.manage')
@@ -63,5 +66,22 @@ export class GhlController {
   @Header('Cache-Control', 'no-store')
   eventsList(@Query(new ZodValidationPipe(eventsQuerySchema)) q: EventsQuery) {
     return this.events.list(q);
+  }
+
+  /** Cambios de etiqueta enviados (o por enviar) a GoHighLevel, con su estado y por qué se omitieron. */
+  @RequirePermission('integrations.manage')
+  @Get('outbox')
+  @Header('Cache-Control', 'no-store')
+  outboxList(@Query(new ZodValidationPipe(outboxQuerySchema)) q: OutboxQuery) {
+    return this.outbox.list(q);
+  }
+
+  /** Vuelve a poner en cola un cambio de etiqueta que falló. */
+  @RequirePermission('integrations.manage')
+  @Post('outbox/:id/retry')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  outboxRetry(@Param('id', new ZodValidationPipe(z.uuid())) id: string) {
+    return this.outbox.retry(id);
   }
 }

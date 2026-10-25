@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
 import { contactTags, Database, tags, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
+import { TagChangeBus } from './tag-change.bus';
 
 export type SystemTagKey = 'lead' | 'appointment' | 'sale';
 
@@ -31,7 +32,10 @@ export const toTagView = (r: TagRow): TagView => ({ id: r.id, name: r.name, colo
  */
 @Injectable()
 export class SystemTagsService {
-  constructor(@Inject(Database) private readonly db: Database) {}
+  constructor(
+    @Inject(Database) private readonly db: Database,
+    @Inject(TagChangeBus) private readonly bus: TagChangeBus,
+  ) {}
 
   /** Asegura las tres etiquetas de la empresa activa y devuelve su id por clave. */
   async ensure(tx: TenantTx): Promise<Map<SystemTagKey, string>> {
@@ -53,6 +57,7 @@ export class SystemTagsService {
     const inserted = await tx.insert(contactTags).values({ contactId, tagId, setBy: 'system' }).onConflictDoNothing().returning({ tagId: contactTags.tagId });
     if (inserted.length === 0) return false;
     await writeAudit(tx, { entityType: 'contact', entityId: contactId, field: 'tag', oldValue: null, newValue: key, source: 'automation' });
+    await this.bus.emit(tx, { contactId, tagName: SYSTEM_TAGS[key].name, tagKind: 'system', op: 'add', origin: 'local' });
     return true;
   }
 

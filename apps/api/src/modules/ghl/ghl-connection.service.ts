@@ -198,10 +198,12 @@ export class GhlConnectionService {
       await tx.update(ghlConnections).set({ lastError: null, lastCheckAt: now, updatedAt: now }).where(eq(ghlConnections.id, connectionId));
       return;
     }
+    const [before] = await tx.select({ status: ghlConnections.status }).from(ghlConnections).where(eq(ghlConnections.id, connectionId)).limit(1);
     await tx
       .update(ghlConnections)
       .set({ lastError: outcome.message.slice(0, 300), lastCheckAt: now, updatedAt: now, ...(outcome.credentials ? { status: 'needs_reconnect' } : {}) })
       .where(eq(ghlConnections.id, connectionId));
+    if (outcome.credentials && before && before.status !== 'needs_reconnect') await writeAudit(tx, { entityType: 'ghl_connection', entityId: connectionId, field: 'status', oldValue: before.status, newValue: 'needs_reconnect', source: 'ghl' });
   }
 
   // ------------------------------------------------------------------ interno

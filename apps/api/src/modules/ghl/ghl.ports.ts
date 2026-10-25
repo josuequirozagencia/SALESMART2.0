@@ -22,6 +22,13 @@ export class GhlError extends Error {
   }
 }
 
+/** Datos con que se busca o crea un contacto en GHL (se empareja por teléfono o correo, según la configuración de duplicados de la Location). */
+export interface GhlContactInput {
+  name: string | null;
+  phone: string | null;
+  email: string | null;
+}
+
 export interface GhlProvider {
   /** `none` = sin adaptador configurado. */
   readonly kind: 'none' | 'fake' | 'ghl';
@@ -29,6 +36,14 @@ export interface GhlProvider {
   readonly requiresCredentials: boolean;
   /** Comprueba que el token funciona y alcanza la Location. Devuelve el nombre de la Location si GHL lo informa. Lanza `GhlError`. */
   verify(credentials: GhlCredentials): Promise<{ name: string | null }>;
+  /** Agrega etiquetas a un contacto de GHL (idempotente: si ya las tiene no pasa nada). Lanza `GhlError`. */
+  addTags(credentials: GhlCredentials, ghlContactId: string, tags: readonly string[]): Promise<void>;
+  /** Quita etiquetas de un contacto de GHL (idempotente: si no las tiene no pasa nada). Lanza `GhlError`. */
+  removeTags(credentials: GhlCredentials, ghlContactId: string, tags: readonly string[]): Promise<void>;
+  /** Crea el contacto en GHL o actualiza el que ya coincide, y devuelve su identificador. Lanza `GhlError`. */
+  upsertContact(credentials: GhlCredentials, input: GhlContactInput): Promise<{ id: string; created: boolean }>;
+  /** Elimina de la Location la etiqueta con ese nombre (sin distinguir mayúsculas), con lo que desaparece de todos sus contactos. Si no existe no hace nada (`deleted: false`). Lanza `GhlError`. */
+  deleteTag(credentials: GhlCredentials, name: string): Promise<{ deleted: boolean }>;
 }
 
 export const GHL_PROVIDER = Symbol('GHL_PROVIDER');
@@ -38,6 +53,18 @@ export class NoGhlProvider implements GhlProvider {
   readonly kind = 'none' as const;
   readonly requiresCredentials = false;
   verify(): Promise<{ name: string | null }> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  addTags(): Promise<void> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  removeTags(): Promise<void> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  upsertContact(): Promise<{ id: string; created: boolean }> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  deleteTag(): Promise<{ deleted: boolean }> {
     return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
   }
 }

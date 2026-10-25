@@ -6,3 +6,6 @@ export { PrivateTokenProvider, GHL_API_VERSION } from './private-token.provider'
 export { GhlEventsJob, GHL_MAX_BATCHES_PER_RUN } from './ghl-events.job';
 export { GhlEventsService, GHL_EVENT_BATCH, GHL_EVENT_MAX_ATTEMPTS, GHL_PAYLOAD_RETENTION_DAYS, type GhlEventView, type GhlEventStatus } from './ghl-events.service';
 export { normalizeGhlPayload, dedupeKeyOf, type GhlEventPayload, type GhlEventType } from './ghl-event';
+export { GhlOutboxJob, GHL_OUTBOX_MAX_BATCHES_PER_RUN } from './ghl-outbox.job';
+export { GhlOutboxService, GHL_OUTBOX_BATCH, GHL_OUTBOX_MAX_ATTEMPTS, type GhlOutboxView, type GhlOutboxStatus } from './ghl-outbox.service';
+export type { FakeGhlCall } from './ghl.fake';

@@ -3,8 +3,11 @@ import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { ContactsModule } from '../contacts';
 import { OrganizationsModule } from '../organizations';
+import { TagsModule } from '../tags';
 import { GhlConnectionService } from './ghl-connection.service';
 import { GhlEventsJob } from './ghl-events.job';
+import { GhlOutboxJob } from './ghl-outbox.job';
+import { GhlOutboxService } from './ghl-outbox.service';
 import { GhlEventsService } from './ghl-events.service';
 import { GhlWebhookController } from './ghl-webhook.controller';
 import { GhlWebhookService } from './ghl-webhook.service';
@@ -25,18 +28,20 @@ export class GhlModule {
     if (!opts.provider && GhlModule.standard) return GhlModule.standard;
     const mod: DynamicModule = {
       module: GhlModule,
-      imports: [OrganizationsModule, ContactsModule],
+      imports: [OrganizationsModule, ContactsModule, TagsModule],
       controllers: [GhlController, GhlWebhookController],
       providers: [
         GhlConnectionService,
         GhlEventsService,
         GhlWebhookService,
         GhlEventsJob,
+        GhlOutboxService,
+        GhlOutboxJob,
         opts.provider
           ? { provide: GHL_PROVIDER, useValue: opts.provider }
           : { provide: GHL_PROVIDER, useFactory: (cfg: AppConfig): GhlProvider => (cfg.channels.ghlProvider === 'ghl' ? new PrivateTokenProvider() : cfg.channels.ghlProvider === 'fake' ? new FakeGhlProvider() : new NoGhlProvider()), inject: [APP_CONFIG] },
       ],
-      exports: [GhlConnectionService, GhlEventsService, GhlEventsJob],
+      exports: [GhlConnectionService, GhlEventsService, GhlEventsJob, GhlOutboxService, GhlOutboxJob],
     };
     if (!opts.provider) GhlModule.standard = mod;
     return mod;

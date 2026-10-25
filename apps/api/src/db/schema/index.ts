@@ -19,5 +19,5 @@ export { appointments, appointmentReminders } from './appointments';
 export { metaSettings } from './meta';
 export { analyticsSettings, analyticsExports } from './analytics';
 export { ghlConnections } from './ghl';
-export { ghlEvents, ghlContactLinks } from './ghl-events';
+export { ghlEvents, ghlContactLinks, ghlOutbox } from './ghl-events';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';

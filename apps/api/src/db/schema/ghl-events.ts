@@ -61,6 +61,9 @@ export const ghlContactLinks = tenantTable(
     id: uuid('id').primaryKey().$defaultFn(uuidv7),
     ghlContactId: text('ghl_contact_id').notNull(),
     contactId: uuid('contact_id').notNull(),
+    /** Estado de sincronización de etiquetas (M7.3, anti-eco): las etiquetas del contacto en GHL la última vez que lo supimos, en minúsculas. Nulo = aún no se sabe. */
+    tags: jsonb('tags').$type<string[]>(),
+    tagsAt: ts('tags_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -68,5 +71,45 @@ export const ghlContactLinks = tenantTable(
     check('ghl_contact_links_ghl_id_shape', sql`length(${t['ghlContactId']!}) BETWEEN 1 AND 100`),
     uniqueIndex('ghl_contact_links_ghl_uq').on(t['organizationId']!, t['ghlContactId']!),
     uniqueIndex('ghl_contact_links_contact_uq').on(t['organizationId']!, t['contactId']!),
+    check('ghl_contact_links_tags_array', sql`${t['tags']!} IS NULL OR jsonb_typeof(${t['tags']!}) = 'array'`),
+  ],
+);
+
+/**
+ * Salida hacia GoHighLevel (M7.3, ADR-52): cada etiqueta que se pone o se quita de un contacto —y cada etiqueta que se BORRA— aquí y que GHL debe reflejar. Se escribe en la MISMA transacción que el cambio de etiqueta (nunca se pierde) y
+ * la tarea la envía en orden por contacto, con reintentos. Un cambio que VINO de GHL no entra aquí (anti-eco). Estados: `pending` · `done` · `skipped` (con su `note`) · `failed`. Sin DELETE.
+ */
+export const ghlOutbox = tenantTable(
+  'ghl_outbox',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    /** Nulo solo en `tag_delete` (borrar la etiqueta en GHL no es de un contacto). */
+    contactId: uuid('contact_id'),
+    op: text('op').notNull(),
+    tagName: text('tag_name').notNull(),
+    tagKind: text('tag_kind').notNull(),
+    status: text('status').notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
+    /** Solo códigos y nombres de error: nunca un teléfono ni un correo. */
+    lastError: text('last_error'),
+    /** Texto para el administrador (por qué se omitió). */
+    note: text('note'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    processedAt: ts('processed_at'),
+  },
+  (t) => [
+    foreignKey({ name: 'ghl_outbox_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('ghl_outbox_op_valid', sql`${t['op']!} IN ('tag_add', 'tag_remove', 'tag_delete')`),
+    check('ghl_outbox_contact_by_op', sql`(${t['op']!} = 'tag_delete' AND ${t['contactId']!} IS NULL) OR (${t['op']!} <> 'tag_delete' AND ${t['contactId']!} IS NOT NULL)`),
+    check('ghl_outbox_kind_valid', sql`${t['tagKind']!} IN ('system', 'custom')`),
+    check('ghl_outbox_status_valid', sql`${t['status']!} IN ('pending', 'done', 'skipped', 'failed')`),
+    check('ghl_outbox_tag_shape', sql`length(btrim(${t['tagName']!})) BETWEEN 1 AND 100`),
+    check('ghl_outbox_attempts_valid', sql`${t['attempts']!} >= 0`),
+    check('ghl_outbox_note_len', sql`${t['note']!} IS NULL OR length(${t['note']!}) <= 200`),
+    check('ghl_outbox_error_len', sql`${t['lastError']!} IS NULL OR length(${t['lastError']!}) <= 300`),
+    index('ghl_outbox_due_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'pending'`),
+    index('ghl_outbox_contact_idx').on(t['organizationId']!, t['contactId']!, t['createdAt']!, t['id']!).where(sql`${t['status']!} = 'pending'`),
+    index('ghl_outbox_recent_idx').on(t['organizationId']!, t['createdAt']!, t['id']!),
   ],
 );

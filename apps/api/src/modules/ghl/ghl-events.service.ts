@@ -1,10 +1,12 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNotNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
-import { contacts, Database, ghlContactLinks, ghlEvents, type TenantTx } from '../../db';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
+import { contactTags, contacts, Database, ghlContactLinks, ghlEvents, ghlOutbox, tags as tagsTable, type TenantTx } from '../../db';
 import { ValidationError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
+import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
+import { ContactTaggingService } from '../tags';
 import type { GhlEventPayload } from './ghl-event';
 
 export const GHL_EVENT_BATCH = 20;
@@ -17,7 +19,7 @@ const MAX_BACKOFF_MS = 10 * 60_000;
 type EventRow = typeof ghlEvents.$inferSelect;
 export type GhlEventStatus = 'pending' | 'done' | 'skipped' | 'failed';
 type Outcome = 'contact_created' | 'contact_linked' | 'contact_updated' | 'contact_unchanged';
-type Processed = { status: 'done'; outcome: Outcome; contactId: string } | { status: 'skipped'; note: string };
+type Processed = { status: 'done'; outcome: Outcome; contactId: string; note?: string | null } | { status: 'skipped'; note: string };
 
 export interface GhlEventView {
   id: string;
@@ -53,6 +55,7 @@ export class GhlEventsService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -103,7 +106,7 @@ export class GhlEventsService {
       await tx.execute(sql`ROLLBACK TO SAVEPOINT ghl_event`);
     }
     if (failure === null && result) {
-      if (result.status === 'done') await tx.update(ghlEvents).set({ status: 'done', outcome: result.outcome, contactId: result.contactId, attempts, processedAt: now, lastError: null, note: null }).where(eq(ghlEvents.id, ev.id));
+      if (result.status === 'done') await tx.update(ghlEvents).set({ status: 'done', outcome: result.outcome, contactId: result.contactId, attempts, processedAt: now, lastError: null, note: result.note ?? null }).where(eq(ghlEvents.id, ev.id));
       else await tx.update(ghlEvents).set({ status: 'skipped', note: result.note.slice(0, 200), attempts, processedAt: now, lastError: null }).where(eq(ghlEvents.id, ev.id));
       return;
     }
@@ -121,7 +124,7 @@ export class GhlEventsService {
     // Un aviso sin contenido (ya vaciado) no tiene nada que procesar
     if (!ev.payload) return { status: 'skipped', note: 'El contenido del aviso ya se había vaciado' };
     if (ev.eventType === 'message_in') return { status: 'skipped', note: 'Los mensajes entrantes de GoHighLevel se procesan en una versión posterior' };
-    const p = ev.payload as { name: string | null; phone: string | null; phone_invalid: boolean; email: string | null };
+    const p = ev.payload as { name: string | null; phone: string | null; phone_invalid: boolean; email: string | null; tags?: string[] | null };
     const ghlId = ev.ghlContactId;
 
     // 1) ¿ya está vinculado? (y su contacto sigue vigente)
@@ -145,7 +148,59 @@ export class GhlEventsService {
     }
     // 3) completar nombre y correo sin pisar lo que ya hay
     const changed = await this.contacts.completeProfile(tx, contactId, { name: p.name, email: p.email }, 'ghl');
-    return { status: 'done', outcome: outcome ?? (changed ? 'contact_updated' : 'contact_unchanged'), contactId };
+    // 4) etiquetas: solo si el aviso las trae (una lista vacía significa «sin etiquetas»; la ausencia, «no se informó»)
+    const tagged = p.tags ? await this.reconcileTags(tx, ghlId, contactId, p.tags) : null;
+    return { status: 'done', outcome: outcome ?? (changed || tagged?.changed ? 'contact_updated' : 'contact_unchanged'), contactId, note: tagged?.note ?? null };
+  }
+
+  /**
+   * Refleja en el contacto las etiquetas que GHL dice que tiene (M7.3, anti-eco). Se compara con lo último que se supo de GHL (`ghl_contact_links.tags`): lo nuevo se agrega y lo que ya no está se quita,
+   * SOLO entre las etiquetas personalizadas que existen aquí con ese nombre (sin distinguir mayúsculas; las del sistema nunca se tocan y las desconocidas se ignoran). Lo que se aplica se anuncia con
+   * origen `ghl`, así que NO vuelve a salir hacia GHL. Una etiqueta con un cambio nuestro todavía por enviar no se toca (el aviso de GHL puede ser anterior a ese cambio). La primera vez que se
+   * ve un contacto no hay con qué comparar: solo se agrega, nunca se quita.
+   */
+  private async reconcileTags(tx: TenantTx, ghlId: string, contactId: string, snapshot: readonly string[]): Promise<{ changed: boolean; note: string | null }> {
+    const snap = [...new Set(snapshot.map((t) => t.toLowerCase()))];
+    const [link] = await tx.select({ id: ghlContactLinks.id, tags: ghlContactLinks.tags }).from(ghlContactLinks).where(eq(ghlContactLinks.ghlContactId, ghlId)).limit(1);
+    const prev = link?.tags ?? null;
+    const custom = await tx.select({ id: tagsTable.id, name: tagsTable.name }).from(tagsTable).where(and(eq(tagsTable.isSystem, false), isNull(tagsTable.deletedAt)));
+    const byName = new Map(custom.map((t) => [t.name.toLowerCase(), t]));
+    const mine = new Set((await tx.select({ id: contactTags.tagId }).from(contactTags).where(eq(contactTags.contactId, contactId))).map((r) => r.id));
+    const pending = new Set((await tx.select({ name: ghlOutbox.tagName }).from(ghlOutbox).where(and(eq(ghlOutbox.contactId, contactId), eq(ghlOutbox.status, 'pending')))).map((r) => r.name.toLowerCase()));
+
+    const added = prev ? snap.filter((t) => !prev.includes(t)) : snap;
+    const removed = prev ? prev.filter((t) => !snap.includes(t)) : [];
+    let unmatched = 0;
+    const toAdd: string[] = [];
+    const toRemove: string[] = [];
+    for (const name of added) {
+      if (pending.has(name)) continue;
+      const t = byName.get(name);
+      if (!t) unmatched += 1;
+      else if (!mine.has(t.id)) toAdd.push(t.id);
+    }
+    for (const name of removed) {
+      if (pending.has(name)) continue;
+      const t = byName.get(name);
+      if (t && mine.has(t.id)) toRemove.push(t.id);
+    }
+    let changed = false;
+    let counts: { added: string[]; removed: string[] } = { added: [], removed: [] };
+    if (toAdd.length > 0 || toRemove.length > 0) {
+      const nameOf = new Map(custom.map((t) => [t.id, t.name]));
+      const before = [...mine].filter((id) => nameOf.has(id)).map((id) => nameOf.get(id)!).sort((a, b) => a.localeCompare(b));
+      counts = await this.tagging.applyExternal(tx, contactId, { add: toAdd, remove: toRemove }, 'ghl');
+      changed = counts.added.length > 0 || counts.removed.length > 0;
+      if (changed) {
+        const after = [...before.filter((n) => !counts.removed.includes(n)), ...counts.added].sort((a, b) => a.localeCompare(b));
+        await writeAudit(tx, { entityType: 'contact', entityId: contactId, field: 'tags', oldValue: before, newValue: after, source: 'ghl' });
+      }
+    }
+    if (link) await tx.update(ghlContactLinks).set({ tags: snap, tagsAt: new Date() }).where(eq(ghlContactLinks.id, link.id));
+    const parts: string[] = [];
+    if (counts.added.length > 0 || counts.removed.length > 0) parts.push(`Etiquetas: ${counts.added.length} agregada(s), ${counts.removed.length} quitada(s)`);
+    if (unmatched > 0) parts.push(`${unmatched} etiqueta(s) de GoHighLevel sin equivalente aquí`);
+    return { changed, note: parts.length > 0 ? parts.join('; ') : null };
   }
 
   /** Vacía el contenido de los avisos ya terminados con más de 30 días (minimización de datos personales): la fila queda como registro. */

@@ -25,7 +25,8 @@ export interface GhlEventPayload {
   /** Vino un teléfono pero no se pudo entender (para explicarlo en el panel). */
   phoneInvalid: boolean;
   email: string | null;
-  tags: string[];
+  /** Las etiquetas del contacto en GHL en ese momento; null si el aviso NO las mandó (distinto de una lista vacía: «sin etiquetas»). */
+  tags: string[] | null;
   locationId: string | null;
   eventId: string | null;
 }
@@ -66,6 +67,9 @@ function tagList(v: unknown): string[] {
   return out;
 }
 
+/** null si el aviso no trae el campo; si lo trae (aunque vacío) es la lista completa de etiquetas del contacto. */
+const tagsOf = (v: unknown): string[] | null => (Array.isArray(v) || typeof v === 'string' ? tagList(v) : null);
+
 /** Valida y normaliza el cuerpo de un aviso. Devuelve los problemas del contrato (nada de datos personales en ellos) o el aviso listo para guardar. */
 export function normalizeGhlPayload(body: unknown): { ok: true; event: GhlEventPayload } | { ok: false; issues: GhlEventIssue[] } {
   if (!isObject(body)) return { ok: false, issues: [{ path: 'body', code: 'invalid_type', message: 'El cuerpo debe ser un objeto JSON' }] };
@@ -104,7 +108,7 @@ export function normalizeGhlPayload(body: unknown): { ok: true; event: GhlEventP
       phone: phoneOk ? phone : null,
       phoneInvalid: phoneRaw !== null && !phoneOk,
       email,
-      tags: tagList(top('tags') ?? contact['tags']),
+      tags: tagsOf(top('tags') ?? contact['tags']),
       locationId,
       eventId,
     },
@@ -117,6 +121,6 @@ export const DEDUPE_WINDOW_MS = 10 * 60_000;
 /** Clave para no procesar dos veces el mismo aviso: el `event_id` que mande el Workflow o, si no, la huella del contenido dentro de la ventana de 10 minutos. */
 export function dedupeKeyOf(e: GhlEventPayload, now: Date): string {
   if (e.eventId) return `id:${e.eventId}`;
-  const canonical = JSON.stringify([e.type, e.ghlContactId, e.name, e.phone, e.email, [...e.tags].sort(), Math.floor(now.getTime() / DEDUPE_WINDOW_MS)]);
+  const canonical = JSON.stringify([e.type, e.ghlContactId, e.name, e.phone, e.email, e.tags === null ? null : [...e.tags].sort(), Math.floor(now.getTime() / DEDUPE_WINDOW_MS)]);
   return `h:${createHash('sha256').update(canonical).digest('hex')}`;
 }

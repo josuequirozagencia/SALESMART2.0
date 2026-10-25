@@ -8,7 +8,7 @@ import { CREDS, ghlProviderContract } from './ghl.contract';
 
 const TOKEN = 'pit-11111111-2222-3333-4444-555555555555';
 const creds = { ...CREDS, accessToken: TOKEN };
-interface Seen { method: string; url: string; auth: string | undefined; version: string | undefined }
+interface Seen { method: string; url: string; auth: string | undefined; version: string | undefined; contentType: string | undefined; body: unknown }
 
 let server: Server;
 let origin = '';
@@ -22,8 +22,13 @@ const json = (res: ServerResponse, status: number, body: unknown) => {
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    seen.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers['authorization'], version: req.headers['version'] as string | undefined });
-    reply(req, res);
+    const chunks: Buffer[] = [];
+    req.on('data', (c: Buffer) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString();
+      seen.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers['authorization'], version: req.headers['version'] as string | undefined, contentType: req.headers['content-type'], body: raw ? (JSON.parse(raw) as unknown) : null });
+      reply(req, res);
+    });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
   origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -45,21 +50,24 @@ describe('contract test del puerto GhlProvider', () => {
   it('lo cumple el fake', async () => {
     await ghlProviderContract(() => {
       const fake = new FakeGhlProvider();
-      return { provider: fake, failNext: (e) => fake.failNextVerify(e) };
+      return { provider: fake, failNext: (e) => fake.failNextVerify(e), failNextCall: (e) => fake.failNextCall(e) };
     });
   });
 
   it('lo cumple el adaptador real contra el servidor simulado', async () => {
     let next: GhlError | null = null;
     await ghlProviderContract(() => {
-      reply = (_q, res) => {
+      reply = (req, res) => {
         const e = next;
         next = null;
-        if (!e) return json(res, 200, { contacts: [] });
-        if (e.credentials) return json(res, 401, { message: e.message });
-        return json(res, 429, { message: e.message });
+        if (e) return e.credentials ? json(res, 401, { message: e.message }) : e.retryable ? json(res, 429, { message: e.message }) : json(res, 422, { message: e.message });
+        if (req.url?.startsWith('/contacts/upsert')) return json(res, 200, { new: true, contact: { id: 'ghlContact0001' } });
+        if (req.url?.startsWith('/locations/') && req.method === 'GET') return json(res, 200, { tags: [{ id: 'tagVip000001', name: 'VIP', locationId: creds.locationId }] });
+        if (req.url?.startsWith('/locations/') && req.method === 'DELETE') return json(res, 200, { succeded: true });
+        if (req.url?.includes('/tags')) return json(res, 200, { tags: [] });
+        return json(res, 200, { contacts: [] });
       };
-      return { provider: provider(), failNext: (e) => { next = e; } };
+      return { provider: provider(), failNext: (e) => { next = e; }, failNextCall: (e) => { next = e; } };
     });
   });
 });
@@ -135,5 +143,147 @@ describe('PrivateTokenProvider · verify', () => {
     const redirected = await fail(provider().verify(creds));
     expect(redirected).toMatchObject({ retryable: true });
     expect(seen.filter((s) => s.url.includes('robado'))).toHaveLength(0);
+  });
+});
+
+describe('PrivateTokenProvider · etiquetas y contactos', () => {
+  const CONTACT = 'abc123XYZ789';
+
+  it('agregar etiquetas: POST /contacts/{id}/tags con la lista en el cuerpo y el token en la cabecera', async () => {
+    reply = (_q, res) => json(res, 201, { tags: ['vip'] });
+    await expect(provider().addTags(creds, CONTACT, ['vip', 'nuevo'])).resolves.toBeUndefined();
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'POST', url: `/contacts/${CONTACT}/tags`, auth: `Bearer ${TOKEN}`, version: GHL_API_VERSION, contentType: 'application/json', body: { tags: ['vip', 'nuevo'] } });
+    expect(seen[0]!.url).not.toContain(TOKEN);
+  });
+
+  it('quitar etiquetas: DELETE /contacts/{id}/tags con la lista en el cuerpo', async () => {
+    reply = (_q, res) => json(res, 200, { tags: [] });
+    await provider().removeTags(creds, CONTACT, ['vip']);
+    expect(seen[0]).toMatchObject({ method: 'DELETE', url: `/contacts/${CONTACT}/tags`, body: { tags: ['vip'] } });
+  });
+
+  it('las etiquetas se limpian: sin repetidas, sin caracteres de control, acotadas a 100 y a 50 por llamada; sin ninguna no hay llamada', async () => {
+    await provider().addTags(creds, CONTACT, ['a', 'a', '  b c ', 'x'.repeat(300), ...Array.from({ length: 80 }, (_, i) => `t${i}`)]);
+    const tags = (seen[0]!.body as { tags: string[] }).tags;
+    expect(tags).toHaveLength(50);
+    expect(tags.slice(0, 2)).toEqual(['a', 'b  c']);
+    expect(tags[2]).toHaveLength(100);
+    seen.length = 0;
+    for (const none of [[], [''], ['   ']]) expect(await fail(provider().addTags(creds, CONTACT, none))).toMatchObject({ retryable: false, credentials: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('un identificador de contacto con forma inválida no sale a la red (no se arma una dirección con texto ajeno)', async () => {
+    for (const id of ['../../me', 'a/b', 'corto', 'con espacio1234', 'x'.repeat(65), 'a?b=1&c=22222', '']) {
+      expect(await fail(provider().addTags(creds, id, ['vip'])), id).toMatchObject({ retryable: false, credentials: false });
+      expect(await fail(provider().removeTags(creds, id, ['vip'])), id).toMatchObject({ retryable: false });
+    }
+    expect(seen).toHaveLength(0);
+  });
+
+  it('401 y 403 son credenciales; un 404 sobre un contacto es «el contacto no existe» (definitivo, sin culpar al token); 429 y 5xx se reintentan', async () => {
+    for (const status of [401, 403]) {
+      reply = (_q, res) => json(res, status, { message: 'Invalid token' });
+      expect(await fail(provider().addTags(creds, CONTACT, ['vip'])), String(status)).toMatchObject({ retryable: false, credentials: true });
+    }
+    reply = (_q, res) => json(res, 404, { message: 'Contact not found' });
+    const gone = await fail(provider().removeTags(creds, CONTACT, ['vip']));
+    expect(gone).toMatchObject({ retryable: false, credentials: false });
+    expect(gone.message).toContain('no encuentra el contacto');
+    for (const status of [429, 500, 503]) {
+      reply = (_q, res) => json(res, status, { message: 'later' });
+      expect(await fail(provider().addTags(creds, CONTACT, ['vip'])), String(status)).toMatchObject({ retryable: true, credentials: false });
+    }
+  });
+
+  it('crear o actualizar contacto: POST /contacts/upsert con la Location y solo los datos que hay; devuelve el id y si es nuevo', async () => {
+    reply = (_q, res) => json(res, 200, { new: true, contact: { id: 'newContact0001', name: 'Ana' }, traceId: 't' });
+    expect(await provider().upsertContact(creds, { name: 'Ana Torres', phone: '+593984217730', email: null })).toEqual({ id: 'newContact0001', created: true });
+    expect(seen[0]).toMatchObject({ method: 'POST', url: '/contacts/upsert', auth: `Bearer ${TOKEN}`, body: { locationId: creds.locationId, name: 'Ana Torres', phone: '+593984217730' } });
+    expect(seen[0]!.body).not.toHaveProperty('email');
+    reply = (_q, res) => json(res, 200, { new: false, contact: { id: 'oldContact0002' } });
+    expect(await provider().upsertContact(creds, { name: null, phone: null, email: 'ana@correo.test' })).toEqual({ id: 'oldContact0002', created: false });
+    expect(seen[1]!.body).toEqual({ locationId: creds.locationId, email: 'ana@correo.test' });
+  });
+
+  it('sin teléfono ni correo no se llama; una respuesta sin identificador válido es pasajera; los errores son los mismos', async () => {
+    expect(await fail(provider().upsertContact(creds, { name: 'Ana', phone: null, email: null }))).toMatchObject({ retryable: false });
+    expect(seen).toHaveLength(0);
+    for (const body of [{}, { contact: {} }, { contact: { id: 5 } }, { contact: { id: '../x' } }]) {
+      reply = (_q, res) => json(res, 200, body);
+      expect(await fail(provider().upsertContact(creds, { name: null, phone: '+593984217730', email: null })), JSON.stringify(body)).toMatchObject({ retryable: true });
+    }
+    reply = (_q, res) => json(res, 401, { message: 'x' });
+    expect(await fail(provider().upsertContact(creds, { name: null, phone: '+593984217730', email: null }))).toMatchObject({ credentials: true });
+  });
+
+  it('ningún error de estas llamadas filtra el token, un teléfono ni un correo aunque GHL los repita', async () => {
+    reply = (_q, res) => json(res, 422, { message: [`phone +593 98 421-7730 invalid for ${TOKEN}`, 'email ana@correo.test duplicado'] });
+    const e = await fail(provider().upsertContact(creds, { name: 'Ana', phone: '+593984217730', email: 'ana@correo.test' }));
+    expect(e.message).not.toContain(TOKEN);
+    expect(e.message).not.toMatch(/593|98 421|ana@correo/);
+    expect(e.message).toContain('[token]');
+    expect(e.message).toContain('[correo]');
+    expect(e.message).toContain('[número]');
+  });
+});
+
+describe('PrivateTokenProvider · borrar etiquetas de la Location', () => {
+  const LIST = { tags: [{ id: 'tagAbc000001', name: 'Nuevo', locationId: 'x' }, { id: 'tagVip000002', name: ' VIP ', locationId: 'x' }] };
+
+  it('busca la etiqueta por nombre (sin distinguir mayúsculas ni espacios de los bordes) y la borra por su identificador', async () => {
+    reply = (req, res) => (req.method === 'GET' ? json(res, 200, LIST) : json(res, 200, { succeded: true }));
+    expect(await provider().deleteTag(creds, 'vip')).toEqual({ deleted: true });
+    expect(seen.map((s) => [s.method, s.url])).toEqual([['GET', `/locations/${creds.locationId}/tags`], ['DELETE', `/locations/${creds.locationId}/tags/tagVip000002`]]);
+    expect(seen.every((s) => s.auth === `Bearer ${TOKEN}` && s.version === GHL_API_VERSION)).toBe(true);
+    expect(seen.every((s) => !s.url.includes(TOKEN))).toBe(true);
+  });
+
+  it('si GoHighLevel no tiene la etiqueta, no hay nada que borrar y no se llama a DELETE', async () => {
+    reply = (_q, res) => json(res, 200, LIST);
+    expect(await provider().deleteTag(creds, 'Otra')).toEqual({ deleted: false });
+    expect(seen.map((s) => s.method)).toEqual(['GET']);
+    reply = (_q, res) => json(res, 200, {});
+    expect(await provider().deleteTag(creds, 'VIP')).toEqual({ deleted: false });
+  });
+
+  it('si otro la borró entre la búsqueda y el borrado (404) cuenta como ya borrada', async () => {
+    reply = (req, res) => (req.method === 'GET' ? json(res, 200, LIST) : json(res, 404, { message: 'Tag not found' }));
+    expect(await provider().deleteTag(creds, 'VIP')).toEqual({ deleted: false });
+  });
+
+  it('un 403 es «falta el permiso de etiquetas» (definitivo, SIN culpar al token); un 401 sí es de credenciales; 429 y 5xx se reintentan', async () => {
+    reply = (_q, res) => json(res, 403, { message: 'Forbidden' });
+    const noScope = await fail(provider().deleteTag(creds, 'VIP'));
+    expect(noScope).toMatchObject({ retryable: false, credentials: false });
+    expect(noScope.message).toContain('permiso');
+    reply = (_q, res) => json(res, 401, { message: 'Invalid token' });
+    expect(await fail(provider().deleteTag(creds, 'VIP'))).toMatchObject({ retryable: false, credentials: true });
+    for (const status of [429, 500, 503]) {
+      reply = (_q, res) => json(res, status, { message: 'later' });
+      expect(await fail(provider().deleteTag(creds, 'VIP')), String(status)).toMatchObject({ retryable: true, credentials: false });
+    }
+    // un 403 al BORRAR (permiso de escritura que falta) también es de permiso
+    reply = (req, res) => (req.method === 'GET' ? json(res, 200, LIST) : json(res, 403, { message: 'Forbidden' }));
+    expect(await fail(provider().deleteTag(creds, 'VIP'))).toMatchObject({ retryable: false, credentials: false });
+  });
+
+  it('una lista rota o un identificador raro es pasajero y nunca arma una dirección con texto ajeno', async () => {
+    reply = (_q, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('no es json');
+    };
+    expect(await fail(provider().deleteTag(creds, 'VIP'))).toMatchObject({ retryable: true });
+    seen.length = 0;
+    reply = (_q, res) => json(res, 200, { tags: [{ id: '../../me', name: 'VIP' }] });
+    expect(await fail(provider().deleteTag(creds, 'VIP'))).toMatchObject({ retryable: true });
+    expect(seen.map((s) => s.method)).toEqual(['GET']); // no llegó a DELETE
+  });
+
+  it('un nombre vacío no sale a la red; una Location inválida tampoco', async () => {
+    for (const name of ['', '   ']) expect(await fail(provider().deleteTag(creds, name))).toMatchObject({ retryable: false });
+    expect(await fail(provider().deleteTag({ ...creds, locationId: '../x' }, 'VIP'))).toMatchObject({ retryable: false, credentials: true });
+    expect(seen).toHaveLength(0);
   });
 });

@@ -22,3 +22,6 @@ export const eventsQuerySchema = z
   })
   .strict();
 export type EventsQuery = z.infer<typeof eventsQuerySchema>;
+
+export const outboxQuerySchema = eventsQuerySchema;
+export type OutboxQuery = EventsQuery;

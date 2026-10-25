@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GhlConnection, GhlEvent, GhlStatus } from '../src/features/ghl/useGhl';
+import type { GhlConnection, GhlEvent, GhlOutboxItem, GhlStatus } from '../src/features/ghl/useGhl';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -16,7 +16,9 @@ const hooked = { configured: true, id: ID, path: `/v1/integrations/ghl/webhook/$
 
 const event = (over: Partial<GhlEvent> = {}): GhlEvent => ({ id: 'e1', type: 'contact', ghl_contact_id: 'GHL-ANA', status: 'done', outcome: 'contact_created', note: null, contact: { id: 'k1', name: 'Ana Torres' }, attempts: 1, last_error: null, received_at: NOW, processed_at: NOW, ...over });
 
-interface World { events?: GhlEvent[]; statusQueries?: string[]; conn: GhlConnection; calls: Array<{ method: string; path: string; body: unknown }>; saveFails?: () => ReturnType<Handler>; testFails?: boolean }
+const out = (over: Partial<GhlOutboxItem> = {}): GhlOutboxItem => ({ id: 'o1', op: 'tag_add', tag: 'VIP', tag_kind: 'custom', status: 'done', contact: { id: 'k1', name: 'Ana Torres' }, note: null, attempts: 1, last_error: null, created_at: NOW, processed_at: NOW, can_retry: false, ...over });
+
+interface World { outbox?: GhlOutboxItem[]; outboxQueries?: string[]; retries?: string[]; events?: GhlEvent[]; statusQueries?: string[]; conn: GhlConnection; calls: Array<{ method: string; path: string; body: unknown }>; saveFails?: () => ReturnType<Handler>; testFails?: boolean }
 const world = (conn: GhlConnection = none(), over: Partial<World> = {}): World => ({ conn, calls: [], ...over });
 const reject = (message: string) => err(400, 'VALIDATION_ERROR', 'x', { body: { error: { code: 'VALIDATION_ERROR', message: 'x', request_id: 'r', details: [{ path: 'access_token', code: 'rejected', message }] } } });
 
@@ -25,6 +27,8 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
   return {
     ...authed(me),
     'GET /ghl/connection': () => ({ body: w.conn }),
+    'GET /ghl/outbox': (c) => { (w.outboxQueries ??= []).push(c.query.get('status') ?? ''); const st = c.query.get('status'); const items = (w.outbox ?? []).filter((o) => !st || o.status === st); const counts: Record<string, number> = {}; for (const o of w.outbox ?? []) counts[o.status] = (counts[o.status] ?? 0) + 1; return { body: { items, next_cursor: null, counts } }; },
+    'POST /ghl/outbox/o2/retry': () => { w.retries = [...(w.retries ?? []), 'o2']; w.outbox = (w.outbox ?? []).map((o) => (o.id === 'o2' ? { ...o, status: 'pending', can_retry: false, last_error: null } : o)); return { body: { id: 'o2', status: 'pending' } }; },
     'GET /ghl/events': (c) => { (w.statusQueries ??= []).push(c.query.get('status') ?? ''); const st = c.query.get('status'); return { body: { items: (w.events ?? []).filter((e) => !st || e.status === st), next_cursor: null } }; },
     'PUT /ghl/connection': (c) => {
       rec(c);
@@ -292,6 +296,104 @@ describe('Configuración › GoHighLevel · avisos recibidos', () => {
     mockApi({ ...server(world(live('active', { webhook: hooked }))), 'GET /ghl/events': () => err(500, 'INTERNAL') });
     renderApp('/settings/ghl');
     const panel = within(await screen.findByRole('region', { name: 'Avisos recibidos' }));
+    expect(await panel.findByRole('alert')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Conexión con GoHighLevel' })).toBeInTheDocument();
+  });
+});
+
+describe('Configuración › GoHighLevel · etiquetas enviadas', () => {
+  it('sin conexión no muestra el panel; conectada lo muestra con cada cambio, su estado, el contacto y el motivo', async () => {
+    const none_ = world();
+    mockApi(server(none_));
+    renderApp('/settings/ghl');
+    await screen.findByRole('region', { name: 'Conexión con GoHighLevel' });
+    expect(screen.queryByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' })).toBeNull();
+    expect(none_.outboxQueries).toBeUndefined();
+  });
+
+  it('lista los cambios: agregar/quitar con el nombre de la etiqueta, el estado y el motivo de los omitidos y fallidos', async () => {
+    const w = world(live(), {
+      outbox: [
+        out(),
+        out({ id: 'o2', op: 'tag_remove', tag: 'Nuevo', status: 'failed', attempts: 5, last_error: 'GoHighLevel no encuentra el contacto', can_retry: true }),
+        out({ id: 'o3', tag: 'Venta', tag_kind: 'system', status: 'skipped', note: 'El contacto no tiene teléfono ni correo: no se puede buscar ni crear en GoHighLevel' }),
+        out({ id: 'o4', tag: 'Lead', status: 'pending', attempts: 2 }),
+      ],
+    });
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' }));
+    const rows = within(await panel.findByRole('list', { name: 'Etiquetas enviadas' })).getAllByRole('listitem');
+    expect(rows).toHaveLength(4);
+    expect(within(rows[0]!).getByText(/Agregar «VIP»/)).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Enviado')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(/Quitar «Nuevo»/)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('Falló')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('GoHighLevel no encuentra el contacto')).toBeInTheDocument();
+    expect(within(rows[2]!).getByText(/ni correo/)).toBeInTheDocument();
+    expect(within(rows[2]!).getByText('Omitido')).toBeInTheDocument();
+    expect(within(rows[3]!).getByText(/2 intento\(s\); se reintenta solo/)).toBeInTheDocument();
+    expect(panel.getByText(/1 cambio\(s\) de etiqueta no se pudieron enviar/)).toBeInTheDocument();
+  });
+
+  it('reintentar un cambio fallido lo manda a la cola y deja de ofrecer el botón', async () => {
+    const w = world(live(), { outbox: [out({ id: 'o2', status: 'failed', last_error: 'x', can_retry: true })] });
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' }));
+    await userEvent.click(await panel.findByRole('button', { name: /Reintentar agregar «VIP»/ }));
+    await waitFor(() => expect(w.retries).toEqual(['o2']));
+    await waitFor(() => expect(panel.queryByRole('button', { name: /Reintentar/ })).toBeNull());
+    expect(await within(panel.getByRole('list', { name: 'Etiquetas enviadas' })).findByText('Pendiente')).toBeInTheDocument();
+  });
+
+  it('borrar una etiqueta aquí se ve como «Eliminar en GoHighLevel» sin contacto, y un borrado fallido se puede reintentar', async () => {
+    const w = world(live(), {
+      outbox: [
+        out({ id: 'o5', op: 'tag_delete', tag: 'VIP', contact: null, status: 'pending' }),
+        out({ id: 'o2', op: 'tag_delete', tag: 'Viejo', contact: null, status: 'failed', attempts: 1, last_error: 'El token no tiene permiso para esta operación en GoHighLevel (revisa los permisos de etiquetas de la integración)', can_retry: true }),
+      ],
+    });
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' }));
+    const rows = within(await panel.findByRole('list', { name: 'Etiquetas enviadas' })).getAllByRole('listitem');
+    expect(within(rows[0]!).getByText(/Eliminar en GoHighLevel «VIP»/)).toBeInTheDocument();
+    expect(within(rows[0]!).queryByText(/Contacto/)).toBeNull();
+    expect(within(rows[1]!).getByText(/permiso para esta operación/)).toBeInTheDocument();
+    await userEvent.click(panel.getByRole('button', { name: /Reintentar eliminar en gohighlevel «Viejo»/i }));
+    await waitFor(() => expect(w.retries).toEqual(['o2']));
+  });
+
+  it('el aviso de permisos explica que borrar etiquetas necesita leer y escribir etiquetas', async () => {
+    mockApi(server(world(live())));
+    renderApp('/settings/ghl');
+    const how = within(await screen.findByRole('region', { name: 'Cómo conectarlo' }));
+    expect(how.getByText(/si borras una etiqueta aquí se elimina también en GoHighLevel/)).toBeInTheDocument();
+    expect(how.getByText(/permiso de leer y escribir etiquetas/)).toBeInTheDocument();
+  });
+
+  it('filtrar por estado vuelve a pedir solo esos cambios; sin cambios lo dice', async () => {
+    const w = world(live(), { outbox: [out(), out({ id: 'o3', status: 'skipped', note: 'n' })] });
+    mockApi(server(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' }));
+    await panel.findAllByRole('listitem');
+    await userEvent.selectOptions(panel.getByLabelText('Estado'), 'skipped');
+    await waitFor(() => expect(w.outboxQueries).toContain('skipped'));
+    await waitFor(() => expect(within(panel.getByRole('list', { name: 'Etiquetas enviadas' })).getAllByRole('listitem')).toHaveLength(1));
+  });
+
+  it('sin cambios enviados lo dice, y si el servidor falla lo explica sin romper el resto', async () => {
+    mockApi(server(world(live(), { outbox: [] })));
+    renderApp('/settings/ghl');
+    expect(await screen.findByText(/Todavía no se ha enviado ninguna etiqueta/)).toBeInTheDocument();
+  });
+
+  it('si el servidor no puede dar la lista muestra el error dentro del panel', async () => {
+    mockApi({ ...server(world(live())), 'GET /ghl/outbox': () => err(500, 'INTERNAL') });
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' }));
     expect(await panel.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Conexión con GoHighLevel' })).toBeInTheDocument();
   });
