@@ -85,6 +85,12 @@ export class OrgDirectoryService {
     return o?.kind === 'client';
   }
 
+  /** Las empresas CLIENTE (para las tareas que recorren a todas, como el procesamiento de documentos). */
+  async clientOrganizationIds(): Promise<string[]> {
+    const rows = await this.db.withIdentity((tx) => tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.kind, 'client')));
+    return rows.map((r) => r.id);
+  }
+
   invalidate(): void {
     this.welcome.clear();
     this.cache.clear();

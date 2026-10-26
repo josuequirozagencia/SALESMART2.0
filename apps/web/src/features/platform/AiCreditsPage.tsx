@@ -4,7 +4,7 @@ import { useIdempotencyKey } from '../../lib/idempotency';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
-import { KIND_LABEL, useAiLedger, useAiOrgs, useAiPlatformMutations, type AiOrg, type AiPricing } from '../ai/useAiCredits';
+import { KIND_LABEL, useAiLedger, useAiModels, useAiOrgs, useAiPlatformMutations, useSetModelPrice, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
 
 const n = (v: number): string => v.toLocaleString('es-EC');
 const when = (iso: string): string => new Date(iso).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' });
@@ -38,6 +38,48 @@ function PricingForm({ p }: { p: AiPricing }) {
       {saved ? <Alert kind="ok">Precio guardado.</Alert> : null}
       <div><Button type="submit" variant="primary" loading={setPricing.isPending}>Guardar precio</Button></div>
     </form>
+  );
+}
+
+function ModelRow({ m }: { m: AiModelPrice }) {
+  const set = useSetModelPrice();
+  const [input, setInput] = useState(num(m.usd_per_1m_input));
+  const [output, setOutput] = useState(num(m.usd_per_1m_output));
+  const [error, setError] = useState<string>();
+  const [saved, setSaved] = useState(false);
+  const submit = (e: FormEvent): void => {
+    e.preventDefault();
+    setSaved(false);
+    if (!DECIMAL.test(input.trim()) || Number(input) > 10000 || !DECIMAL.test(output.trim()) || Number(output) > 10000) return setError('Dos números de 0 a 10000.');
+    setError(undefined);
+    set.mutate({ model: m.model, usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim() }, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar el precio.')) });
+  };
+  return (
+    <li className="py-3">
+      <form onSubmit={submit} noValidate aria-label={`Precio de ${m.model}`} className="grid gap-2">
+        <div className="flex flex-wrap items-center gap-2"><b className="text-[13.5px]">{m.model}</b><Pill kind="muted">{m.kind === 'embedding' ? 'Embeddings' : 'Chat'}</Pill></div>
+        <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-3 min-[560px]:items-end">
+          <Field label="Entrada (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} />}</Field>
+          <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
+          <div><Button type="submit" loading={set.isPending}>Guardar</Button></div>
+        </div>
+        {error ? <Alert>{error}</Alert> : null}
+        {saved ? <Alert kind="ok">Precio guardado.</Alert> : null}
+      </form>
+    </li>
+  );
+}
+
+function ModelPrices() {
+  const q = useAiModels();
+  return (
+    <section aria-label="Modelos de IA" className="grid gap-2 rounded-2xl border border-line bg-surface p-4">
+      <h2 className="text-[15px] font-bold">Modelos de IA</h2>
+      <p className="max-w-[70ch] text-[12.5px] text-muted">Lo que cobra el proveedor por millón de tokens. Con esto y los tokens de cada llamada se calcula el costo real que luego pasa por el margen. Valores de ejemplo hasta que cargues los reales.</p>
+      {q.isLoading ? <Spinner label="Cargando modelos" /> : null}
+      {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los modelos.')}</Alert> : null}
+      {q.data ? <ul className="divide-y divide-line">{q.data.map((m) => <ModelRow key={m.model} m={m} />)}</ul> : null}
+    </section>
   );
 }
 
@@ -132,6 +174,7 @@ export function AiCreditsPage() {
   return (
     <div className="grid gap-4">
       {q.data ? <PricingForm p={q.data.pricing} /> : null}
+      <ModelPrices />
       <section aria-label="Créditos por empresa" className="grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-[15px] font-bold">Créditos por empresa</h2>

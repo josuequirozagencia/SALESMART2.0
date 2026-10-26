@@ -97,6 +97,14 @@ Variable del servicio «app»: `CAPI_PROVIDER` (`meta` por omisión; `none` para
 
 Cada empresa pega su dataset y su token en **Configuración › API de Conversiones** (el token se comprueba contra Meta antes de guardarse y no se vuelve a mostrar). **Validar la primera vez con tu dataset:** (1) «Probar conexión»; (2) poner un código de «Eventos de prueba» de Events Manager; (3) generar un Lead, una cita y una venta de un contacto que llegó por un anuncio y ver en Events Manager › Eventos de prueba que llegan con la cuenta de WhatsApp Business y el `ctwa_clid`; (4) quitar el código de prueba para producción. Si Meta rechaza el formato, ajustar `user_data` en `AttributionService`/`CapiSenderService`.
 
+## 4e. IA: créditos y conocimiento (M8, ADR-53)
+
+Variable del servicio «app»: `AI_PROVIDER` (`openai` por omisión; `none` para apagar la IA; `fake` solo desarrollo y se rechaza en producción). La clave de OpenAI es **de la plataforma**: la guarda el Súper Admin en **Proveedores › IA de texto › OpenAI** (cifrada con `PROVIDER_CREDENTIALS_KEY`, que debe estar cargada) y se deja OpenAI como proveedor en uso. Los documentos de la biblioteca usan el almacenamiento de archivos (**Proveedores › Almacenamiento**, el mismo de los adjuntos): sin él la subida responde 503.
+
+Mientras no haya clave de IA, los documentos subidos quedan «Esperando a la IA» y se procesan solos cuando se guarda la clave. Los precios de los modelos (`text-embedding-3-small`, `gpt-4o-mini`) y el valor del crédito y el margen (0,01 USD y 100 %) son **de ejemplo**: cárgalos reales en la consola de plataforma › **Créditos IA**.
+
+**A validar la primera vez con tu clave real:** (1) subir un PDF, un Word y una tabla y ver que llegan a «Listo»; (2) «Probar la búsqueda» con preguntas que sí y que no están en los documentos (el umbral de parecido, `MIN_SCORE = 0,30`, es **provisional** y se calibra aquí); (3) que el costo cobrado en Créditos IA > Movimientos coincide con lo que muestra el panel de OpenAI; (4) un PDF escaneado (debe fallar con un mensaje claro) y uno protegido con contraseña. La base vectorial funciona **sin extensión** (hasta 5 000 fragmentos por empresa); pasar a pgvector requiere verificar la extensión en Railway y en CI.
+
 ## 5. Lista de comprobación posterior al despliegue
 1. `GET https://<dominio>/health/ready` → `{"status":"ok"}`.
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.

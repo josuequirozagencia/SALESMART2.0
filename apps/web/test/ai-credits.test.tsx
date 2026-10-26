@@ -72,6 +72,7 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     return {
       ...authed(ME_ROOT),
       'GET /platform/trials': () => ({ body: NO_TRIALS }),
+      'GET /platform/ai/models': () => ({ body: [] }),
       'GET /platform/ai/organizations': (c) => { rec(w, 'list', c); const q = c.query.get('q')?.toLowerCase(); return { body: { items: w.orgs.filter((o) => !q || o.name.toLowerCase().includes(q)), next_cursor: null, pricing: w.pricing } satisfies AiOrgList }; },
       'PUT /platform/ai/pricing': (c) => { rec(w, 'pricing', c); const b = c.body as { usd_per_credit: string; global_margin_pct: string }; w.pricing = { ...w.pricing, usd_per_credit: Number(b.usd_per_credit).toFixed(6), global_margin_pct: Number(b.global_margin_pct).toFixed(2) }; return { body: w.pricing }; },
       [`PUT /platform/ai/organizations/${ORG_A}/margin`]: (c) => { rec(w, 'margin', c); const m = (c.body as { margin_pct: string | null }).margin_pct; w.orgs = w.orgs.map((o) => (o.id === ORG_A ? { ...o, margin_pct: m ?? w.pricing.global_margin_pct, margin_override: m !== null } : o)); return { body: { id: ORG_A, margin_pct: m ?? '100.00', margin_override: m !== null } }; },

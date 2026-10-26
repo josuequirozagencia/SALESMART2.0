@@ -589,6 +589,20 @@
       "when": 1793022805916,
       "tag": "0083_m81_ai_credits_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "7",
+      "when": 1793029999610,
+      "tag": "0084_m82_knowledge",
+      "breakpoints": true
+    },
+    {
+      "idx": 85,
+      "version": "7",
+      "when": 1793030013588,
+      "tag": "0085_m82_knowledge_grants",
+      "breakpoints": true
     }
   ]
 }

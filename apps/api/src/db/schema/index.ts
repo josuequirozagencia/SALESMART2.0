@@ -22,3 +22,4 @@ export { ghlConnections } from './ghl';
 export { ghlEvents, ghlContactLinks, ghlOutbox, ghlEnrollments } from './ghl-events';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';
 export { aiWallets, aiLedger, aiHolds, aiPricing, aiOrgPricing } from './ai';
+export { knowledgeDocuments, documentChunks, aiModelPrices } from './ai-knowledge';

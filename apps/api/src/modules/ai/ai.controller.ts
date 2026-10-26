@@ -5,7 +5,7 @@ import { PlatformOnly, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { AiAdminService } from './ai-admin.service';
 import { AiCreditsService } from './ai-credits.service';
-import { adminOrganizationsQuerySchema, creditsQuerySchema, grantSchema, idempotencyKeySchema, marginSchema, pricingSchema, type AdminOrganizationsQuery, type CreditsQuery, type GrantDto, type MarginDto, type PricingDto } from './ai.dto';
+import { adminOrganizationsQuerySchema, creditsQuerySchema, grantSchema, idempotencyKeySchema, marginSchema, modelParamSchema, modelPriceSchema, pricingSchema, type AdminOrganizationsQuery, type CreditsQuery, type GrantDto, type MarginDto, type ModelPriceDto, type PricingDto } from './ai.dto';
 
 const orgParam = new ZodValidationPipe(z.uuid());
 
@@ -49,6 +49,19 @@ export class AiAdminController {
   @Header('Cache-Control', 'no-store')
   setPricing(@Body(new ZodValidationPipe(pricingSchema)) b: PricingDto) {
     return this.admin.setPricing(b);
+  }
+
+  /** Precio de los modelos de IA (dólares por millón de tokens). */
+  @Get('models')
+  @Header('Cache-Control', 'no-store')
+  models() {
+    return this.admin.listModels();
+  }
+
+  @Put('models/:model')
+  @Header('Cache-Control', 'no-store')
+  setModel(@Param('model', new ZodValidationPipe(modelParamSchema)) model: string, @Body(new ZodValidationPipe(modelPriceSchema)) b: ModelPriceDto) {
+    return this.admin.setModelPrice(model, b);
   }
 
   @Get('organizations')

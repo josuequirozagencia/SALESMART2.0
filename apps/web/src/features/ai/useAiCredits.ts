@@ -77,3 +77,18 @@ export function useAiPlatformMutations() {
     }),
   };
 }
+
+/** Precio de un modelo de IA (dólares por millón de tokens). SOLO plataforma. */
+export interface AiModelPrice { model: string; kind: 'embedding' | 'chat'; usd_per_1m_input: string; usd_per_1m_output: string; updated_at: string }
+
+export function useAiModels() {
+  return useQuery({ queryKey: ['platform', 'ai', 'models'], retry: false, queryFn: () => api<AiModelPrice[]>('/platform/ai/models') });
+}
+
+export function useSetModelPrice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ model, usd_per_1m_input, usd_per_1m_output }: { model: string; usd_per_1m_input: string; usd_per_1m_output: string }) => api<AiModelPrice>(`/platform/ai/models/${encodeURIComponent(model)}`, { method: 'PUT', body: { usd_per_1m_input, usd_per_1m_output } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
+  });
+}

@@ -22,7 +22,9 @@ export function mockApi(routes: Record<string, Handler>): { calls: Call[]; count
     const method = (init?.method ?? 'GET').toUpperCase();
     const headers: Record<string, string> = {};
     new Headers(init?.headers).forEach((v, k) => { headers[k] = v; });
-    const call: Call = { method, path, query: new URLSearchParams(qs), body: init?.body ? JSON.parse(String(init.body)) : undefined, headers };
+    // Un cuerpo que no es JSON (la subida de un archivo es el archivo tal cual) llega como { raw_bytes } para que la prueba compruebe cuánto se envió
+    const raw = init?.body && typeof init.body !== 'string' ? { raw_bytes: (init.body as ArrayBuffer).byteLength ?? 0 } : undefined;
+    const call: Call = { method, path, query: new URLSearchParams(qs), body: raw ?? (init?.body ? JSON.parse(String(init.body)) : undefined), headers };
     calls.push(call);
     const h = routes[`${method} ${path}`];
     if (!h) throw new Error(`Ruta sin manejador en la prueba: ${method} ${path}`);

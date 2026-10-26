@@ -35,3 +35,10 @@ export const adminOrganizationsQuerySchema = z.strictObject({
 export type AdminOrganizationsQuery = z.infer<typeof adminOrganizationsQuerySchema>;
 
 export const idempotencyKeySchema = z.string().trim().min(8).max(100).regex(/^[A-Za-z0-9_.:-]+$/, 'solo letras, números y _ . : -');
+
+export const modelPriceSchema = z.strictObject({
+  usd_per_1m_input: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000'),
+  usd_per_1m_output: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000'),
+});
+export type ModelPriceDto = z.infer<typeof modelPriceSchema>;
+export const modelParamSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);

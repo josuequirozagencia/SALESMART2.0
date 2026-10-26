@@ -55,6 +55,8 @@ export const envSchema = z.object({
   CAPI_PROVIDER: z.enum(['meta', 'none', 'fake']).default('meta'),
   /** GoHighLevel (M7, ADR-52): `ghl` = Private Token real con las credenciales de cada empresa; `none` = sin adaptador; `fake` solo para desarrollo/pruebas. */
   GHL_PROVIDER: z.enum(['ghl', 'none', 'fake']).default('ghl'),
+  /** Adaptador de IA (M8, ADR-53): `openai` con la clave que el Súper Admin guarda en Proveedores › IA de texto; `fake` solo desarrollo y pruebas. */
+  AI_PROVIDER: z.enum(['openai', 'none', 'fake']).default('openai'),
   /** Adjuntos (M5.6d, ADR-50). Almacenamiento: 's3' = el servicio S3-compatible que el Súper Admin configura en «Proveedores»; 'fake' (memoria) es solo desarrollo y pruebas y se rechaza en producción. */
   STORAGE_PROVIDER: z.enum(['s3', 'fake']).default('s3'),
   /** Antivirus: 'clamav' = clamd por TCP (CLAMAV_HOST/CLAMAV_PORT); 'none' = sin revisión (los archivos quedan «sin revisar»: solo para pruebas del piloto); 'fake' solo desarrollo y pruebas. */

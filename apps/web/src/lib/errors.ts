@@ -44,7 +44,9 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // GoHighLevel (ADR-52): el servidor ya redacta el motivo (sin tokens ni datos del cliente)
     case 'GHL_NOT_CONNECTED': case 'GHL_REJECTED': case 'GHL_UNAVAILABLE': case 'GHL_ALREADY_ENROLLED': case 'GHL_TEXT_ONLY': case 'GHL_SCHEDULE_UNSUPPORTED': case 'GHL_OUTBOX_NOT_FAILED': return e.message;
     // Créditos IA (ADR-53): el servidor ya redacta el motivo
-    case 'AI_NO_CREDITS': case 'AI_HOLD_CLOSED': return e.message;
+    case 'AI_NO_CREDITS': case 'AI_HOLD_CLOSED': case 'AI_NOT_CONFIGURED': case 'AI_BUSY': case 'AI_UNAVAILABLE': return e.message;
+    // Conocimiento (ADR-53): el servidor ya redacta el motivo
+    case 'DOCUMENT_EXISTS': case 'DOCUMENT_LIMIT': case 'DOCUMENT_BUSY': case 'DOCUMENT_TOO_LARGE': case 'DOCUMENT_UNSUPPORTED': case 'DOCUMENT_EMPTY': case 'DOCUMENT_UPLOAD_FAILED': return e.message;
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo
     case 'HOLIDAY_EXISTS': case 'HOLIDAY_LIMIT': return e.message;
     // Inbox (ADR-16/50): el servidor ya redacta el motivo

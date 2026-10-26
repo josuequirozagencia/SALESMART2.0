@@ -2,9 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundError } from '../../errors';
 import { PlatformContext, TenantContext } from '../../tenant';
 import { CompaniesService, OrgDirectoryService } from '../organizations';
-import { AiPricingService, PlatformAuditService, type AiPricingView } from '../platform';
+import { AiModelPricesService, AiPricingService, PlatformAuditService, type AiPricingView, type ModelPriceView } from '../platform';
 import { AiCreditsService, type CreditsView, type LedgerItemPlatformView, type LedgerItemView } from './ai-credits.service';
-import type { AdminOrganizationsQuery, GrantDto, MarginDto, PricingDto } from './ai.dto';
+import type { AdminOrganizationsQuery, GrantDto, MarginDto, ModelPriceDto, PricingDto } from './ai.dto';
 
 export interface AdminOrganizationItem {
   id: string;
@@ -35,6 +35,7 @@ export interface AdminOrganizationList {
 export class AiAdminService {
   constructor(
     @Inject(AiPricingService) private readonly pricing: AiPricingService,
+    @Inject(AiModelPricesService) private readonly models: AiModelPricesService,
     @Inject(AiCreditsService) private readonly credits: AiCreditsService,
     @Inject(CompaniesService) private readonly companies: CompaniesService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
@@ -43,6 +44,14 @@ export class AiAdminService {
 
   getPricing(): Promise<AiPricingView> {
     return this.pricing.get();
+  }
+
+  listModels(): Promise<ModelPriceView[]> {
+    return this.models.list();
+  }
+
+  setModelPrice(model: string, b: ModelPriceDto): Promise<ModelPriceView> {
+    return this.models.set(model, b);
   }
 
   setPricing(b: PricingDto): Promise<AiPricingView> {

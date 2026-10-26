@@ -1,3 +1,13 @@
 export { AiModule } from './ai.module';
 export { AiCreditsService, AI_HOLD_TTL_MS, MAX_GRANT_CREDITS, type CreditsView, type LedgerItemView, type LedgerKind, type WalletSummary } from './ai-credits.service';
 export { creditsFor } from './credits';
+export { AiGateway, AiUnavailableError, EMBEDDING_MODEL, EMBEDDING_DIMENSIONS, type EmbeddingOutcome } from './ai-gateway.service';
+export { AI_PROVIDER, AiProviderError, NoAiProvider, type AIProvider, type AiCredentials, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+export { FakeAiProvider, fakeVector, type FakeAiCall } from './ai.fake';
+export { OpenAiProvider, MAX_EMBED_INPUTS } from './openai.provider';
+export { KnowledgeJob } from './knowledge/knowledge.job';
+export { KnowledgeProcessorService, KNOWLEDGE_BATCH, KNOWLEDGE_MAX_ATTEMPTS, KNOWLEDGE_LEASE_MS } from './knowledge/knowledge-processor.service';
+export { KnowledgeService, MAX_DOCUMENTS, MIN_SCORE, type DocumentView, type DocumentList, type SearchView } from './knowledge/knowledge.service';
+export { VECTOR_STORE, PgArrayVectorStore, MAX_CHUNKS_PER_ORG, normalize, toBytes, fromBytes, type VectorStore, type VectorHit } from './knowledge/vector-store';
+export { chunkText, chunkTable, cleanText, TARGET_CHARS, MAX_CHUNK_CHARS, OVERLAP_CHARS } from './knowledge/chunker';
+export { detectKind, parseDocument, parseCsv, decodeText, ParseError, MAX_DOCUMENT_BYTES, MAX_TEXT_CHARS, type DocumentKind } from './knowledge/document-parser';
