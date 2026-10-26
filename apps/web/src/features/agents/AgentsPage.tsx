@@ -62,7 +62,7 @@ export function AgentsPage() {
         <h1 className="text-[22px] font-bold">Agentes IA</h1>
         <Button variant="primary" disabled={items.length >= max} onClick={() => setOpen('new')}>Nuevo agente</Button>
       </div>
-      <p className="max-w-[70ch] text-[13px] text-muted">Un agente es un asistente que atiende a tus clientes con lo que tú le enseñas: su personalidad, sus documentos y las conexiones donde responde. Hoy puedes configurarlos y revisar sus instrucciones; empezarán a contestar mensajes en una próxima versión.</p>
+      <p className="max-w-[70ch] text-[13px] text-muted">Un agente es un asistente que atiende a tus clientes con lo que tú le enseñas: su personalidad, sus documentos y las conexiones donde responde. Hoy puedes configurarlos y probarlos en el simulador; empezarán a contestar mensajes a tus clientes en una próxima versión.</p>
       {q.isLoading ? <Spinner label="Cargando agentes" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')}</Alert> : null}
       {q.data && items.length === 0 ? <p className="text-[13px] text-muted">Aún no tienes agentes. Crea el primero para empezar.</p> : null}

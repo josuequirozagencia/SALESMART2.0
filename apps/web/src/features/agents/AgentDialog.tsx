@@ -5,11 +5,11 @@ import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { Tabs } from '../crm/Tabs';
 import { Avatar, COVER_CLASS, COVER_LABEL } from './agentUi';
-import { useAgent, useAgentMutations, useAgentOptions, useContactSearch, type Agent, type AgentOptions, type AgentPatch, type Cover } from './useAgents';
+import { useAgent, useAgentMutations, useAgentOptions, useContactSearch, type Agent, type AgentOptions, type AgentPatch, type Cover, type TestTurn } from './useAgents';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const areaCls = 'min-h-[96px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] font-normal text-fg';
-type TabKey = 'general' | 'instructions' | 'knowledge' | 'behavior';
+type TabKey = 'general' | 'instructions' | 'knowledge' | 'behavior' | 'test';
 
 /** El resultado de guardar: «Cambios guardados.» o el motivo del servidor. */
 function Result({ ok, error }: { ok: boolean; error: string | undefined }) {
@@ -279,7 +279,92 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
   );
 }
 
-/** Los ajustes de un agente en pestañas (M8.3, ADR-20): General, Instrucciones, Conocimiento y Comportamiento. «Probar» llega con el simulador (M8.4). */
+interface Bubble { from: 'user' | 'agent'; texts: string[]; turn?: TestTurn }
+const SHORTCUTS = ['¿Cuál es el horario de atención?', '¿Cuánto cuesta?', '¿Tienen cupos disponibles?', 'Quiero hablar con un asesor'];
+
+/** «Qué hizo el agente» en un turno: los documentos que consultó, si no encontró respaldo, las variables sin datos y el consumo. */
+function Trace({ t }: { t: TestTurn }) {
+  return (
+    <ul aria-label="Qué hizo el agente" className="grid gap-1 rounded-xl bg-surface2 p-2 text-[11.5px] text-muted">
+      <li>{t.trace.search.grounded ? <>Consultó: {t.trace.search.results.map((r) => `${r.document} (${Math.round(r.score * 100)} %)`).join(', ')}</> : <b className="text-warn">No encontró respaldo en los documentos: no debería dar datos del negocio.</b>}</li>
+      {t.trace.missing_variables.length > 0 ? <li>Sin datos del contacto para: {t.trace.missing_variables.map((v) => `{{${v}}}`).join(', ')}</li> : null}
+      {t.trace.split ? <li>Respuesta dividida en {t.replies.length} mensajes.</li> : null}
+      {t.trace.trimmed ? <li>Respuesta recortada al largo máximo del agente.</li> : null}
+      <li>Modelo {t.trace.model.name} · {t.trace.model.tokens_in + t.trace.model.tokens_out} tokens · {t.credits_used} {t.credits_used === 1 ? 'crédito' : 'créditos'}</li>
+    </ul>
+  );
+}
+
+/** Simulador (M8.4): conversa con el agente tal como está guardado, sin enviar mensajes a nadie ni crear contactos. Cada mensaje usa créditos de prueba. */
+function TestTab({ a }: { a: Agent }) {
+  const m = useAgentMutations();
+  const [log, setLog] = useState<Bubble[]>([]);
+  const [text, setText] = useState('');
+  const [error, setError] = useState<string>();
+  const [search, setSearch] = useState('');
+  const [contact, setContact] = useState<{ id: string; name: string } | null>(null);
+  const [spent, setSpent] = useState(0);
+  const [remaining, setRemaining] = useState<number | null>(null);
+  const [open, setOpen] = useState<number | null>(null);
+  const found = useContactSearch(contact ? '' : search);
+
+  const send = (message: string): void => {
+    const msg = message.trim();
+    if (msg === '' || m.test.isPending) return;
+    setError(undefined);
+    const history = log.slice(-20).map((b) => ({ role: b.from === 'user' ? ('user' as const) : ('assistant' as const), text: b.texts.join('\n\n') }));
+    setLog((l) => [...l, { from: 'user', texts: [msg] }]);
+    setText('');
+    m.test.mutate({ id: a.id, message: msg, history, contactId: contact?.id ?? null }, {
+      onSuccess: (t) => { setLog((l) => [...l, { from: 'agent', texts: t.replies.length > 0 ? t.replies : ['(sin respuesta)'], turn: t }]); setSpent((s) => s + t.credits_used); setRemaining(t.remaining_today); },
+      onError: (e) => setError(friendlyError(e, 'No pudimos probar al agente.')),
+    });
+  };
+
+  return (
+    <div className="grid gap-3">
+      <p className="text-[13px] text-muted">Conversa con «{a.name}» como lo haría un cliente. Usa las instrucciones y los documentos <b>guardados</b>; no envía mensajes a nadie ni crea contactos. Cada mensaje usa créditos de prueba.</p>
+      {!a.readiness.documents ? <Alert kind="info">Este agente no tiene documentos asignados: no tendrá respaldo para dar datos del negocio y te lo dirá.</Alert> : null}
+      <section aria-label="Probar como" className="grid gap-1.5 text-[13px]">
+        {contact ? <p className="flex flex-wrap items-center gap-2">Probando como <b>{contact.name}</b><Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setContact(null)}>Volver al ejemplo</Button></p> : (
+          <>
+            <Input aria-label="Probar como un contacto" type="search" placeholder="Probar como un contacto (opcional)…" value={search} onChange={(e) => setSearch(e.target.value)} />
+            {found.data && found.data.items.length > 0 ? <ul aria-label="Contactos para probar" className="flex flex-wrap gap-1.5">{found.data.items.map((c) => <li key={c.id}><button type="button" onClick={() => { setContact(c); setSearch(''); }} className="rounded-full border border-line px-2.5 py-1 text-[12px] hover:border-accent">{c.name}</button></li>)}</ul> : null}
+          </>
+        )}
+      </section>
+      <div className="mx-auto grid w-full max-w-[380px] gap-2 rounded-[28px] border-4 border-line bg-surface p-3">
+        <div role="log" aria-label="Conversación de prueba" className="grid max-h-[340px] min-h-[200px] content-start gap-2 overflow-y-auto">
+          {log.length === 0 ? <p className="py-8 text-center text-[12.5px] text-muted">Escribe un mensaje o elige un atajo.</p> : null}
+          {log.map((b, i) => (
+            <div key={i} className={`grid gap-1 ${b.from === 'user' ? 'justify-items-end' : 'justify-items-start'}`}>
+              {b.texts.map((x, j) => <p key={j} className={`max-w-[85%] whitespace-pre-line rounded-2xl px-3 py-2 text-[13.5px] ${b.from === 'user' ? 'bg-accent text-accent-ink' : 'bg-surface2'}`}>{x}</p>)}
+              {b.turn ? (
+                <>
+                  <button type="button" className="text-[11.5px] font-semibold text-accent hover:underline" aria-expanded={open === i} onClick={() => setOpen(open === i ? null : i)}>{open === i ? 'Ocultar qué hizo' : 'Ver qué hizo el agente'}</button>
+                  {open === i ? <Trace t={b.turn} /> : null}
+                </>
+              ) : null}
+            </div>
+          ))}
+          {m.test.isPending ? <p className="text-[12px] text-muted" role="status">El agente está escribiendo…</p> : null}
+        </div>
+        {error ? <Alert>{error}</Alert> : null}
+        <div className="flex flex-wrap gap-1.5">{SHORTCUTS.map((s) => <button key={s} type="button" onClick={() => send(s)} className="rounded-full border border-line px-2.5 py-1 text-[11.5px] hover:border-accent">{s}</button>)}</div>
+        <form onSubmit={(e) => { e.preventDefault(); send(text); }} className="flex gap-2">
+          <Input aria-label="Mensaje de prueba" className="flex-1" value={text} maxLength={1000} placeholder="Escribe un mensaje…" onChange={(e) => setText(e.target.value)} />
+          <Button type="submit" variant="primary" loading={m.test.isPending}>Enviar</Button>
+        </form>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 text-[12px] text-muted">
+        <span>{spent} {spent === 1 ? 'crédito usado' : 'créditos usados'} en esta prueba{remaining !== null ? ` · te quedan ${remaining} mensajes de prueba hoy` : ''}</span>
+        <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => { setLog([]); setSpent(0); setOpen(null); setError(undefined); }}>Nueva conversación</Button>
+      </div>
+    </div>
+  );
+}
+
+/** Los ajustes de un agente en pestañas (M8.3, ADR-20): General, Instrucciones, Conocimiento, Comportamiento y Probar (el simulador, M8.4). */
 export function AgentDialog({ id, justCreated, onClose }: { id: string; justCreated: boolean; onClose: () => void }) {
   const q = useAgent(id);
   const options = useAgentOptions();
@@ -295,12 +380,13 @@ export function AgentDialog({ id, justCreated, onClose }: { id: string; justCrea
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar el agente.')}</Alert> : null}
       {a && o ? (
         <>
-          <Tabs label="Secciones del agente" active={tab} onChange={setTab} tabs={[['general', 'General'], ['instructions', 'Instrucciones'], ['knowledge', 'Conocimiento'], ['behavior', 'Comportamiento']]} />
+          <Tabs label="Secciones del agente" active={tab} onChange={setTab} tabs={[['general', 'General'], ['instructions', 'Instrucciones'], ['knowledge', 'Conocimiento'], ['behavior', 'Comportamiento'], ['test', 'Probar']]} />
           <div className="max-h-[65vh] overflow-y-auto pr-1">
             {tab === 'general' ? <GeneralTab a={a} o={o} /> : null}
             {tab === 'instructions' ? <InstructionsTab a={a} o={o} /> : null}
             {tab === 'knowledge' ? <KnowledgeTab a={a} o={o} /> : null}
             {tab === 'behavior' ? <BehaviorTab a={a} o={o} /> : null}
+            {tab === 'test' ? <TestTab a={a} /> : null}
           </div>
           {error ? <Alert>{error}</Alert> : null}
           <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">

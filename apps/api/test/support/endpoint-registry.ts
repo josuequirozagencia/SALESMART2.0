@@ -228,6 +228,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/agents/:id/channels', kind: 'tenant', isolationTest: '../../ai/agents.test.ts' },
   { route: 'PUT /v1/agents/:id/photo', kind: 'tenant', isolationTest: '../../ai/agents.test.ts' },
   { route: 'DELETE /v1/agents/:id/photo', kind: 'tenant', isolationTest: '../../ai/agents.test.ts' },
+  // Simulador de prueba del agente (M8.4). Pruebas: test/ai/agent-test.test.ts
+  { route: 'POST /v1/agents/:id/test', kind: 'tenant', isolationTest: '../../ai/agent-test.test.ts' },
   { route: 'GET /v1/ghl/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'POST /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'GET /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },

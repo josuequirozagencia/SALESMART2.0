@@ -95,3 +95,28 @@ export const agentChannels = tenantTable(
     uniqueIndex('agent_channels_channel_uq').on(t['organizationId']!, t['channelId']!),
   ],
 );
+
+/**
+ * Un turno del simulador de prueba de un agente (M8.4, ADR-20/53). Solo METADATOS —quién, cuándo, si hubo respaldo en los documentos, tokens y créditos—: **el texto de la prueba no se guarda**. Sirve
+ * para el tope diario de pruebas por empresa y para saber cuánto cuestan. Solo de inserción.
+ */
+export const agentTestRuns = tenantTable(
+  'agent_test_runs',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    agentId: uuid('agent_id').notNull(),
+    userId: uuid('user_id').references(() => users.id),
+    /** ¿Se encontraron fragmentos de los documentos para esa pregunta? */
+    grounded: boolean('grounded').notNull(),
+    hits: integer('hits').notNull().default(0),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    credits: integer('credits').notNull().default(0),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'agent_test_runs_agent_fk', columns: [t['organizationId']!, t['agentId']!], foreignColumns: [agents.organizationId, agents.id] }),
+    check('agent_test_runs_counts_valid', sql`${t['hits']!} >= 0 AND ${t['tokensIn']!} >= 0 AND ${t['tokensOut']!} >= 0 AND ${t['credits']!} >= 0`),
+    index('agent_test_runs_recent_idx').on(t['organizationId']!, t['createdAt']!),
+  ],
+);

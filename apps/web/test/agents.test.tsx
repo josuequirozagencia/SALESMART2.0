@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Agent, AgentCard, AgentOptions, AgentPreview } from '../src/features/agents/useAgents';
+import type { Agent, AgentCard, AgentOptions, AgentPreview, TestTurn } from '../src/features/agents/useAgents';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -38,7 +38,7 @@ const OPTIONS: AgentOptions = {
   documents: [{ id: 'd1', name: 'horarios.txt', status: 'ready', chunk_count: 3000, active: true }, { id: 'd2', name: 'precios.csv', status: 'ready', chunk_count: 2500, active: true }, { id: 'd3', name: 'nuevo.pdf', status: 'processing', chunk_count: 0, active: true }],
 };
 
-interface World { agents: Agent[]; calls: Record<string, Call[]>; options: AgentOptions; preview?: AgentPreview; patchFails?: () => ReturnType<Handler> }
+interface World { agents: Agent[]; calls: Record<string, Call[]>; options: AgentOptions; preview?: AgentPreview; patchFails?: () => ReturnType<Handler>; turn?: (c: Call) => ReturnType<Handler> }
 const world = (over: Partial<World> = {}): World => ({ agents: [agent()], calls: {}, options: OPTIONS, ...over });
 const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
 const cards = (w: World): AgentCard[] => w.agents.map((a) => ({ id: a.id, name: a.name, role: a.role, photo_url: a.photo_url, cover: a.cover, active: a.active, model: a.model, channels: a.channels, documents: a.document_ids.length, chunks: a.chunks, created_at: a.created_at }));
@@ -71,9 +71,18 @@ function server(w: World): Record<string, Handler> {
     'DELETE /agents/a1/photo': (c) => { rec(w, 'photoDelete', c); return { body: set({ ...cur(), photo_url: null }) }; },
     'DELETE /agents/a1': (c) => { rec(w, 'delete', c); w.agents = []; return { body: { id: 'a1', deleted: true } }; },
     'POST /agents/preview': (c) => { rec(w, 'preview', c); return { body: w.preview ?? { system: 'Eres Sofía.\n\nREGLAS\n- No inventes', missing: [], unknown: [], contact: null } }; },
+    'POST /agents/a1/test': (c) => { rec(w, 'test', c); return w.turn ? w.turn(c) : { body: turn() }; },
     'GET /contacts': (c) => { rec(w, 'contacts', c); return { body: { items: [{ id: 'k1', name: 'Lucía Paredes' }] } }; },
   };
 }
+const turn = (over: Partial<TestTurn> = {}): TestTurn => ({
+  replies: ['Atendemos de lunes a viernes de 9 a 18 horas.'],
+  trace: { search: { query: 'horario', grounded: true, results: [{ document: 'horarios.txt', score: 0.62 }] }, missing_variables: [], model: { name: 'gpt-4o-mini', tokens_in: 300, tokens_out: 20 }, split: false, trimmed: false },
+  credits_used: 2,
+  remaining_today: 99,
+  contact: null,
+  ...over,
+});
 const open = async (name = 'Sofía') => {
   await userEvent.click(await screen.findByRole('button', { name: `Abrir el agente ${name}` }));
   return within(await screen.findByRole('dialog', { name: `Agente ${name}` }));
@@ -337,5 +346,90 @@ describe('Agentes IA · borrar', () => {
     await waitFor(() => expect(w.calls['delete']).toHaveLength(1));
     expect(await screen.findByText(/Aún no tienes agentes/)).toBeInTheDocument();
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+});
+
+describe('Agentes IA · Probar (simulador)', () => {
+  const chat = async () => {
+    mockApiFor.current();
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Probar');
+    return { d, log: within(await d.findByRole('log', { name: 'Conversación de prueba' })) };
+  };
+  const mockApiFor = { current: () => undefined as unknown };
+
+  it('un atajo envía el mensaje; muestra la respuesta del agente y «qué hizo» con los documentos consultados y el consumo', async () => {
+    const w = world();
+    mockApiFor.current = () => mockApi(server(w));
+    const { d, log } = await chat();
+    expect(d.getByText(/no envía mensajes a nadie ni crea contactos/)).toBeInTheDocument();
+    expect(d.getByText(/no tiene documentos asignados/)).toBeInTheDocument(); // el agente de la prueba no tiene
+    await userEvent.click(d.getByRole('button', { name: '¿Cuál es el horario de atención?' }));
+    await waitFor(() => expect(w.calls['test']).toHaveLength(1));
+    expect(w.calls['test']![0]!.body).toEqual({ message: '¿Cuál es el horario de atención?', history: [], contact_id: null });
+    expect(await log.findByText('Atendemos de lunes a viernes de 9 a 18 horas.')).toBeInTheDocument();
+    expect(log.getByText('¿Cuál es el horario de atención?')).toBeInTheDocument();
+    await userEvent.click(log.getByRole('button', { name: 'Ver qué hizo el agente' }));
+    const trace = within(log.getByRole('list', { name: 'Qué hizo el agente' }));
+    expect(trace.getByText('Consultó: horarios.txt (62 %)')).toBeInTheDocument();
+    expect(trace.getByText(/gpt-4o-mini · 320 tokens · 2 créditos/)).toBeInTheDocument();
+    expect(d.getByText(/2 créditos usados en esta prueba · te quedan 99 mensajes de prueba hoy/)).toBeInTheDocument();
+  });
+
+  it('sin respaldo lo dice claramente; la conversación se manda como historial en el turno siguiente; las respuestas divididas salen como varios globos', async () => {
+    const w = world();
+    let n = 0;
+    w.turn = () => {
+      n += 1;
+      return { body: n === 1 ? turn({ replies: ['No tengo ese dato.', 'Te paso con una persona.'], trace: { ...turn().trace, split: true, search: { query: 'x', grounded: false, results: [] } } }) : turn() };
+    };
+    mockApiFor.current = () => mockApi(server(w));
+    const { d, log } = await chat();
+    await userEvent.type(d.getByLabelText('Mensaje de prueba'), 'receta de ceviche');
+    await userEvent.click(d.getByRole('button', { name: 'Enviar' }));
+    expect(await log.findByText('No tengo ese dato.')).toBeInTheDocument();
+    expect(log.getByText('Te paso con una persona.')).toBeInTheDocument();
+    await userEvent.click(log.getByRole('button', { name: 'Ver qué hizo el agente' }));
+    expect(log.getByText(/No encontró respaldo en los documentos/)).toBeInTheDocument();
+    expect(log.getByText('Respuesta dividida en 2 mensajes.')).toBeInTheDocument();
+    await userEvent.type(d.getByLabelText('Mensaje de prueba'), '¿y el sábado?');
+    await userEvent.click(d.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(w.calls['test']).toHaveLength(2));
+    expect(w.calls['test']![1]!.body).toEqual({ message: '¿y el sábado?', history: [{ role: 'user', text: 'receta de ceviche' }, { role: 'assistant', text: 'No tengo ese dato.\n\nTe paso con una persona.' }], contact_id: null });
+  });
+
+  it('«Probar como» un contacto manda su id; «Nueva conversación» limpia el chat y el consumo', async () => {
+    const w = world();
+    mockApiFor.current = () => mockApi(server(w));
+    const { d, log } = await chat();
+    await userEvent.type(d.getByLabelText('Probar como un contacto'), 'luc');
+    await userEvent.click(await d.findByRole('button', { name: 'Lucía Paredes' }));
+    expect(d.getByText('Lucía Paredes')).toBeInTheDocument();
+    await userEvent.type(d.getByLabelText('Mensaje de prueba'), 'Hola');
+    await userEvent.click(d.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(w.calls['test']![0]!.body).toEqual({ message: 'Hola', history: [], contact_id: 'k1' }));
+    await log.findByText('Atendemos de lunes a viernes de 9 a 18 horas.');
+    await userEvent.click(d.getByRole('button', { name: 'Nueva conversación' }));
+    expect(log.queryByText('Atendemos de lunes a viernes de 9 a 18 horas.')).toBeNull();
+    expect(d.getByText(/0 créditos usados/)).toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Volver al ejemplo' }));
+    expect(d.getByLabelText('Probar como un contacto')).toBeInTheDocument();
+  });
+
+  it('un error (sin créditos, tope diario, IA no disponible) se muestra y el chat sigue utilizable', async () => {
+    const w = world({ agents: [agent({ document_ids: ['d1'], readiness: { instructions: true, documents: true, channel: false } })] });
+    w.turn = () => err(409, 'AI_NO_CREDITS', 'No hay créditos suficientes para esta operación');
+    mockApiFor.current = () => mockApi(server(w));
+    const { d } = await chat();
+    expect(d.queryByText(/no tiene documentos asignados/)).toBeNull();
+    await userEvent.type(d.getByLabelText('Mensaje de prueba'), 'Hola');
+    await userEvent.click(d.getByRole('button', { name: 'Enviar' }));
+    expect(await d.findByText('No hay créditos suficientes para esta operación')).toBeInTheDocument();
+    w.turn = () => ({ body: turn() });
+    await userEvent.type(d.getByLabelText('Mensaje de prueba'), 'Otra vez');
+    await userEvent.click(d.getByRole('button', { name: 'Enviar' }));
+    expect(await d.findByText('Atendemos de lunes a viernes de 9 a 18 horas.')).toBeInTheDocument();
+    expect(d.queryByText('No hay créditos suficientes para esta operación')).toBeNull();
   });
 });

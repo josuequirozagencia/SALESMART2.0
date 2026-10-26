@@ -53,6 +53,8 @@ export interface SearchView {
   hits: SearchHitView[];
   /** Había más fragmentos de los que se recorren en una búsqueda: conviene acotar a un agente o a menos documentos. */
   truncated: boolean;
+  /** Créditos que costó esta búsqueda. */
+  credits_used: number;
 }
 
 const view = (d: typeof knowledgeDocuments.$inferSelect): DocumentView => ({
@@ -212,12 +214,12 @@ export class KnowledgeService {
       await this.credits.release(holdId);
       throw this.unavailable(e);
     }
-    await this.credits.settle(holdId, { costUsd: outcome.costUsd, ref: 'Búsqueda en la biblioteca' });
+    const charged = await this.credits.settle(holdId, { costUsd: outcome.costUsd, ref: 'Búsqueda en la biblioteca' });
     return this.db.withTenant(async (tx) => {
       const { hits: found, truncated } = await this.store.search(tx, outcome.vectors[0]!, { documentIds, limit, minScore: MIN_SCORE });
       const names = found.length === 0 ? [] : await tx.select({ id: knowledgeDocuments.id, name: knowledgeDocuments.name }).from(knowledgeDocuments).where(inArray(knowledgeDocuments.id, [...new Set(found.map((h) => h.documentId))]));
       const byId = new Map(names.map((n) => [n.id, n.name]));
-      return { hits: found.map((h): SearchHitView => ({ document: { id: h.documentId, name: byId.get(h.documentId) ?? '' }, content: h.content, score: Math.round(h.score * 1000) / 1000 })), truncated };
+      return { hits: found.map((h): SearchHitView => ({ document: { id: h.documentId, name: byId.get(h.documentId) ?? '' }, content: h.content, score: Math.round(h.score * 1000) / 1000 })), truncated, credits_used: charged.credits };
     });
   }
 

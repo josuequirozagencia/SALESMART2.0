@@ -49,6 +49,21 @@ export interface AgentOptions {
 
 export interface AgentPreview { system: string; missing: string[]; unknown: string[]; contact: { id: string; name: string } | null }
 
+/** Un turno del simulador: lo que respondería el agente y «qué hizo». */
+export interface TestTurn {
+  replies: string[];
+  trace: {
+    search: { query: string; grounded: boolean; results: Array<{ document: string; score: number }> };
+    missing_variables: string[];
+    model: { name: string; tokens_in: number; tokens_out: number };
+    split: boolean;
+    trimmed: boolean;
+  };
+  credits_used: number;
+  remaining_today: number;
+  contact: { id: string; name: string } | null;
+}
+
 export type AgentPatch = Partial<{
   name: string;
   role: string | null;
@@ -99,6 +114,7 @@ export function useAgentMutations() {
     setDocuments: useMutation({ mutationFn: ({ id, ids }: { id: string; ids: string[] }) => put<Agent>(`/agents/${id}/documents`, { document_ids: ids }), onSettled: (_d, _e, v) => done(v.id)() }),
     setChannels: useMutation({ mutationFn: ({ id, ids }: { id: string; ids: string[] }) => put<Agent>(`/agents/${id}/channels`, { channel_ids: ids }), onSettled: (_d, _e, v) => done(v.id)() }),
     removePhoto: useMutation({ mutationFn: (id: string) => api<Agent>(`/agents/${id}/photo`, { method: 'DELETE' }), onSettled: (_d, _e, id) => done(id)() }),
+    test: useMutation({ mutationFn: ({ id, message, history, contactId }: { id: string; message: string; history: Array<{ role: 'user' | 'assistant'; text: string }>; contactId: string | null }) => api<TestTurn>(`/agents/${id}/test`, { method: 'POST', body: { message, history, contact_id: contactId } }) }),
     preview: useMutation({ mutationFn: (b: Record<string, unknown>) => api<AgentPreview>('/agents/preview', { method: 'POST', body: b }) }),
     uploadPhoto: useMutation({
       mutationFn: async ({ id, file }: { id: string; file: File }): Promise<Agent> => {

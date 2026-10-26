@@ -14,3 +14,5 @@ export { detectKind, parseDocument, parseCsv, decodeText, ParseError, MAX_DOCUME
 export { AgentsService, MAX_AGENTS, MAX_PHOTO_BYTES, type AgentCard, type AgentDetail, type AgentOptions, type PreviewView } from './agents/agents.service';
 export { composePrompt, unknownAgentVariables, AGENT_BUILT_IN, COVERS, type Cover, type PromptInput, type ComposedPrompt } from './agents/agent-prompt';
 export { MAX_CHUNKS_PER_AGENT } from './knowledge/vector-store';
+export { AgentTestService, MAX_TESTS_PER_DAY, FRAGMENTS_PER_TURN, type TurnView } from './agents/agent-test.service';
+export { buildChatMessages, splitReply, trimReply, estimateInputTokens, MAX_HISTORY_TURNS } from './agents/agent-chat';

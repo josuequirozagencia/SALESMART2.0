@@ -55,3 +55,12 @@ export const previewSchema = z.strictObject({
   contact_id: z.uuid().nullable().optional(),
 });
 export type PreviewDto = z.infer<typeof previewSchema>;
+
+export const testTurnSchema = z.strictObject({
+  message: z.string().trim().min(1).max(1000),
+  /** Los turnos anteriores de la conversación de prueba (los lleva la pantalla; el servidor solo usa los más recientes). */
+  history: z.array(z.strictObject({ role: z.enum(['user', 'assistant']), text: z.string().min(1).max(2000) })).max(30).optional(),
+  /** «Probar como» este contacto: solo se lee para llenar las variables. */
+  contact_id: z.uuid().nullable().optional(),
+});
+export type TestTurnDto = z.infer<typeof testTurnSchema>;

@@ -4,7 +4,8 @@ import { z } from 'zod';
 import { AppError } from '../../../errors';
 import { ZodValidationPipe } from '../../../http';
 import { RequirePermission } from '../../../rbac';
-import { createAgentSchema, previewSchema, setChannelsSchema, setDocumentsSchema, updateAgentSchema, type CreateAgentDto, type PreviewDto, type SetChannelsDto, type SetDocumentsDto, type UpdateAgentDto } from './agents.dto';
+import { AgentTestService } from './agent-test.service';
+import { createAgentSchema, previewSchema, setChannelsSchema, setDocumentsSchema, testTurnSchema, updateAgentSchema, type CreateAgentDto, type PreviewDto, type SetChannelsDto, type SetDocumentsDto, type TestTurnDto, type UpdateAgentDto } from './agents.dto';
 import { AgentsService, MAX_PHOTO_BYTES } from './agents.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -49,7 +50,10 @@ function readBody(req: Request, limit: number): Promise<Buffer> {
 @RequirePermission('agents.manage')
 @Controller('agents')
 export class AgentsController {
-  constructor(@Inject(AgentsService) private readonly agents: AgentsService) {}
+  constructor(
+    @Inject(AgentsService) private readonly agents: AgentsService,
+    @Inject(AgentTestService) private readonly tests: AgentTestService,
+  ) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
@@ -115,6 +119,18 @@ export class AgentsController {
   @Header('Cache-Control', 'no-store')
   async setPhoto(@Param('id', idParam) id: string, @Req() req: Request) {
     return this.agents.setPhoto(id, await readBody(req, MAX_PHOTO_BYTES));
+  }
+
+  /**
+   * Simulador de prueba (M8.4): un turno de conversación con las instrucciones y los documentos guardados del agente. **No envía mensajes ni crea contactos.** Cuesta créditos de «prueba» y tiene un
+   * tope diario por empresa. Permiso propio (`agents.test`).
+   */
+  @RequirePermission('agents.test')
+  @Post(':id/test')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  test(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(testTurnSchema)) b: TestTurnDto) {
+    return this.tests.turn(id, b);
   }
 
   @Delete(':id/photo')

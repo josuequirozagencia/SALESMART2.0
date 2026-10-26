@@ -9,6 +9,7 @@ import { PlatformModule } from '../platform';
 import { AiAdminService } from './ai-admin.service';
 import { AiCreditsService } from './ai-credits.service';
 import { AiGateway } from './ai-gateway.service';
+import { AgentTestService } from './agents/agent-test.service';
 import { AgentsController } from './agents/agents.controller';
 import { AgentsService } from './agents/agents.service';
 import { AiAdminController, AiCreditsController } from './ai.controller';
@@ -26,7 +27,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
   return cfg.ai.provider === 'openai' ? new OpenAiProvider() : cfg.ai.provider === 'fake' ? new FakeAiProvider() : new NoAiProvider();
 }
 
-/** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2) y agentes (M8.3). Después: prueba y agente en vivo. */
+/** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2), agentes (M8.3) y simulador de prueba (M8.4). Después: agente en vivo. */
 @Module({
   imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule],
   controllers: [AiCreditsController, AiAdminController, KnowledgeController, AgentsController],
@@ -36,6 +37,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     AiGateway,
     KnowledgeService,
     AgentsService,
+    AgentTestService,
     KnowledgeProcessorService,
     KnowledgeJob,
     { provide: AI_PROVIDER, useFactory: buildAiProvider, inject: [APP_CONFIG] },

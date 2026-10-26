@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AI_PROVIDER, AiProviderError, type AIProvider } from './ai.ports';
+import { AI_PROVIDER, AiProviderError, type AIProvider, type ChatMessage } from './ai.ports';
 import { MAX_EMBED_INPUTS } from './openai.provider';
 import { AiModelPricesService, PlatformCredentialsReader } from '../platform';
 
@@ -27,6 +27,14 @@ export interface EmbeddingOutcome {
   readonly vectors: number[][];
   /** Tokens que cobró el proveedor. */
   readonly tokens: number;
+  /** Costo real en USD según el precio del modelo (SOLO servidor). */
+  readonly costUsd: number;
+}
+
+export interface ChatOutcome {
+  readonly text: string;
+  readonly tokensIn: number;
+  readonly tokensOut: number;
   /** Costo real en USD según el precio del modelo (SOLO servidor). */
   readonly costUsd: number;
 }
@@ -77,6 +85,24 @@ export class AiGateway {
     const cost = await this.embeddingCostUsd(tokens);
     if (cost === null) throw new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado');
     return { vectors, tokens, costUsd: cost };
+  }
+
+  /** Precios (USD por millón de tokens) de un modelo de chat; null si no está cargado. SOLO servidor. */
+  chatPrice(model: string): Promise<{ usdPer1mInput: number; usdPer1mOutput: number } | null> {
+    return this.prices.price(model).then((p) => (p && p.kind === 'chat' ? { usdPer1mInput: p.usdPer1mInput, usdPer1mOutput: p.usdPer1mOutput } : null));
+  }
+
+  /** Genera una respuesta de chat y calcula su costo real. Se llama FUERA de toda transacción de negocio. */
+  async chat(input: { model: string; messages: readonly ChatMessage[]; temperature: number; maxTokens: number }): Promise<ChatOutcome> {
+    const price = await this.chatPrice(input.model);
+    if (!price) throw new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado');
+    const apiKey = await this.key();
+    try {
+      const out = await this.provider.chat({ apiKey }, { model: input.model, messages: input.messages, temperature: input.temperature, maxTokens: input.maxTokens });
+      return { ...out, costUsd: (out.tokensIn * price.usdPer1mInput + out.tokensOut * price.usdPer1mOutput) / 1_000_000 };
+    } catch (e) {
+      throw this.translate(e);
+    }
   }
 
   private async key(): Promise<string> {
