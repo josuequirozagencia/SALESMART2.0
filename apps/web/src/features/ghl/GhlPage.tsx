@@ -6,7 +6,8 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { CopyField } from '../../ui/CopyField';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
-import { useDisconnectGhl, useGhlConnection, useGhlEvents, useGhlOutbox, useIssueGhlSecret, useRetryGhlOutbox, useSaveGhl, useTestGhl, type GhlConnection, type GhlEvent, type GhlEventFilter, type GhlEventOutcome, type GhlEventStatus, type GhlOutboxFilter, type GhlOutboxItem, type GhlOutboxStatus, type GhlStatus, type GhlWebhookIssued } from './useGhl';
+import { useQueues } from '../queues/useQueues';
+import { useDisconnectGhl, useGhlConnection, useGhlChannel, useGhlEvents, useGhlOutbox, useIssueGhlSecret, useRetryGhlOutbox, useSaveGhl, useSaveGhlChannel, useTestGhl, type GhlConnection, type GhlEvent, type GhlEventFilter, type GhlEventOutcome, type GhlEventStatus, type GhlReplyType, type GhlOutboxFilter, type GhlOutboxItem, type GhlOutboxStatus, type GhlStatus, type GhlWebhookIssued } from './useGhl';
 
 const STATUS: Record<GhlStatus, { label: string; kind: PillKind }> = {
   active: { label: 'Conectada', kind: 'ok' },
@@ -28,9 +29,25 @@ const OUTBOX_STATUS: Record<GhlOutboxStatus, { label: string; kind: PillKind }> 
   skipped: { label: 'Omitido', kind: 'muted' },
   failed: { label: 'Falló', kind: 'crit' },
 };
+const REPLY_TYPES: ReadonlyArray<{ value: GhlReplyType; label: string }> = [
+  { value: 'SMS', label: 'SMS' },
+  { value: 'WhatsApp', label: 'WhatsApp (el de GoHighLevel)' },
+  { value: 'IG', label: 'Instagram' },
+  { value: 'FB', label: 'Facebook' },
+  { value: 'Live_Chat', label: 'Chat en vivo' },
+];
 const OP_LABEL: Record<GhlOutboxItem['op'], string> = { tag_add: 'Agregar', tag_remove: 'Quitar', tag_delete: 'Eliminar en GoHighLevel' };
-const OUTCOME: Record<GhlEventOutcome, string> = { contact_created: 'Contacto creado', contact_linked: 'Vinculado a un contacto existente', contact_updated: 'Contacto completado', contact_unchanged: 'Sin cambios' };
+const OUTCOME: Record<GhlEventOutcome, string> = { contact_created: 'Contacto creado', contact_linked: 'Vinculado a un contacto existente', contact_updated: 'Contacto completado', contact_unchanged: 'Sin cambios', message_received: 'Mensaje recibido' };
 const TYPE_LABEL: Record<GhlEvent['type'], string> = { contact: 'Contacto', message_in: 'Mensaje entrante' };
+const MESSAGE_EXAMPLE = `{
+  "event": "message_in",
+  "contact_id": "{{contact.id}}",
+  "full_name": "{{contact.name}}",
+  "phone": "{{contact.phone}}",
+  "message": "{{message.body}}",
+  "message_type": "SMS",
+  "message_id": "{{message.id}}"
+}`;
 const EXAMPLE = `{
   "contact_id": "{{contact.id}}",
   "full_name": "{{contact.name}}",
@@ -164,6 +181,63 @@ function WebhookSection({ s }: { s: GhlConnection }) {
   );
 }
 
+/** El canal «GoHighLevel» del Inbox: a qué cola van las conversaciones nuevas y por qué canal de GHL se responde cuando el aviso no lo dice. */
+function ChannelSection() {
+  const ch = useGhlChannel(true);
+  const queues = useQueues();
+  const save = useSaveGhlChannel();
+  const [queue, setQueue] = useState<string | null>(null);
+  const [type, setType] = useState<GhlReplyType | null>(null);
+  const [error, setError] = useState<string>();
+  const [notice, setNotice] = useState<string>();
+  const data = ch.data;
+  // Los valores del formulario parten de lo guardado y se vuelven a leer solo cuando cambia lo guardado
+  const savedQueue = data?.queue?.id ?? null;
+  const savedType = data?.default_type ?? null;
+  const [seen, setSeen] = useState<string>('');
+  const key = `${savedQueue ?? ''}|${savedType ?? ''}`;
+  if (data && seen !== key) {
+    setSeen(key);
+    setQueue(savedQueue);
+    setType(savedType);
+  }
+  if (!data?.configured) return null;
+  const submit = (): void => {
+    setError(undefined);
+    setNotice(undefined);
+    save.mutate({ queue_id: queue, default_type: type }, { onSuccess: () => setNotice('Cambios guardados.'), onError: (e) => setError(friendlyError(e, 'No se pudo guardar')) });
+  };
+  return (
+    <section aria-label="Canal de mensajes" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+      <div>
+        <b className="text-[15px]">Mensajes de GoHighLevel en el Inbox</b>
+        <p className="max-w-[680px] text-[12.5px] text-muted">Los mensajes que lleguen por tus Workflows aparecen en el Inbox como el canal «GoHighLevel», con el mismo reparto, horarios y permisos que WhatsApp. Por ahora solo texto.</p>
+      </div>
+      <div className="grid items-start gap-3 sm:grid-cols-2">
+        <Field label="Cola de las conversaciones nuevas" hint="Sin cola, las conversaciones quedan «sin asignar» hasta que alguien las tome.">
+          {(f) => (
+            <select {...f} value={queue ?? ''} onChange={(e) => setQueue(e.target.value === '' ? null : e.target.value)} className={`${selectCls} w-full`}>
+              <option value="">Sin cola</option>
+              {(queues.data?.items ?? []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+          )}
+        </Field>
+        <Field label="Responder por, si el aviso no dice el canal" hint="Normalmente se responde por el mismo canal por el que escribió el cliente.">
+          {(f) => (
+            <select {...f} value={type ?? ''} onChange={(e) => setType(e.target.value === '' ? null : (e.target.value as GhlReplyType))} className={`${selectCls} w-full`}>
+              <option value="">Ninguno (avisar que falta)</option>
+              {REPLY_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+            </select>
+          )}
+        </Field>
+      </div>
+      {error ? <Alert>{error}</Alert> : null}
+      {notice ? <Alert kind="ok">{notice}</Alert> : null}
+      <div className="flex justify-end"><Button variant="primary" loading={save.isPending} onClick={submit}>Guardar canal</Button></div>
+    </section>
+  );
+}
+
 /** Cómo armar la acción «Webhook» del Workflow de GoHighLevel. */
 function HowTo() {
   return (
@@ -175,7 +249,9 @@ function HowTo() {
         <li>En «Custom Data» (o en el cuerpo) envía estos campos; los que falten se ignoran y el resto de lo que mande GoHighLevel no se guarda:</li>
       </ol>
       <pre className="overflow-x-auto rounded-xl bg-surface2 p-3 text-[12.5px]">{EXAMPLE}</pre>
-      <p className="text-muted">Obligatorio solo <code className="rounded bg-surface2 px-1">contact_id</code>. Para crear un contacto nuevo hace falta el teléfono en formato internacional (+593…); si el teléfono ya existe, se vincula sin tocar el nombre ni el responsable, y solo se completa el correo si estaba vacío. Opcional: <code className="rounded bg-surface2 px-1">event_id</code> (evita procesar dos veces el mismo aviso) y <code className="rounded bg-surface2 px-1">location.id</code> (debe ser la Location conectada). <b>Etiquetas:</b> si el cuerpo trae <code className="rounded bg-surface2 px-1">tags</code> (la lista completa de etiquetas del contacto en GoHighLevel), Sales Smart agrega y quita las que existen aquí con el mismo nombre (sin distinguir mayúsculas); las del sistema (Lead, Cita agendada y Venta) nunca se tocan. Las etiquetas que pones o quitas aquí también se envían a GoHighLevel, y si borras una etiqueta aquí se elimina también en GoHighLevel (la integración necesita el permiso de leer y escribir etiquetas de la Location, además del de contactos). Los mensajes entrantes llegan en la siguiente versión.</p>
+      <p className="text-muted">Obligatorio solo <code className="rounded bg-surface2 px-1">contact_id</code>. Para crear un contacto nuevo hace falta el teléfono en formato internacional (+593…); si el teléfono ya existe, se vincula sin tocar el nombre ni el responsable, y solo se completa el correo si estaba vacío. Opcional: <code className="rounded bg-surface2 px-1">event_id</code> (evita procesar dos veces el mismo aviso) y <code className="rounded bg-surface2 px-1">location.id</code> (debe ser la Location conectada). <b>Etiquetas:</b> si el cuerpo trae <code className="rounded bg-surface2 px-1">tags</code> (la lista completa de etiquetas del contacto en GoHighLevel), Sales Smart agrega y quita las que existen aquí con el mismo nombre (sin distinguir mayúsculas); las del sistema (Lead, Cita agendada y Venta) nunca se tocan. Las etiquetas que pones o quitas aquí también se envían a GoHighLevel, y si borras una etiqueta aquí se elimina también en GoHighLevel (la integración necesita el permiso de leer y escribir etiquetas de la Location, además del de contactos). </p>
+      <p className="text-[12.5px] text-muted"><b>Mensajes:</b> para que lo que escribe el cliente llegue a la bandeja, crea otro Workflow con el disparador «Customer Replied» (o el que uses) y la misma acción «Webhook», con este cuerpo (ajusta <code className="rounded bg-surface2 px-1">message_type</code> al canal: SMS, WhatsApp, Instagram, Facebook o Live Chat). Las respuestas salen por el mismo canal por el que escribió el cliente.</p>
+      <pre className="overflow-x-auto rounded-xl bg-surface2 p-3 text-[12.5px]">{MESSAGE_EXAMPLE}</pre>
     </section>
   );
 }
@@ -279,6 +355,7 @@ export function GhlPage() {
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
       {q.data ? <ConnectionForm s={q.data} /> : null}
       {q.data ? <WebhookSection s={q.data} /> : null}
+      {q.data?.configured && q.data.status !== 'disconnected' ? <ChannelSection /> : null}
       {q.data ? <HowTo /> : null}
       {q.data?.webhook.configured ? <EventsPanel /> : null}
       {q.data?.configured && q.data.status !== 'disconnected' ? <OutboxPanel /> : null}

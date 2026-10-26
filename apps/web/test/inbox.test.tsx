@@ -743,3 +743,46 @@ describe('Inbox · plantillas de WhatsApp', () => {
     expect(log.getByRole('img', { name: 'Enviado' })).toBeInTheDocument();
   });
 });
+
+describe('Inbox · canal de GoHighLevel (M7.4)', () => {
+  const ghl = (over: Partial<Conversation> = {}): Conversation =>
+    conv({ channel: { id: 'chg', name: 'GoHighLevel', state: 'active', kind: 'ghl' }, window: { open: true, expires_at: null }, last_inbound_at: ago(72 * HOUR), ...over });
+
+  it('no tiene ventana de 24 h: se puede responder pasados varios días, sin avisos de WhatsApp, y el mensaje sale', async () => {
+    const w = world({ convs: [ghl()], messages: { c1: [msg({ text: 'Hola por SMS' })] } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const box = await screen.findByRole('textbox', { name: 'Mensaje' });
+    expect(box).toBeEnabled();
+    expect(screen.queryByText(/Pasaron más de 24 horas/)).not.toBeInTheDocument();
+    await userEvent.type(box, 'Con gusto te ayudo');
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+    await waitFor(() => expect(w.posts).toEqual([{ path: '/conversations/c1/messages', body: { text: 'Con gusto te ayudo' } }]));
+  });
+
+  it('por GoHighLevel solo hay texto: no ofrece plantillas, adjuntar ni programar', async () => {
+    mockApi(server(world({ convs: [ghl()] })));
+    renderApp('/inbox/c1');
+    await screen.findByRole('textbox', { name: 'Mensaje' });
+    expect(screen.queryByRole('button', { name: 'Plantillas' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Adjuntar archivo' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Programar mensaje' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Respuestas rápidas' })).toBeInTheDocument(); // las respuestas rápidas sí sirven
+  });
+
+  it('en WhatsApp (o sin tipo de canal) siguen todos los botones', async () => {
+    mockApi(server(world({ convs: [conv()] })));
+    renderApp('/inbox/c1');
+    await screen.findByRole('textbox', { name: 'Mensaje' });
+    expect(screen.getByRole('button', { name: 'Plantillas' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Adjuntar archivo' })).toBeInTheDocument();
+  });
+
+  it('con la conexión de GoHighLevel rechazada o desconectada explica a quién acudir, sin hablar de WhatsApp', async () => {
+    const off = ghl({ channel: { id: 'chg', name: 'GoHighLevel', state: 'disabled', kind: 'ghl' }, can: { reply: false, note: true, accept: false, take: false, close: true, transfer: false, share: false } });
+    mockApi(server(world({ convs: [off] })));
+    renderApp('/inbox/c1');
+    expect(await screen.findByText(/conexión con GoHighLevel está desconectada o su token fue rechazado/)).toBeInTheDocument();
+    expect(screen.queryByText(/conexión de WhatsApp/)).not.toBeInTheDocument();
+  });
+});

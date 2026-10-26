@@ -49,7 +49,7 @@ export function useIssueGhlSecret() {
 }
 
 export type GhlEventStatus = 'pending' | 'done' | 'skipped' | 'failed';
-export type GhlEventOutcome = 'contact_created' | 'contact_linked' | 'contact_updated' | 'contact_unchanged';
+export type GhlEventOutcome = 'contact_created' | 'contact_linked' | 'contact_updated' | 'contact_unchanged' | 'message_received';
 export interface GhlEvent {
   id: string;
   type: 'contact' | 'message_in';
@@ -109,4 +109,24 @@ export function useGhlOutbox(status: GhlOutboxFilter, limit: number) {
 export function useRetryGhlOutbox() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (id: string) => api<{ id: string; status: 'pending' }>(`/ghl/outbox/${id}/retry`, { method: 'POST' }), onSettled: () => qc.invalidateQueries({ queryKey: ['ghl-outbox'] }) });
+}
+
+export type GhlReplyType = 'SMS' | 'WhatsApp' | 'IG' | 'FB' | 'Live_Chat';
+export interface GhlChannel {
+  configured: boolean;
+  channel_id: string | null;
+  /** Cola a la que van las conversaciones nuevas de GoHighLevel; sin cola quedan «sin asignar». */
+  queue: { id: string; name: string } | null;
+  /** Canal de GHL por el que se responde cuando el aviso no dice por cuál llegó el mensaje. */
+  default_type: GhlReplyType | null;
+}
+export interface SaveGhlChannelInput { queue_id: string | null; default_type: GhlReplyType | null }
+
+export function useGhlChannel(enabled: boolean) {
+  return useQuery({ queryKey: ['ghl-channel'], enabled, retry: false, queryFn: () => api<GhlChannel>('/ghl/channel') });
+}
+
+export function useSaveGhlChannel() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (input: SaveGhlChannelInput) => api<GhlChannel>('/ghl/channel', { method: 'PUT', body: input }), onSettled: () => qc.invalidateQueries({ queryKey: ['ghl-channel'] }) });
 }

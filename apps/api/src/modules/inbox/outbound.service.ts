@@ -9,7 +9,7 @@ import { OrgDirectoryService, OrgMembersService } from '../organizations';
 import { QuickRepliesService, type ResolvedQuickReplyView } from '../quick-replies';
 import { SlaService } from '../sla';
 import { renderedText, TemplatesService, type TemplateList } from '../templates';
-import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
+import { assertCanReply, assertWindowOpen, hasWindow, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
 import type { NoteDto, ReplyDto, SendMediaDto, SendTemplateDto } from './inbox.dto';
 import { messageView, type MessageView } from './inbox.views';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
@@ -60,7 +60,8 @@ export class OutboundService {
     const timeZone = (await this.directory.current()).timeZone;
     const messageId = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
-      assertCanReply(scope, c, channel.state, collab);
+      assertCanReply(scope, c, channel.state, collab, channel.provider);
+      if (!hasWindow(channel.provider)) throw new ConflictError('GHL_TEXT_ONLY', 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto');
       assertWindowOpen(c.lastInboundAt, now);
       const [att] = await tx.select({ id: messageAttachments.id, conversationId: messageAttachments.conversationId, kind: messageAttachments.kind, mimeType: messageAttachments.mimeType, filename: messageAttachments.filename, state: messageAttachments.state, scanStatus: messageAttachments.scanStatus, storageKey: messageAttachments.storageKey, messageId: messageAttachments.messageId }).from(messageAttachments).where(and(eq(messageAttachments.id, dto.attachment_id), eq(messageAttachments.conversationId, conversationId), eq(messageAttachments.direction, 'out'))).limit(1);
       // 404 uniforme: un archivo de OTRA conversación (aunque sea de la misma empresa y la persona no la vea) no se distingue de uno que no existe
@@ -97,12 +98,14 @@ export class OutboundService {
   async listTemplates(access: InboxAccess, conversationId: string): Promise<TemplateList> {
     const scope = scopeOf(access);
     if (!scope.canReply) throw new ForbiddenError();
-    const channelId = await this.db.withTenant(async (tx) => {
+    const found = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId);
-      assertCanReply(scope, c, channel.state, collab);
-      return c.channelAccountId;
+      assertCanReply(scope, c, channel.state, collab, channel.provider);
+      return { channelId: c.channelAccountId, provider: channel.provider };
     });
-    return this.templates.forChannel(channelId);
+    // GoHighLevel no tiene plantillas de WhatsApp (M7.4): lista vacía en vez de consultar a Meta por un canal que no es suyo
+    if (found.provider === 'ghl') return { items: [], synced_at: null, sync_error: null };
+    return this.templates.forChannel(found.channelId);
   }
 
   /**
@@ -147,9 +150,9 @@ export class OutboundService {
    */
   private async enqueue(tx: TenantTx, scope: InboxScope, conversationId: string, now: Date, timeZone: string, make: (tx: TenantTx, c: ConversationRow) => Promise<Outgoing>): Promise<string> {
     const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
-    assertCanReply(scope, c, channel.state, collab);
+    assertCanReply(scope, c, channel.state, collab, channel.provider);
     const out = await make(tx, c);
-    if (out.needsWindow) assertWindowOpen(c.lastInboundAt, now);
+    if (out.needsWindow) assertWindowOpen(c.lastInboundAt, now, channel.provider);
     const [m] = await tx
       .insert(messages)
       .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: out.kind, body: out.body, meta: out.meta, status: 'queued', sentAt: now, createdBy: scope.userId, attempts: 0, nextAttemptAt: now })
@@ -199,9 +202,9 @@ export class OutboundService {
       if (!m) throw new NotFoundError();
       if (m.status === 'queued') return;
       if (m.status !== 'failed') throw new ConflictError('MESSAGE_NOT_FAILED', 'Solo se puede reintentar un mensaje que falló');
-      assertCanReply(scope, c, channel.state, collab);
+      assertCanReply(scope, c, channel.state, collab, channel.provider);
       // Una plantilla se puede reenviar fuera de las 24 h: es justo para lo que sirve
-      if (probe.kind !== 'template') assertWindowOpen(c.lastInboundAt, now);
+      if (probe.kind !== 'template') assertWindowOpen(c.lastInboundAt, now, channel.provider);
       await tx.update(messages).set({ status: 'queued', error: null, attempts: 0, nextAttemptAt: now, meta: sql`${messages.meta} - 'error_code'` }).where(eq(messages.id, messageId));
     });
     return this.sendNow(messageId);

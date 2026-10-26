@@ -1,11 +1,12 @@
-import { GhlError, type GhlContactInput, type GhlCredentials, type GhlProvider } from './ghl.ports';
+import { GhlError, type GhlContactInput, type GhlCredentials, type GhlOutgoingMessage, type GhlProvider } from './ghl.ports';
 
 /** Lo que el fake «hizo» en GHL, en orden (las pruebas lo leen). */
 export type FakeGhlCall =
   | { kind: 'addTags'; contactId: string; tags: string[]; credentials: GhlCredentials }
   | { kind: 'removeTags'; contactId: string; tags: string[]; credentials: GhlCredentials }
   | { kind: 'upsertContact'; input: GhlContactInput; credentials: GhlCredentials }
-  | { kind: 'deleteTag'; name: string; credentials: GhlCredentials };
+  | { kind: 'deleteTag'; name: string; credentials: GhlCredentials }
+  | { kind: 'sendMessage'; message: GhlOutgoingMessage; credentials: GhlCredentials };
 
 /** Fake de GoHighLevel para pruebas: guarda con qué credenciales se llamó y permite simular fallos. Debe pasar el mismo contract test que el adaptador real. */
 export class FakeGhlProvider implements GhlProvider {
@@ -21,6 +22,7 @@ export class FakeGhlProvider implements GhlProvider {
   locationName: string | null = 'Barbería Norte';
   /** Identificador que «asigna GHL» a un contacto nuevo (se numera para distinguirlos). */
   private nextContact = 1;
+  private nextMessage = 1;
   /** Etiquetas que «existen en GHL» (en minúsculas): `deleteTag` devuelve si estaba. */
   readonly existingTags = new Set<string>();
   /** Contactos «ya existentes en GHL» por teléfono, para probar el emparejamiento. */
@@ -73,5 +75,12 @@ export class FakeGhlProvider implements GhlProvider {
     if (fail) return Promise.reject(fail);
     this.calls.push({ kind: 'deleteTag', name, credentials });
     return Promise.resolve({ deleted: this.existingTags.delete(name.toLowerCase()) });
+  }
+
+  sendMessage(credentials: GhlCredentials, message: GhlOutgoingMessage): Promise<{ id: string }> {
+    const fail = this.callFailures.shift();
+    if (fail) return Promise.reject(fail);
+    this.calls.push({ kind: 'sendMessage', message, credentials });
+    return Promise.resolve({ id: `FakeGhlMessage${String(this.nextMessage++).padStart(6, '0')}` });
   }
 }

@@ -1,6 +1,6 @@
 // M7.2 — Contrato de los avisos del Workflow de GoHighLevel (normalizador puro): qué se lee, qué se ignora y qué se rechaza.
 import { describe, expect, it } from 'vitest';
-import { DEDUPE_WINDOW_MS, MAX_TAGS, dedupeKeyOf, normalizeGhlPayload, type GhlEventPayload } from '../../src/modules/ghl/ghl-event';
+import { DEDUPE_WINDOW_MS, MAX_MESSAGE_LENGTH, MAX_TAGS, dedupeKeyOf, messageTypeOf, normalizeGhlPayload, type GhlEventPayload } from '../../src/modules/ghl/ghl-event';
 
 const ok = (body: unknown): GhlEventPayload => {
   const r = normalizeGhlPayload(body);
@@ -15,7 +15,7 @@ const bad = (body: unknown) => {
 
 describe('normalizeGhlPayload · lo que entiende', () => {
   it('un cuerpo mínimo: solo el contacto; el tipo por omisión es «contact» y no inventa datos', () => {
-    expect(ok({ contact_id: 'abc123' })).toEqual({ type: 'contact', ghlContactId: 'abc123', name: null, phone: null, phoneInvalid: false, email: null, tags: null, locationId: null, eventId: null });
+    expect(ok({ contact_id: 'abc123' })).toEqual({ type: 'contact', ghlContactId: 'abc123', name: null, phone: null, phoneInvalid: false, email: null, tags: null, locationId: null, eventId: null, message: null });
   });
 
   it('nivel superior: nombre, teléfono, correo, etiquetas, Location y event_id', () => {
@@ -43,8 +43,9 @@ describe('normalizeGhlPayload · lo que entiende', () => {
     expect(JSON.stringify(e)).not.toContain('Calle 1');
   });
 
-  it('el mensaje entrante es un tipo reconocido (se procesará en M7.4)', () => {
-    expect(ok({ event: 'message_in', contact_id: 'C1' }).type).toBe('message_in');
+  it('el mensaje entrante es un tipo reconocido y exige el texto del mensaje', () => {
+    expect(ok({ event: 'message_in', contact_id: 'C1', message: 'Hola' }).type).toBe('message_in');
+    expect(bad({ event: 'message_in', contact_id: 'C1' })[0]).toMatchObject({ path: 'message', code: 'required' });
   });
 });
 
@@ -120,5 +121,59 @@ describe('dedupeKeyOf', () => {
 
   it('la clave nunca lleva datos personales en claro', () => {
     expect(dedupeKeyOf(base, t0)).toMatch(/^h:[0-9a-f]{64}$/);
+  });
+});
+
+describe('normalizeGhlPayload · mensaje entrante (M7.4)', () => {
+  const msg = (over: Record<string, unknown> = {}) => ({ event: 'message_in', contact_id: 'C1', ...over });
+
+  it('el texto puede venir como cadena, como objeto o en campos planos, y del nivel superior o de customData', () => {
+    for (const body of [msg({ message: 'Hola' }), msg({ message: { body: 'Hola' } }), msg({ message: { text: 'Hola' } }), msg({ message_text: 'Hola' }), msg({ message_body: 'Hola' }), msg({ body: 'Hola' }), msg({ customData: { message: 'Hola' } }), { event: 'message_in', customData: { contact_id: 'C1', message: 'Hola' } }]) {
+      expect(ok(body).message?.text, JSON.stringify(body)).toBe('Hola');
+    }
+  });
+
+  it('lee el identificador, el canal y la hora, y los entiende de varias formas', () => {
+    const e = ok(msg({ message: { body: 'Hola', id: 'wamid.123', type: 'TYPE_WHATSAPP', dateAdded: '2026-10-24T10:00:00.000Z' } }));
+    expect(e.message).toEqual({ id: 'wamid.123', text: 'Hola', type: 'WhatsApp', sentAt: '2026-10-24T10:00:00.000Z' });
+    expect(ok(msg({ message: 'x', message_id: 'm9', message_type: 'sms', message_sent_at: 1_761_300_000 })).message).toMatchObject({ id: 'm9', type: 'SMS', sentAt: new Date(1_761_300_000_000).toISOString() });
+    expect(ok(msg({ message: 'x', date_added: 1_761_300_000_123 })).message?.sentAt).toBe(new Date(1_761_300_000_123).toISOString());
+    expect(ok(msg({ message: 'x', message_sent_at: 'no es fecha' })).message?.sentAt).toBeNull();
+    expect(ok(msg({ message: 'x' })).message).toMatchObject({ id: null, type: null, sentAt: null });
+  });
+
+  it('el canal se reconoce por sus nombres usuales; lo desconocido queda sin canal', () => {
+    const cases: Array<[unknown, string | null]> = [['SMS', 'SMS'], ['TYPE_SMS', 'SMS'], ['text', 'SMS'], ['WhatsApp', 'WhatsApp'], ['whatsapp', 'WhatsApp'], ['IG', 'IG'], ['Instagram', 'IG'], ['FB', 'FB'], ['Facebook', 'FB'], ['Messenger', 'FB'], ['Live Chat', 'Live_Chat'], ['live_chat', 'Live_Chat'], ['webchat', 'Live_Chat'], ['Email', 'Email'], ['telegram', null], ['', null], [null, null], [{}, null]];
+    for (const [raw, expected] of cases) expect(messageTypeOf(raw), String(raw)).toBe(expected);
+  });
+
+  it('conserva saltos de línea y tabulaciones, quita el resto de caracteres de control y acota el largo', () => {
+    expect(ok(msg({ message: 'Línea 1\r\nLínea 2\r3\tTab\u0000\u0007\u0085fin' })).message?.text).toBe('Línea 1\nLínea 2\n3\tTabfin');
+    expect(ok(msg({ message: 'x'.repeat(MAX_MESSAGE_LENGTH + 500) })).message?.text).toHaveLength(MAX_MESSAGE_LENGTH);
+    expect(ok(msg({ message: '  espacios  ' })).message?.text).toBe('espacios');
+  });
+
+  it('sin texto (vacío, solo espacios, del tipo equivocado) es un problema del contrato, sin repetir datos del cliente', () => {
+    for (const body of [msg(), msg({ message: '' }), msg({ message: '   ' }), msg({ message: 5 }), msg({ message: {} }), msg({ message: { body: [] } }), msg({ message: ['Hola'] })]) {
+      expect(bad(body)[0], JSON.stringify(body)).toMatchObject({ path: 'message', code: 'required' });
+    }
+    expect(JSON.stringify(bad(msg({ phone: '+593984217730', full_name: 'Ana Torres' })))).not.toMatch(/593984217730|Ana Torres/);
+  });
+
+  it('message_id demasiado largo se rechaza; en un aviso de contacto el mensaje se ignora', () => {
+    expect(bad(msg({ message: 'x', message_id: 'i'.repeat(101) }))[0]).toMatchObject({ path: 'message_id', code: 'too_long' });
+    expect(ok({ contact_id: 'C1', message: 'esto no es un mensaje' }).message).toBeNull();
+  });
+
+  it('la clave de duplicados de un mensaje es su id de GHL; sin él, su contenido en la ventana de 10 minutos', () => {
+    const t0 = new Date('2026-10-24T12:00:00.000Z');
+    const a = ok(msg({ message: 'Hola', message_id: 'm1' }));
+    expect(dedupeKeyOf(a, t0)).toBe('mid:m1');
+    expect(dedupeKeyOf(a, new Date(t0.getTime() + 5 * DEDUPE_WINDOW_MS))).toBe('mid:m1');
+    expect(dedupeKeyOf(ok(msg({ message: 'Hola', message_id: 'm1', event_id: 'e1' })), t0)).toBe('id:e1');
+    const w = Math.floor(t0.getTime() / DEDUPE_WINDOW_MS) * DEDUPE_WINDOW_MS;
+    const noId = ok(msg({ message: 'Hola' }));
+    expect(dedupeKeyOf(noId, new Date(w + 1_000))).toBe(dedupeKeyOf(noId, new Date(w + 2_000)));
+    expect(dedupeKeyOf(noId, new Date(w + 1_000))).not.toBe(dedupeKeyOf(ok(msg({ message: 'Otro' })), new Date(w + 1_000)));
   });
 });

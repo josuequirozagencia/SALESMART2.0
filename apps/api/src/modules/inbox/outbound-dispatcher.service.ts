@@ -5,6 +5,7 @@ import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type MediaKind, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
 import { AttachmentsService } from '../attachments';
+import { GhlError, GhlOutboundService, type GhlSendPlan } from '../ghl';
 import { RealtimeService } from '../realtime';
 
 /** Mientras un envío está en curso el mensaje queda «reservado» este tiempo: si el proceso muere a mitad, otra pasada lo retoma. Debe superar el tiempo máximo de espera al proveedor. */
@@ -37,12 +38,18 @@ const ERROR_TEXT: Readonly<Record<string, string>> = {
   template_data: 'Faltan los datos de la plantilla: vuelve a elegirla y enviarla',
   attachment_data: 'Faltan los datos del archivo: súbelo de nuevo e inténtalo',
   storage_unavailable: 'No pudimos leer el archivo del almacenamiento: inténtalo de nuevo en unos minutos',
+  ghl_credentials: 'GoHighLevel rechazó el token o la conexión no está activa: el administrador debe reconectarla en Configuración › GoHighLevel',
+  ghl_no_contact: 'Este contacto no está vinculado a un contacto de GoHighLevel: no hay a quién escribirle por ahí',
+  ghl_type_unknown: 'No sabemos por qué canal de GoHighLevel escribirle: incluye message_type en el Workflow o elige un canal por omisión en Configuración › GoHighLevel',
+  ghl_unsupported: 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto',
+  ghl_rejected: 'GoHighLevel rechazó el mensaje (revisa que el contacto exista allá y que el token tenga permiso de conversaciones)',
 };
 const CHANNEL_OFF = 'La conexión de WhatsApp está desactivada o desconectada. Actívala y vuelve a intentar';
 const CREDENTIALS_UNREADABLE = 'No se pueden leer las credenciales de la conexión: el administrador debe volver a pegar el token';
 const NO_RECIPIENT = 'El contacto no tiene un teléfono al cual escribir';
 const TEMPLATE_DATA = 'Faltan los datos de la plantilla: vuelve a elegirla y enviarla';
 const ATTACHMENT_DATA = 'Faltan los datos del archivo: súbelo de nuevo e inténtalo';
+const GHL_UNSUPPORTED = 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto';
 const STORAGE_UNAVAILABLE = 'No pudimos leer el archivo del almacenamiento: inténtalo de nuevo en unos minutos';
 
 export type DispatchResult =
@@ -67,6 +74,8 @@ interface SendPlan {
   template: { name: string; language: string; components: readonly TemplateSendComponent[] } | null;
   /** Si es un adjunto: el archivo que se sube al proveedor y luego el mensaje que lo referencia. */
   media: { kind: MediaKind; mimeType: string; filename: string | null; bytes: Buffer; caption: string | null } | null;
+  /** Si el canal es GoHighLevel (M7.4): token, contacto y canal de GHL por el que se responde. */
+  ghl?: GhlSendPlan | null;
 }
 
 /**
@@ -88,6 +97,8 @@ export class OutboundDispatcher {
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
+    // GoHighLevel (M7.4): módulo global; sin él (pruebas de otros módulos) los mensajes de un canal de GHL fallan con su motivo
+    @Optional() @Inject(GhlOutboundService) private readonly ghl?: GhlOutboundService,
   ) {}
 
   /** Intenta enviar UN mensaje ahora (si está pendiente y le toca). No lanza por un fallo del proveedor: lo anota en el mensaje. */
@@ -118,15 +129,21 @@ export class OutboundDispatcher {
     let code: string | null = null;
     try {
       const credentials = { accessToken: plan.accessToken };
-      if (plan.media) {
+      if (plan.ghl) {
+        sentId = (await this.ghl!.send(plan.ghl, plan.text)).id;
+      } else if (plan.media) {
         sentId = (await this.provider.sendMedia(credentials, plan.phoneNumberId, { to: plan.to, kind: plan.media.kind, bytes: plan.media.bytes, mimeType: plan.media.mimeType, filename: plan.media.filename, caption: plan.media.caption })).externalId;
       } else {
         sentId = (plan.template ? await this.provider.sendTemplate(credentials, plan.phoneNumberId, { to: plan.to, name: plan.template.name, language: plan.template.language, components: plan.template.components }) : await this.provider.sendText(credentials, plan.phoneNumberId, { to: plan.to, text: plan.text })).externalId;
       }
     } catch (e) {
       if (e instanceof WhatsAppProviderError) code = e.code;
-      else code = 'unavailable';
-      this.log.warn({ message_id: plan.messageId, attempts: plan.attempts, code }, 'envío de WhatsApp no salió');
+      else if (e instanceof GhlError) {
+        // Un token rechazado pide reconectar (queda a la vista en Configuración); un fallo pasajero se reintenta; el resto es definitivo
+        code = e.credentials ? 'ghl_credentials' : e.retryable ? 'unavailable' : 'ghl_rejected';
+        if (e.credentials) await this.ghl?.tokenRejected(e).catch(() => undefined);
+      } else code = 'unavailable';
+      this.log.warn({ message_id: plan.messageId, attempts: plan.attempts, code }, plan.ghl ? 'envío por GoHighLevel no salió' : 'envío de WhatsApp no salió');
     }
 
     const done = new Date();
@@ -205,6 +222,7 @@ export class OutboundDispatcher {
           contactId: conversations.contactId,
           channelStatus: channelAccounts.status,
           channelDeletedAt: channelAccounts.deletedAt,
+          provider: channelAccounts.provider,
           sealed: channelAccounts.credentialsSealed,
           phoneNumberId: whatsappAccounts.phoneNumberId,
           numberActive: whatsappAccounts.active,
@@ -215,11 +233,20 @@ export class OutboundDispatcher {
         .where(eq(conversations.id, m.conversationId))
         .limit(1);
 
-      const fail = async (code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' | 'attachment_data', text: string) => {
+      const fail = async (code: 'channel_off' | 'credentials' | 'no_recipient' | 'template_data' | 'attachment_data' | 'ghl_credentials' | 'ghl_no_contact' | 'ghl_type_unknown' | 'ghl_unsupported', text: string) => {
         await tx.update(messages).set({ status: 'failed', nextAttemptAt: null, error: text, meta: sql`${messages.meta} || ${JSON.stringify({ error_code: code })}::jsonb` }).where(eq(messages.id, m.id));
         return { kind: 'failed' as const, code };
       };
 
+      // GoHighLevel (M7.4): sin número de WhatsApp ni token propio del canal; se escribe por la API de GHL con la conexión de la empresa
+      if (ctx?.provider === 'ghl') {
+        if (ctx.channelDeletedAt !== null || ctx.channelStatus !== 'active') return fail('ghl_credentials', ERROR_TEXT['ghl_credentials']!);
+        if (m.kind !== 'text' || m.body === null) return fail('ghl_unsupported', GHL_UNSUPPORTED);
+        if (!this.ghl) return fail('ghl_credentials', ERROR_TEXT['ghl_credentials']!);
+        const prep = await this.ghl.prepare(tx, { id: m.conversationId, contactId: ctx.contactId });
+        if (!prep.ok) return fail(prep.code, ERROR_TEXT[prep.code]!);
+        return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body, to: '', phoneNumberId: '', accessToken: '', template: null, media: null, ghl: prep.plan, attInfo: null } };
+      }
       if (!ctx || ctx.channelDeletedAt !== null || ctx.channelStatus !== 'active' || !ctx.numberActive || ctx.phoneNumberId === null) return fail('channel_off', CHANNEL_OFF);
       const secrets = ctx.sealed ? this.vault.open(m.channelAccountId, ctx.sealed) : null;
       const accessToken = secrets?.['access_token'];
@@ -249,6 +276,7 @@ export class OutboundDispatcher {
     });
     if (result.kind !== 'plan') return result;
     const plan = result.plan;
+    if (plan.ghl) return { kind: 'plan' as const, plan: { messageId: plan.messageId, channelAccountId: plan.channelAccountId, attempts: plan.attempts, text: plan.text, to: '', phoneNumberId: '', accessToken: '', template: null, media: null, ghl: plan.ghl } };
     if (plan.attInfo) {
       let mediaBytes: Buffer;
       const mediaInfo = { kind: plan.attInfo.kind, mimeType: plan.attInfo.mimeType, filename: plan.attInfo.filename, caption: plan.text || null };

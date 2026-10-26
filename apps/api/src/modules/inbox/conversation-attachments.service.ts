@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
 import { Database, messageAttachments } from '../../db';
-import { AppError, ForbiddenError, NotFoundError } from '../../errors';
+import { AppError, ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { AttachmentsService } from '../attachments';
 import { assertCanReply, loadConversation, scopeOf, type InboxAccess } from './inbox.access';
@@ -37,7 +37,8 @@ export class ConversationAttachmentsService {
     // Primero se comprueba que la persona puede escribir en la conversación: no se gasta almacenamiento ni antivirus en algo que no podrá enviar
     await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId);
-      assertCanReply(scope, c, channel.state, collab);
+      assertCanReply(scope, c, channel.state, collab, channel.provider);
+      if (channel.provider === 'ghl') throw new ConflictError('GHL_TEXT_ONLY', 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto');
     });
     const prepared = await this.files.prepareUpload(file.bytes, file.contentType, file.filename);
     const id = uuidv7();

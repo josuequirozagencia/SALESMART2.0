@@ -8,6 +8,7 @@ import { APP_CONFIG } from '../../tokens';
 import { writeAudit } from '../audit';
 import { GhlRoutesService } from '../organizations';
 import { CredentialVault, VaultOpenError } from '../platform';
+import { GhlChannelService } from './ghl-channel.service';
 import type { SaveConnectionDto } from './ghl.dto';
 import { GHL_PROVIDER, GhlError, type GhlCredentials, type GhlProvider } from './ghl.ports';
 
@@ -45,6 +46,7 @@ export class GhlConnectionService {
     @Inject(APP_CONFIG) cfg: AppConfig,
     @Inject(GHL_PROVIDER) private readonly provider: GhlProvider,
     @Inject(GhlRoutesService) private readonly routes: GhlRoutesService,
+    @Inject(GhlChannelService) private readonly channel: GhlChannelService,
   ) {
     this.vault = CredentialVault.fromConfig(cfg.providers.credentialsKeys);
   }
@@ -135,6 +137,8 @@ export class GhlConnectionService {
           .returning({ id: ghlConnections.id });
         await writeAudit(tx, { entityType: 'ghl_connection', entityId: row!.id, newValue: { location_id: input.location_id, auth_type: 'private_token', status: 'active' }, source: 'manual' });
       }
+      // El canal «GoHighLevel» del Inbox (M7.4) sigue al estado de la conexión
+      await this.channel.sync(tx, sealed || !cur ? 'active' : (cur.status as GhlStatus));
     });
     return this.get();
   }
@@ -182,6 +186,7 @@ export class GhlConnectionService {
       await tx.update(ghlConnections).set({ status: 'disconnected', credentialsSealed: null, keyVersion: null, tokenLast4: null, lastError: null, updatedAt: new Date() }).where(eq(ghlConnections.id, cur.id));
       await writeAudit(tx, { entityType: 'ghl_connection', entityId: cur.id, field: 'status', oldValue: cur.status, newValue: 'disconnected', source: 'manual' });
       await writeAudit(tx, { entityType: 'ghl_connection', entityId: cur.id, field: 'access_token', source: 'manual' });
+      await this.channel.sync(tx, 'disconnected');
     });
     return this.get();
   }
@@ -203,7 +208,17 @@ export class GhlConnectionService {
       .update(ghlConnections)
       .set({ lastError: outcome.message.slice(0, 300), lastCheckAt: now, updatedAt: now, ...(outcome.credentials ? { status: 'needs_reconnect' } : {}) })
       .where(eq(ghlConnections.id, connectionId));
+    if (outcome.credentials) await this.channel.sync(tx, 'needs_reconnect');
     if (outcome.credentials && before && before.status !== 'needs_reconnect') await writeAudit(tx, { entityType: 'ghl_connection', entityId: connectionId, field: 'status', oldValue: before.status, newValue: 'needs_reconnect', source: 'ghl' });
+  }
+
+  /** GHL rechazó el token en una llamada hecha por otro servicio (el envío de un mensaje del Inbox): la conexión pide reconexión. */
+  async rejectedByProvider(message: string): Promise<void> {
+    await this.db.withTenant(async (tx) => {
+      const [c] = await tx.select({ id: ghlConnections.id, status: ghlConnections.status }).from(ghlConnections).limit(1);
+      if (!c || c.status !== 'active') return;
+      await this.noteCallResult(tx, c.id, { ok: false, message, credentials: true }, new Date());
+    });
   }
 
   // ------------------------------------------------------------------ interno
@@ -213,6 +228,7 @@ export class GhlConnectionService {
     await this.db.withTenant(async (tx) => {
       await tx.update(ghlConnections).set({ status: after, lastError: error ? error.slice(0, 300) : null, lastCheckAt: now, updatedAt: now }).where(eq(ghlConnections.id, id));
       if (before !== after) await writeAudit(tx, { entityType: 'ghl_connection', entityId: id, field: 'status', oldValue: before, newValue: after, source: 'manual' });
+      await this.channel.sync(tx, after);
     });
   }
 

@@ -54,7 +54,7 @@ export type ChannelState = 'active' | 'disabled' | 'removed';
 
 export interface Loaded {
   c: ConversationRow;
-  channel: { name: string; state: ChannelState };
+  channel: { name: string; state: ChannelState; provider: string };
   contactName: string;
   /** Si la persona NO es la dueña, su permiso como colaboradora. */
   collab: Collab;
@@ -68,7 +68,7 @@ export const channelState = (status: string, deletedAt: Date | null): ChannelSta
  */
 export async function loadConversation(tx: TenantTx, scope: InboxScope, id: string, lock = false): Promise<Loaded> {
   const q = tx
-    .select({ c: conversations, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, contactName: contacts.name, collab: collabOf(scope.userId) })
+    .select({ c: conversations, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, channelProvider: channelAccounts.provider, contactName: contacts.name, collab: collabOf(scope.userId) })
     .from(conversations)
     .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
     .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
@@ -76,7 +76,7 @@ export async function loadConversation(tx: TenantTx, scope: InboxScope, id: stri
     .limit(1);
   const [row] = await (lock ? q.for('update', { of: conversations }) : q);
   if (!row) throw new NotFoundError();
-  return { c: row.c, channel: { name: row.channelName, state: channelState(row.channelStatus, row.channelDeletedAt) }, contactName: row.contactName, collab: row.c.ownerId === scope.userId ? null : row.collab };
+  return { c: row.c, channel: { name: row.channelName, state: channelState(row.channelStatus, row.channelDeletedAt), provider: row.channelProvider }, contactName: row.contactName, collab: row.c.ownerId === scope.userId ? null : row.collab };
 }
 
 /** Lo que esta persona puede hacer con una conversación en su estado actual. Una sola fuente para la interfaz (`can`) y para las acciones. */
@@ -116,7 +116,7 @@ export function abilities(scope: InboxScope, c: Pick<ConversationRow, 'status' |
 }
 
 /** Por qué no puede responder, con el mensaje que ve la persona; no hace nada si puede. */
-export function assertCanReply(scope: InboxScope, c: Pick<ConversationRow, 'status' | 'ownerId'>, channel: ChannelState, collab: Collab = null): void {
+export function assertCanReply(scope: InboxScope, c: Pick<ConversationRow, 'status' | 'ownerId'>, channel: ChannelState, collab: Collab = null, provider = 'meta_cloud'): void {
   if (c.status === 'closed') throw new ConflictError('CONVERSATION_CLOSED', 'La conversación está finalizada');
   if (c.status === 'unassigned') throw new ConflictError('CONVERSATION_UNASSIGNED', 'La conversación aún no tiene asesor: asígnala o tómala antes de responder');
   if (c.ownerId !== scope.userId && !scope.viewAll) {
@@ -124,7 +124,7 @@ export function assertCanReply(scope: InboxScope, c: Pick<ConversationRow, 'stat
     if (collab !== 'reply') throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación, o quien la comparte con permiso para responder, puede responder');
     if (c.status === 'pending') throw new ConflictError('CONVERSATION_NOT_ACCEPTED', 'Quien tiene asignada la conversación aún no la acepta: podrás responder cuando lo haga');
   }
-  if (channel !== 'active') throw new ConflictError('CHANNEL_DISABLED', 'La conexión de WhatsApp de esta conversación está desactivada o desconectada');
+  if (channel !== 'active') throw new ConflictError('CHANNEL_DISABLED', provider === 'ghl' ? 'La conexión con GoHighLevel está desconectada o su token fue rechazado: el administrador debe revisarla en Configuración › GoHighLevel' : 'La conexión de WhatsApp de esta conversación está desactivada o desconectada');
 }
 
 /** Cómo se relaciona la persona con la conversación (para la interfaz). */
@@ -144,12 +144,16 @@ export interface WindowState {
   expires_at: string | null;
 }
 
-export function windowOf(lastInboundAt: Date | null, now: Date): WindowState {
+/** ¿El canal tiene la ventana de 24 h de WhatsApp oficial? GoHighLevel no (cada canal de GHL tiene sus propias reglas y GHL las aplica). */
+export const hasWindow = (provider: string): boolean => provider !== 'ghl';
+
+export function windowOf(lastInboundAt: Date | null, now: Date, provider = 'meta_cloud'): WindowState {
+  if (!hasWindow(provider)) return { open: true, expires_at: null };
   if (!lastInboundAt) return { open: false, expires_at: null };
   const end = new Date(lastInboundAt.getTime() + WINDOW_MS);
   return { open: end.getTime() > now.getTime(), expires_at: end.toISOString() };
 }
 
-export function assertWindowOpen(lastInboundAt: Date | null, now: Date): void {
-  if (!windowOf(lastInboundAt, now).open) throw new ConflictError('WINDOW_CLOSED', 'Pasaron más de 24 horas desde el último mensaje del cliente: WhatsApp solo permite escribirle con una plantilla aprobada');
+export function assertWindowOpen(lastInboundAt: Date | null, now: Date, provider = 'meta_cloud'): void {
+  if (!windowOf(lastInboundAt, now, provider).open) throw new ConflictError('WINDOW_CLOSED', 'Pasaron más de 24 horas desde el último mensaje del cliente: WhatsApp solo permite escribirle con una plantilla aprobada');
 }

@@ -29,6 +29,15 @@ export interface GhlContactInput {
   email: string | null;
 }
 
+/** Canales de GHL por los que Sales Smart puede ESCRIBIR (M7.4): por el mismo por el que llegó el mensaje. */
+export type GhlReplyType = 'SMS' | 'WhatsApp' | 'IG' | 'FB' | 'Live_Chat';
+
+export interface GhlOutgoingMessage {
+  ghlContactId: string;
+  type: GhlReplyType;
+  text: string;
+}
+
 export interface GhlProvider {
   /** `none` = sin adaptador configurado. */
   readonly kind: 'none' | 'fake' | 'ghl';
@@ -44,6 +53,8 @@ export interface GhlProvider {
   upsertContact(credentials: GhlCredentials, input: GhlContactInput): Promise<{ id: string; created: boolean }>;
   /** Elimina de la Location la etiqueta con ese nombre (sin distinguir mayúsculas), con lo que desaparece de todos sus contactos. Si no existe no hace nada (`deleted: false`). Lanza `GhlError`. */
   deleteTag(credentials: GhlCredentials, name: string): Promise<{ deleted: boolean }>;
+  /** Escribe al cliente por GHL, por el canal indicado, y devuelve el identificador del mensaje. Lanza `GhlError`. */
+  sendMessage(credentials: GhlCredentials, message: GhlOutgoingMessage): Promise<{ id: string }>;
 }
 
 export const GHL_PROVIDER = Symbol('GHL_PROVIDER');
@@ -65,6 +76,9 @@ export class NoGhlProvider implements GhlProvider {
     return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
   }
   deleteTag(): Promise<{ deleted: boolean }> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  sendMessage(): Promise<{ id: string }> {
     return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
   }
 }

@@ -3,9 +3,10 @@ import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { GhlConnectionService } from './ghl-connection.service';
+import { GhlChannelService } from './ghl-channel.service';
 import { GhlEventsService } from './ghl-events.service';
 import { GhlOutboxService } from './ghl-outbox.service';
-import { eventsQuerySchema, outboxQuerySchema, saveConnectionSchema, type EventsQuery, type OutboxQuery, type SaveConnectionDto } from './ghl.dto';
+import { channelConfigSchema, eventsQuerySchema, outboxQuerySchema, saveConnectionSchema, type ChannelConfigDto, type EventsQuery, type OutboxQuery, type SaveConnectionDto } from './ghl.dto';
 
 /**
  * Conexión de la empresa con GoHighLevel (M7.1, ADR-52). Solo quien administra integraciones (`integrations.manage`); `no-store`: son credenciales. El token jamás se devuelve (solo sus
@@ -17,6 +18,7 @@ export class GhlController {
     @Inject(GhlConnectionService) private readonly ghl: GhlConnectionService,
     @Inject(GhlEventsService) private readonly events: GhlEventsService,
     @Inject(GhlOutboxService) private readonly outbox: GhlOutboxService,
+    @Inject(GhlChannelService) private readonly channel: GhlChannelService,
   ) {}
 
   @RequirePermission('integrations.manage')
@@ -83,5 +85,20 @@ export class GhlController {
   @Header('Cache-Control', 'no-store')
   outboxRetry(@Param('id', new ZodValidationPipe(z.uuid())) id: string) {
     return this.outbox.retry(id);
+  }
+
+  /** El canal «GoHighLevel» del Inbox: a qué cola van las conversaciones nuevas y por qué canal de GHL se responde por omisión. */
+  @RequirePermission('integrations.manage')
+  @Get('channel')
+  @Header('Cache-Control', 'no-store')
+  channelView() {
+    return this.channel.view();
+  }
+
+  @RequirePermission('integrations.manage')
+  @Put('channel')
+  @Header('Cache-Control', 'no-store')
+  channelSave(@Body(new ZodValidationPipe(channelConfigSchema)) b: ChannelConfigDto) {
+    return this.channel.configure(b);
   }
 }

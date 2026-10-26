@@ -62,6 +62,7 @@ describe('contract test del puerto GhlProvider', () => {
         next = null;
         if (e) return e.credentials ? json(res, 401, { message: e.message }) : e.retryable ? json(res, 429, { message: e.message }) : json(res, 422, { message: e.message });
         if (req.url?.startsWith('/contacts/upsert')) return json(res, 200, { new: true, contact: { id: 'ghlContact0001' } });
+        if (req.url?.startsWith('/conversations/messages')) return json(res, 200, { conversationId: 'conv00000001', messageId: 'ghlMsg0000001' });
         if (req.url?.startsWith('/locations/') && req.method === 'GET') return json(res, 200, { tags: [{ id: 'tagVip000001', name: 'VIP', locationId: creds.locationId }] });
         if (req.url?.startsWith('/locations/') && req.method === 'DELETE') return json(res, 200, { succeded: true });
         if (req.url?.includes('/tags')) return json(res, 200, { tags: [] });
@@ -285,5 +286,59 @@ describe('PrivateTokenProvider · borrar etiquetas de la Location', () => {
     for (const name of ['', '   ']) expect(await fail(provider().deleteTag(creds, name))).toMatchObject({ retryable: false });
     expect(await fail(provider().deleteTag({ ...creds, locationId: '../x' }, 'VIP'))).toMatchObject({ retryable: false, credentials: true });
     expect(seen).toHaveLength(0);
+  });
+});
+
+describe('PrivateTokenProvider · escribir al cliente (M7.4)', () => {
+  const CONTACT = 'abc123XYZ789';
+
+  it('POST /conversations/messages con el canal, el contacto y el texto; el token va en la cabecera; devuelve el id del mensaje', async () => {
+    reply = (_q, res) => json(res, 200, { conversationId: 'conv00000001', messageId: 'ghlMsg0000001' });
+    expect(await provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'Live_Chat', text: '  Hola, ¿en qué te ayudo?  ' })).toEqual({ id: 'ghlMsg0000001' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'POST', url: '/conversations/messages', auth: `Bearer ${TOKEN}`, version: GHL_API_VERSION, contentType: 'application/json', body: { type: 'Live_Chat', contactId: CONTACT, message: 'Hola, ¿en qué te ayudo?' } });
+    expect(seen[0]!.url).not.toContain(TOKEN);
+  });
+
+  it('acepta los cinco canales de texto y rechaza otros sin llamar a la red', async () => {
+    reply = (_q, res) => json(res, 200, { messageId: 'ghlMsg0000001' });
+    for (const type of ['SMS', 'WhatsApp', 'IG', 'FB', 'Live_Chat'] as const) await expect(provider().sendMessage(creds, { ghlContactId: CONTACT, type, text: 'x' })).resolves.toEqual({ id: 'ghlMsg0000001' });
+    seen.length = 0;
+    for (const type of ['Email', 'Custom', 'sms', '']) expect(await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: type as never, text: 'x' }))).toMatchObject({ retryable: false, credentials: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('un texto vacío o demasiado largo, o un contacto con forma inválida, no salen a la red', async () => {
+    for (const text of ['', '   ', 'x'.repeat(8001)]) expect(await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text }))).toMatchObject({ retryable: false });
+    for (const id of ['../../me', 'a/b', 'corto', 'x'.repeat(65)]) expect(await fail(provider().sendMessage(creds, { ghlContactId: id, type: 'SMS', text: 'x' })), id).toMatchObject({ retryable: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('401 es de credenciales; 403 es «falta el permiso de conversaciones» (sin culpar al token); 404 es «el contacto no existe»; 429 y 5xx se reintentan', async () => {
+    reply = (_q, res) => json(res, 401, { message: 'Invalid token' });
+    expect(await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'x' }))).toMatchObject({ retryable: false, credentials: true });
+    reply = (_q, res) => json(res, 403, { message: 'Forbidden' });
+    const noScope = await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'x' }));
+    expect(noScope).toMatchObject({ retryable: false, credentials: false });
+    expect(noScope.message).toContain('permiso');
+    reply = (_q, res) => json(res, 404, { message: 'Contact not found' });
+    expect(await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'x' }))).toMatchObject({ retryable: false, credentials: false });
+    for (const status of [429, 500, 503]) {
+      reply = (_q, res) => json(res, status, { message: 'later' });
+      expect(await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'x' })), String(status)).toMatchObject({ retryable: true, credentials: false });
+    }
+  });
+
+  it('una respuesta sin identificador de mensaje es pasajera (no se da por enviado)', async () => {
+    for (const body of [{}, { messageId: 5 }, { messageId: '' }, { messageId: 'x'.repeat(300) }]) {
+      reply = (_q, res) => json(res, 200, body);
+      expect(await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'x' })), JSON.stringify(body)).toMatchObject({ retryable: true });
+    }
+  });
+
+  it('ningún error repite el texto del cliente, su teléfono o su correo aunque GHL lo repita', async () => {
+    reply = (_q, res) => json(res, 422, { message: ['message "Mi número es +593 98 421-7730 y mi correo ana@correo.test" no es válido'] });
+    const e = await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'Mi número es +593 98 421-7730' }));
+    expect(e.message).not.toMatch(/593|98 421|ana@correo/);
   });
 });

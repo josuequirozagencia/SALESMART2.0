@@ -742,7 +742,8 @@ export interface Conversation {
   participants: Participant[];
   my_access: MyAccess;
   queue: { id: string; name: string; color: string } | null;
-  channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed' };
+  /** `kind`: 'ghl' = canal de GoHighLevel (sin ventana de 24 h ni plantillas ni adjuntos); omitido o 'whatsapp' = WhatsApp. */
+  channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed'; kind?: 'whatsapp' | 'ghl' };
   tags: ContactTag[];
   last_message: { direction: 'in' | 'out'; kind: string; preview: string; status: string; at: string } | null;
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */

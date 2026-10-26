@@ -20,7 +20,7 @@ const UNFILLED = /\{\{\s*[A-Za-z0-9_.]+\s*\}\}/g;
 export function replyBlock(c: Conversation): string | null {
   if (c.status === 'closed') return 'La conversación está finalizada. Si el cliente escribe de nuevo, se abrirá otra.';
   if (c.status === 'unassigned') return c.can.take ? 'Esta conversación aún no tiene asesor. Asígnatela para poder responder.' : 'Esta conversación aún no tiene asesor.';
-  if (!c.can.reply && c.channel.state !== 'active') return 'La conexión de WhatsApp de esta conversación está desactivada o desconectada.';
+  if (!c.can.reply && c.channel.state !== 'active') return c.channel.kind === 'ghl' ? 'La conexión con GoHighLevel está desconectada o su token fue rechazado: el administrador debe revisarla en Configuración › GoHighLevel.' : 'La conexión de WhatsApp de esta conversación está desactivada o desconectada.';
   if (!c.can.reply && c.my_access === 'collaborator_view') return 'Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente.';
   if (!c.can.reply && c.my_access === 'collaborator_reply' && c.status === 'pending') return `${c.owner?.name ?? 'Quien la tiene'} aún no acepta la conversación: podrás responder cuando lo haga.`;
   if (!c.can.reply) return c.owner ? `Solo ${c.owner.name} puede responder esta conversación.` : 'No puedes responder esta conversación.';
@@ -151,7 +151,7 @@ export function Composer({ c }: { c: Conversation }) {
           <button type="button" aria-pressed={noteMode} onClick={() => setMode('note')} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${noteMode ? 'border-warn bg-warn-soft text-warn' : 'border-line text-muted hover:text-fg'}`}>Nota interna</button>
         </div>
           ) : null}
-          <button type="button" onClick={() => setPicker(true)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${c.window.open ? 'border-line text-muted hover:text-fg' : 'border-accent bg-accent text-accent-ink'}`}>Plantillas</button>
+          {c.channel.kind === 'ghl' ? null : <button type="button" onClick={() => setPicker(true)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${c.window.open ? 'border-line text-muted hover:text-fg' : 'border-accent bg-accent text-accent-ink'}`}>Plantillas</button>}
           <button type="button" onClick={() => setManage(true)} className="rounded-full border border-line px-3 py-1 text-[12.5px] font-semibold text-muted hover:text-fg">Respuestas rápidas</button>
         </div>
       ) : null}
@@ -204,8 +204,8 @@ export function Composer({ c }: { c: Conversation }) {
           onKeyDown={onKey}
           className="max-h-40 min-h-[44px] flex-1 resize-none rounded-[14px] border border-line bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted/70 disabled:opacity-60"
         />
-        {!noteMode && c.can.reply ? <Button aria-label="Adjuntar archivo" disabled={!!block || !!pendingAttachment} onClick={() => setAttaching(true)}>Adjuntar</Button> : null}
-        {!noteMode && c.can.reply && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
+        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <Button aria-label="Adjuntar archivo" disabled={!!block || !!pendingAttachment} onClick={() => setAttaching(true)}>Adjuntar</Button> : null}
+        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
         <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
       </div>
     </div>

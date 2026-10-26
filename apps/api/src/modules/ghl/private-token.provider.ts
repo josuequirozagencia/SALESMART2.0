@@ -1,4 +1,4 @@
-import { GhlError, type GhlContactInput, type GhlCredentials, type GhlProvider } from './ghl.ports';
+import { GhlError, type GhlContactInput, type GhlCredentials, type GhlOutgoingMessage, type GhlProvider } from './ghl.ports';
 
 /**
  * Valor de la cabecera `Version` de la API 2.0 de GHL. SIN CONFIRMAR contra una cuenta real: la documentación oficial de versionado lista `2021-07-28`, pero otras fuentes (y algunas
@@ -15,6 +15,9 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 /** Etiquetas por llamada (y largo de cada una): lo que se manda a GHL está acotado. */
 export const MAX_TAGS_PER_CALL = 50;
 const MAX_TAG_LENGTH = 100;
+/** Lo que se manda por mensaje: el mismo tope que admite la base. */
+const MAX_MESSAGE_LENGTH = 8000;
+const REPLY_TYPES: ReadonlySet<string> = new Set(['SMS', 'WhatsApp', 'IG', 'FB', 'Live_Chat']);
 
 /** Texto de GHL apto para mostrarse: sin saltos de línea, acotado y sin nada parecido a un token (`pit-<uuid>`), un correo o un teléfono. */
 const safeText = (v: unknown): string =>
@@ -120,6 +123,32 @@ export class PrivateTokenProvider implements GhlProvider {
     if (res.status === 404) return { deleted: false }; // otro la borró entre la búsqueda y el borrado
     if (!res.ok) throw await this.failure(res, false, false);
     return { deleted: true };
+  }
+
+  /**
+   * Escribe al cliente: `POST /conversations/messages` con el canal (`type`), el contacto y el texto. Solo los canales de texto que Sales Smart reconoce. Un 404 es «el contacto ya no existe en GHL»
+   * (definitivo); un 403 es un token sin permiso de conversaciones (definitivo, sin culpar al token); 401, credenciales. El texto del cliente nunca va en un mensaje de error.
+   */
+  async sendMessage(credentials: GhlCredentials, message: GhlOutgoingMessage): Promise<{ id: string }> {
+    if (!REPLY_TYPES.has(message.type)) throw new GhlError('Ese canal de GoHighLevel no admite respuestas desde aquí', false);
+    const text = message.text.trim();
+    if (text.length === 0) throw new GhlError('No hay texto que enviar', false);
+    if (text.length > MAX_MESSAGE_LENGTH) throw new GhlError('El mensaje es demasiado largo', false);
+    const res = await this.call('/conversations/messages', credentials.accessToken, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type: message.type, contactId: this.contact(message.ghlContactId), message: text }),
+    });
+    if (!res.ok) throw await this.failure(res, false, false);
+    try {
+      const out = (await res.json()) as { messageId?: unknown; id?: unknown };
+      const id = typeof out.messageId === 'string' ? out.messageId : typeof out.id === 'string' ? out.id : null;
+      if (id === null || id.length === 0 || id.length > 200) throw new GhlError('GoHighLevel respondió algo que no se entiende', true);
+      return { id };
+    } catch (e) {
+      if (e instanceof GhlError) throw e;
+      throw new GhlError('GoHighLevel respondió algo que no se entiende', true);
+    }
   }
 
   private location(id: string): string {

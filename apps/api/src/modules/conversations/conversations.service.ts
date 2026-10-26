@@ -19,6 +19,16 @@ function clean(raw: string | null | undefined, max: number): string | null {
   return t === '' ? null : t;
 }
 
+/** Cómo se identifica a quien escribe cuando el canal ya lo resolvió (GoHighLevel, M7.4): en vez de buscar por teléfono, el contacto ya viene dado. */
+export interface IngestOptions {
+  /** El contacto ya resuelto por el canal. */
+  contactId: string;
+  /** El canal acaba de crear este contacto (para poner la etiqueta Lead al primer mensaje). */
+  contactCreated?: boolean;
+  /** Origen para la auditoría de la conversación nueva. */
+  audit?: 'meta' | 'ghl';
+}
+
 export interface IngestResult {
   /** El mensaje ya estaba registrado (mismo canal y mismo identificador): no se cambió nada. */
   duplicate: boolean;
@@ -54,14 +64,14 @@ export class ConversationsService {
    * actualiza la conversación (último mensaje, no leídos; si esperaba al cliente, vuelve a «trabajando») y, si sigue «sin asignar», la reparte según la cola de su
    * conexión (M5.3). `assign` trae lo de identidad que el reparto necesita (zona horaria y quién puede recibir trabajo): se resuelve antes de abrir la transacción.
    */
-  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext): Promise<IngestResult> {
+  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext, opts?: IngestOptions): Promise<IngestResult> {
     const [seen] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId))).limit(1);
     if (seen) return { duplicate: true, conversationId: null, contactCreated: false, conversationCreated: false };
 
-    const contact = await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
+    const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
     // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
     if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
-    const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw);
+    const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw, opts?.audit ?? 'meta');
     const inserted = await tx
       .insert(messages)
       .values({
@@ -184,7 +194,7 @@ export class ConversationsService {
   }
 
   /** La conversación abierta del contacto en el canal, o una nueva. Serializa por (contacto, canal): dos mensajes simultáneos no abren dos. */
-  private async openConversation(tx: TenantTx, contactId: string, channelAccountId: string, peerId: string): Promise<{ id: string; created: boolean }> {
+  private async openConversation(tx: TenantTx, contactId: string, channelAccountId: string, peerId: string, audit: 'meta' | 'ghl'): Promise<{ id: string; created: boolean }> {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`conversation:${contactId}:${channelAccountId}`}::text || ':' || app_org()::text), 0))`);
     const [open] = await tx
       .select({ id: conversations.id })
@@ -193,7 +203,7 @@ export class ConversationsService {
       .limit(1);
     if (open) return { id: open.id, created: false };
     const [c] = await tx.insert(conversations).values({ contactId, channelAccountId, peerId }).returning({ id: conversations.id });
-    await writeAudit(tx, { entityType: 'conversation', entityId: c!.id, newValue: { contact_id: contactId, channel_account_id: channelAccountId, status: 'unassigned' }, source: 'meta' });
+    await writeAudit(tx, { entityType: 'conversation', entityId: c!.id, newValue: { contact_id: contactId, channel_account_id: channelAccountId, status: 'unassigned' }, source: audit });
     return { id: c!.id, created: true };
   }
 }

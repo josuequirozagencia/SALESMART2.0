@@ -39,7 +39,7 @@ export interface ConversationView {
   /** Cómo se relaciona quien consulta con ella: dueño, colaborador (con o sin permiso de responder) o supervisor (la ve porque ve todo). */
   my_access: MyAccess;
   queue: { id: string; name: string; color: string } | null;
-  channel: { id: string; name: string; state: ChannelState };
+  channel: { id: string; name: string; state: ChannelState; kind: 'whatsapp' | 'ghl' };
   tags: TagView[];
   /** El último mensaje real (las notas internas no cuentan). */
   last_message: LastMessageView | null;
@@ -119,6 +119,7 @@ export interface ConversationParts {
   phone: string | null;
   channelName: string;
   channelState: ChannelState;
+  channelProvider: string;
   queue: { id: string; name: string; color: string } | null;
   owner: { id: string; name: string } | null;
   participants: ParticipantView[];
@@ -147,10 +148,10 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
     participants: p.participants,
     my_access: myAccessOf(scope, c, p.collab),
     queue: p.queue,
-    channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState },
+    channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState, kind: p.channelProvider === 'ghl' ? 'ghl' : 'whatsapp' },
     tags: [...p.tags],
     last_message: p.last ? { direction: p.last.direction as 'in' | 'out', kind: p.last.kind, preview: previewOf(p.last.kind, p.last.body), status: p.last.status, at: p.last.sentAt.toISOString() } : null,
-    window: windowOf(c.lastInboundAt, now),
+    window: windowOf(c.lastInboundAt, now, p.channelProvider),
     sla: p.sla,
     can: abilities(scope, c, p.channelState, p.collab),
   };
@@ -159,7 +160,7 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
 type MessageRow = typeof messages.$inferSelect;
 
 /** `wa_id`, el código del último error de envío y la hora de la reacción son de uso interno: no se muestran (la reacción se muestra aparte). */
-const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'template', 'auto']);
+const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'template', 'auto', 'ghl_type']);
 
 /** De lo que guarda una plantilla enviada, solo lo que se muestra (nunca los datos de envío). */
 function templateOf(meta: Record<string, unknown>): MessageView['template'] {

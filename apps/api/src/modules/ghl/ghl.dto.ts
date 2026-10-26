@@ -25,3 +25,12 @@ export type EventsQuery = z.infer<typeof eventsQuerySchema>;
 
 export const outboxQuerySchema = eventsQuerySchema;
 export type OutboxQuery = EventsQuery;
+
+/** Canal «GoHighLevel» del Inbox (M7.4): a qué cola van las conversaciones nuevas y por qué canal de GHL se responde cuando el aviso no lo dice. */
+export const channelConfigSchema = z
+  .object({
+    queue_id: z.uuid().nullable(),
+    default_type: z.enum(['SMS', 'WhatsApp', 'IG', 'FB', 'Live_Chat']).nullable(),
+  })
+  .strict();
+export type ChannelConfigDto = z.infer<typeof channelConfigSchema>;

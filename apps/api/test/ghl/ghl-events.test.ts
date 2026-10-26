@@ -191,7 +191,7 @@ describe('receptor público · contrato del cuerpo', () => {
   it('solo se guarda lo que el contrato conoce: lo demás del cuerpo (direcciones, notas…) nunca llega a la base', async () => {
     await hook(hookA, { ...ana(), address1: 'Calle Secreta 123', customData: { nota_privada: 'no guardar' }, attributionSource: { sessionSource: 'x' } });
     const [ev] = await events();
-    expect(Object.keys(ev!['payload'] as object).sort()).toEqual(['email', 'name', 'phone', 'phone_invalid', 'tags']);
+    expect(Object.keys(ev!['payload'] as object).sort()).toEqual(['email', 'message', 'name', 'phone', 'phone_invalid', 'tags']);
     expect(JSON.stringify(ev)).not.toMatch(/Calle Secreta|no guardar|sessionSource/);
   });
 
@@ -299,12 +299,11 @@ describe('proceso de los avisos de contacto', () => {
     expect((await events())[1]).toMatchObject({ status: 'done', outcome: 'contact_created' });
   });
 
-  it('un mensaje entrante se acepta pero aún no se procesa (llega en M7.4): queda omitido con su motivo', async () => {
-    await hook(hookA, ana({ event: 'message_in' }));
-    await process_(ORG_A);
-    expect((await events())[0]).toMatchObject({ status: 'skipped', event_type: 'message_in' });
-    expect((await events())[0]!['note']).toContain('versión posterior');
-    expect(await contactsOf()).toEqual([]);
+  it('un aviso de mensaje sin el texto es 400 y no guarda nada (los mensajes se prueban en ghl-messages.test.ts)', async () => {
+    const r = await hook(hookA, ana({ event: 'message_in' }));
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(await json(r))).toContain('message');
+    expect(await events()).toEqual([]);
   });
 
   it('un fallo al procesar reintenta con espera creciente y tras el máximo de intentos queda «failed», sin datos personales en el error', async () => {

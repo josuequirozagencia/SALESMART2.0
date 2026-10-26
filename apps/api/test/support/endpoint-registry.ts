@@ -196,6 +196,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Etiquetas bidireccionales con GHL (M7.3, ADR-52). Pruebas: test/ghl/ghl-tags.test.ts
   { route: 'GET /v1/ghl/outbox', kind: 'tenant', isolationTest: '../../ghl/ghl-tags.test.ts' },
   { route: 'POST /v1/ghl/outbox/:id/retry', kind: 'tenant', isolationTest: '../../ghl/ghl-tags.test.ts' },
+  // Mensajes de GHL en el Inbox (M7.4, ADR-52). Pruebas: test/ghl/ghl-messages.test.ts
+  { route: 'GET /v1/ghl/channel', kind: 'tenant', isolationTest: '../../ghl/ghl-messages.test.ts' },
+  { route: 'PUT /v1/ghl/channel', kind: 'tenant', isolationTest: '../../ghl/ghl-messages.test.ts' },
   // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
   { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },

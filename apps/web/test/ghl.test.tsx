@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GhlConnection, GhlEvent, GhlOutboxItem, GhlStatus } from '../src/features/ghl/useGhl';
+import type { GhlChannel, GhlConnection, GhlEvent, GhlOutboxItem, GhlStatus } from '../src/features/ghl/useGhl';
 import { authed, err, ME_ADMIN, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
@@ -242,7 +242,7 @@ describe('Configuración › GoHighLevel · avisos recibidos', () => {
     renderApp('/settings/ghl');
     const how = within(await screen.findByRole('region', { name: 'Cómo conectarlo' }));
     expect(how.getByText(/X-Webhook-Secret/)).toBeInTheDocument();
-    expect(how.getByText(/contact_id/, { selector: 'pre' })).toBeInTheDocument();
+    expect(how.getAllByText(/contact_id/, { selector: 'pre' })).toHaveLength(2); // el de contactos y el de mensajes
     expect(screen.queryByRole('region', { name: 'Avisos recibidos' })).toBeNull();
     expect(w.statusQueries).toBeUndefined();
   });
@@ -396,5 +396,85 @@ describe('Configuración › GoHighLevel · etiquetas enviadas', () => {
     const panel = within(await screen.findByRole('region', { name: 'Etiquetas enviadas a GoHighLevel' }));
     expect(await panel.findByRole('alert')).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Conexión con GoHighLevel' })).toBeInTheDocument();
+  });
+});
+
+describe('Configuración › GoHighLevel · canal de mensajes (M7.4)', () => {
+  const QUEUES = [{ id: 'q1', name: 'Ventas' }, { id: 'q2', name: 'Soporte' }];
+  interface ChannelWorld extends World { channel?: GhlChannel; saves?: unknown[] }
+  function channelServer(w: ChannelWorld): Record<string, Handler> {
+    return {
+      ...server(w),
+      'GET /queues': () => ({ body: { items: QUEUES, limits: { max_queues: 20 } } }),
+      'GET /ghl/channel': () => ({ body: w.channel ?? { configured: true, channel_id: 'ch1', queue: null, default_type: null } }),
+      'PUT /ghl/channel': (c) => {
+        (w.saves ??= []).push(c.body);
+        const b = c.body as { queue_id: string | null; default_type: GhlChannel['default_type'] };
+        w.channel = { configured: true, channel_id: 'ch1', queue: b.queue_id ? QUEUES.find((q) => q.id === b.queue_id)! : null, default_type: b.default_type };
+        return { body: w.channel };
+      },
+    };
+  }
+  const section = async () => within(await screen.findByRole('region', { name: 'Canal de mensajes' }));
+
+  it('conectada, ofrece elegir la cola y el canal por omisión; guardar manda los dos valores', async () => {
+    const w: ChannelWorld = world(live());
+    mockApi(channelServer(w));
+    renderApp('/settings/ghl');
+    const s = await section();
+    expect(s.getByText(/Mensajes de GoHighLevel en el Inbox/)).toBeInTheDocument();
+    await userEvent.selectOptions(await s.findByLabelText('Cola de las conversaciones nuevas'), 'q2');
+    await userEvent.selectOptions(s.getByLabelText(/Responder por/), 'IG');
+    await userEvent.click(s.getByRole('button', { name: 'Guardar canal' }));
+    await waitFor(() => expect(w.saves).toEqual([{ queue_id: 'q2', default_type: 'IG' }]));
+    expect(await s.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('muestra lo guardado y permite quitarlo (sin cola, sin canal por omisión)', async () => {
+    const w: ChannelWorld = world(live(), { channel: { configured: true, channel_id: 'ch1', queue: QUEUES[0]!, default_type: 'SMS' } } as Partial<ChannelWorld>);
+    mockApi(channelServer(w));
+    renderApp('/settings/ghl');
+    const s = await section();
+    await waitFor(() => expect(s.getByLabelText('Cola de las conversaciones nuevas')).toHaveValue('q1'));
+    expect(s.getByLabelText(/Responder por/)).toHaveValue('SMS');
+    await userEvent.selectOptions(s.getByLabelText('Cola de las conversaciones nuevas'), '');
+    await userEvent.selectOptions(s.getByLabelText(/Responder por/), '');
+    await userEvent.click(s.getByRole('button', { name: 'Guardar canal' }));
+    await waitFor(() => expect(w.saves).toEqual([{ queue_id: null, default_type: null }]));
+  });
+
+  it('desconectada no se ofrece el canal; si el servidor rechaza el guardado muestra el motivo', async () => {
+    mockApi(channelServer(world(live('disconnected'))));
+    renderApp('/settings/ghl');
+    await screen.findByRole('region', { name: 'Conexión con GoHighLevel' });
+    expect(screen.queryByRole('region', { name: 'Canal de mensajes' })).toBeNull();
+  });
+
+  it('un error al guardar se muestra sin perder lo elegido', async () => {
+    const w: ChannelWorld = world(live());
+    mockApi({ ...channelServer(w), 'PUT /ghl/channel': () => err(400, 'VALIDATION_ERROR', 'La cola no existe') });
+    renderApp('/settings/ghl');
+    const s = await section();
+    await userEvent.selectOptions(await s.findByLabelText('Cola de las conversaciones nuevas'), 'q1');
+    await userEvent.click(s.getByRole('button', { name: 'Guardar canal' }));
+    expect(await s.findByRole('alert')).toBeInTheDocument();
+    expect(s.getByLabelText('Cola de las conversaciones nuevas')).toHaveValue('q1');
+  });
+
+  it('la guía explica cómo traer los mensajes: Workflow aparte, message_type y que se responde por el mismo canal', async () => {
+    mockApi(channelServer(world(live())));
+    renderApp('/settings/ghl');
+    const how = within(await screen.findByRole('region', { name: 'Cómo conectarlo' }));
+    expect(how.getByText(/Customer Replied/)).toBeInTheDocument();
+    expect(how.getByText(/mismo canal por el que escribió el cliente/)).toBeInTheDocument();
+    expect(how.getByText(/"event": "message_in"/, { selector: 'pre' })).toBeInTheDocument();
+  });
+
+  it('un aviso de mensaje en el panel de avisos se ve como «Mensaje recibido»', async () => {
+    const w = world(live('active', { webhook: hooked }), { events: [event({ id: 'e9', type: 'message_in', outcome: 'message_received', note: null })] });
+    mockApi(channelServer(w));
+    renderApp('/settings/ghl');
+    const panel = within(await screen.findByRole('region', { name: 'Avisos recibidos' }));
+    expect(await panel.findByText('Mensaje recibido')).toBeInTheDocument();
   });
 });

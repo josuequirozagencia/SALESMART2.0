@@ -1,12 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm';
-import { contactTags, contacts, Database, ghlContactLinks, ghlEvents, ghlOutbox, tags as tagsTable, type TenantTx } from '../../db';
+import { contactTags, contacts, Database, ghlConnections, ghlContactLinks, ghlEvents, ghlOutbox, tags as tagsTable, type TenantTx } from '../../db';
 import { ValidationError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
 import { ContactsService } from '../contacts';
+import { ConversationsService, type NormalizedMessage } from '../conversations';
+import type { AssignmentContext } from '../queues';
+import type { OrgDirectory } from '../organizations';
 import { ContactTaggingService } from '../tags';
+import { GhlChannelService } from './ghl-channel.service';
 import type { GhlEventPayload } from './ghl-event';
 
 export const GHL_EVENT_BATCH = 20;
@@ -18,7 +22,7 @@ const MAX_BACKOFF_MS = 10 * 60_000;
 
 type EventRow = typeof ghlEvents.$inferSelect;
 export type GhlEventStatus = 'pending' | 'done' | 'skipped' | 'failed';
-type Outcome = 'contact_created' | 'contact_linked' | 'contact_updated' | 'contact_unchanged';
+type Outcome = 'contact_created' | 'contact_linked' | 'contact_updated' | 'contact_unchanged' | 'message_received';
 type Processed = { status: 'done'; outcome: Outcome; contactId: string; note?: string | null } | { status: 'skipped'; note: string };
 
 export interface GhlEventView {
@@ -56,6 +60,8 @@ export class GhlEventsService {
     @Inject(Database) private readonly db: Database,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
+    @Inject(ConversationsService) private readonly conversations: ConversationsService,
+    @Inject(GhlChannelService) private readonly channel: GhlChannelService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -67,7 +73,7 @@ export class GhlEventsService {
         dedupeKey,
         eventType: e.type,
         ghlContactId: e.ghlContactId,
-        payload: { name: e.name, phone: e.phone, phone_invalid: e.phoneInvalid, email: e.email, tags: e.tags },
+        payload: { name: e.name, phone: e.phone, phone_invalid: e.phoneInvalid, email: e.email, tags: e.tags, message: e.message ? { id: e.message.id, text: e.message.text, type: e.message.type, sent_at: e.message.sentAt } : null },
         receivedAt: now,
         nextAttemptAt: now,
       })
@@ -76,8 +82,12 @@ export class GhlEventsService {
     return inserted.length > 0;
   }
 
-  /** Procesa los avisos pendientes cuya hora ya llegó. Devuelve cuántos tomó (hechos o reprogramados). */
-  async runDue(now: Date, batch = GHL_EVENT_BATCH): Promise<number> {
+  /**
+   * Procesa los avisos pendientes cuya hora ya llegó. Devuelve cuántos tomó (hechos o reprogramados). `dir` es lo de identidad que el reparto de un mensaje entrante necesita (zona horaria y quién puede
+   * recibir trabajo): quien llama lo lee ANTES, porque dentro de la transacción de negocio no se puede tocar la identidad. Sin él, un aviso de mensaje se reintenta más tarde en vez de repartirse mal.
+   */
+  async runDue(now: Date, dir?: OrgDirectory, batch = GHL_EVENT_BATCH): Promise<number> {
+    const assign: AssignmentContext | null = dir ? { now, timeZone: dir.timeZone, assignable: dir.assignable } : null;
     return this.db.withTenant(async (tx) => {
       const due = await tx
         .select()
@@ -86,20 +96,20 @@ export class GhlEventsService {
         .orderBy(asc(ghlEvents.receivedAt), asc(ghlEvents.id))
         .limit(batch)
         .for('update', { skipLocked: true });
-      for (const ev of due) await this.processOne(tx, ev, now);
+      for (const ev of due) await this.processOne(tx, ev, now, assign);
       if (due.length < batch) await this.redactOld(tx, now);
       return due.length;
     });
   }
 
-  private async processOne(tx: TenantTx, ev: EventRow, now: Date): Promise<void> {
+  private async processOne(tx: TenantTx, ev: EventRow, now: Date, assign: AssignmentContext | null): Promise<void> {
     const attempts = ev.attempts + 1;
     // SAVEPOINT en la misma transacción: si este aviso falla se revierte solo lo suyo y los demás avisos del lote siguen sanos
     await tx.execute(sql`SAVEPOINT ghl_event`);
     let failure: unknown = null;
     let result: Processed | null = null;
     try {
-      result = await this.apply(tx, ev);
+      result = await this.apply(tx, ev, now, assign);
       await tx.execute(sql`RELEASE SAVEPOINT ghl_event`);
     } catch (e) {
       failure = e;
@@ -120,11 +130,10 @@ export class GhlEventsService {
     }
   }
 
-  private async apply(tx: TenantTx, ev: EventRow): Promise<Processed> {
+  private async apply(tx: TenantTx, ev: EventRow, now: Date, assign: AssignmentContext | null): Promise<Processed> {
     // Un aviso sin contenido (ya vaciado) no tiene nada que procesar
     if (!ev.payload) return { status: 'skipped', note: 'El contenido del aviso ya se había vaciado' };
-    if (ev.eventType === 'message_in') return { status: 'skipped', note: 'Los mensajes entrantes de GoHighLevel se procesan en una versión posterior' };
-    const p = ev.payload as { name: string | null; phone: string | null; phone_invalid: boolean; email: string | null; tags?: string[] | null };
+    const p = ev.payload as { name: string | null; phone: string | null; phone_invalid: boolean; email: string | null; tags?: string[] | null; message?: { id: string | null; text: string; type: string | null; sent_at: string | null } | null };
     const ghlId = ev.ghlContactId;
 
     // 1) ¿ya está vinculado? (y su contacto sigue vigente)
@@ -150,7 +159,38 @@ export class GhlEventsService {
     const changed = await this.contacts.completeProfile(tx, contactId, { name: p.name, email: p.email }, 'ghl');
     // 4) etiquetas: solo si el aviso las trae (una lista vacía significa «sin etiquetas»; la ausencia, «no se informó»)
     const tagged = p.tags ? await this.reconcileTags(tx, ghlId, contactId, p.tags) : null;
+    if (ev.eventType === 'message_in') return this.ingestMessage(tx, ev, p, contactId, outcome === 'contact_created', now, assign, tagged?.note ?? null);
     return { status: 'done', outcome: outcome ?? (changed || tagged?.changed ? 'contact_updated' : 'contact_unchanged'), contactId, note: tagged?.note ?? null };
+  }
+
+  /**
+   * Un mensaje que el cliente escribió por GHL (M7.4): entra al Inbox por el canal «GoHighLevel» con el mismo reparto, SLA y bandeja que WhatsApp. El contacto ya viene resuelto (por el vínculo o por teléfono).
+   * Idempotente por el identificador del mensaje en GHL (o, sin él, por el del propio aviso). El canal por el que llegó se guarda en el mensaje (`ghl_type`) para responder por el mismo.
+   */
+  private async ingestMessage(tx: TenantTx, ev: EventRow, p: { name: string | null; phone: string | null; message?: { id: string | null; text: string; type: string | null; sent_at: string | null } | null }, contactId: string, contactCreated: boolean, now: Date, assign: AssignmentContext | null, tagNote: string | null): Promise<Processed> {
+    const m = p.message;
+    if (!m || !m.text) return { status: 'skipped', note: 'El aviso no trae el texto del mensaje' };
+    if (!assign) throw new Error('assign_context_missing'); // se reintenta con el contexto de reparto
+    const [conn] = await tx.select({ status: ghlConnections.status }).from(ghlConnections).limit(1);
+    if (!conn || conn.status === 'disconnected') return { status: 'skipped', note: 'GoHighLevel está desconectado: el mensaje no se registró' };
+    const channelId = await this.channel.sync(tx, conn.status as 'active' | 'needs_reconnect');
+    const parsed = m.sent_at ? new Date(m.sent_at) : now;
+    // La hora que informa GHL no puede estar en el futuro (el cronómetro de respuesta corre desde el mensaje)
+    const sentAt = Number.isNaN(parsed.getTime()) || parsed.getTime() > now.getTime() + 5 * 60_000 ? now : parsed;
+    const normalized: NormalizedMessage = {
+      externalId: m.id ? `ghl:${m.id}` : `ghl:evt:${ev.id}`,
+      from: p.phone ?? '',
+      fromRaw: ev.ghlContactId,
+      profileName: p.name,
+      kind: 'text',
+      text: m.text,
+      media: null,
+      extra: m.type ? { ghl_type: m.type } : {},
+      sentAt,
+    };
+    const r = await this.conversations.ingestInbound(tx, channelId, normalized, assign, { contactId, contactCreated, audit: 'ghl' });
+    const notes = [r.duplicate ? 'Mensaje repetido: ya estaba registrado' : null, tagNote].filter((x): x is string => x !== null);
+    return { status: 'done', outcome: 'message_received', contactId, note: notes.length > 0 ? notes.join('; ') : null };
   }
 
   /**

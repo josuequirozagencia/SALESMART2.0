@@ -7,7 +7,7 @@ import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
 import { OrgDirectoryService, OrgMembersService, type OrgDirectory } from '../organizations';
 import { RealtimeService } from '../realtime';
-import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, WINDOW_MS, type InboxAccess, type InboxScope } from './inbox.access';
+import { assertCanReply, assertWindowOpen, hasWindow, loadConversation, scopeOf, WINDOW_MS, type InboxAccess, type InboxScope } from './inbox.access';
 import type { CreateScheduledDto } from './inbox.dto';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundService } from './outbound.service';
@@ -94,7 +94,8 @@ export class ScheduledMessagesService {
     const timeZone = (await this.directory.current()).timeZone;
     const row = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
-      assertCanReply(scope, c, channel.state, collab);
+      assertCanReply(scope, c, channel.state, collab, channel.provider);
+      if (!hasWindow(channel.provider)) throw new ConflictError('GHL_SCHEDULE_UNSUPPORTED', 'Por ahora los mensajes programados solo funcionan en WhatsApp');
       assertWindowOpen(c.lastInboundAt, now);
       const limit = new Date(c.lastInboundAt!.getTime() + WINDOW_MS - WINDOW_MARGIN_MS);
       if (sendAt.getTime() > limit.getTime()) {

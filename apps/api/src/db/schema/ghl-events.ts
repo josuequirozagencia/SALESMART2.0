@@ -38,7 +38,7 @@ export const ghlEvents = tenantTable(
     foreignKey({ name: 'ghl_events_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
     check('ghl_events_type_valid', sql`${t['eventType']!} IN ('contact', 'message_in')`),
     check('ghl_events_status_valid', sql`${t['status']!} IN ('pending', 'done', 'skipped', 'failed')`),
-    check('ghl_events_outcome_valid', sql`${t['outcome']!} IS NULL OR ${t['outcome']!} IN ('contact_created', 'contact_linked', 'contact_updated', 'contact_unchanged')`),
+    check('ghl_events_outcome_valid', sql`${t['outcome']!} IS NULL OR ${t['outcome']!} IN ('contact_created', 'contact_linked', 'contact_updated', 'contact_unchanged', 'message_received')`),
     check('ghl_events_ghl_contact_shape', sql`length(${t['ghlContactId']!}) BETWEEN 1 AND 100`),
     check('ghl_events_dedupe_shape', sql`length(${t['dedupeKey']!}) BETWEEN 1 AND 200`),
     check('ghl_events_attempts_valid', sql`${t['attempts']!} >= 0`),

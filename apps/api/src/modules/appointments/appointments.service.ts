@@ -116,7 +116,9 @@ export class AppointmentsService {
       else if (channel.state !== 'active') blocked = 'channel_off';
       const end = c.lastInboundAt ? c.lastInboundAt.getTime() + WINDOW_MS : null;
       const open = end !== null && end > Date.now();
-      return { channelId: c.channelAccountId, blocked, max: this.limitFor(contactSource.provider, contactSource.source), window: { open, expires_at: end !== null ? new Date(end).toISOString() : null } };
+      // GoHighLevel no tiene la ventana de 24 h de WhatsApp oficial (M7.4): los recordatorios salen como texto cuando toque
+      const noWindow = contactSource.provider === 'ghl';
+      return { channelId: c.channelAccountId, blocked, max: this.limitFor(contactSource.provider, contactSource.source), window: noWindow ? { open: true, expires_at: null } : { open, expires_at: end !== null ? new Date(end).toISOString() : null } };
     });
     const list = base.blocked === 'channel_off' ? { items: [] } : await this.templates.forChannel(base.channelId);
     return {
@@ -165,7 +167,7 @@ export class AppointmentsService {
     const startsAt = new Date(input.starts_at);
     this.assertFuture(startsAt, now);
     const offsets = [...(input.reminders ?? [])].sort((a, b) => b - a);
-    const tpl = await this.checkReminders(tx, { offsets, startsAt, now, channelId: c.channelAccountId, lastInboundAt: c.lastInboundAt, limit: this.limitFor(contactSource.provider, contactSource.source), templateId: input.reminder_template_id ?? null, params: input.reminder_params ?? {} });
+    const tpl = await this.checkReminders(tx, { offsets, startsAt, now, channelId: c.channelAccountId, lastInboundAt: c.lastInboundAt, noWindow: contactSource.provider === 'ghl', limit: this.limitFor(contactSource.provider, contactSource.source), templateId: input.reminder_template_id ?? null, params: input.reminder_params ?? {} });
 
     const [a] = await tx
       .insert(appointments)
@@ -228,7 +230,7 @@ export class AppointmentsService {
           if (offsets.length > 0 && !conv) throw new ConflictError('APPOINTMENT_NO_CONVERSATION', 'La cita no tiene conversación: no se pueden programar recordatorios');
           const templateId = input.reminder_template_id !== undefined ? input.reminder_template_id : cur.reminderTemplateId;
           const params = input.reminder_params ?? cur.reminderParams;
-          const useTemplate = conv && offsets.length > 0 ? await this.checkReminders(tx, { offsets, startsAt, now, channelId: conv.channelId, lastInboundAt: conv.lastInboundAt, limit: this.limitFor(conv.provider, conv.source), templateId, params }) : false;
+          const useTemplate = conv && offsets.length > 0 ? await this.checkReminders(tx, { offsets, startsAt, now, channelId: conv.channelId, lastInboundAt: conv.lastInboundAt, noWindow: conv.provider === 'ghl', limit: this.limitFor(conv.provider, conv.source), templateId, params }) : false;
           change('reminders', 'reminderOffsets', cur.reminderOffsets, offsets);
           set.reminderTemplateId = useTemplate ? templateId : null;
           set.reminderParams = useTemplate ? params : {};
@@ -358,7 +360,7 @@ export class AppointmentsService {
     const conv = await this.conversationFacts(tx, a.conversationId);
     if (!conv || conv.channelState !== 'active') return { status: 'skipped', reason: 'channel_off' };
 
-    const windowOpen = conv.lastInboundAt !== null && conv.lastInboundAt.getTime() + WINDOW_MS - WINDOW_MARGIN_MS > now.getTime();
+    const windowOpen = conv.provider === 'ghl' || (conv.lastInboundAt !== null && conv.lastInboundAt.getTime() + WINDOW_MS - WINDOW_MARGIN_MS > now.getTime());
     let kind: 'text' | 'template';
     let body: string;
     let meta: Record<string, unknown> = {};
@@ -399,12 +401,12 @@ export class AppointmentsService {
    * Valida los recordatorios: tope por fuente, que cada uno caiga en el futuro y, si alguno cae fuera de la ventana de 24 h de WhatsApp, que haya una plantilla aprobada y válida
    * (ADR-13/51). Devuelve true si se guardará la plantilla.
    */
-  private async checkReminders(tx: TenantTx, p: { offsets: number[]; startsAt: Date; now: Date; channelId: string; lastInboundAt: Date | null; limit: number; templateId: string | null; params: Record<string, string> }): Promise<boolean> {
+  private async checkReminders(tx: TenantTx, p: { offsets: number[]; startsAt: Date; now: Date; channelId: string; lastInboundAt: Date | null; noWindow?: boolean; limit: number; templateId: string | null; params: Record<string, string> }): Promise<boolean> {
     if (p.offsets.length > p.limit) throw new ValidationError([{ path: 'reminders', code: 'too_many', message: `Máximo ${p.limit} recordatorios por cita en este canal` }]);
     for (const o of p.offsets) {
       if (p.startsAt.getTime() - o * 60_000 <= p.now.getTime()) throw new ValidationError([{ path: 'reminders', code: 'in_past', message: `El recordatorio de ${o} minutos antes ya habría pasado: quítalo o agenda la cita más adelante` }]);
     }
-    const windowEnd = p.lastInboundAt ? p.lastInboundAt.getTime() + WINDOW_MS - WINDOW_MARGIN_MS : Number.NEGATIVE_INFINITY;
+    const windowEnd = p.noWindow ? Number.POSITIVE_INFINITY : p.lastInboundAt ? p.lastInboundAt.getTime() + WINDOW_MS - WINDOW_MARGIN_MS : Number.NEGATIVE_INFINITY;
     const needsTemplate = p.offsets.some((o) => p.startsAt.getTime() - o * 60_000 > windowEnd);
     if (!p.templateId) {
       if (needsTemplate) throw new ValidationError([{ path: 'reminder_template_id', code: 'required', message: 'Algún recordatorio saldría después de que se cierre la ventana de 24 h de WhatsApp: elige una plantilla aprobada para enviarlo' }]);

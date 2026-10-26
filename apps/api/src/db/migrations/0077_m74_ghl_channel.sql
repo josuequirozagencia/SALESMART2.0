@@ -1,0 +1,5 @@
+ALTER TABLE "channel_accounts" DROP CONSTRAINT "channel_accounts_provider_valid";--> statement-breakpoint
+ALTER TABLE "ghl_events" DROP CONSTRAINT "ghl_events_outcome_valid";--> statement-breakpoint
+CREATE UNIQUE INDEX "channel_accounts_ghl_uq" ON "channel_accounts" USING btree ("organization_id") WHERE "channel_accounts"."provider" = 'ghl' AND "channel_accounts"."deleted_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "channel_accounts" ADD CONSTRAINT "channel_accounts_provider_valid" CHECK ("channel_accounts"."provider" IN ('meta_cloud', 'evolution', 'ghl'));--> statement-breakpoint
+ALTER TABLE "ghl_events" ADD CONSTRAINT "ghl_events_outcome_valid" CHECK ("ghl_events"."outcome" IS NULL OR "ghl_events"."outcome" IN ('contact_created', 'contact_linked', 'contact_updated', 'contact_unchanged', 'message_received'));

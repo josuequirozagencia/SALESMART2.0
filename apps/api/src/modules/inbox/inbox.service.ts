@@ -82,6 +82,7 @@ interface Row {
   channelName: string;
   channelStatus: string;
   channelDeletedAt: Date | null;
+  channelProvider: string;
   queueName: string | null;
   queueColor: string | null;
   key: string;
@@ -309,7 +310,7 @@ export class InboxService {
 
   private fetchRows(tx: TenantTx, scope: InboxScope, where: SQL, limit: number): Promise<Row[]> {
     return tx
-      .select({ c: conversations, contactName: contacts.name, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, queueName: queues.name, queueColor: queues.color, key: KEY, collab: collabColumn(scope) })
+      .select({ c: conversations, contactName: contacts.name, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, channelProvider: channelAccounts.provider, queueName: queues.name, queueColor: queues.color, key: KEY, collab: collabColumn(scope) })
       .from(conversations)
       .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
       .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
@@ -348,6 +349,7 @@ export class InboxService {
       phone: phones.get(r.c.contactId) ?? null,
       channelName: r.channelName,
       channelState: channelState(r.channelStatus, r.channelDeletedAt),
+      channelProvider: r.channelProvider,
       queue: r.c.queueId && r.queueName !== null ? { id: r.c.queueId, name: r.queueName, color: r.queueColor ?? '#7c5cfa' } : null,
       tags: tagsByContact.get(r.c.contactId) ?? [],
       last: last.get(r.c.id) ?? null,

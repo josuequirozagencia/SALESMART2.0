@@ -13,7 +13,7 @@ const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' 
  */
 
 /**
- * Conexión de una empresa a un canal. Hoy solo `meta_cloud` (WhatsApp oficial); `evolution` (QR, no oficial) queda reservado. Las credenciales viven SOLO
+ * Conexión de una empresa a un canal. `meta_cloud` (WhatsApp oficial), `ghl` (GoHighLevel, M7.4: sin credenciales propias, usa las de `ghl_connections`) y `evolution` (QR, no oficial) reservado. Las credenciales viven SOLO
  * cifradas (`credentials_sealed`, bóveda de ADR-42) y no se devuelven nunca. Borrado LÓGICO.
  */
 export const channelAccounts = tenantTable(
@@ -37,12 +37,14 @@ export const channelAccounts = tenantTable(
     deletedAt: ts('deleted_at'),
   },
   (t) => [
-    check('channel_accounts_provider_valid', sql`${t['provider']!} IN ('meta_cloud', 'evolution')`),
+    check('channel_accounts_provider_valid', sql`${t['provider']!} IN ('meta_cloud', 'evolution', 'ghl')`),
     check('channel_accounts_status_valid', sql`${t['status']!} IN ('active', 'disabled')`),
     check('channel_accounts_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 60`),
     check('channel_accounts_last4_shape', sql`${t['tokenLast4']!} IS NULL OR length(${t['tokenLast4']!}) = 4`),
     check('channel_accounts_credentials_pair', sql`(${t['credentialsSealed']!} IS NULL) = (${t['keyVersion']!} IS NULL)`),
     foreignKey({ name: 'channel_accounts_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
+    // GoHighLevel (M7.4): un solo canal de GHL por empresa (el de su Location)
+    uniqueIndex('channel_accounts_ghl_uq').on(t['organizationId']!).where(sql`${t['provider']!} = 'ghl' AND ${t['deletedAt']!} IS NULL`),
     uniqueIndex('channel_accounts_org_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
   ],
 );

@@ -9,3 +9,7 @@ export { normalizeGhlPayload, dedupeKeyOf, type GhlEventPayload, type GhlEventTy
 export { GhlOutboxJob, GHL_OUTBOX_MAX_BATCHES_PER_RUN } from './ghl-outbox.job';
 export { GhlOutboxService, GHL_OUTBOX_BATCH, GHL_OUTBOX_MAX_ATTEMPTS, type GhlOutboxView, type GhlOutboxStatus } from './ghl-outbox.service';
 export type { FakeGhlCall } from './ghl.fake';
+export { GhlChannelService, type GhlChannelView } from './ghl-channel.service';
+export { GhlOutboundService, type GhlPrepareFailure, type GhlSendPlan } from './ghl-outbound.service';
+export { GHL_REPLY_TYPES, messageTypeOf, type GhlInboundMessage, type GhlMessageType } from './ghl-event';
+export type { GhlReplyType, GhlOutgoingMessage } from './ghl.ports';
