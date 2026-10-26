@@ -199,6 +199,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Mensajes de GHL en el Inbox (M7.4, ADR-52). Pruebas: test/ghl/ghl-messages.test.ts
   { route: 'GET /v1/ghl/channel', kind: 'tenant', isolationTest: '../../ghl/ghl-messages.test.ts' },
   { route: 'PUT /v1/ghl/channel', kind: 'tenant', isolationTest: '../../ghl/ghl-messages.test.ts' },
+  { route: 'GET /v1/ghl/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
+  { route: 'POST /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
+  { route: 'GET /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   // Catálogo de productos por cola (M6.1, ADR-08/ADR-51). Pruebas: test/queues/products.test.ts (A↔B, permisos, precios exactos, límites)
   { route: 'GET /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },
   { route: 'POST /v1/queues/:id/products', kind: 'tenant', isolationTest: '../../queues/products.test.ts' },

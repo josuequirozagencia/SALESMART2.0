@@ -1,4 +1,4 @@
-import { GhlError, type GhlContactInput, type GhlCredentials, type GhlOutgoingMessage, type GhlProvider } from './ghl.ports';
+import { GhlError, type GhlContactInput, type GhlCredentials, type GhlOutgoingMessage, type GhlProvider, type GhlWorkflow } from './ghl.ports';
 
 /**
  * Valor de la cabecera `Version` de la API 2.0 de GHL. SIN CONFIRMAR contra una cuenta real: la documentación oficial de versionado lista `2021-07-28`, pero otras fuentes (y algunas
@@ -11,6 +11,9 @@ const LOCATION_ID = /^[A-Za-z0-9]{8,64}$/;
 const CONTACT_ID = /^[A-Za-z0-9]{6,64}$/;
 /** Identificador de una etiqueta de GHL: solo letras y números (también se arma una dirección con él). */
 const TAG_ID = /^[A-Za-z0-9]{6,64}$/;
+/** Identificador de un flujo de GHL: solo letras, números, guiones y guion bajo (se arma una dirección con él). */
+const WORKFLOW_ID = /^[A-Za-z0-9_-]{6,80}$/;
+const MAX_WORKFLOWS = 500;
 const DEFAULT_TIMEOUT_MS = 10_000;
 /** Etiquetas por llamada (y largo de cada una): lo que se manda a GHL está acotado. */
 export const MAX_TAGS_PER_CALL = 50;
@@ -151,6 +154,39 @@ export class PrivateTokenProvider implements GhlProvider {
     }
   }
 
+  /**
+   * Los flujos de la Location: `GET /workflows/?locationId=` (permiso de lectura de workflows). Solo se conserva lo que se muestra (id, nombre, estado), acotado; un 403 es un token SIN
+   * ese permiso (definitivo, no culpa al token).
+   */
+  async listWorkflows(credentials: GhlCredentials): Promise<GhlWorkflow[]> {
+    const res = await this.call(`/workflows/?locationId=${this.location(credentials.locationId)}`, credentials.accessToken, { method: 'GET' });
+    if (!res.ok) throw await this.failure(res, false, false);
+    try {
+      const body = (await res.json()) as { workflows?: Array<{ id?: unknown; name?: unknown; status?: unknown }> };
+      const out: GhlWorkflow[] = [];
+      for (const w of Array.isArray(body.workflows) ? body.workflows : []) {
+        if (typeof w.id !== 'string' || !WORKFLOW_ID.test(w.id) || typeof w.name !== 'string') continue;
+        const name = w.name.replace(/\p{Cc}/gu, ' ').trim().slice(0, 150);
+        if (name.length === 0) continue;
+        out.push({ id: w.id, name, status: typeof w.status === 'string' ? w.status.slice(0, 30) : 'unknown' });
+        if (out.length >= MAX_WORKFLOWS) break;
+      }
+      return out;
+    } catch {
+      throw new GhlError('GoHighLevel respondió algo que no se entiende', true);
+    }
+  }
+
+  /**
+   * Inscribe al contacto en el flujo: `POST /contacts/{contactId}/workflow/{workflowId}`. Un 404 es «ese contacto o ese flujo ya no existe en GHL» (definitivo); un 403, token sin permiso de
+   * workflows (definitivo); 401, credenciales. GHL no devuelve nada útil: un 2xx es suficiente.
+   */
+  async enrollInWorkflow(credentials: GhlCredentials, ghlContactId: string, workflowId: string): Promise<void> {
+    if (!WORKFLOW_ID.test(workflowId)) throw new GhlError('El identificador del flujo de GoHighLevel no es válido', false);
+    const res = await this.call(`/contacts/${this.contact(ghlContactId)}/workflow/${workflowId}`, credentials.accessToken, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    if (!res.ok) throw await this.failure(res, false, false);
+  }
+
   private location(id: string): string {
     if (!LOCATION_ID.test(id)) throw new GhlError('El Location ID no es válido (solo letras y números)', false, true);
     return id;
@@ -189,9 +225,9 @@ export class PrivateTokenProvider implements GhlProvider {
   private async failure(res: Response, notFoundIsCredentials: boolean, forbiddenIsCredentials = true): Promise<GhlError> {
     const text = await readMessage(res);
     const tail = text ? `: ${text}` : '';
-    if (res.status === 403 && !forbiddenIsCredentials) return new GhlError(`El token no tiene permiso para esta operación en GoHighLevel (revisa los permisos de etiquetas de la integración)${tail}`, false);
+    if (res.status === 403 && !forbiddenIsCredentials) return new GhlError(`El token no tiene permiso para esta operación en GoHighLevel (revisa los permisos de la integración: etiquetas, conversaciones o workflows según la operación)${tail}`, false);
     if (res.status === 401 || (forbiddenIsCredentials && res.status === 403) || (notFoundIsCredentials && res.status === 404)) return new GhlError(`GoHighLevel rechazó el token o no encuentra la Location${tail}`, false, true);
-    if (res.status === 404) return new GhlError(`GoHighLevel no encuentra el contacto${tail}`, false);
+    if (res.status === 404) return new GhlError(`GoHighLevel no encuentra el contacto, el flujo o la Location${tail}`, false);
     if (res.status === 429 || res.status >= 500) return new GhlError(`GoHighLevel no pudo atender la llamada ahora${tail}`, true);
     return new GhlError(`GoHighLevel rechazó la solicitud${tail}`, false);
   }

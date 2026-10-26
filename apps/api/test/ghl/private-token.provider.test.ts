@@ -61,6 +61,7 @@ describe('contract test del puerto GhlProvider', () => {
         const e = next;
         next = null;
         if (e) return e.credentials ? json(res, 401, { message: e.message }) : e.retryable ? json(res, 429, { message: e.message }) : json(res, 422, { message: e.message });
+        if (req.url?.startsWith('/workflows/')) return json(res, 200, { workflows: [{ id: 'wf000000000001', name: 'Bienvenida', status: 'published' }] });
         if (req.url?.startsWith('/contacts/upsert')) return json(res, 200, { new: true, contact: { id: 'ghlContact0001' } });
         if (req.url?.startsWith('/conversations/messages')) return json(res, 200, { conversationId: 'conv00000001', messageId: 'ghlMsg0000001' });
         if (req.url?.startsWith('/locations/') && req.method === 'GET') return json(res, 200, { tags: [{ id: 'tagVip000001', name: 'VIP', locationId: creds.locationId }] });
@@ -340,5 +341,75 @@ describe('PrivateTokenProvider · escribir al cliente (M7.4)', () => {
     reply = (_q, res) => json(res, 422, { message: ['message "Mi número es +593 98 421-7730 y mi correo ana@correo.test" no es válido'] });
     const e = await fail(provider().sendMessage(creds, { ghlContactId: CONTACT, type: 'SMS', text: 'Mi número es +593 98 421-7730' }));
     expect(e.message).not.toMatch(/593|98 421|ana@correo/);
+  });
+});
+
+describe('PrivateTokenProvider · flujos (M7.5)', () => {
+  const CONTACT = 'abc123XYZ789';
+  const WF = 'wf000000000001';
+
+  it('GET /workflows/?locationId= devuelve id, nombre y estado, descarta lo mal formado, limpia y acota; el token va en la cabecera', async () => {
+    reply = (_q, res) =>
+      json(res, 200, {
+        workflows: [
+          { id: WF, name: '  Bienvenida  ', status: 'published' },
+          { id: 'wf000000000002', name: 'Borrador', status: 'draft' },
+          { id: '../x', name: 'Mal id', status: 'published' },
+          { id: 'wf000000000003', name: '   ', status: 'published' },
+          { id: 'wf000000000004', name: 7, status: 'published' },
+          { id: 'wf000000000005', name: 'Sin estado' },
+        ],
+      });
+    expect(await provider().listWorkflows(creds)).toEqual([
+      { id: WF, name: 'Bienvenida', status: 'published' },
+      { id: 'wf000000000002', name: 'Borrador', status: 'draft' },
+      { id: 'wf000000000005', name: 'Sin estado', status: 'unknown' },
+    ]);
+    expect(seen[0]).toMatchObject({ method: 'GET', url: `/workflows/?locationId=${creds.locationId}`, auth: `Bearer ${TOKEN}`, version: GHL_API_VERSION });
+    expect(seen[0]!.url).not.toContain(TOKEN);
+  });
+
+  it('sin la lista, o con algo que no se entiende, falla con el motivo adecuado', async () => {
+    reply = (_q, res) => json(res, 200, { workflows: 'nada' });
+    expect(await provider().listWorkflows(creds)).toEqual([]);
+    reply = (_q, res) => { res.writeHead(200); res.end('no es json'); };
+    expect(await fail(provider().listWorkflows(creds))).toMatchObject({ retryable: true });
+    expect(await fail(provider().listWorkflows({ ...creds, locationId: '../x' }))).toMatchObject({ retryable: false, credentials: true });
+    reply = (_q, res) => json(res, 401, { message: 'Invalid token' });
+    expect(await fail(provider().listWorkflows(creds))).toMatchObject({ retryable: false, credentials: true });
+    reply = (_q, res) => json(res, 403, { message: 'not authorized' });
+    const noScope = await fail(provider().listWorkflows(creds));
+    expect(noScope).toMatchObject({ retryable: false, credentials: false });
+    expect(noScope.message).toContain('permiso');
+    for (const status of [429, 500, 503]) {
+      reply = (_q, res) => json(res, status, { message: 'x' });
+      expect(await fail(provider().listWorkflows(creds)), String(status)).toMatchObject({ retryable: true, credentials: false });
+    }
+  });
+
+  it('POST /contacts/{id}/workflow/{flujo}: el identificador del contacto y el del flujo se validan antes de armar la dirección', async () => {
+    reply = (_q, res) => json(res, 200, { succeded: true });
+    await expect(provider().enrollInWorkflow(creds, CONTACT, WF)).resolves.toBeUndefined();
+    expect(seen[0]).toMatchObject({ method: 'POST', url: `/contacts/${CONTACT}/workflow/${WF}`, auth: `Bearer ${TOKEN}`, version: GHL_API_VERSION });
+    seen.length = 0;
+    for (const w of ['../../x', 'a/b', 'corto', '', 'x'.repeat(81)]) expect(await fail(provider().enrollInWorkflow(creds, CONTACT, w)), w).toMatchObject({ retryable: false, credentials: false });
+    for (const c of ['../../me', 'a/b', 'corto']) expect(await fail(provider().enrollInWorkflow(creds, c, WF)), c).toMatchObject({ retryable: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('errores al inscribir: 401 credenciales; 403 falta de permiso; 404 contacto o flujo inexistente (definitivo); 429/5xx reintentables; ni el token ni datos del cliente en el mensaje', async () => {
+    const run = async (status: number, body: unknown) => {
+      reply = (_q, res) => json(res, status, body);
+      return fail(provider().enrollInWorkflow(creds, CONTACT, WF));
+    };
+    expect(await run(401, { message: 'Invalid token' })).toMatchObject({ retryable: false, credentials: true });
+    const noScope = await run(403, { message: 'The token is not authorized for this scope' });
+    expect(noScope).toMatchObject({ retryable: false, credentials: false });
+    expect(noScope.message).toContain('permiso');
+    expect(await run(404, { message: 'not found' })).toMatchObject({ retryable: false, credentials: false });
+    expect(await run(422, { message: 'Contact is already in workflow' })).toMatchObject({ retryable: false, credentials: false });
+    for (const status of [429, 500, 502]) expect(await run(status, { message: 'x' }), String(status)).toMatchObject({ retryable: true, credentials: false });
+    const leaky = await run(422, { message: `rechazó +593984217730 ana@x.com ${TOKEN}` });
+    expect(leaky.message).not.toMatch(/593984217730|ana@x.com|pit-1111/);
   });
 });

@@ -13,3 +13,5 @@ export { GhlChannelService, type GhlChannelView } from './ghl-channel.service';
 export { GhlOutboundService, type GhlPrepareFailure, type GhlSendPlan } from './ghl-outbound.service';
 export { GHL_REPLY_TYPES, messageTypeOf, type GhlInboundMessage, type GhlMessageType } from './ghl-event';
 export type { GhlReplyType, GhlOutgoingMessage } from './ghl.ports';
+export { GhlWorkflowsService, GHL_WORKFLOWS_TTL_MS, GHL_ENROLL_GUARD_MS, type GhlWorkflowView, type GhlWorkflowList, type GhlEnrollmentView } from './ghl-workflows.service';
+export type { GhlWorkflow } from './ghl.ports';

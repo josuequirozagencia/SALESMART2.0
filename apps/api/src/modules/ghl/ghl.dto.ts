@@ -34,3 +34,9 @@ export const channelConfigSchema = z
   })
   .strict();
 export type ChannelConfigDto = z.infer<typeof channelConfigSchema>;
+
+export const enrollSchema = z.strictObject({ workflow_id: z.string().trim().min(6).max(80).regex(/^[A-Za-z0-9_-]+$/) });
+export type EnrollDto = z.infer<typeof enrollSchema>;
+
+export const workflowsQuerySchema = z.strictObject({ refresh: z.enum(['1', 'true']).optional() });
+export type WorkflowsQuery = z.infer<typeof workflowsQuerySchema>;

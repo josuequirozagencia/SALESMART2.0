@@ -1,12 +1,14 @@
-import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
+import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { GhlConnectionService } from './ghl-connection.service';
 import { GhlChannelService } from './ghl-channel.service';
 import { GhlEventsService } from './ghl-events.service';
 import { GhlOutboxService } from './ghl-outbox.service';
-import { channelConfigSchema, eventsQuerySchema, outboxQuerySchema, saveConnectionSchema, type ChannelConfigDto, type EventsQuery, type OutboxQuery, type SaveConnectionDto } from './ghl.dto';
+import { GhlWorkflowsService } from './ghl-workflows.service';
+import { channelConfigSchema, enrollSchema, eventsQuerySchema, outboxQuerySchema, saveConnectionSchema, workflowsQuerySchema, type ChannelConfigDto, type EnrollDto, type EventsQuery, type OutboxQuery, type SaveConnectionDto, type WorkflowsQuery } from './ghl.dto';
 
 /**
  * Conexión de la empresa con GoHighLevel (M7.1, ADR-52). Solo quien administra integraciones (`integrations.manage`); `no-store`: son credenciales. El token jamás se devuelve (solo sus
@@ -19,6 +21,7 @@ export class GhlController {
     @Inject(GhlEventsService) private readonly events: GhlEventsService,
     @Inject(GhlOutboxService) private readonly outbox: GhlOutboxService,
     @Inject(GhlChannelService) private readonly channel: GhlChannelService,
+    @Inject(GhlWorkflowsService) private readonly workflows: GhlWorkflowsService,
   ) {}
 
   @RequirePermission('integrations.manage')
@@ -100,5 +103,30 @@ export class GhlController {
   @Header('Cache-Control', 'no-store')
   channelSave(@Body(new ZodValidationPipe(channelConfigSchema)) b: ChannelConfigDto) {
     return this.channel.configure(b);
+  }
+
+  /** Los flujos (Workflows) de la Location de GHL, con memoria de 5 min (`?refresh=1` la salta). */
+  @RequirePermission('ghl.enroll')
+  @Get('workflows')
+  @Header('Cache-Control', 'no-store')
+  workflowsList(@Query(new ZodValidationPipe(workflowsQuerySchema)) q: WorkflowsQuery) {
+    return this.workflows.list(q.refresh !== undefined);
+  }
+
+  /** Inscribe a un contacto en un flujo de GHL. El contacto debe ser uno que la persona ve (404 uniforme). */
+  @RequirePermission('ghl.enroll')
+  @Post('contacts/:contactId/workflows')
+  @HttpCode(201)
+  @Header('Cache-Control', 'no-store')
+  enroll(@Req() req: AuthedRequest, @Param('contactId', new ZodValidationPipe(z.uuid())) contactId: string, @Body(new ZodValidationPipe(enrollSchema)) b: EnrollDto) {
+    return this.workflows.enroll({ viewAll: req.principal?.permissions?.has('contacts.view_all') === true }, contactId, b.workflow_id);
+  }
+
+  /** Últimas inscripciones del contacto en flujos de GHL. */
+  @RequirePermission('ghl.enroll')
+  @Get('contacts/:contactId/workflows')
+  @Header('Cache-Control', 'no-store')
+  enrollments(@Req() req: AuthedRequest, @Param('contactId', new ZodValidationPipe(z.uuid())) contactId: string) {
+    return this.workflows.history({ viewAll: req.principal?.permissions?.has('contacts.view_all') === true }, contactId);
   }
 }

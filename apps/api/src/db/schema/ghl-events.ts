@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { contacts } from './crm';
+import { users } from './identity';
 import { tenantTable } from './helpers';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -111,5 +112,31 @@ export const ghlOutbox = tenantTable(
     index('ghl_outbox_due_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'pending'`),
     index('ghl_outbox_contact_idx').on(t['organizationId']!, t['contactId']!, t['createdAt']!, t['id']!).where(sql`${t['status']!} = 'pending'`),
     index('ghl_outbox_recent_idx').on(t['organizationId']!, t['createdAt']!, t['id']!),
+  ],
+);
+
+/**
+ * Inscripción de un contacto a un flujo (Workflow) de GoHighLevel (M7.5, ADR-52): un registro por intento, con su resultado (`done` | `failed`). Lo escribe quien pulsa «Inscribir» en la misma
+ * petición (la llamada a GHL es síncrona para que el resultado se vea al instante). El nombre del flujo se guarda tal como estaba (GHL puede renombrarlo). Solo de inserción: es un historial.
+ */
+export const ghlEnrollments = tenantTable(
+  'ghl_enrollments',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    contactId: uuid('contact_id').notNull(),
+    workflowId: text('workflow_id').notNull(),
+    workflowName: text('workflow_name').notNull(),
+    status: text('status').notNull(),
+    /** Solo el motivo ya limpio que devuelve el adaptador (sin teléfonos, correos ni tokens). */
+    error: text('error'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'ghl_enrollments_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('ghl_enrollments_status_valid', sql`${t['status']!} IN ('done', 'failed')`),
+    check('ghl_enrollments_workflow_shape', sql`length(${t['workflowId']!}) BETWEEN 1 AND 100 AND length(btrim(${t['workflowName']!})) BETWEEN 1 AND 150`),
+    check('ghl_enrollments_error_len', sql`${t['error']!} IS NULL OR length(${t['error']!}) <= 300`),
+    index('ghl_enrollments_contact_idx').on(t['organizationId']!, t['contactId']!, t['createdAt']!, t['id']!),
   ],
 );

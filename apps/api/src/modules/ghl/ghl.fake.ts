@@ -1,4 +1,4 @@
-import { GhlError, type GhlContactInput, type GhlCredentials, type GhlOutgoingMessage, type GhlProvider } from './ghl.ports';
+import { GhlError, type GhlContactInput, type GhlCredentials, type GhlOutgoingMessage, type GhlProvider, type GhlWorkflow } from './ghl.ports';
 
 /** Lo que el fake «hizo» en GHL, en orden (las pruebas lo leen). */
 export type FakeGhlCall =
@@ -6,7 +6,9 @@ export type FakeGhlCall =
   | { kind: 'removeTags'; contactId: string; tags: string[]; credentials: GhlCredentials }
   | { kind: 'upsertContact'; input: GhlContactInput; credentials: GhlCredentials }
   | { kind: 'deleteTag'; name: string; credentials: GhlCredentials }
-  | { kind: 'sendMessage'; message: GhlOutgoingMessage; credentials: GhlCredentials };
+  | { kind: 'sendMessage'; message: GhlOutgoingMessage; credentials: GhlCredentials }
+  | { kind: 'listWorkflows'; credentials: GhlCredentials }
+  | { kind: 'enrollInWorkflow'; ghlContactId: string; workflowId: string; credentials: GhlCredentials };
 
 /** Fake de GoHighLevel para pruebas: guarda con qué credenciales se llamó y permite simular fallos. Debe pasar el mismo contract test que el adaptador real. */
 export class FakeGhlProvider implements GhlProvider {
@@ -25,6 +27,12 @@ export class FakeGhlProvider implements GhlProvider {
   private nextMessage = 1;
   /** Etiquetas que «existen en GHL» (en minúsculas): `deleteTag` devuelve si estaba. */
   readonly existingTags = new Set<string>();
+  /** Los flujos que «tiene GHL» (las pruebas los cambian). */
+  workflows: GhlWorkflow[] = [
+    { id: 'wf000000000001', name: 'Bienvenida', status: 'published' },
+    { id: 'wf000000000002', name: 'Seguimiento de citas', status: 'published' },
+    { id: 'wf000000000003', name: 'Borrador interno', status: 'draft' },
+  ];
   /** Contactos «ya existentes en GHL» por teléfono, para probar el emparejamiento. */
   readonly existingByPhone = new Map<string, string>();
 
@@ -82,5 +90,19 @@ export class FakeGhlProvider implements GhlProvider {
     if (fail) return Promise.reject(fail);
     this.calls.push({ kind: 'sendMessage', message, credentials });
     return Promise.resolve({ id: `FakeGhlMessage${String(this.nextMessage++).padStart(6, '0')}` });
+  }
+
+  listWorkflows(credentials: GhlCredentials): Promise<GhlWorkflow[]> {
+    const fail = this.callFailures.shift();
+    if (fail) return Promise.reject(fail);
+    this.calls.push({ kind: 'listWorkflows', credentials });
+    return Promise.resolve(this.workflows.map((w) => ({ ...w })));
+  }
+
+  enrollInWorkflow(credentials: GhlCredentials, ghlContactId: string, workflowId: string): Promise<void> {
+    const fail = this.callFailures.shift();
+    if (fail) return Promise.reject(fail);
+    this.calls.push({ kind: 'enrollInWorkflow', ghlContactId, workflowId, credentials });
+    return Promise.resolve();
   }
 }

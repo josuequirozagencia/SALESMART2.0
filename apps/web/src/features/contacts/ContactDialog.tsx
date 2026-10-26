@@ -14,6 +14,7 @@ import { NotesPanel } from '../crm/NotesPanel';
 import { Tabs } from '../crm/Tabs';
 import { ContactOpportunitiesPanel } from '../pipelines/ContactOpportunitiesPanel';
 import { TasksPanel } from '../crm/TasksPanel';
+import { GhlFlowsPanel } from '../ghl/GhlFlowsPanel';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { useTags } from '../tags/useTags';
 import { useCreateContact, useDeleteContact, useUpdateContact, type ContactInput } from './useContacts';
@@ -54,7 +55,7 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
   const [tagIds, setTagIds] = useState<string[]>(initialTags);
   const [formError, setFormError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [tab, setTab] = useState<'data' | 'notes' | 'tasks' | 'opportunities' | 'companies'>('data');
+  const [tab, setTab] = useState<'data' | 'notes' | 'tasks' | 'opportunities' | 'companies' | 'ghl'>('data');
   const create = useCreateContact();
   const update = useUpdateContact();
   const remove = useDeleteContact();
@@ -146,10 +147,11 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
     <Modal title={editing ? 'Contacto' : 'Nuevo contacto'} onClose={onClose} wide>
       {readOnly ? <Alert kind="info">Estás en modo solo lectura: puedes ver este contacto, no cambiarlo.</Alert> : null}
       {contact ? <TagBadges tags={contact.tags} /> : null}
-      {contact ? <Tabs label="Secciones del contacto" active={tab} onChange={setTab} tabs={[['data', 'Datos'], ['notes', 'Notas'], ['tasks', 'Tareas'], ['opportunities', 'Oportunidades'], ['companies', `Empresas${contact.companies.length > 0 ? ` · ${contact.companies.length}` : ''}`]]} /> : null}
+      {contact ? <Tabs label="Secciones del contacto" active={tab} onChange={setTab} tabs={[['data', 'Datos'], ['notes', 'Notas'], ['tasks', 'Tareas'], ['opportunities', 'Oportunidades'], ['companies', `Empresas${contact.companies.length > 0 ? ` · ${contact.companies.length}` : ''}`], ['ghl', 'GoHighLevel']]} /> : null}
       {contact && tab === 'notes' ? <NotesPanel target={{ kind: 'contact', id: contact.id }} canWrite={!readOnly} /> : null}
       {contact && tab === 'tasks' ? <TasksPanel link={{ contact: { id: contact.id, name: contact.name } }} canWrite={!readOnly} viewAll={canAssign} owners={owners} /> : null}
       {contact && tab === 'opportunities' ? <ContactOpportunitiesPanel contact={contact} canWrite={!readOnly} viewAll={canAssign} owners={owners} /> : null}
+      {contact && tab === 'ghl' ? <GhlFlowsPanel contactId={contact.id} canWrite={!readOnly} /> : null}
       {contact && tab === 'companies' ? <ContactCompaniesPanel contact={contact} canWrite={!readOnly} /> : null}
       <form onSubmit={submit} noValidate className={`grid gap-3 ${tab === 'data' ? '' : 'hidden'}`} aria-label={editing ? 'Contacto' : 'Nuevo contacto'}>
         <Field label="Nombre" error={errors.name}>

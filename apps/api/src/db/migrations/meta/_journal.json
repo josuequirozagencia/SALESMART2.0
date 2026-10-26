@@ -547,6 +547,27 @@
       "when": 1792927676568,
       "tag": "0077_m74_ghl_channel",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1792998894172,
+      "tag": "0078_m75_ghl_enrollments",
+      "breakpoints": true
+    },
+    {
+      "idx": 79,
+      "version": "7",
+      "when": 1792998914970,
+      "tag": "0079_m75_ghl_enroll_permission",
+      "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1792998927440,
+      "tag": "0080_m75_ghl_enrollments_grants",
+      "breakpoints": true
     }
   ]
 }

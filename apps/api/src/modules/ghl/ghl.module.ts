@@ -11,6 +11,7 @@ import { GhlEventsJob } from './ghl-events.job';
 import { GhlOutboundService } from './ghl-outbound.service';
 import { GhlOutboxJob } from './ghl-outbox.job';
 import { GhlOutboxService } from './ghl-outbox.service';
+import { GhlWorkflowsService } from './ghl-workflows.service';
 import { GhlEventsService } from './ghl-events.service';
 import { GhlWebhookController } from './ghl-webhook.controller';
 import { GhlWebhookService } from './ghl-webhook.service';
@@ -44,11 +45,12 @@ export class GhlModule {
         GhlEventsJob,
         GhlOutboxService,
         GhlOutboxJob,
+        GhlWorkflowsService,
         opts.provider
           ? { provide: GHL_PROVIDER, useValue: opts.provider }
           : { provide: GHL_PROVIDER, useFactory: (cfg: AppConfig): GhlProvider => (cfg.channels.ghlProvider === 'ghl' ? new PrivateTokenProvider() : cfg.channels.ghlProvider === 'fake' ? new FakeGhlProvider() : new NoGhlProvider()), inject: [APP_CONFIG] },
       ],
-      exports: [GhlConnectionService, GhlChannelService, GhlOutboundService, GhlEventsService, GhlEventsJob, GhlOutboxService, GhlOutboxJob],
+      exports: [GhlConnectionService, GhlChannelService, GhlOutboundService, GhlEventsService, GhlEventsJob, GhlOutboxService, GhlOutboxJob, GhlWorkflowsService],
     };
     if (!opts.provider) GhlModule.standard = mod;
     return mod;

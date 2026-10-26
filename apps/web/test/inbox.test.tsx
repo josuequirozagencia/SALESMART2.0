@@ -785,4 +785,94 @@ describe('Inbox · canal de GoHighLevel (M7.4)', () => {
     expect(await screen.findByText(/conexión con GoHighLevel está desconectada o su token fue rechazado/)).toBeInTheDocument();
     expect(screen.queryByText(/conexión de WhatsApp/)).not.toBeInTheDocument();
   });
+
+  describe('inscribir en un flujo (M7.5)', () => {
+    interface FlowWorld { posts: unknown[]; history: Array<Record<string, unknown>>; workflows: Array<{ id: string; name: string; enrollable: boolean }>; fail?: () => ReturnType<Handler>; listFail?: () => ReturnType<Handler>; refreshes: number }
+    const flows = (over: Partial<FlowWorld> = {}): FlowWorld => ({
+      posts: [],
+      history: [],
+      refreshes: 0,
+      workflows: [{ id: 'wf000000000001', name: 'Bienvenida', enrollable: true }, { id: 'wf000000000002', name: 'Seguimiento de citas', enrollable: true }, { id: 'wf000000000003', name: 'Borrador interno', enrollable: false }],
+      ...over,
+    });
+    const withFlows = (w: ReturnType<typeof world>, f: FlowWorld): Record<string, Handler> => ({
+      ...server(w),
+      'GET /ghl/workflows': (c) => {
+        if (c.query.get('refresh')) f.refreshes += 1;
+        return f.listFail ? f.listFail() : { body: { items: f.workflows, fetched_at: new Date().toISOString() } };
+      },
+      'GET /ghl/contacts/k1/workflows': () => ({ body: { items: f.history } }),
+      'POST /ghl/contacts/k1/workflows': (c) => {
+        f.posts.push(c.body);
+        if (f.fail) return f.fail();
+        const wf = f.workflows.find((x) => x.id === (c.body as { workflow_id: string }).workflow_id)!;
+        const row = { id: `en${f.posts.length}`, workflow: { id: wf.id, name: wf.name }, status: 'done', error: null, by: { id: 'u2', name: 'Luis Navas' }, created_at: new Date().toISOString() };
+        f.history = [row, ...f.history];
+        return { status: 201, body: row };
+      },
+    });
+    const open = async (): Promise<ReturnType<typeof within>> => {
+      await userEvent.click(await screen.findByRole('button', { name: 'Inscribir en un flujo' }));
+      return within(await screen.findByRole('dialog', { name: 'Inscribir a Ana Torres en un flujo' }));
+    };
+
+    it('solo se ofrece en conversaciones de GoHighLevel a quien las lleva; elige un flujo publicado, lo inscribe y el resultado queda en el historial', async () => {
+      const w = world({ convs: [ghl()] });
+      const f = flows();
+      mockApi(withFlows(w, f));
+      renderApp('/inbox/c1');
+      const dlg = await open();
+      const select = await dlg.findByLabelText('Flujo');
+      expect(within(select).queryByRole('option', { name: 'Borrador interno' })).toBeNull(); // solo los publicados
+      expect(dlg.getByRole('button', { name: 'Inscribir en el flujo' })).toBeDisabled();
+      expect(dlg.getByText('Aún no se ha inscrito en ningún flujo.')).toBeInTheDocument();
+      await userEvent.selectOptions(select, 'wf000000000002');
+      await userEvent.click(dlg.getByRole('button', { name: 'Inscribir en el flujo' }));
+      await waitFor(() => expect(f.posts).toEqual([{ workflow_id: 'wf000000000002' }]));
+      expect(await dlg.findByText('Inscrito en «Seguimiento de citas».')).toBeInTheDocument();
+      const list = within(await dlg.findByRole('list'));
+      expect(await list.findByText('Seguimiento de citas')).toBeInTheDocument();
+      expect(list.getByText(/Luis Navas/)).toBeInTheDocument();
+    });
+
+    it('en una conversación de WhatsApp no aparece el botón', async () => {
+      mockApi(withFlows(world({ convs: [conv()] }), flows()));
+      renderApp('/inbox/c1');
+      await screen.findByRole('textbox', { name: 'Mensaje' });
+      expect(screen.queryByRole('button', { name: 'Inscribir en un flujo' })).not.toBeInTheDocument();
+    });
+
+    it('si GHL rechazó la inscripción se ve el motivo; si el servidor falla se muestra el error sin perder la elección', async () => {
+      const f = flows({ fail: () => ({ status: 409, body: { error: { code: 'GHL_ALREADY_ENROLLED', message: 'Este contacto ya se inscribió en ese flujo hace menos de un minuto', request_id: 'r', details: [] } } }) });
+      mockApi(withFlows(world({ convs: [ghl()] }), f));
+      renderApp('/inbox/c1');
+      const dlg = await open();
+      await userEvent.selectOptions(await dlg.findByLabelText('Flujo'), 'wf000000000001');
+      await userEvent.click(dlg.getByRole('button', { name: 'Inscribir en el flujo' }));
+      expect(await dlg.findByRole('alert')).toHaveTextContent(/hace menos de un minuto/);
+      expect(dlg.getByLabelText('Flujo')).toHaveValue('wf000000000001');
+      f.fail = () => ({ status: 201, body: { id: 'en9', workflow: { id: 'wf000000000001', name: 'Bienvenida' }, status: 'failed', error: 'GoHighLevel rechazó la solicitud: el contacto ya está en el flujo', by: null, created_at: new Date().toISOString() } });
+      await userEvent.click(dlg.getByRole('button', { name: 'Inscribir en el flujo' }));
+      expect(await dlg.findByText(/GoHighLevel no lo inscribió en «Bienvenida»: GoHighLevel rechazó la solicitud/)).toBeInTheDocument();
+    });
+
+    it('sin conexión con GoHighLevel muestra el motivo del servidor y no ofrece inscribir', async () => {
+      const f = flows({ listFail: () => ({ status: 409, body: { error: { code: 'GHL_NOT_CONNECTED', message: 'GoHighLevel no está conectado: el administrador debe revisar Configuración › GoHighLevel', request_id: 'r', details: [] } } }) });
+      mockApi(withFlows(world({ convs: [ghl()] }), f));
+      renderApp('/inbox/c1');
+      const dlg = await open();
+      expect(await dlg.findByRole('alert')).toHaveTextContent(/no está conectado/);
+      expect(dlg.queryByRole('button', { name: 'Inscribir en el flujo' })).toBeNull();
+    });
+
+    it('«Actualizar lista» salta la memoria del servidor', async () => {
+      const f = flows();
+      mockApi(withFlows(world({ convs: [ghl()] }), f));
+      renderApp('/inbox/c1');
+      const dlg = await open();
+      await dlg.findByLabelText('Flujo');
+      await userEvent.click(dlg.getByRole('button', { name: 'Actualizar lista' }));
+      await waitFor(() => expect(f.refreshes).toBe(1));
+    });
+  });
 });

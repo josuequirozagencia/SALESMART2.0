@@ -130,3 +130,37 @@ export function useSaveGhlChannel() {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (input: SaveGhlChannelInput) => api<GhlChannel>('/ghl/channel', { method: 'PUT', body: input }), onSettled: () => qc.invalidateQueries({ queryKey: ['ghl-channel'] }) });
 }
+
+export interface GhlWorkflow { id: string; name: string; enrollable: boolean }
+export interface GhlWorkflowList { items: GhlWorkflow[]; fetched_at: string }
+export interface GhlEnrollment {
+  id: string;
+  workflow: { id: string; name: string };
+  status: 'done' | 'failed';
+  error: string | null;
+  by: { id: string; name: string } | null;
+  created_at: string;
+}
+
+/** Los flujos de GoHighLevel (la lista se guarda 5 min en el servidor; «Actualizar» la salta). */
+export function useGhlWorkflows(enabled: boolean) {
+  const qc = useQueryClient();
+  const query = useQuery({ queryKey: ['ghl-workflows'], enabled, retry: false, staleTime: 60_000, queryFn: () => api<GhlWorkflowList>('/ghl/workflows') });
+  const refresh = async (): Promise<void> => {
+    const fresh = await api<GhlWorkflowList>('/ghl/workflows?refresh=1');
+    qc.setQueryData(['ghl-workflows'], fresh);
+  };
+  return { query, refresh };
+}
+
+export function useGhlEnrollments(contactId: string) {
+  return useQuery({ queryKey: ['ghl-enrollments', contactId], retry: false, queryFn: () => api<{ items: GhlEnrollment[] }>(`/ghl/contacts/${contactId}/workflows`) });
+}
+
+export function useEnrollGhl(contactId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (workflowId: string) => api<GhlEnrollment>(`/ghl/contacts/${contactId}/workflows`, { method: 'POST', body: { workflow_id: workflowId } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['ghl-enrollments', contactId] }),
+  });
+}

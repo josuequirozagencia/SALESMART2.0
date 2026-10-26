@@ -38,6 +38,13 @@ export interface GhlOutgoingMessage {
   text: string;
 }
 
+/** Un flujo (Workflow) de GHL al que se puede inscribir un contacto. `status`: `published` o `draft` (solo los publicados reciben contactos). */
+export interface GhlWorkflow {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export interface GhlProvider {
   /** `none` = sin adaptador configurado. */
   readonly kind: 'none' | 'fake' | 'ghl';
@@ -55,6 +62,10 @@ export interface GhlProvider {
   deleteTag(credentials: GhlCredentials, name: string): Promise<{ deleted: boolean }>;
   /** Escribe al cliente por GHL, por el canal indicado, y devuelve el identificador del mensaje. Lanza `GhlError`. */
   sendMessage(credentials: GhlCredentials, message: GhlOutgoingMessage): Promise<{ id: string }>;
+  /** Los flujos de la Location (M7.5). Lanza `GhlError`. */
+  listWorkflows(credentials: GhlCredentials): Promise<GhlWorkflow[]>;
+  /** Inscribe un contacto de GHL en un flujo (M7.5). Lanza `GhlError`. */
+  enrollInWorkflow(credentials: GhlCredentials, ghlContactId: string, workflowId: string): Promise<void>;
 }
 
 export const GHL_PROVIDER = Symbol('GHL_PROVIDER');
@@ -79,6 +90,12 @@ export class NoGhlProvider implements GhlProvider {
     return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
   }
   sendMessage(): Promise<{ id: string }> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  listWorkflows(): Promise<GhlWorkflow[]> {
+    return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
+  }
+  enrollInWorkflow(): Promise<void> {
     return Promise.reject(new GhlError('No hay adaptador de GoHighLevel configurado', false));
   }
 }

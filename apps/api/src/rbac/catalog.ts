@@ -58,6 +58,8 @@ export const PERMISSIONS = {
   'analytics.view_all': 'tenant',
   'analytics.export': 'tenant',
   'analytics.manage': 'tenant',
+  // M7.5 (ADR-52): inscribir un contacto en un flujo (Workflow) de GoHighLevel. El asesor solo sobre los contactos que ve.
+  'ghl.enroll': 'tenant',
   export: 'tenant',
   'team.manage': 'tenant',
   'billing.manage': 'tenant',
@@ -106,7 +108,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
   client_admin: tenantKeys,
   // `contacts.write` del asesor es de alcance PROPIO (ADR-32 #3 / ADR-43): crea contactos asignados a sí mismo y edita los suyos.
   // M4.2 (ADR-49): `opportunities.write` del asesor es de alcance PROPIO (sus oportunidades), igual que sus contactos.
-  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write', 'sales.read', 'sales.create', 'sales.register_payment', 'appointments.read', 'appointments.write', 'analytics.view', 'analytics.export'],
+  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write', 'sales.read', 'sales.create', 'sales.register_payment', 'appointments.read', 'appointments.write', 'analytics.view', 'analytics.export', 'ghl.enroll'],
 };
 
 /**

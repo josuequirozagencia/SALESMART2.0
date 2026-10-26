@@ -40,6 +40,11 @@ export async function ghlProviderContract(make: () => { provider: GhlProvider; f
   const sent = await provider.sendMessage(CREDS, { ghlContactId: 'abc123XYZ', type: 'SMS', text: 'Hola' });
   expect(typeof sent.id).toBe('string');
   expect(sent.id.length).toBeGreaterThan(3);
+  // 5d) flujos: la lista trae identificador, nombre y estado; inscribir resuelve sin devolver nada
+  const flows = await provider.listWorkflows(CREDS);
+  expect(Array.isArray(flows)).toBe(true);
+  for (const w of flows) expect(typeof w.id === 'string' && typeof w.name === 'string' && typeof w.status === 'string').toBe(true);
+  await expect(provider.enrollInWorkflow(CREDS, 'abc123XYZ', 'wf000000000001')).resolves.toBeUndefined();
   // 6) los fallos de estas llamadas llegan igual, con sus banderas, y la siguiente vuelve a funcionar
   failNextCall(new GhlError('token rechazado', false, true));
   expect(await provider.addTags(CREDS, 'abc123XYZ', ['vip']).catch((e: unknown) => e)).toMatchObject({ retryable: false, credentials: true });
@@ -51,6 +56,10 @@ export async function ghlProviderContract(make: () => { provider: GhlProvider; f
   expect(await provider.sendMessage(CREDS, { ghlContactId: 'abc123XYZ', type: 'SMS', text: 'Hola' }).catch((e: unknown) => e)).toMatchObject({ retryable: false, credentials: false });
   failNextCall(new GhlError('token rechazado', false, true));
   expect(await provider.sendMessage(CREDS, { ghlContactId: 'abc123XYZ', type: 'WhatsApp', text: 'Hola' }).catch((e: unknown) => e)).toMatchObject({ retryable: false, credentials: true });
+  failNextCall(new GhlError('token rechazado', false, true));
+  expect(await provider.listWorkflows(CREDS).catch((e: unknown) => e)).toMatchObject({ retryable: false, credentials: true });
+  failNextCall(new GhlError('límite de uso', true));
+  expect(await provider.enrollInWorkflow(CREDS, 'abc123XYZ', 'wf000000000001').catch((e: unknown) => e)).toMatchObject({ retryable: true, credentials: false });
   failNextCall(new GhlError('sin teléfono', false));
   expect(await provider.upsertContact(CREDS, { name: null, phone: '+593984217730', email: null }).catch((e: unknown) => e)).toMatchObject({ retryable: false, credentials: false });
   await expect(provider.addTags(CREDS, 'abc123XYZ', ['vip'])).resolves.toBeUndefined();
