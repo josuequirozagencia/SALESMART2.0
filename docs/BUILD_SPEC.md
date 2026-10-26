@@ -348,7 +348,7 @@ Citas con recordatorios (topes por fuente), ventas con abono y catálogo por col
 
 **M8 — IA: agentes, conocimiento y créditos**
 Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con RAG (pgvector), créditos con libro y recarga, `ToolRegistry` con permisos y auditoría.
-*Avance:* plan por rebanadas en `docs/M8_PLAN.md` (ADR-53, APROBADO el 2026-10-26). M8.1 (créditos: monedero, libro, cobro atómico y precio/margen solo en el servidor) construida el 2026-10-26. M8.2 (biblioteca de conocimiento con búsqueda vectorial, sin extensión de base de datos) construida el 2026-10-26. M8.3 (agentes: galería, instrucciones con variables, documentos, conexiones y foto) construida el 2026-10-26. M8.4 (simulador de prueba con créditos `test` y tope diario) construida el 2026-10-27.
+*Avance:* plan por rebanadas en `docs/M8_PLAN.md` (ADR-53, APROBADO el 2026-10-26). M8.1 (créditos: monedero, libro, cobro atómico y precio/margen solo en el servidor) construida el 2026-10-26. M8.2 (biblioteca de conocimiento con búsqueda vectorial, sin extensión de base de datos) construida el 2026-10-26. M8.3 (agentes: galería, instrucciones con variables, documentos, conexiones y foto) construida el 2026-10-26. M8.4 (simulador de prueba con créditos `test` y tope diario) construida el 2026-10-27. M8.5a (agente en vivo en el Inbox: contesta, se pausa con un mensaje humano y pasa a una persona con reglas fijas) construida el 2026-10-27; M8.5b (herramientas del agente) pendiente.
 *Aceptación:* el agente no responde con datos que no están en sus documentos; descuento atómico sin saldo negativo bajo concurrencia; margen no aparece en ninguna respuesta de API de cliente.
 
 **M9 — WhatsApp QR, formularios y automatizaciones**

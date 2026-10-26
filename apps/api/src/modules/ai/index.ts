@@ -6,6 +6,10 @@ export { AI_PROVIDER, AiProviderError, NoAiProvider, type AIProvider, type AiCre
 export { FakeAiProvider, fakeVector, type FakeAiCall } from './ai.fake';
 export { OpenAiProvider, MAX_EMBED_INPUTS } from './openai.provider';
 export { KnowledgeJob } from './knowledge/knowledge.job';
+export { AgentRuntimeJob } from './runtime/agent-runtime.job';
+export { AgentRuntimeService, AGENT_RUNTIME_BATCH, AGENT_FRESH_MS, AGENT_LEASE_MS, AGENT_MAX_ATTEMPTS, type AgentStatusView } from './runtime/agent-runtime.service';
+export { AgentTurnService } from './agents/agent-turn.service';
+export { asksForPerson, MAX_AGENT_TURNS, HANDOFF_MESSAGE } from './runtime/handoff';
 export { KnowledgeProcessorService, KNOWLEDGE_BATCH, KNOWLEDGE_MAX_ATTEMPTS, KNOWLEDGE_LEASE_MS } from './knowledge/knowledge-processor.service';
 export { KnowledgeService, MAX_DOCUMENTS, MIN_SCORE, type DocumentView, type DocumentList, type SearchView } from './knowledge/knowledge.service';
 export { VECTOR_STORE, PgArrayVectorStore, MAX_CHUNKS_PER_ORG, normalize, toBytes, fromBytes, type VectorStore, type VectorHit } from './knowledge/vector-store';

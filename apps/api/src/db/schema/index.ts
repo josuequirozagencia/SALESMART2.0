@@ -24,3 +24,4 @@ export { slaPolicies, businessHours, holidays, responseTimers } from './sla';
 export { aiWallets, aiLedger, aiHolds, aiPricing, aiOrgPricing } from './ai';
 export { knowledgeDocuments, documentChunks, aiModelPrices } from './ai-knowledge';
 export { agents, agentDocuments, agentChannels, agentTestRuns } from './ai-agents';
+export { aiConversationState } from './ai-runtime';

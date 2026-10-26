@@ -366,9 +366,9 @@ export class AgentsService {
   }
 
   /** Los ajustes que necesita el simulador (y, después, el agente en vivo): modelo, límites y cómo dividir. 404 si no existe. */
-  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number }> {
+  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean }> {
     const r = await this.db.withTenant((tx) => this.byId(tx, id, false));
-    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks };
+    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn };
   }
 
   // ------------------------------------------------------------------ interno

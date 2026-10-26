@@ -728,6 +728,14 @@ export interface Participant {
   added_by: { id: string; name: string } | null;
   added_at: string;
 }
+/** Qué hace el agente de IA en una conversación (M8.5). `idle`: no ha intervenido; `active` atiende; `paused` lo detuvo una persona o faltan créditos; `handed_off` pasó a una persona. */
+export interface AgentStatus {
+  agent: { id: string; name: string } | null;
+  state: 'idle' | 'active' | 'paused' | 'handed_off';
+  reason: string | null;
+  can_control: boolean;
+}
+
 export interface Conversation {
   id: string;
   status: ConversationStatus;

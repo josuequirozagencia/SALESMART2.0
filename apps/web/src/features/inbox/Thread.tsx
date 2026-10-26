@@ -10,6 +10,7 @@ import { Pill } from '../../ui/Pill';
 import { GhlFlowsDialog } from '../ghl/GhlFlowsPanel';
 import { AppointmentDialog } from '../appointments/AppointmentDialog';
 import { SaleDialog } from '../sales/SaleDialog';
+import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
 import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
@@ -176,6 +177,7 @@ export function Thread({ id, meId }: { id: string; meId: string }) {
     <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-col bg-bg">
       <Header c={c} meId={meId} onBackError={setActionError} />
       {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
+      <AgentBanner c={c} />
       <Messages c={c} />
       <Composer key={c.id} c={c} />
     </section>

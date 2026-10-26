@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
 import { useRealtimeStatus } from '../../lib/realtime';
-import type { ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
+import type { AgentStatus, ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /**
  * Cada cuánto se vuelve a mirar el listado y el hilo abierto cuando NO hay conexión en vivo (respaldo). Con la conexión en vivo los cambios llegan solos y
@@ -181,6 +181,22 @@ export function useShare(id: string) {
 export function useRevoke(id: string) {
   const refresh = useRefresh(id);
   return useMutation({ mutationFn: (userId: string) => api<RevokeResult>(`/conversations/${id}/participants/${userId}`, { method: 'DELETE' }), onSettled: refresh });
+}
+
+/** Qué hace el agente de IA en la conversación (404 si la persona no puede verla; sin agente, `agent: null`). */
+export function useAgentStatus(id: string) {
+  const poll = usePolling();
+  return useQuery({ queryKey: ['conversation-ai', id], retry: false, staleTime: 5_000, refetchInterval: poll.thread, queryFn: () => api<AgentStatus>(`/conversations/${id}/ai`) });
+}
+
+/** Tomar el control (pausar al agente) o reanudarlo. Devuelve el estado nuevo. */
+export function useAgentControl(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (action: 'pause' | 'resume') => api<AgentStatus>(`/conversations/${id}/ai/${action}`, { method: 'POST' }),
+    onSuccess: (s) => qc.setQueryData(['conversation-ai', id], s),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ['conversation-ai', id] }), qc.invalidateQueries({ queryKey: ['messages', id] })]),
+  });
 }
 
 export function useRetryMessage(conversationId: string) {

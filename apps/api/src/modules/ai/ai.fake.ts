@@ -46,6 +46,11 @@ export class FakeAiProvider implements AIProvider {
   /** Si es verdadero, `embed` cuenta un token por cada 4 caracteres; si no, exactamente `tokensPerInput` por texto. */
   tokensPerInput: number | null = null;
 
+  /** Descarta los fallos programados que no se llegaron a usar. */
+  clearFailures(): void {
+    this.failures = [];
+  }
+
   /** La próxima llamada (de cualquier tipo) falla con este error. */
   failNext(error: AiProviderError): void {
     this.failures.push(error);

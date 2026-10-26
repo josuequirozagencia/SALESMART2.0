@@ -4,12 +4,15 @@ import { APP_CONFIG } from '../../tokens';
 import { AttachmentsModule } from '../attachments';
 import { ContactsModule } from '../contacts';
 import { CustomFieldsModule } from '../custom-fields';
+import { RealtimeModule } from '../realtime';
+import { SlaModule } from '../sla';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import { AiAdminService } from './ai-admin.service';
 import { AiCreditsService } from './ai-credits.service';
 import { AiGateway } from './ai-gateway.service';
 import { AgentTestService } from './agents/agent-test.service';
+import { AgentTurnService } from './agents/agent-turn.service';
 import { AgentsController } from './agents/agents.controller';
 import { AgentsService } from './agents/agents.service';
 import { AiAdminController, AiCreditsController } from './ai.controller';
@@ -21,16 +24,19 @@ import { KnowledgeProcessorService } from './knowledge/knowledge-processor.servi
 import { KnowledgeService } from './knowledge/knowledge.service';
 import { PgArrayVectorStore, VECTOR_STORE } from './knowledge/vector-store';
 import { OpenAiProvider } from './openai.provider';
+import { AgentRuntimeJob } from './runtime/agent-runtime.job';
+import { AgentRuntimeService } from './runtime/agent-runtime.service';
+import { ConversationAiController } from './runtime/conversation-ai.controller';
 
 /** El adaptador de IA que dice la configuración (las pruebas registran el suyo sobreescribiendo `AI_PROVIDER`). */
 export function buildAiProvider(cfg: AppConfig): AIProvider {
   return cfg.ai.provider === 'openai' ? new OpenAiProvider() : cfg.ai.provider === 'fake' ? new FakeAiProvider() : new NoAiProvider();
 }
 
-/** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2), agentes (M8.3) y simulador de prueba (M8.4). Después: agente en vivo. */
+/** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2), agentes (M8.3), simulador de prueba (M8.4) y agente en vivo en el Inbox (M8.5). */
 @Module({
-  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule],
-  controllers: [AiCreditsController, AiAdminController, KnowledgeController, AgentsController],
+  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule, RealtimeModule, SlaModule],
+  controllers: [AiCreditsController, AiAdminController, KnowledgeController, AgentsController, ConversationAiController],
   providers: [
     AiCreditsService,
     AiAdminService,
@@ -38,11 +44,14 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     KnowledgeService,
     AgentsService,
     AgentTestService,
+    AgentTurnService,
+    AgentRuntimeService,
+    AgentRuntimeJob,
     KnowledgeProcessorService,
     KnowledgeJob,
     { provide: AI_PROVIDER, useFactory: buildAiProvider, inject: [APP_CONFIG] },
     { provide: VECTOR_STORE, useFactory: () => new PgArrayVectorStore() },
   ],
-  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, KnowledgeJob],
+  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, KnowledgeJob, AgentRuntimeJob],
 })
 export class AiModule {}

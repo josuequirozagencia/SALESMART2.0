@@ -22,6 +22,7 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
         void qc.invalidateQueries({ queryKey: ['conversation', id] });
         void qc.invalidateQueries({ queryKey: ['messages', id] });
         void qc.invalidateQueries({ queryKey: ['scheduled', id] });
+        void qc.invalidateQueries({ queryKey: ['conversation-ai', id] });
       }
       conversations.clear();
     };
@@ -31,7 +32,7 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
         timer ??= setTimeout(flush, COALESCE_MS);
       },
       onResync: () => {
-        for (const key of ['conversations', 'conversation', 'messages', 'scheduled']) void qc.invalidateQueries({ queryKey: [key] });
+        for (const key of ['conversations', 'conversation', 'messages', 'scheduled', 'conversation-ai']) void qc.invalidateQueries({ queryKey: [key] });
       },
     });
     return () => {
