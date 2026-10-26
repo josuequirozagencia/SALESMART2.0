@@ -3,7 +3,10 @@ import { AppError } from '../../../errors';
 import { TenantContext } from '../../../tenant';
 import { AiPricingService } from '../../platform';
 import { AiCreditsService } from '../ai-credits.service';
-import { AiGateway, AiUnavailableError } from '../ai-gateway.service';
+import { AiGateway, AiUnavailableError, type ChatOutcome } from '../ai-gateway.service';
+import type { ChatMessage, ToolCall } from '../ai.ports';
+import type { ToolResult } from '../tools/agent-tools.service';
+import { MAX_CALLS_PER_ROUND, MAX_TOOL_ROUNDS, toolDefinitions, toolGuidance, type ToolConfig } from '../tools/tool-defs';
 import { creditsFor } from '../credits';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { buildChatMessages, estimateInputTokens, splitReply, trimReply } from './agent-chat';
@@ -22,6 +25,8 @@ export interface TurnRequest {
   readonly contactId: string | null;
   /** `test` (simulador) o `use` (conversación real): así se anota en el libro de créditos. */
   readonly kind: 'use' | 'test';
+  /** Herramientas del agente (M8.5b): qué se le ofrece al modelo y cómo se ejecuta cada llamada que pida. Sin esto, el modelo solo responde texto. */
+  readonly tools?: { readonly config: ToolConfig; readonly execute: (call: ToolCall) => Promise<ToolResult> };
 }
 
 export interface TurnResult {
@@ -36,6 +41,10 @@ export interface TurnResult {
   /** Créditos que costó el turno (búsqueda y respuesta). */
   readonly creditsUsed: number;
   readonly contact: { id: string; name: string } | null;
+  /** Lo que el modelo pidió con herramientas y cómo terminó cada una (vacío si no usó ninguna). */
+  readonly toolCalls: ToolResult[];
+  /** Una herramienta pidió pasar la conversación a una persona. */
+  readonly transfer: boolean;
 }
 
 /**
@@ -60,22 +69,56 @@ export class AgentTurnService {
     const prompt = await this.agents.preview({ agent_id: req.agentId, ...(req.contactId ? { contact_id: req.contactId } : {}) });
     const found = await this.knowledge.search({ query: message, limit: FRAGMENTS_PER_TURN, agentId: req.agentId, kind: req.kind });
     const fragments = found.hits.map((h) => ({ document: h.document.name, content: h.content }));
-    const messages = buildChatMessages({ system: prompt.system, fragments, history: req.history, message });
+    const defs = req.tools ? toolDefinitions(req.tools.config) : [];
+    const guidance = req.tools ? toolGuidance(req.tools.config) : '';
+    const messages: ChatMessage[] = buildChatMessages({ system: guidance ? `${prompt.system}
+
+${guidance}` : prompt.system, fragments, history: req.history, message });
     const price = await this.gateway.chatPrice(settings.model);
     if (!price) throw this.unavailable(new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado'));
     const rate = await this.pricing.resolve(TenantContext.current().organizationId);
-    const worstUsd = (estimateInputTokens(messages) * price.usdPer1mInput + settings.maxTokens * price.usdPer1mOutput) / 1_000_000;
     const ref = `${req.kind === 'test' ? 'Prueba del agente' : 'Agente'} ${settings.name}`.slice(0, 200);
-    const { holdId } = await this.credits.reserve({ credits: Math.max(1, creditsFor(worstUsd, rate.marginPct, rate.usdPerCredit)), kind: req.kind, ref });
-    let out;
-    try {
-      out = await this.gateway.chat({ model: settings.model, messages, temperature: settings.temperature, maxTokens: settings.maxTokens });
-    } catch (e) {
-      await this.credits.release(holdId);
-      throw this.unavailable(e);
+    const defsChars = JSON.stringify(defs).length;
+    // Una vuelta de chat: reserva (el peor caso), llamada y cobro de lo realmente usado; un fallo libera la reserva
+    const round = async (withTools: boolean): Promise<{ out: ChatOutcome; credits: number }> => {
+      const worstUsd = ((estimateInputTokens(messages) + Math.ceil(withTools ? defsChars / 3 : 0)) * price.usdPer1mInput + settings.maxTokens * price.usdPer1mOutput) / 1_000_000;
+      const { holdId } = await this.credits.reserve({ credits: Math.max(1, creditsFor(worstUsd, rate.marginPct, rate.usdPerCredit)), kind: req.kind, ref });
+      let out: ChatOutcome;
+      try {
+        out = await this.gateway.chat({ model: settings.model, messages, temperature: settings.temperature, maxTokens: settings.maxTokens, ...(withTools && defs.length > 0 ? { tools: defs } : {}) });
+      } catch (e) {
+        await this.credits.release(holdId);
+        throw this.unavailable(e);
+      }
+      const charged = await this.credits.settle(holdId, { costUsd: out.costUsd, ref });
+      return { out, credits: charged.credits };
+    };
+
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let credits = found.credits_used;
+    let text = '';
+    const toolResults: ToolResult[] = [];
+    let transfer = false;
+    for (let i = 0; ; i++) {
+      const withTools = req.tools !== undefined && defs.length > 0 && i < MAX_TOOL_ROUNDS;
+      const { out, credits: c } = await round(withTools);
+      tokensIn += out.tokensIn;
+      tokensOut += out.tokensOut;
+      credits += c;
+      if (out.text.trim() !== '') text = out.text;
+      const calls = out.toolCalls.slice(0, MAX_CALLS_PER_ROUND);
+      if (!withTools || calls.length === 0 || !req.tools) break;
+      // El modelo pidió herramientas: se ejecutan EN EL SERVIDOR con lo que el agente tiene permitido y su resultado vuelve al modelo
+      messages.push({ role: 'assistant', content: out.text, toolCalls: calls });
+      for (const call of calls) {
+        const r = await req.tools.execute(call);
+        toolResults.push(r);
+        if (r.transfer) transfer = true;
+        messages.push({ role: 'tool', toolCallId: call.id, content: `${r.outcome}: ${r.detail}` });
+      }
     }
-    const charged = await this.credits.settle(holdId, { costUsd: out.costUsd, ref });
-    const trimmed = trimReply(out.text, settings.maxChars);
+    const trimmed = trimReply(text, settings.maxChars);
     const replies = settings.splitEnabled ? splitReply(trimmed, settings.splitBlocks) : trimmed === '' ? [] : [trimmed];
     return {
       replies,
@@ -83,10 +126,12 @@ export class AgentTurnService {
       hits: fragments.length,
       search: { query: message, results: found.hits.map((h) => ({ document: h.document.name, score: h.score })) },
       missingVariables: prompt.missing,
-      model: { name: settings.model, tokensIn: out.tokensIn, tokensOut: out.tokensOut },
-      trimmed: trimmed.length < out.text.trim().length,
-      creditsUsed: found.credits_used + charged.credits,
+      model: { name: settings.model, tokensIn, tokensOut },
+      trimmed: trimmed.length < text.trim().length,
+      creditsUsed: credits,
       contact: prompt.contact,
+      toolCalls: toolResults,
+      transfer,
     };
   }
 

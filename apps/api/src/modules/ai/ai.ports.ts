@@ -35,22 +35,40 @@ export interface EmbedResult {
   readonly tokens: number;
 }
 
-export interface ChatMessage {
-  readonly role: 'system' | 'user' | 'assistant';
-  readonly content: string;
+/** Una herramienta que el modelo puede pedir (llamada a funciones). `parameters` es un esquema JSON. */
+export interface ToolDefinition {
+  readonly name: string;
+  readonly description: string;
+  readonly parameters: Readonly<Record<string, unknown>>;
 }
+
+/** Una herramienta que el modelo pidió usar. `arguments` es el texto JSON tal como lo dio el modelo: NO es de fiar hasta validarlo. */
+export interface ToolCall {
+  readonly id: string;
+  readonly name: string;
+  readonly arguments: string;
+}
+
+export type ChatMessage =
+  | { readonly role: 'system' | 'user'; readonly content: string }
+  | { readonly role: 'assistant'; readonly content: string; readonly toolCalls?: readonly ToolCall[] }
+  | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string };
 
 export interface ChatRequest {
   readonly model: string;
   readonly messages: readonly ChatMessage[];
   readonly temperature: number;
   readonly maxTokens: number;
+  /** Herramientas que el modelo puede pedir; sin ellas, solo responde texto. */
+  readonly tools?: readonly ToolDefinition[];
 }
 
 export interface ChatResult {
   readonly text: string;
   readonly tokensIn: number;
   readonly tokensOut: number;
+  /** Herramientas que el modelo pidió (vacío o ausente: ninguna). */
+  readonly toolCalls?: readonly ToolCall[];
 }
 
 export interface AIProvider {

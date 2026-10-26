@@ -1,4 +1,4 @@
-import { AiProviderError, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+import { AiProviderError, type AiCredentials, type AIProvider, type ToolCall, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
 
 const DEFAULT_BASE = 'https://api.openai.com';
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -62,17 +62,33 @@ export class OpenAiProvider implements AIProvider {
     if (request.messages.length === 0) throw new AiProviderError('No hay mensajes que enviar', false);
     const res = await this.call('/v1/chat/completions', credentials, {
       model: request.model,
-      messages: request.messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: request.messages.map((m) =>
+        m.role === 'tool'
+          ? { role: 'tool', tool_call_id: m.toolCallId, content: m.content }
+          : m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
+            ? { role: 'assistant', content: m.content === '' ? null : m.content, tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })) }
+            : { role: m.role, content: m.content },
+      ),
       temperature: Math.min(Math.max(request.temperature, 0), 2),
       max_completion_tokens: Math.min(Math.max(Math.floor(request.maxTokens), 1), 16_000),
+      ...(request.tools && request.tools.length > 0 ? { tools: request.tools.map((t) => ({ type: 'function', function: { name: t.name, description: t.description, parameters: t.parameters } })), tool_choice: 'auto' } : {}),
     });
     try {
-      const body = (await res.json()) as { choices?: Array<{ message?: { content?: unknown } }>; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
-      const text = body.choices?.[0]?.message?.content;
+      const body = (await res.json()) as { choices?: Array<{ message?: { content?: unknown; tool_calls?: unknown } }>; usage?: { prompt_tokens?: unknown; completion_tokens?: unknown } };
+      const message = body.choices?.[0]?.message;
+      const toolCalls: ToolCall[] = [];
+      if (Array.isArray(message?.tool_calls)) {
+        for (const c of message.tool_calls as Array<{ id?: unknown; type?: unknown; function?: { name?: unknown; arguments?: unknown } }>) {
+          if (typeof c?.id !== 'string' || typeof c.function?.name !== 'string' || typeof c.function.arguments !== 'string') throw new AiProviderError('El proveedor de IA respondió algo que no se entiende', true);
+          toolCalls.push({ id: c.id, name: c.function.name, arguments: c.function.arguments });
+        }
+      }
+      // Con herramientas pedidas el texto puede venir vacío o nulo
+      const text = typeof message?.content === 'string' ? message.content : message?.content === null && toolCalls.length > 0 ? '' : undefined;
       const tokensIn = Number(body.usage?.prompt_tokens);
       const tokensOut = Number(body.usage?.completion_tokens);
       if (typeof text !== 'string' || !Number.isFinite(tokensIn) || !Number.isFinite(tokensOut)) throw new AiProviderError('El proveedor de IA respondió algo que no se entiende', true);
-      return { text, tokensIn: Math.floor(tokensIn), tokensOut: Math.floor(tokensOut) };
+      return { text, tokensIn: Math.floor(tokensIn), tokensOut: Math.floor(tokensOut), ...(toolCalls.length > 0 ? { toolCalls } : {}) };
     } catch (e) {
       if (e instanceof AiProviderError) throw e;
       throw new AiProviderError('El proveedor de IA respondió algo que no se entiende', true);

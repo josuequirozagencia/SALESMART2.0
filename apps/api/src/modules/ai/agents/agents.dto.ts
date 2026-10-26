@@ -31,6 +31,9 @@ export const updateAgentSchema = z
     transfer_enabled: z.boolean(),
     transfer_queue_id: z.uuid().nullable(),
     always_on: z.boolean(),
+    /** Variables de campos personalizados del contacto que el agente puede rellenar (M8.5b); [] = ninguno. */
+    capture_fields: z.array(z.string().regex(/^[a-z][a-z0-9_]{0,39}$/)).max(10),
+    tasks_enabled: z.boolean(),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');

@@ -53,6 +53,8 @@ export interface AgentDetail extends AgentCard {
   transfer_enabled: boolean;
   transfer_queue_id: string | null;
   always_on: boolean;
+  capture_fields: string[];
+  tasks_enabled: boolean;
   document_ids: string[];
   channel_ids: string[];
   /** Qué le falta para poder responder (la pantalla lo muestra como lista de pendientes). */
@@ -60,15 +62,20 @@ export interface AgentDetail extends AgentCard {
   updated_at: string;
 }
 
+/** Campos del contacto que un agente puede rellenar como máximo. */
+export const MAX_CAPTURE_FIELDS = 10;
+
 export interface AgentOptions {
   /** Modelos de chat que se pueden elegir (solo nombres: los precios son de la plataforma). */
   models: string[];
   covers: readonly Cover[];
-  limits: { max_agents: number; max_photo_bytes: number; max_chunks: number };
+  limits: { max_agents: number; max_photo_bytes: number; max_chunks: number; max_capture_fields: number };
   /** Variables que se pueden usar en las instrucciones. */
   variables: Array<{ key: string; label: string; example: string; kind: 'builtin' | 'custom' }>;
   channels: Array<{ id: string; name: string; provider: string; status: string; agent: { id: string; name: string } | null }>;
   queues: Array<{ id: string; name: string }>;
+  /** Campos personalizados del contacto que se pueden permitir al agente (M8.5b). */
+  capture_options: Array<{ key: string; name: string; type: string }>;
   documents: Array<{ id: string; name: string; status: string; chunk_count: number; active: boolean }>;
 }
 
@@ -132,13 +139,14 @@ export class AgentsService {
       return {
         models,
         covers: COVERS,
-        limits: { max_agents: MAX_AGENTS, max_photo_bytes: MAX_PHOTO_BYTES, max_chunks: MAX_CHUNKS_PER_AGENT },
+        limits: { max_agents: MAX_AGENTS, max_photo_bytes: MAX_PHOTO_BYTES, max_chunks: MAX_CHUNKS_PER_AGENT, max_capture_fields: MAX_CAPTURE_FIELDS },
         variables: [...AGENT_BUILT_IN.map((v) => ({ key: v.key, label: v.label, example: v.example, kind: 'builtin' as const })), ...labels.map((f) => ({ key: `contact.${f.key}`, label: f.name, example: '', kind: 'custom' as const }))],
         channels: channelRows.map((c) => {
           const agentId = agentOf.get(c.id);
           return { ...c, agent: agentId ? { id: agentId, name: nameOf.get(agentId) ?? '' } : null };
         }),
         queues: q,
+        capture_options: labels.map((f) => ({ key: f.key, name: f.name, type: f.type })),
         documents: docs,
       };
     });
@@ -175,6 +183,11 @@ export class AgentsService {
           const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, patch.transfer_queue_id), isNull(queues.deletedAt))).limit(1);
           if (!q) throw new ValidationError([{ path: 'transfer_queue_id', code: 'not_found', message: 'La cola no existe' }]);
         }
+        if (patch.capture_fields !== undefined) {
+          const active = new Set((await this.custom.labels(tx, 'contact')).map((f) => f.key));
+          const bad = patch.capture_fields.filter((k) => !active.has(k));
+          if (bad.length > 0) throw new ValidationError([{ path: 'capture_fields', code: 'unknown_field', message: `Estos campos no existen o están archivados: ${bad.join(', ')}` }]);
+        }
         await this.assertVariables(tx, { personality: patch.personality ?? cur.personality, objective: patch.objective ?? cur.objective, extra_info: patch.extra_info ?? cur.extraInfo });
         const next = { personality: patch.personality ?? cur.personality, objective: patch.objective ?? cur.objective };
         if (patch.active === true && !cur.active && next.personality.trim() === '' && next.objective.trim() === '') throw new ConflictError('AGENT_INCOMPLETE', 'Escribe la personalidad o el objetivo del agente antes de activarlo');
@@ -207,6 +220,14 @@ export class AgentsService {
         if (patch.transfer_enabled !== undefined) note('transfer_enabled', cur.transferEnabled, patch.transfer_enabled, () => (set.transferEnabled = patch.transfer_enabled!));
         if (patch.transfer_queue_id !== undefined) note('transfer_queue_id', cur.transferQueueId, patch.transfer_queue_id, () => (set.transferQueueId = patch.transfer_queue_id!));
         if (patch.always_on !== undefined) note('always_on', cur.alwaysOn, patch.always_on, () => (set.alwaysOn = patch.always_on!));
+        if (patch.capture_fields !== undefined) {
+          const next = [...new Set(patch.capture_fields)];
+          if (JSON.stringify(next) !== JSON.stringify(cur.captureFields)) {
+            set.captureFields = next;
+            changes.push({ field: 'capture_fields', oldValue: cur.captureFields, newValue: next });
+          }
+        }
+        if (patch.tasks_enabled !== undefined) note('tasks_enabled', cur.tasksEnabled, patch.tasks_enabled, () => (set.tasksEnabled = patch.tasks_enabled!));
         if (changes.length === 0) return;
         await tx.update(agents).set(set).where(eq(agents.id, id));
         for (const c of changes) await writeAudit(tx, { entityType: 'agent', entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
@@ -366,9 +387,9 @@ export class AgentsService {
   }
 
   /** Los ajustes que necesita el simulador (y, después, el agente en vivo): modelo, límites y cómo dividir. 404 si no existe. */
-  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean }> {
+  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; transferQueueId: string | null }> {
     const r = await this.db.withTenant((tx) => this.byId(tx, id, false));
-    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn };
+    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, transferQueueId: r.transferQueueId };
   }
 
   // ------------------------------------------------------------------ interno
@@ -405,6 +426,8 @@ export class AgentsService {
       transfer_enabled: r.transferEnabled,
       transfer_queue_id: r.transferQueueId,
       always_on: r.alwaysOn,
+      capture_fields: r.captureFields,
+      tasks_enabled: r.tasksEnabled,
       document_ids: rel.documentIds,
       channel_ids: rel.channels.map((c) => c.id),
       readiness: { instructions: r.personality.trim() !== '' || r.objective.trim() !== '', documents: rel.documentIds.length > 0, channel: rel.channels.length > 0 },

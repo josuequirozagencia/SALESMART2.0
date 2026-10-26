@@ -4,6 +4,8 @@ import { agentTestRuns, Database } from '../../../db';
 import { ConflictError } from '../../../errors';
 import { TenantContext } from '../../../tenant';
 import { AgentTurnService, FRAGMENTS_PER_TURN } from './agent-turn.service';
+import { AgentToolsService } from '../tools/agent-tools.service';
+import { hasTools } from '../tools/tool-defs';
 import { AgentsService } from './agents.service';
 import type { TestTurnDto } from './agents.dto';
 
@@ -21,6 +23,8 @@ export interface TurnView {
     model: { name: string; tokens_in: number; tokens_out: number };
     split: boolean;
     trimmed: boolean;
+    /** Lo que el agente HABRÍA hecho con sus herramientas (en la prueba no se escribe nada). */
+    tool_calls: Array<{ tool: string; outcome: string; detail: string }>;
   };
   /** Créditos que costó el turno (búsqueda y respuesta). */
   credits_used: number;
@@ -40,18 +44,22 @@ export class AgentTestService {
     @Inject(Database) private readonly db: Database,
     @Inject(AgentsService) private readonly agents: AgentsService,
     @Inject(AgentTurnService) private readonly turns: AgentTurnService,
+    @Inject(AgentToolsService) private readonly tools: AgentToolsService,
   ) {}
 
   async turn(agentId: string, input: TestTurnDto): Promise<TurnView> {
-    await this.agents.runtimeSettings(agentId); // 404 antes de gastar nada
+    const settings = await this.agents.runtimeSettings(agentId); // 404 antes de gastar nada
     const used = await this.usedToday();
     if (used >= MAX_TESTS_PER_DAY) throw new ConflictError('AGENT_TEST_LIMIT', `Llegaste al máximo de ${MAX_TESTS_PER_DAY} mensajes de prueba en 24 horas: inténtalo más tarde`);
     const userId = TenantContext.current().userId ?? null;
-    const r = await this.turns.run({ agentId, message: input.message, history: input.history ?? [], contactId: input.contact_id ?? null, kind: 'test' });
+    // Las herramientas se ofrecen igual que en vivo, pero en la prueba solo se VALIDAN: no se escribe nada (dryRun)
+    const config = await this.tools.configFor(agentId);
+    const tools = hasTools(config) ? { config, execute: (call: Parameters<AgentToolsService['execute']>[2]) => this.tools.execute(config, { agentId, agentName: settings.name, conversationId: null, contactId: input.contact_id ?? null, dryRun: true, now: new Date() }, call) } : undefined;
+    const r = await this.turns.run({ agentId, message: input.message, history: input.history ?? [], contactId: input.contact_id ?? null, kind: 'test', ...(tools ? { tools } : {}) });
     await this.db.withTenant((tx) => tx.insert(agentTestRuns).values({ agentId, userId, grounded: r.grounded, hits: r.hits, tokensIn: r.model.tokensIn, tokensOut: r.model.tokensOut, credits: r.creditsUsed, createdAt: new Date() }));
     return {
       replies: r.replies,
-      trace: { search: { query: r.search.query, grounded: r.grounded, results: r.search.results }, missing_variables: r.missingVariables, model: { name: r.model.name, tokens_in: r.model.tokensIn, tokens_out: r.model.tokensOut }, split: r.replies.length > 1, trimmed: r.trimmed },
+      trace: { search: { query: r.search.query, grounded: r.grounded, results: r.search.results }, missing_variables: r.missingVariables, model: { name: r.model.name, tokens_in: r.model.tokensIn, tokens_out: r.model.tokensOut }, split: r.replies.length > 1, trimmed: r.trimmed, tool_calls: r.toolCalls.map((c) => ({ tool: c.tool, outcome: c.outcome, detail: c.detail })) },
       credits_used: r.creditsUsed,
       remaining_today: Math.max(MAX_TESTS_PER_DAY - used - 1, 0),
       contact: r.contact,

@@ -1,4 +1,4 @@
-import { AiProviderError, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+import { AiProviderError, type ToolCall, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
 
 /** Lo que el fake «hizo», en orden (las pruebas lo leen). Sin la clave: nunca se guarda. */
 export type FakeAiCall = { kind: 'embed'; model: string; inputs: string[]; dimensions: number } | { kind: 'chat'; request: ChatRequest };
@@ -43,6 +43,8 @@ export class FakeAiProvider implements AIProvider {
   private failures: AiProviderError[] = [];
   /** Lo que responde `chat` (las pruebas lo cambian). */
   chatReply: (request: ChatRequest) => string = () => 'Respuesta de prueba';
+  /** Si está puesto, decide la respuesta COMPLETA de `chat` (texto y herramientas que pide); sustituye a `chatReply`. */
+  chatResult: ((request: ChatRequest) => { text?: string; toolCalls?: ToolCall[] }) | null = null;
   /** Si es verdadero, `embed` cuenta un token por cada 4 caracteres; si no, exactamente `tokensPerInput` por texto. */
   tokensPerInput: number | null = null;
 
@@ -71,7 +73,10 @@ export class FakeAiProvider implements AIProvider {
     if (fail) return Promise.reject(fail);
     this.keysSeen.push(credentials.apiKey);
     this.calls.push({ kind: 'chat', request });
-    const text = this.chatReply(request);
-    return Promise.resolve({ text, tokensIn: Math.ceil(request.messages.reduce((n, m) => n + m.content.length, 0) / 4), tokensOut: Math.ceil(text.length / 4) });
+    const scripted = this.chatResult?.(request);
+    const text = scripted ? (scripted.text ?? '') : this.chatReply(request);
+    const toolCalls = scripted?.toolCalls ?? [];
+    const tokensIn = Math.ceil(request.messages.reduce((n, m) => n + m.content.length, 0) / 4);
+    return Promise.resolve({ text, tokensIn, tokensOut: Math.ceil((text.length + toolCalls.reduce((n, c) => n + c.arguments.length, 0)) / 4), toolCalls });
   }
 }

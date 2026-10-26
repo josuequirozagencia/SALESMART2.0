@@ -18,7 +18,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
-import { AI_PROVIDER, AiModule, composePrompt, FakeAiProvider, KnowledgeProcessorService, MAX_AGENTS, MAX_CHUNKS_PER_AGENT, MAX_PHOTO_BYTES } from '../../src/modules/ai';
+import { AI_PROVIDER, AiModule, composePrompt, FakeAiProvider, KnowledgeProcessorService, MAX_AGENTS, MAX_CAPTURE_FIELDS, MAX_CHUNKS_PER_AGENT, MAX_PHOTO_BYTES } from '../../src/modules/ai';
 import { StorageGateway } from '../../src/modules/attachments';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
@@ -468,7 +468,7 @@ describe('opciones del formulario', () => {
     const o = await json<{ models: string[]; covers: string[]; limits: Row; variables: Array<{ key: string; kind: string }>; channels: Array<{ id: string; name: string; agent: { name: string } | null }>; queues: Row[]; documents: Array<{ id: string; chunk_count: number }> }>(r);
     expect(o.models).toEqual(['gpt-4o-mini']);
     expect(o.covers).toEqual(['violet', 'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'slate']);
-    expect(o.limits).toEqual({ max_agents: MAX_AGENTS, max_photo_bytes: MAX_PHOTO_BYTES, max_chunks: MAX_CHUNKS_PER_AGENT });
+    expect(o.limits).toEqual({ max_agents: MAX_AGENTS, max_photo_bytes: MAX_PHOTO_BYTES, max_chunks: MAX_CHUNKS_PER_AGENT, max_capture_fields: MAX_CAPTURE_FIELDS });
     expect(o.variables.map((v) => v.key)).toEqual(['primer_nombre', 'nombre', 'empresa', 'mi_nombre', 'contact.ciudad']);
     expect(o.variables.map((v) => v.key)).not.toContain('telefono');
     expect(o.channels).toEqual([expect.objectContaining({ id: ch, name: 'WhatsApp Norte', agent: expect.objectContaining({ name: 'Sofía' }) })]);

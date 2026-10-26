@@ -223,15 +223,19 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
   const [transfer, setTransfer] = useState(a.transfer_enabled);
   const [queue, setQueue] = useState(a.transfer_queue_id ?? '');
   const [always, setAlways] = useState(a.always_on);
+  const [capture, setCapture] = useState<string[]>(a.capture_fields ?? []);
+  const [tasks, setTasks] = useState(a.tasks_enabled ?? false);
   const [channels, setChannels] = useState<string[]>(a.channel_ids);
   const [error, setError] = useState<string>();
   const [ok, setOk] = useState(false);
+  const toggleField = (key: string): void => setCapture((cur) => (cur.includes(key) ? cur.filter((x) => x !== key) : [...cur, key]));
+  const maxFields = o.limits.max_capture_fields ?? 10;
   const toggle = (id: string): void => setChannels((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
   const save = async (): Promise<void> => {
     setOk(false);
     setError(undefined);
     try {
-      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always } });
+      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks } });
       await m.setChannels.mutateAsync({ id: a.id, ids: channels });
       setOk(true);
     } catch (e) {
@@ -253,6 +257,23 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
             {(f) => <select {...f} className={selectCls} value={queue} onChange={(e) => setQueue(e.target.value)}><option value="">La cola de la conexión</option>{o.queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}</select>}
           </Field>
         ) : null}
+      </section>
+      <section aria-label="Datos y tareas" className="grid gap-2">
+        <h3 className="text-[13.5px] font-bold">Qué puede hacer con los datos del cliente</h3>
+        <p className="text-[12.5px] text-muted">Solo guarda lo que el cliente dijo con claridad, nunca pisa lo que escribió una persona y todo queda en el historial con la marca «IA».</p>
+        {(o.capture_options ?? []).length === 0 ? <p className="text-[12.5px] text-muted">Crea campos personalizados en Configuración › Campos personalizados para que el agente pueda llenarlos.</p> : (
+          <ul aria-label="Campos que puede llenar" className="grid gap-1.5 sm:grid-cols-2">
+            {(o.capture_options ?? []).map((f) => (
+              <li key={f.key}>
+                <label className="flex items-center gap-2 rounded-xl border border-line px-3 py-2 text-[13.5px]">
+                  <input type="checkbox" checked={capture.includes(f.key)} disabled={!capture.includes(f.key) && capture.length >= maxFields} onChange={() => toggleField(f.key)} aria-label={`Puede llenar «${f.name}»`} />
+                  <span className="min-w-0 flex-1 truncate font-semibold">{f.name}</span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
+        <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={tasks} onChange={(e) => setTasks(e.target.checked)} />Puede crear tareas de seguimiento para el responsable de la conversación</label>
       </section>
       <section aria-label="Conexiones" className="grid gap-2">
         <h3 className="text-[13.5px] font-bold">Conexiones donde responde</h3>
@@ -282,6 +303,8 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
 interface Bubble { from: 'user' | 'agent'; texts: string[]; turn?: TestTurn }
 const SHORTCUTS = ['¿Cuál es el horario de atención?', '¿Cuánto cuesta?', '¿Tienen cupos disponibles?', 'Quiero hablar con un asesor'];
 
+const TOOL_LABELS: Record<string, string> = { update_contact_fields: 'Guardar datos en la ficha', create_task: 'Crear tarea', transfer_to_person: 'Pasar a una persona' };
+
 /** «Qué hizo el agente» en un turno: los documentos que consultó, si no encontró respaldo, las variables sin datos y el consumo. */
 function Trace({ t }: { t: TestTurn }) {
   return (
@@ -290,6 +313,7 @@ function Trace({ t }: { t: TestTurn }) {
       {t.trace.missing_variables.length > 0 ? <li>Sin datos del contacto para: {t.trace.missing_variables.map((v) => `{{${v}}}`).join(', ')}</li> : null}
       {t.trace.split ? <li>Respuesta dividida en {t.replies.length} mensajes.</li> : null}
       {t.trace.trimmed ? <li>Respuesta recortada al largo máximo del agente.</li> : null}
+      {(t.trace.tool_calls ?? []).map((c, i) => <li key={i}><b>{TOOL_LABELS[c.tool] ?? c.tool}</b> (solo se simula): {c.detail}</li>)}
       <li>Modelo {t.trace.model.name} · {t.trace.model.tokens_in + t.trace.model.tokens_out} tokens · {t.credits_used} {t.credits_used === 1 ? 'crédito' : 'créditos'}</li>
     </ul>
   );

@@ -31,6 +31,9 @@ export interface Agent extends AgentCard {
   transfer_enabled: boolean;
   transfer_queue_id: string | null;
   always_on: boolean;
+  /** Variables de campos del contacto que el agente puede rellenar (M8.5b). */
+  capture_fields: string[];
+  tasks_enabled: boolean;
   document_ids: string[];
   channel_ids: string[];
   readiness: { instructions: boolean; documents: boolean; channel: boolean };
@@ -40,10 +43,12 @@ export interface Agent extends AgentCard {
 export interface AgentOptions {
   models: string[];
   covers: Cover[];
-  limits: { max_agents: number; max_photo_bytes: number; max_chunks: number };
+  limits: { max_agents: number; max_photo_bytes: number; max_chunks: number; max_capture_fields: number };
   variables: Array<{ key: string; label: string; example: string; kind: 'builtin' | 'custom' }>;
   channels: Array<{ id: string; name: string; provider: string; status: string; agent: { id: string; name: string } | null }>;
   queues: Array<{ id: string; name: string }>;
+  /** Campos personalizados del contacto que se pueden permitir al agente. */
+  capture_options: Array<{ key: string; name: string; type: string }>;
   documents: Array<{ id: string; name: string; status: string; chunk_count: number; active: boolean }>;
 }
 
@@ -58,6 +63,8 @@ export interface TestTurn {
     model: { name: string; tokens_in: number; tokens_out: number };
     split: boolean;
     trimmed: boolean;
+    /** Lo que el agente HABRÍA hecho con sus herramientas (en la prueba no se escribe nada). */
+    tool_calls?: Array<{ tool: string; outcome: string; detail: string }>;
   };
   credits_used: number;
   remaining_today: number;
@@ -82,6 +89,8 @@ export type AgentPatch = Partial<{
   transfer_enabled: boolean;
   transfer_queue_id: string | null;
   always_on: boolean;
+  capture_fields: string[];
+  tasks_enabled: boolean;
 }>;
 
 export function useAgents() {

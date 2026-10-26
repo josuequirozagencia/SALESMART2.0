@@ -2,7 +2,7 @@
  * Cuándo el agente pasa la conversación a una persona (M8.5, ADR-53). Reglas DETERMINISTAS, no del modelo: no dependen de que la IA «decida» bien. Hoy: el cliente pide hablar con una persona,
  * se llegó al máximo de turnos del agente en la conversación o hubo un problema (sin créditos, IA caída, mensaje que no es de texto).
  */
-export type HandoffReason = 'requested' | 'turn_limit' | 'unsupported_media' | 'ai_error' | 'no_support';
+export type HandoffReason = 'requested' | 'turn_limit' | 'unsupported_media' | 'ai_error' | 'no_support' | 'agent_decision';
 
 /** Máximo de respuestas seguidas del agente en una conversación sin que una persona intervenga: pasado esto, la pasa a una persona (evita bucles y gasto sin fin). */
 export const MAX_AGENT_TURNS = 20;
@@ -38,6 +38,7 @@ export function handoffNote(agent: string, reason: HandoffReason | 'human_messag
     case 'unsupported_media': return `El agente ${agent} pasó la conversación a una persona: el cliente envió algo que no es texto (imagen, audio o archivo) y el agente solo lee texto.`;
     case 'ai_error': return `El agente ${agent} pasó la conversación a una persona: el servicio de IA no estuvo disponible.`;
     case 'no_support': return `El agente ${agent} pasó la conversación a una persona: no encontró en sus documentos lo que el cliente preguntó.`;
+    case 'agent_decision': return `El agente ${agent} pasó la conversación a una persona: lo decidió con su herramienta de transferencia.`;
     case 'no_credits': return `El agente ${agent} dejó de atender esta conversación: la empresa se quedó sin créditos de IA.`;
     case 'human_message': return `El agente ${agent} dejó de atender: una persona escribió en la conversación.`;
     case 'human_took': return `El agente ${agent} dejó de atender: una persona tomó la conversación.`;

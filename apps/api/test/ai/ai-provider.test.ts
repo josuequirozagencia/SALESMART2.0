@@ -186,6 +186,56 @@ describe('OpenAiProvider · chat', () => {
   });
 });
 
+describe('OpenAiProvider · chat con herramientas (M8.5b)', () => {
+  const tools = [{ name: 'create_task', description: 'Crea una tarea', parameters: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] } }];
+  const ask = (messages: Parameters<OpenAiProvider['chat']>[1]['messages']) => provider().chat(creds, { model: 'gpt-4o-mini', messages, temperature: 0.3, maxTokens: 200, tools });
+
+  it('envía las herramientas como funciones y los turnos con tool_calls y resultados en el formato de OpenAI', async () => {
+    reply = happy;
+    await ask([
+      { role: 'system', content: 'Eres amable' },
+      { role: 'user', content: 'Llámenme' },
+      { role: 'assistant', content: '', toolCalls: [{ id: 'call_1', name: 'create_task', arguments: '{"title":"Llamar"}' }] },
+      { role: 'tool', toolCallId: 'call_1', content: 'done: tarea creada' },
+    ]);
+    const body = seen[0]!.body!;
+    expect(body['tools']).toEqual([{ type: 'function', function: { name: 'create_task', description: 'Crea una tarea', parameters: tools[0]!.parameters } }]);
+    expect(body['tool_choice']).toBe('auto');
+    expect(body['messages']).toEqual([
+      { role: 'system', content: 'Eres amable' },
+      { role: 'user', content: 'Llámenme' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'create_task', arguments: '{"title":"Llamar"}' } }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'done: tarea creada' },
+    ]);
+  });
+
+  it('sin herramientas no manda ni «tools» ni «tool_choice»', async () => {
+    reply = happy;
+    await provider().chat(creds, { model: 'gpt-4o-mini', messages: [{ role: 'user', content: 'Hola' }], temperature: 0, maxTokens: 10 });
+    expect(seen[0]!.body).not.toHaveProperty('tools');
+    expect(seen[0]!.body).not.toHaveProperty('tool_choice');
+  });
+
+  it('lee las herramientas que el modelo pidió (con el texto nulo) y rechaza las mal formadas', async () => {
+    const usage = { prompt_tokens: 20, completion_tokens: 9 };
+    reply = (_q, res) => json(res, 200, { choices: [{ message: { content: null, tool_calls: [{ id: 'call_9', type: 'function', function: { name: 'create_task', arguments: '{"title":"X"}' } }] } }], usage });
+    expect(await ask([{ role: 'user', content: 'x' }])).toEqual({ text: '', tokensIn: 20, tokensOut: 9, toolCalls: [{ id: 'call_9', name: 'create_task', arguments: '{"title":"X"}' }] });
+    reply = (_q, res) => json(res, 200, { choices: [{ message: { content: null, tool_calls: [{ id: 'call_9', type: 'function', function: { name: 'create_task' } }] } }], usage });
+    expect(await fail(ask([{ role: 'user', content: 'x' }]))).toMatchObject({ retryable: true });
+    // texto nulo SIN herramientas sigue siendo una respuesta que no se entiende
+    reply = (_q, res) => json(res, 200, { choices: [{ message: { content: null } }], usage });
+    expect(await fail(ask([{ role: 'user', content: 'x' }]))).toMatchObject({ retryable: true });
+  });
+
+  it('el fake pide herramientas como se le programe y las expone igual que el adaptador real', async () => {
+    const fake = new FakeAiProvider();
+    fake.chatResult = () => ({ toolCalls: [{ id: 'c1', name: 'create_task', arguments: '{"title":"Y"}' }] });
+    const out = await fake.chat({ apiKey: '' }, { model: 'm', messages: [{ role: 'user', content: 'hola' }], temperature: 0, maxTokens: 10, tools });
+    expect(out.toolCalls).toEqual([{ id: 'c1', name: 'create_task', arguments: '{"title":"Y"}' }]);
+    expect(out.text).toBe('');
+  });
+});
+
 describe('OpenAiProvider · errores', () => {
   const embed = () => provider().embed(creds, { model: 'text-embedding-3-small', inputs: ['x'], dimensions: 16 });
   const run = async (status: number, body: unknown) => {

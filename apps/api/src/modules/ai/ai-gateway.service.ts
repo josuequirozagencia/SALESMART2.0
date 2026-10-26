@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AI_PROVIDER, AiProviderError, type AIProvider, type ChatMessage } from './ai.ports';
+import { AI_PROVIDER, AiProviderError, type AIProvider, type ChatMessage, type ToolCall, type ToolDefinition } from './ai.ports';
 import { MAX_EMBED_INPUTS } from './openai.provider';
 import { AiModelPricesService, PlatformCredentialsReader } from '../platform';
 
@@ -35,6 +35,8 @@ export interface ChatOutcome {
   readonly text: string;
   readonly tokensIn: number;
   readonly tokensOut: number;
+  /** Herramientas que el modelo pidió (vacío si ninguna). */
+  readonly toolCalls: readonly ToolCall[];
   /** Costo real en USD según el precio del modelo (SOLO servidor). */
   readonly costUsd: number;
 }
@@ -93,13 +95,13 @@ export class AiGateway {
   }
 
   /** Genera una respuesta de chat y calcula su costo real. Se llama FUERA de toda transacción de negocio. */
-  async chat(input: { model: string; messages: readonly ChatMessage[]; temperature: number; maxTokens: number }): Promise<ChatOutcome> {
+  async chat(input: { model: string; messages: readonly ChatMessage[]; temperature: number; maxTokens: number; tools?: readonly ToolDefinition[] }): Promise<ChatOutcome> {
     const price = await this.chatPrice(input.model);
     if (!price) throw new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado');
     const apiKey = await this.key();
     try {
-      const out = await this.provider.chat({ apiKey }, { model: input.model, messages: input.messages, temperature: input.temperature, maxTokens: input.maxTokens });
-      return { ...out, costUsd: (out.tokensIn * price.usdPer1mInput + out.tokensOut * price.usdPer1mOutput) / 1_000_000 };
+      const out = await this.provider.chat({ apiKey }, { model: input.model, messages: input.messages, temperature: input.temperature, maxTokens: input.maxTokens, ...(input.tools ? { tools: input.tools } : {}) });
+      return { ...out, toolCalls: out.toolCalls ?? [], costUsd: (out.tokensIn * price.usdPer1mInput + out.tokensOut * price.usdPer1mOutput) / 1_000_000 };
     } catch (e) {
       throw this.translate(e);
     }

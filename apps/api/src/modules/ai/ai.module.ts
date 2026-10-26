@@ -5,6 +5,7 @@ import { AttachmentsModule } from '../attachments';
 import { ContactsModule } from '../contacts';
 import { CustomFieldsModule } from '../custom-fields';
 import { RealtimeModule } from '../realtime';
+import { QueuesModule } from '../queues';
 import { SlaModule } from '../sla';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
@@ -13,6 +14,7 @@ import { AiCreditsService } from './ai-credits.service';
 import { AiGateway } from './ai-gateway.service';
 import { AgentTestService } from './agents/agent-test.service';
 import { AgentTurnService } from './agents/agent-turn.service';
+import { AgentToolsService } from './tools/agent-tools.service';
 import { AgentsController } from './agents/agents.controller';
 import { AgentsService } from './agents/agents.service';
 import { AiAdminController, AiCreditsController } from './ai.controller';
@@ -35,7 +37,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
 
 /** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2), agentes (M8.3), simulador de prueba (M8.4) y agente en vivo en el Inbox (M8.5). */
 @Module({
-  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule, RealtimeModule, SlaModule],
+  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule, RealtimeModule, SlaModule, QueuesModule],
   controllers: [AiCreditsController, AiAdminController, KnowledgeController, AgentsController, ConversationAiController],
   providers: [
     AiCreditsService,
@@ -45,6 +47,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     AgentsService,
     AgentTestService,
     AgentTurnService,
+    AgentToolsService,
     AgentRuntimeService,
     AgentRuntimeJob,
     KnowledgeProcessorService,

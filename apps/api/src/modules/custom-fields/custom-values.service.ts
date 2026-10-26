@@ -12,6 +12,21 @@ export interface CustomChange {
   newValue: CustomValue | null;
 }
 
+/** Un campo del contacto tal como se le describe a la IA (M8.5b). */
+export interface AiFieldDef {
+  key: string;
+  name: string;
+  type: FieldType;
+  options: string[] | null;
+}
+
+/** Lo que pasó al escribir los campos que pidió la IA: lo escrito, lo que ya estaba igual y lo que se rechazó (con el motivo, que se le devuelve al modelo). */
+export interface AiFieldOutcome {
+  changes: CustomChange[];
+  unchanged: string[];
+  rejected: Array<{ key: string; reason: string }>;
+}
+
 const path = (key: string): string => `custom_fields.${key}`;
 
 /**
@@ -65,6 +80,55 @@ export class CustomValuesService {
       const v = fromColumns(def.type as FieldType, row);
       if (v === null) continue;
       out.set(row.entityId, { ...(out.get(row.entityId) ?? {}), [def.varKey]: v });
+    }
+    return out;
+  }
+
+  /** Los campos ACTIVOS de los contactos con esas variables, en el orden pedido (los archivados o inexistentes no aparecen). */
+  async contactFields(tx: TenantTx, keys: readonly string[]): Promise<AiFieldDef[]> {
+    const byKey = new Map((await this.repo.list(tx, 'contact', false)).map((d) => [d.varKey, d]));
+    return keys.flatMap((k) => {
+      const d = byKey.get(k);
+      return d ? [{ key: d.varKey, name: d.name, type: d.type as FieldType, options: d.options ? [...d.options] : null }] : [];
+    });
+  }
+
+  /**
+   * Escribe en un contacto los campos que pidió la IA (M8.5b, ADR-53; F17). A diferencia de `apply` NO falla por completo: cada campo se decide por separado y el motivo de lo rechazado vuelve al modelo.
+   * Reglas: el campo debe existir y estar activo; el valor debe ser válido para su tipo; **no se puede vaciar**; y **no pisa lo que escribió una persona** (si el último en escribirlo fue un usuario y el valor es
+   * distinto, se rechaza). Lo que la IA escribió antes sí puede corregirlo. Escribe sin usuario (`updated_by` nulo = automatización).
+   */
+  async applyForAi(tx: TenantTx, contactId: string, input: Readonly<Record<string, unknown>>): Promise<AiFieldOutcome> {
+    const defs = new Map((await this.repo.list(tx, 'contact', false)).map((d) => [d.varKey, d]));
+    const out: AiFieldOutcome = { changes: [], unchanged: [], rejected: [] };
+    const prepared: Array<{ def: DefinitionRow; norm: Normalized }> = [];
+    for (const [key, raw] of Object.entries(input)) {
+      const def = defs.get(key);
+      if (!def) {
+        out.rejected.push({ key, reason: 'ese campo no existe o está archivado' });
+        continue;
+      }
+      const r = coerceValue(def.type as FieldType, def.options, raw);
+      if (!r.ok) out.rejected.push({ key, reason: r.message });
+      else if (r.value === null) out.rejected.push({ key, reason: 'no se puede dejar vacío' });
+      else prepared.push({ def, norm: r.value });
+    }
+    if (prepared.length === 0) return out;
+    const existing = new Map((await this.repo.valuesOf(tx, 'contact', [contactId], prepared.map((p) => p.def.id))).map((r) => [r.definitionId, r]));
+    for (const { def, norm } of prepared) {
+      const row = existing.get(def.id);
+      const oldValue = row ? fromColumns(def.type as FieldType, row) : null;
+      const newValue = display(norm);
+      if (JSON.stringify(oldValue) === JSON.stringify(newValue)) {
+        out.unchanged.push(def.varKey);
+        continue;
+      }
+      if (row && row.updatedBy !== null) {
+        out.rejected.push({ key: def.varKey, reason: 'ya tiene un valor que escribió una persona y no se cambia' });
+        continue;
+      }
+      await this.repo.upsertValue(tx, { entity: 'contact', entityId: contactId, definitionId: def.id }, toColumns(norm), null);
+      out.changes.push({ key: def.varKey, oldValue, newValue });
     }
     return out;
   }

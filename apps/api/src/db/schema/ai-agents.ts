@@ -43,6 +43,10 @@ export const agents = tenantTable(
     transferQueueId: uuid('transfer_queue_id'),
     /** Responde a toda hora (sin respetar el horario de la cola). */
     alwaysOn: boolean('always_on').notNull().default(true),
+    /** Variables de los campos personalizados del CONTACTO que el agente puede rellenar con la herramienta de captura (M8.5b); vacío = ninguna. */
+    captureFields: text('capture_fields').array().notNull().default(sql`'{}'::text[]`),
+    /** El agente puede crear tareas de seguimiento para el responsable de la conversación (M8.5b). */
+    tasksEnabled: boolean('tasks_enabled').notNull().default(false),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -57,6 +61,7 @@ export const agents = tenantTable(
     check('agents_temperature_valid', sql`${t['temperature']!} >= 0 AND ${t['temperature']!} <= 1.5`),
     check('agents_max_tokens_valid', sql`${t['maxTokens']!} BETWEEN 100 AND 2000`),
     check('agents_max_chars_valid', sql`${t['maxChars']!} BETWEEN 100 AND 4000`),
+    check('agents_capture_fields_valid', sql`cardinality(${t['captureFields']!}) <= 10`),
     check('agents_blocks_valid', sql`${t['splitBlocks']!} BETWEEN 1 AND 5`),
     check('agents_texts_len', sql`length(${t['personality']!}) <= 4000 AND length(${t['objective']!}) <= 4000 AND length(${t['extraInfo']!}) <= 8000`),
     uniqueIndex('agents_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),

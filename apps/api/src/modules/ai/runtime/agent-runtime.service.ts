@@ -6,11 +6,14 @@ import type { AppLogger } from '../../../logger';
 import { APP_LOGGER } from '../../../tokens';
 import { writeAudit } from '../../audit';
 import { loadConversation, scopeOf, type InboxAccess } from '../../inbox';
-import { OrgDirectoryService } from '../../organizations';
+import { OrgDirectoryService, type OrgDirectory } from '../../organizations';
+import { AssignmentService, type AssignmentContext } from '../../queues';
 import { RealtimeService } from '../../realtime';
 import { isOpenAt, SlaService } from '../../sla';
 import { AgentTurnService } from '../agents/agent-turn.service';
 import { AgentsService } from '../agents/agents.service';
+import { AgentToolsService } from '../tools/agent-tools.service';
+import { hasTools } from '../tools/tool-defs';
 import { asksForPerson, HANDOFF_MESSAGE, handoffNote, MAX_AGENT_TURNS, MAX_UNSUPPORTED_STREAK, type HandoffReason } from './handoff';
 
 export const AGENT_RUNTIME_BATCH = 5;
@@ -45,6 +48,12 @@ export interface AgentStatusView {
   can_control: boolean;
 }
 
+/** A dónde va una conversación cuando el agente la pasa a una persona: la cola de transferencia del agente (si tiene) y el contexto de reparto (la zona horaria y quién puede recibir trabajo se leen ANTES de la transacción). */
+interface Route {
+  queueId: string | null;
+  ctx: AssignmentContext;
+}
+
 export type AgentOutcome = 'replied' | 'handed_off' | 'paused' | 'skipped' | 'retry';
 
 /**
@@ -63,6 +72,8 @@ export class AgentRuntimeService {
     @Inject(Database) private readonly db: Database,
     @Inject(AgentTurnService) private readonly turns: AgentTurnService,
     @Inject(AgentsService) private readonly agents: AgentsService,
+    @Inject(AgentToolsService) private readonly tools: AgentToolsService,
+    @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
@@ -72,13 +83,13 @@ export class AgentRuntimeService {
   /** Procesa lo pendiente de la empresa del contexto. Devuelve cuántas conversaciones tocó. */
   async runDue(now: Date, batch = AGENT_RUNTIME_BATCH): Promise<number> {
     await this.pauseForHumans(now);
-    const timeZone = (await this.directory.current()).timeZone; // identidad: ANTES de la transacción de negocio
+    const dir = await this.directory.current(); // identidad: ANTES de la transacción de negocio
     let touched = 0;
     for (let i = 0; i < batch; i++) {
       const job = await this.claim(now);
       if (!job) break;
       touched += 1;
-      await this.handle(job, now, timeZone);
+      await this.handle(job, now, dir);
     }
     return touched;
   }
@@ -136,9 +147,10 @@ export class AgentRuntimeService {
     });
   }
 
-  private async handle(job: Claimed, now: Date, timeZone: string): Promise<AgentOutcome> {
+  private async handle(job: Claimed, now: Date, dir: OrgDirectory): Promise<AgentOutcome> {
     try {
       const settings = await this.agents.runtimeSettings(job.agentId);
+      const route: Route = { queueId: settings.transferQueueId, ctx: { now, timeZone: dir.timeZone, assignable: dir.assignable } };
       // 1) Lo que hay que contestar: los mensajes del cliente posteriores a lo ya atendido, y la conversación reciente como historial
       const recent = await this.db.withTenant((tx) =>
         tx
@@ -153,28 +165,33 @@ export class AgentRuntimeService {
       const pending = ordered.filter((m) => m.direction === 'in' && (since === null || m.at > since));
       const newest = pending.reduce<Date | null>((d, m) => (d === null || m.at > d ? m.at : d), null) ?? now;
       const text = pending.filter((m) => m.kind === 'text' && m.body).map((m) => m.body!).join('\n');
-      if (text.trim() === '') return await this.handoff(job, settings.name, 'unsupported_media', newest, false, now);
-      if (job.turns >= MAX_AGENT_TURNS) return await this.handoff(job, settings.name, 'turn_limit', newest, false, now);
-      if (settings.transferEnabled && asksForPerson(text)) return await this.handoff(job, settings.name, 'requested', newest, true, now);
+      if (text.trim() === '') return await this.handoff(job, settings.name, 'unsupported_media', newest, false, now, route);
+      if (job.turns >= MAX_AGENT_TURNS) return await this.handoff(job, settings.name, 'turn_limit', newest, false, now, route);
+      if (settings.transferEnabled && asksForPerson(text)) return await this.handoff(job, settings.name, 'requested', newest, true, now, route);
       // 2) Fuera de horario con «a toda hora» apagado: no contesta (la cola avisa); no se vuelve a intentar con este mensaje
       if (!settings.alwaysOn && job.queueId) {
-        const open = await this.db.withTenant(async (tx) => isOpenAt((await this.sla.calendars(tx, timeZone)).forQueue(job.queueId), now));
-        if (!open) return await this.finish(job, newest, { replied: 0, grounded: true }, now, null);
+        const open = await this.db.withTenant(async (tx) => isOpenAt((await this.sla.calendars(tx, dir.timeZone)).forQueue(job.queueId), now));
+        if (!open) return await this.finish(job, newest, { replied: 0, grounded: true }, now, null, '', route);
       }
       // 3) El turno
       const history = ordered
         .filter((m) => m.kind === 'text' && m.body && !pending.includes(m) && (m.direction === 'in' || m.status !== 'failed'))
         .map((m) => ({ role: m.direction === 'in' ? ('user' as const) : ('assistant' as const), text: m.body!.slice(0, 1500) }));
-      const turn = await this.turns.run({ agentId: job.agentId, message: text.slice(0, 1000), history, contactId: job.contactId, kind: 'use' });
-      if (turn.replies.length === 0) return await this.finish(job, newest, { replied: 0, grounded: turn.grounded }, now, null);
-      return await this.finish(job, newest, { replied: turn.replies.length, grounded: turn.grounded }, now, turn.replies, settings.name);
+      // Herramientas del agente (M8.5b): se ejecutan en el servidor con lo que el agente tiene permitido
+      const config = await this.tools.configFor(job.agentId);
+      const tools = hasTools(config) ? { config, execute: (call: Parameters<AgentToolsService['execute']>[2]) => this.tools.execute(config, { agentId: job.agentId, agentName: settings.name, conversationId: job.conversationId, contactId: job.contactId, dryRun: false, now }, call) } : undefined;
+      const turn = await this.turns.run({ agentId: job.agentId, message: text.slice(0, 1000), history, contactId: job.contactId, kind: 'use', ...(tools ? { tools } : {}) });
+      const notes = turn.toolCalls.flatMap((c) => (c.summary ? [`El agente ${settings.name} ${c.summary}.`] : []));
+      const extra = { notes, transfer: turn.transfer };
+      if (turn.replies.length === 0 && !turn.transfer && notes.length === 0) return await this.finish(job, newest, { replied: 0, grounded: turn.grounded }, now, null, settings.name, route);
+      return await this.finish(job, newest, { replied: turn.replies.length, grounded: turn.grounded }, now, turn.replies, settings.name, route, extra);
     } catch (e) {
       return this.failed(job, e, now);
     }
   }
 
   /** Guarda las respuestas y deja el estado de la conversación al día. Si una persona escribió mientras el agente pensaba, NO envía nada y pausa. */
-  private async finish(job: Claimed, newest: Date, r: { replied: number; grounded: boolean }, now: Date, replies: string[] | null, agentName = ''): Promise<AgentOutcome> {
+  private async finish(job: Claimed, newest: Date, r: { replied: number; grounded: boolean }, now: Date, replies: string[] | null, agentName: string, route: Route, extra: { notes: string[]; transfer: boolean } = { notes: [], transfer: false }): Promise<AgentOutcome> {
     return this.db.withTenant(async (tx) => {
       const [c] = await tx.select({ status: conversations.status }).from(conversations).where(eq(conversations.id, job.conversationId)).for('update').limit(1);
       if (!c || c.status === 'closed') {
@@ -185,14 +202,23 @@ export class AgentRuntimeService {
         await this.setState(tx, job.conversationId, job.agentId, { status: 'paused', reason: 'human_message' }, now, 'automation', agentName || undefined);
         return 'paused' as const;
       }
-      if (replies) await this.sendReplies(tx, job, replies, newest, now);
+      // Si el agente decidió pasar la conversación a una persona y no dijo nada, se le avisa al cliente con el texto fijo
+      const toSend = replies && extra.transfer && replies.length === 0 ? [HANDOFF_MESSAGE] : replies;
+      if (toSend && toSend.length > 0) await this.sendReplies(tx, job, toSend, newest, now);
+      for (const n of extra.notes) await this.systemNote(tx, job, n, now);
       const streak = replies === null ? job.unsupportedStreak : r.grounded ? 0 : job.unsupportedStreak + 1;
       await tx
         .update(aiConversationState)
         .set({ handledUntil: newest, turns: replies ? job.turns + 1 : job.turns, unsupportedStreak: streak, attempts: 0, processingStartedAt: null, nextAttemptAt: now, updatedAt: now })
         .where(eq(aiConversationState.conversationId, job.conversationId));
+      if (replies && extra.transfer) {
+        await this.setState(tx, job.conversationId, job.agentId, { status: 'handed_off', reason: 'agent_decision' }, now, 'ai', agentName);
+        await this.routeToQueue(tx, job, route, now);
+        return 'handed_off' as const;
+      }
       if (replies && streak >= MAX_UNSUPPORTED_STREAK) {
         await this.setState(tx, job.conversationId, job.agentId, { status: 'handed_off', reason: 'no_support' }, now, 'ai', agentName);
+        await this.routeToQueue(tx, job, route, now);
         return 'handed_off' as const;
       }
       return replies ? ('replied' as const) : ('skipped' as const);
@@ -200,13 +226,26 @@ export class AgentRuntimeService {
   }
 
   /** Pasa la conversación a una persona: aviso al cliente (si fue él quien lo pidió), nota interna y estado. */
-  private async handoff(job: Claimed, agentName: string, reason: HandoffReason, newest: Date, tellClient: boolean, now: Date): Promise<AgentOutcome> {
+  private async handoff(job: Claimed, agentName: string, reason: HandoffReason, newest: Date, tellClient: boolean, now: Date, route: Route): Promise<AgentOutcome> {
     return this.db.withTenant(async (tx) => {
       if (tellClient && !(await this.humanWroteSince(tx, job.conversationId, now))) await this.sendReplies(tx, job, [HANDOFF_MESSAGE], newest, now);
       await tx.update(aiConversationState).set({ handledUntil: newest, processingStartedAt: null, updatedAt: now }).where(eq(aiConversationState.conversationId, job.conversationId));
       await this.setState(tx, job.conversationId, job.agentId, { status: 'handed_off', reason }, now, 'ai', agentName);
+      await this.routeToQueue(tx, job, route, now);
       return 'handed_off' as const;
     });
+  }
+
+  /**
+   * Al pasar a una persona, si la conversación sigue SIN asignar y el agente tiene una cola de transferencia, se pone en esa cola y se reparte con su regla (la misma de siempre: cartera primero,
+   * rotación, tope diario, SLA). Si ya tiene responsable, no se toca: una persona ya la tiene.
+   */
+  private async routeToQueue(tx: TenantTx, job: Claimed, route: Route, now: Date): Promise<void> {
+    if (route.queueId === null) return;
+    const [c] = await tx.select({ status: conversations.status, queueId: conversations.queueId }).from(conversations).where(eq(conversations.id, job.conversationId)).for('update').limit(1);
+    if (!c || c.status !== 'unassigned') return;
+    if (c.queueId !== route.queueId) await tx.update(conversations).set({ queueId: route.queueId, updatedAt: now }).where(eq(conversations.id, job.conversationId));
+    await this.assignment.assignConversation(tx, job.conversationId, route.ctx);
   }
 
   /** Lo que pasa cuando algo falla: sin créditos pausa; sin clave de IA espera; un fallo pasajero reintenta con espera creciente y, tras 5 intentos, pasa a una persona. */
@@ -226,8 +265,11 @@ export class AgentRuntimeService {
     const attempts = job.attempts + 1;
     if (code !== 'AI_BUSY' && code !== 'AI_UNAVAILABLE') this.log.error({ err: e, conversation_id: job.conversationId }, 'fallo inesperado del agente de IA'); // sin el contenido de la conversación
     if (attempts >= AGENT_MAX_ATTEMPTS) {
+      const queueId = await this.agents.runtimeSettings(job.agentId).then((s) => s.transferQueueId).catch(() => null);
+      const dir = await this.directory.current(); // identidad: antes de la transacción
       return this.db.withTenant(async (tx) => {
         await this.setState(tx, job.conversationId, job.agentId, { status: 'handed_off', reason: 'ai_error' }, now, 'ai', name);
+        await this.routeToQueue(tx, job, { queueId, ctx: { now, timeZone: dir.timeZone, assignable: dir.assignable } }, now);
         return 'handed_off' as const;
       });
     }
@@ -308,6 +350,12 @@ export class AgentRuntimeService {
   private async humanWroteSince(tx: TenantTx, conversationId: string, since: Date): Promise<boolean> {
     const res = await tx.execute(sql`SELECT 1 FROM messages h JOIN ai_conversation_state s ON s.conversation_id = h.conversation_id AND s.organization_id = h.organization_id WHERE h.conversation_id = ${conversationId} AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > COALESCE(s.resumed_at, '-infinity'::timestamptz) AND h.sent_at >= ${new Date(since.getTime() - AGENT_LEASE_MS)} LIMIT 1`);
     return res.rows.length > 0;
+  }
+
+  /** Una nota interna del sistema en la conversación (lo que hizo el agente: guardar un dato, crear una tarea). */
+  private async systemNote(tx: TenantTx, job: Claimed, body: string, now: Date): Promise<void> {
+    await tx.insert(messages).values({ conversationId: job.conversationId, channelAccountId: job.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: body.slice(0, 2000), status: 'internal', sentAt: now });
+    this.realtime.touchHere(job.conversationId, {});
   }
 
   /** Cambia el estado del agente en la conversación, con su nota interna, su auditoría y el aviso en vivo. */

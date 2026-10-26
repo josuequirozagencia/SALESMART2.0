@@ -22,6 +22,8 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   transfer_enabled: true,
   transfer_queue_id: null,
   always_on: true,
+  capture_fields: [],
+  tasks_enabled: false,
   document_ids: [],
   channel_ids: [],
   readiness: { instructions: true, documents: false, channel: false },
@@ -31,10 +33,11 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
 const OPTIONS: AgentOptions = {
   models: ['gpt-4o-mini', 'gpt-4.1-mini'],
   covers: ['violet', 'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'slate'],
-  limits: { max_agents: 20, max_photo_bytes: 2 * 1024 * 1024, max_chunks: 5000 },
+  limits: { max_agents: 20, max_photo_bytes: 2 * 1024 * 1024, max_chunks: 5000, max_capture_fields: 10 },
   variables: [{ key: 'primer_nombre', label: 'Primer nombre del contacto', example: 'Ana', kind: 'builtin' }, { key: 'contact.ciudad', label: 'Ciudad', example: '', kind: 'custom' }],
   channels: [{ id: 'c1', name: 'WhatsApp Norte', provider: 'meta_cloud', status: 'active', agent: null }, { id: 'c2', name: 'GoHighLevel', provider: 'ghl', status: 'active', agent: { id: 'a9', name: 'Marcos' } }],
   queues: [{ id: 'q1', name: 'Ventas' }],
+  capture_options: [{ key: 'ciudad', name: 'Ciudad', type: 'text' }, { key: 'interes', name: 'Interés', type: 'select' }],
   documents: [{ id: 'd1', name: 'horarios.txt', status: 'ready', chunk_count: 3000, active: true }, { id: 'd2', name: 'precios.csv', status: 'ready', chunk_count: 2500, active: true }, { id: 'd3', name: 'nuevo.pdf', status: 'processing', chunk_count: 0, active: true }],
 };
 
@@ -311,9 +314,46 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(d.getByLabelText(/Responder a toda hora/));
     await userEvent.click(conns.getByRole('checkbox', { name: 'Atender «WhatsApp Norte»' }));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false }));
     await waitFor(() => expect(w.calls['channels']![0]!.body).toEqual({ channel_ids: ['c1'] }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('elegir qué campos puede llenar el agente y si crea tareas se guarda; sin campos personalizados lo explica', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    const data = within(await d.findByRole('region', { name: 'Datos y tareas' }));
+    expect(data.getByText(/nunca pisa lo que escribió una persona/)).toBeInTheDocument();
+    await userEvent.click(data.getByRole('checkbox', { name: 'Puede llenar «Ciudad»' }));
+    await userEvent.click(data.getByRole('checkbox', { name: 'Puede llenar «Interés»' }));
+    await userEvent.click(data.getByRole('checkbox', { name: 'Puede llenar «Interés»' })); // lo quita otra vez
+    await userEvent.click(data.getByLabelText(/Puede crear tareas de seguimiento/));
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ capture_fields: ['ciudad'], tasks_enabled: true }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('sin campos personalizados en la empresa explica dónde crearlos', async () => {
+    const w = world({ options: { ...OPTIONS, capture_options: [] } });
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    expect(await d.findByText(/Crea campos personalizados en Configuración › Campos personalizados/)).toBeInTheDocument();
+  });
+
+  it('un agente con límite de campos alcanzado bloquea los demás', async () => {
+    const many = Array.from({ length: 10 }, (_, i) => ({ key: `c${i}`, name: `Campo ${i}`, type: 'text' }));
+    const w = world({ agents: [agent({ capture_fields: many.slice(0, 10).map((m) => m.key) })], options: { ...OPTIONS, capture_options: [...many, { key: 'extra', name: 'Extra', type: 'text' }] } });
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    expect(await d.findByRole('checkbox', { name: 'Puede llenar «Extra»' })).toBeDisabled();
+    expect(d.getByRole('checkbox', { name: 'Puede llenar «Campo 0»' })).toBeEnabled();
   });
 
   it('apagar «pasar con una persona» quita la cola; un conflicto de conexión se muestra', async () => {
@@ -375,6 +415,22 @@ describe('Agentes IA · Probar (simulador)', () => {
     expect(trace.getByText('Consultó: horarios.txt (62 %)')).toBeInTheDocument();
     expect(trace.getByText(/gpt-4o-mini · 320 tokens · 2 créditos/)).toBeInTheDocument();
     expect(d.getByText(/2 créditos usados en esta prueba · te quedan 99 mensajes de prueba hoy/)).toBeInTheDocument();
+  });
+
+  it('«qué hizo» lista lo que el agente habría hecho con sus herramientas, avisando que solo se simula', async () => {
+    const w = world();
+    w.turn = () => ({ body: turn({ trace: { ...turn().trace, tool_calls: [{ tool: 'update_contact_fields', outcome: 'simulated', detail: 'guardaría ciudad = Guayaquil' }, { tool: 'create_task', outcome: 'simulated', detail: 'crearía la tarea «Llamar»' }] } }) });
+    mockApiFor.current = () => mockApi(server(w));
+    const { d, log } = await chat();
+    await userEvent.type(d.getByLabelText('Mensaje de prueba'), 'Estoy en Guayaquil, llámenme');
+    await userEvent.click(d.getByRole('button', { name: 'Enviar' }));
+    await log.findByRole('button', { name: 'Ver qué hizo el agente' });
+    await userEvent.click(log.getByRole('button', { name: 'Ver qué hizo el agente' }));
+    const trace = within(log.getByRole('list', { name: 'Qué hizo el agente' }));
+    expect(trace.getByText(/Guardar datos en la ficha/)).toBeInTheDocument();
+    expect(trace.getByText(/guardaría ciudad = Guayaquil/)).toBeInTheDocument();
+    expect(trace.getByText(/Crear tarea/)).toBeInTheDocument();
+    expect(trace.getAllByText(/solo se simula/)).toHaveLength(2);
   });
 
   it('sin respaldo lo dice claramente; la conversación se manda como historial en el turno siguiente; las respuestas divididas salen como varios globos', async () => {
