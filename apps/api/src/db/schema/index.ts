@@ -21,3 +21,4 @@ export { analyticsSettings, analyticsExports } from './analytics';
 export { ghlConnections } from './ghl';
 export { ghlEvents, ghlContactLinks, ghlOutbox, ghlEnrollments } from './ghl-events';
 export { slaPolicies, businessHours, holidays, responseTimers } from './sla';
+export { aiWallets, aiLedger, aiHolds, aiPricing, aiOrgPricing } from './ai';

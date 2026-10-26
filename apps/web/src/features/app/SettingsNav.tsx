@@ -13,6 +13,7 @@ export function SettingsNav() {
         <NavLink to="/settings/attribution" className={tab}>Atribución de Meta</NavLink>
         <NavLink to="/settings/meta" className={tab}>API de Conversiones</NavLink>
         <NavLink to="/settings/ghl" className={tab}>GoHighLevel</NavLink>
+        <NavLink to="/settings/credits" className={tab}>Créditos IA</NavLink>
         <NavLink to="/settings/connections" className={tab}>Conexiones</NavLink>
         <NavLink to="/settings/queues" className={tab}>Colas</NavLink>
         <NavLink to="/settings/sla" className={tab}>SLA y horario</NavLink>

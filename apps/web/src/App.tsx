@@ -7,6 +7,8 @@ import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
 import { MetaPage } from './features/meta/MetaPage';
+import { CreditsPage } from './features/ai/CreditsPage';
+import { AiCreditsPage } from './features/platform/AiCreditsPage';
 import { GhlPage } from './features/ghl/GhlPage';
 import { SalesPage } from './features/sales/SalesPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
@@ -120,6 +122,7 @@ export function App() {
         <Route path="/settings/attribution" element={<AttributionPage />} />
         <Route path="/settings/meta" element={<MetaPage />} />
         <Route path="/settings/ghl" element={<GhlPage />} />
+        <Route path="/settings/credits" element={<CreditsPage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/queues" element={<QueuesPage />} />
         <Route path="/settings/sla" element={<SlaPage />} />
@@ -130,6 +133,7 @@ export function App() {
       <Route path="/platform/access" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AccessPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/agency/clients" element={<AgencyGate>{(me, out) => <AgencyShell me={me} onLogout={out}><ClientsPage /></AgencyShell>}</AgencyGate>} />
       <Route path="/platform/providers" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><ProvidersPage /></PlatformShell>}</PlatformGate>} />
+      <Route path="/platform/ai" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AiCreditsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/plans" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><PlansPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/trials" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><TrialsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="*" element={<Navigate to="/" replace />} />

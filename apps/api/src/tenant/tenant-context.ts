@@ -46,6 +46,14 @@ export const TenantContext = {
     if (platformStorage.getStore() !== undefined) throw new InvalidContextError('PlatformContext activo (mutuamente excluyentes)');
     return storage.run(validate(input), fn);
   },
+  /**
+   * Ejecuta `fn` FUERA del contexto de empresa (el de plataforma y el de empresa son excluyentes y no se anidan). Para lecturas del servidor que no son de la empresa —el precio de los créditos, las
+   * credenciales de plataforma—, que abren su propio `PlatformContext` de sistema. Jamás se llama con una transacción de negocio abierta ni para saltarse el aislamiento: dentro de `fn` no hay
+   * empresa, así que nada de negocio se puede tocar.
+   */
+  detach<T>(fn: () => T): T {
+    return storage.exit(fn);
+  },
   /** Contexto actual; lanza si no existe. */
   current(): TenantData {
     const c = storage.getStore();

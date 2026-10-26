@@ -21,6 +21,13 @@ export const PlatformContext = {
     });
     return platformStorage.run(data, fn);
   },
+  /**
+   * Ejecuta `fn` FUERA del contexto de plataforma, para que el Súper Admin opere DENTRO de una empresa concreta con `TenantContext.run` (con `actingAs: 'super_admin'`, así que queda marcado en la
+   * auditoría de la empresa). Dentro de `fn` ya no hay plataforma: no se puede usar `withPlatform`.
+   */
+  detach<T>(fn: () => T): T {
+    return platformStorage.exit(fn);
+  },
   current(): PlatformData {
     const c = platformStorage.getStore();
     if (c === undefined) throw new MissingPlatformContextError();

@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
 import type { AppConfig } from '../../../config';
 import { Database, providerCredentials, providerSelection } from '../../../db';
-import { PlatformContext } from '../../../tenant';
+import { PlatformContext, TenantContext } from '../../../tenant';
 import { APP_CONFIG } from '../../../tokens';
 import { CredentialVault, VaultOpenError } from './credential-vault';
 
@@ -60,7 +60,8 @@ export class PlatformCredentialsReader {
         const [row] = await tx.select().from(providerCredentials).where(and(eq(providerCredentials.service, service), eq(providerCredentials.provider, sel.provider))).limit(1);
         return row?.secretsSealed ? { provider: sel.provider, sealed: row.secretsSealed } : null;
       });
-    const found = PlatformContext.currentOrNull() ? await read() : await PlatformContext.run({ actorUserId: SYSTEM_ACTOR }, read);
+    // Desde una petición de empresa (adjuntos) se sale de su contexto para leer como «el sistema»: los contextos son excluyentes y no se anidan
+    const found = PlatformContext.currentOrNull() ? await read() : await TenantContext.detach(() => PlatformContext.run({ actorUserId: SYSTEM_ACTOR }, read));
     if (!found) return null;
     try {
       return { provider: found.provider, values: vault.open(found.sealed, `${service}/${found.provider}`) };

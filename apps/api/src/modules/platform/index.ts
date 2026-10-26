@@ -4,3 +4,4 @@ export { ProvidersService, type ProvidersList, type ServiceView, type ProviderVi
 export { PROVIDER_CATALOG } from './providers/catalog';
 export { PlatformCredentialsReader, type ActiveCredentials } from './providers/credentials-reader';
 export { CredentialVault, VaultOpenError } from './providers/credential-vault';
+export { AiPricingService, type AiPrice, type AiPricingView } from './ai-pricing.service';

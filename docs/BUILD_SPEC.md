@@ -348,6 +348,7 @@ Citas con recordatorios (topes por fuente), ventas con abono y catálogo por col
 
 **M8 — IA: agentes, conocimiento y créditos**
 Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con RAG (pgvector), créditos con libro y recarga, `ToolRegistry` con permisos y auditoría.
+*Avance:* plan por rebanadas en `docs/M8_PLAN.md` (ADR-53, APROBADO el 2026-10-26). M8.1 (créditos: monedero, libro, cobro atómico y precio/margen solo en el servidor) construida el 2026-10-26.
 *Aceptación:* el agente no responde con datos que no están en sus documentos; descuento atómico sin saldo negativo bajo concurrencia; margen no aparece en ninguna respuesta de API de cliente.
 
 **M9 — WhatsApp QR, formularios y automatizaciones**

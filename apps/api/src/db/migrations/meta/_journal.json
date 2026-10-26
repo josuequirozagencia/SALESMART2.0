@@ -568,6 +568,27 @@
       "when": 1792998927440,
       "tag": "0080_m75_ghl_enrollments_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 81,
+      "version": "7",
+      "when": 1793022772320,
+      "tag": "0081_m81_ai_credits",
+      "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "7",
+      "when": 1793022788131,
+      "tag": "0082_m81_ai_credits_permissions",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "7",
+      "when": 1793022805916,
+      "tag": "0083_m81_ai_credits_grants",
+      "breakpoints": true
     }
   ]
 }

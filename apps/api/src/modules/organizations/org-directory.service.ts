@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
-import { Database, organizations } from '../../db';
+import { Database, organizations, trialConfig } from '../../db';
 import { TenantContext } from '../../tenant';
 import { OrgMembersService } from './org-members.service';
 
@@ -21,6 +21,7 @@ const FALLBACK_ZONE = 'UTC';
 @Injectable()
 export class OrgDirectoryService {
   private readonly cache = new Map<string, { at: number; value: OrgDirectory }>();
+  private readonly welcome = new Map<string, { at: number; value: number }>();
 
   constructor(
     @Inject(Database) private readonly db: Database,
@@ -60,7 +61,32 @@ export class OrgDirectoryService {
     await this.db.withIdentity((tx) => tx.update(organizations).set({ currency, updatedAt: new Date() }).where(eq(organizations.id, org)));
   }
 
+  /**
+   * Créditos IA de bienvenida de la empresa del contexto (M8.1): los de `trial_config.welcome_credits` si es una empresa CLIENTE; 0 para agencias y la plataforma. Se lee ANTES de la transacción
+   * de negocio (el monedero se crea la primera vez que se usa) y se guarda 60 s por empresa.
+   */
+  async welcomeCredits(now = Date.now()): Promise<number> {
+    const org = TenantContext.current().organizationId;
+    const hit = this.welcome.get(org);
+    if (hit && now - hit.at < 60_000) return hit.value;
+    const value = await this.db.withIdentity(async (tx) => {
+      const [o] = await tx.select({ kind: organizations.kind }).from(organizations).where(eq(organizations.id, org)).limit(1);
+      if (o?.kind !== 'client') return 0;
+      const [c] = await tx.select({ credits: trialConfig.welcomeCredits }).from(trialConfig).limit(1);
+      return c?.credits ?? 0;
+    });
+    this.welcome.set(org, { at: now, value });
+    return value;
+  }
+
+  /** ¿Existe esa organización y es una empresa CLIENTE? (la Súper Admin consulta o regala créditos a empresas ajenas al contexto). */
+  async isClient(organizationId: string): Promise<boolean> {
+    const [o] = await this.db.withIdentity((tx) => tx.select({ kind: organizations.kind }).from(organizations).where(eq(organizations.id, organizationId)).limit(1));
+    return o?.kind === 'client';
+  }
+
   invalidate(): void {
+    this.welcome.clear();
     this.cache.clear();
   }
 }

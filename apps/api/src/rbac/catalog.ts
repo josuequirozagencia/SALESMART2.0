@@ -60,6 +60,8 @@ export const PERMISSIONS = {
   'analytics.manage': 'tenant',
   // M7.5 (ADR-52): inscribir un contacto en un flujo (Workflow) de GoHighLevel. El asesor solo sobre los contactos que ve.
   'ghl.enroll': 'tenant',
+  // M8.1 (ADR-53): ver el saldo y los movimientos de créditos IA de la empresa (nunca el costo ni el margen).
+  'ai.credits.view': 'tenant',
   export: 'tenant',
   'team.manage': 'tenant',
   'billing.manage': 'tenant',
@@ -72,6 +74,8 @@ export const PERMISSIONS = {
   'platform.plans.manage': 'platform',
   'platform.companies.manage': 'platform',
   'platform.access_log.read': 'platform',
+  // M8.1 (ADR-53): precio y margen de los créditos IA, regalos de créditos y saldos de todas las empresas.
+  'platform.ai.manage': 'platform',
 } as const satisfies Record<string, PermissionScope>;
 
 export type PermissionKey = keyof typeof PERMISSIONS;
@@ -116,7 +120,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
  * y cualquier acceso de agencia o de soporte a una empresa con la prueba vencida (ADR-41). Todo permiso que no está aquí es de escritura.
  * PROVISIONAL: cada módulo nuevo añade aquí sus permisos de lectura.
  */
-export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all']);
+export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'ai.credits.view']);
 
 export type AccessLevel = 'read' | 'advisor' | 'admin';
 export const isAccessLevel = (v: unknown): v is AccessLevel => v === 'read' || v === 'advisor' || v === 'admin';

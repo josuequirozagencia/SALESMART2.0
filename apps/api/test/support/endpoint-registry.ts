@@ -199,6 +199,14 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Mensajes de GHL en el Inbox (M7.4, ADR-52). Pruebas: test/ghl/ghl-messages.test.ts
   { route: 'GET /v1/ghl/channel', kind: 'tenant', isolationTest: '../../ghl/ghl-messages.test.ts' },
   { route: 'PUT /v1/ghl/channel', kind: 'tenant', isolationTest: '../../ghl/ghl-messages.test.ts' },
+  // Créditos IA (M8.1, ADR-53). Pruebas: test/ai/credits.test.ts (A↔B, concurrencia, costo y margen fuera de la API de cliente)
+  { route: 'GET /v1/ai/credits', kind: 'tenant', isolationTest: '../../ai/credits.test.ts' },
+  { route: 'GET /v1/platform/ai/pricing', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'PUT /v1/platform/ai/pricing', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'GET /v1/platform/ai/organizations', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'PUT /v1/platform/ai/organizations/:id/margin', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'POST /v1/platform/ai/organizations/:id/grants', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'GET /v1/platform/ai/organizations/:id/ledger', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'GET /v1/ghl/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'POST /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'GET /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },

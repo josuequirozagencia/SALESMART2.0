@@ -43,6 +43,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'META_UNAVAILABLE': case 'META_UNREACHABLE': case 'META_DISABLED': case 'EVENT_NOT_RETRYABLE': case 'EVENT_TOO_OLD': case 'APPOINTMENT_CLOSED': case 'APPOINTMENT_ALREADY_CANCELLED': case 'APPOINTMENT_NO_CONVERSATION': case 'PRODUCT_EXISTS': case 'PRODUCT_LIMIT': case 'PRODUCT_UNAVAILABLE': case 'SALE_NO_QUEUE': case 'SALE_CANCELLED': case 'SALE_ALREADY_CANCELLED': case 'PAYMENT_EXCEEDS_BALANCE': case 'CORRECTION_EXCEEDS_PAID': case 'CURRENCY_LOCKED': case 'REQUEST_LIMIT': case 'REQUEST_RESOLVED': case 'IDEMPOTENCY_MISMATCH': case 'IDEMPOTENCY_CONFLICT': case 'QUEUE_EXISTS': case 'QUEUE_LIMIT': case 'QUEUE_IN_USE': case 'QUEUE_DISTRIBUTION_OFF': return e.message;
     // GoHighLevel (ADR-52): el servidor ya redacta el motivo (sin tokens ni datos del cliente)
     case 'GHL_NOT_CONNECTED': case 'GHL_REJECTED': case 'GHL_UNAVAILABLE': case 'GHL_ALREADY_ENROLLED': case 'GHL_TEXT_ONLY': case 'GHL_SCHEDULE_UNSUPPORTED': case 'GHL_OUTBOX_NOT_FAILED': return e.message;
+    // Créditos IA (ADR-53): el servidor ya redacta el motivo
+    case 'AI_NO_CREDITS': case 'AI_HOLD_CLOSED': return e.message;
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo
     case 'HOLIDAY_EXISTS': case 'HOLIDAY_LIMIT': return e.message;
     // Inbox (ADR-16/50): el servidor ya redacta el motivo
