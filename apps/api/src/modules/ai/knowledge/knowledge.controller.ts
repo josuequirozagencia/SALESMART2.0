@@ -11,7 +11,7 @@ const idParam = new ZodValidationPipe(z.uuid());
 
 const listQuerySchema = z.strictObject({ limit: z.coerce.number().int().min(1).max(100).optional(), cursor: z.string().max(200).optional() });
 const updateSchema = z.strictObject({ active: z.boolean().optional(), name: z.string().trim().min(1).max(200).optional() }).refine((b) => b.active !== undefined || b.name !== undefined, 'No hay nada que cambiar');
-const searchSchema = z.strictObject({ query: z.string().trim().min(1).max(2000), limit: z.number().int().min(1).max(10).optional() });
+const searchSchema = z.strictObject({ query: z.string().trim().min(1).max(2000), limit: z.number().int().min(1).max(10).optional(), agent_id: z.uuid().optional() });
 
 /** Lee el cuerpo hasta `limit` bytes DESPUÉS de la autenticación y los permisos (no en un middleware): quien no tiene sesión no puede hacer que el servidor reciba decenas de megas. 413 sin guardar el resto. */
 function readBody(req: Request, limit: number): Promise<Buffer> {
@@ -100,11 +100,11 @@ export class KnowledgeController {
     return this.knowledge.remove(id);
   }
 
-  /** «Probar la búsqueda»: los fragmentos de la biblioteca más parecidos a una pregunta (cuesta créditos, apenas uno). */
+  /** «Probar la búsqueda»: los fragmentos de la biblioteca (o solo de los documentos de un agente, con `agent_id`) más parecidos a una pregunta (cuesta créditos, apenas uno). */
   @Post('search')
   @HttpCode(200)
   @Header('Cache-Control', 'no-store')
   search(@Body(new ZodValidationPipe(searchSchema)) b: z.infer<typeof searchSchema>) {
-    return this.knowledge.search({ query: b.query, limit: b.limit, kind: 'test' });
+    return this.knowledge.search({ query: b.query, limit: b.limit, agentId: b.agent_id, kind: 'test' });
   }
 }

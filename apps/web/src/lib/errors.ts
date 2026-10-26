@@ -45,6 +45,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'GHL_NOT_CONNECTED': case 'GHL_REJECTED': case 'GHL_UNAVAILABLE': case 'GHL_ALREADY_ENROLLED': case 'GHL_TEXT_ONLY': case 'GHL_SCHEDULE_UNSUPPORTED': case 'GHL_OUTBOX_NOT_FAILED': return e.message;
     // Créditos IA (ADR-53): el servidor ya redacta el motivo
     case 'AI_NO_CREDITS': case 'AI_HOLD_CLOSED': case 'AI_NOT_CONFIGURED': case 'AI_BUSY': case 'AI_UNAVAILABLE': return e.message;
+    // Agentes (ADR-53): el servidor ya redacta el motivo
+    case 'AGENT_EXISTS': case 'AGENT_LIMIT': case 'AGENT_INCOMPLETE': case 'AGENT_CHUNK_LIMIT': case 'CHANNEL_HAS_AGENT': case 'AGENT_PHOTO_TOO_LARGE': case 'AGENT_PHOTO_UNSUPPORTED': case 'AGENT_PHOTO_EMPTY': case 'AGENT_PHOTO_UPLOAD_FAILED': return e.message;
     // Conocimiento (ADR-53): el servidor ya redacta el motivo
     case 'DOCUMENT_EXISTS': case 'DOCUMENT_LIMIT': case 'DOCUMENT_BUSY': case 'DOCUMENT_TOO_LARGE': case 'DOCUMENT_UNSUPPORTED': case 'DOCUMENT_EMPTY': case 'DOCUMENT_UPLOAD_FAILED': return e.message;
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo

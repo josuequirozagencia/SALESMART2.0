@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
-import { Database, knowledgeDocuments, type TenantTx } from '../../../db';
+import { agentDocuments, agents, Database, knowledgeDocuments, type TenantTx } from '../../../db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../../errors';
 import { TenantContext } from '../../../tenant';
 import { writeAudit } from '../../audit';
@@ -51,6 +51,8 @@ export interface SearchHitView {
 
 export interface SearchView {
   hits: SearchHitView[];
+  /** Había más fragmentos de los que se recorren en una búsqueda: conviene acotar a un agente o a menos documentos. */
+  truncated: boolean;
 }
 
 const view = (d: typeof knowledgeDocuments.$inferSelect): DocumentView => ({
@@ -171,6 +173,7 @@ export class KnowledgeService {
     const key = await this.db.withTenant(async (tx) => {
       const d = await this.byId(tx, id);
       await this.store.remove(tx, id);
+      await tx.delete(agentDocuments).where(eq(agentDocuments.documentId, id)); // los agentes dejan de usarlo
       await tx.update(knowledgeDocuments).set({ deletedAt: new Date(), active: false, updatedAt: new Date() }).where(eq(knowledgeDocuments.id, id));
       await writeAudit(tx, { entityType: 'knowledge_document', entityId: id, field: 'deleted', oldValue: false, newValue: { deleted: true, name: d.name }, source: 'manual' });
       return d.storageKey;
@@ -183,10 +186,20 @@ export class KnowledgeService {
    * Busca los fragmentos más parecidos a una pregunta. Cuesta créditos (vectorizar la pregunta, apenas uno) y por eso falla con 409 `AI_NO_CREDITS` sin saldo. `documentIds` limita la búsqueda a esos
    * documentos (los del agente, en M8.3); sin él, todos los activos y listos de la empresa. Los documentos de OTRA empresa nunca aparecen: la transacción es de la empresa del contexto.
    */
-  async search(input: { query: string; limit?: number | undefined; documentIds?: readonly string[] | undefined; kind?: 'use' | 'test' }): Promise<SearchView> {
+  async search(input: { query: string; limit?: number | undefined; documentIds?: readonly string[] | undefined; agentId?: string | undefined; kind?: 'use' | 'test' }): Promise<SearchView> {
     const query = input.query.trim();
     if (query.length === 0) throw new ValidationError([{ path: 'query', code: 'required', message: 'Escribe la pregunta' }]);
     const limit = Math.min(Math.max(input.limit ?? 5, 1), SEARCH_LIMIT_MAX);
+    // Con un agente, solo cuentan SUS documentos (y si no existe, 404 antes de gastar nada)
+    let documentIds = input.documentIds;
+    if (input.agentId) {
+      const agentId = input.agentId;
+      documentIds = await this.db.withTenant(async (tx) => {
+        const [a] = await tx.select({ id: agents.id }).from(agents).where(and(eq(agents.id, agentId), isNull(agents.deletedAt))).limit(1);
+        if (!a) throw new NotFoundError();
+        return (await tx.select({ id: agentDocuments.documentId }).from(agentDocuments).where(eq(agentDocuments.agentId, agentId))).map((r) => r.id);
+      });
+    }
     const organizationId = TenantContext.current().organizationId;
     const [price, worstUsd] = await Promise.all([this.pricing.resolve(organizationId), this.ai.embeddingCostUsd(Math.ceil(query.length / 3))]);
     if (worstUsd === null) throw this.unavailable(new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado'));
@@ -200,13 +213,12 @@ export class KnowledgeService {
       throw this.unavailable(e);
     }
     await this.credits.settle(holdId, { costUsd: outcome.costUsd, ref: 'Búsqueda en la biblioteca' });
-    const hits = await this.db.withTenant(async (tx) => {
-      const found = await this.store.search(tx, outcome.vectors[0]!, { documentIds: input.documentIds, limit, minScore: MIN_SCORE });
+    return this.db.withTenant(async (tx) => {
+      const { hits: found, truncated } = await this.store.search(tx, outcome.vectors[0]!, { documentIds, limit, minScore: MIN_SCORE });
       const names = found.length === 0 ? [] : await tx.select({ id: knowledgeDocuments.id, name: knowledgeDocuments.name }).from(knowledgeDocuments).where(inArray(knowledgeDocuments.id, [...new Set(found.map((h) => h.documentId))]));
       const byId = new Map(names.map((n) => [n.id, n.name]));
-      return found.map((h): SearchHitView => ({ document: { id: h.documentId, name: byId.get(h.documentId) ?? '' }, content: h.content, score: Math.round(h.score * 1000) / 1000 }));
+      return { hits: found.map((h): SearchHitView => ({ document: { id: h.documentId, name: byId.get(h.documentId) ?? '' }, content: h.content, score: Math.round(h.score * 1000) / 1000 })), truncated };
     });
-    return { hits };
   }
 
   /** Cómo contarle a la persona que la IA no está disponible. */

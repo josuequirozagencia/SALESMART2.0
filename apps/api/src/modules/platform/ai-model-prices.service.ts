@@ -39,12 +39,21 @@ export class AiModelPricesService {
 
   /** El precio de un modelo; null si no está en la tabla (el llamador decide qué hacer). Se puede llamar desde la ruta del cliente: lee como «el sistema». */
   async price(model: string, now = Date.now()): Promise<ModelPrice | null> {
+    return (await this.load(now)).get(model) ?? null;
+  }
+
+  /** Los NOMBRES de los modelos de chat disponibles (lo que puede elegir un agente). Sin precios: el cliente jamás los ve. */
+  async chatModels(now = Date.now()): Promise<string[]> {
+    return [...(await this.load(now)).values()].filter((m) => m.kind === 'chat').map((m) => m.model).sort();
+  }
+
+  private async load(now: number): Promise<Map<string, ModelPrice>> {
     if (!this.cache || now - this.cache.at >= CACHE_MS) {
       const read = () => this.db.withPlatform((tx) => tx.select().from(aiModelPrices));
       const rows = PlatformContext.currentOrNull() ? await read() : await TenantContext.detach(() => PlatformContext.run({ actorUserId: SYSTEM_ACTOR }, read));
       this.cache = { at: now, value: new Map(rows.map((r) => [r.model, { model: r.model, kind: r.kind as ModelPrice['kind'], usdPer1mInput: Number(r.usdPer1mInput), usdPer1mOutput: Number(r.usdPer1mOutput) }])) };
     }
-    return this.cache.value.get(model) ?? null;
+    return this.cache.value;
   }
 
   async list(): Promise<ModelPriceView[]> {

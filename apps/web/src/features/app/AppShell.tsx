@@ -47,6 +47,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
           <NavLink to="/opportunities" className={tab}>Oportunidades</NavLink>
           <NavLink to="/tasks" className={tab}>Tareas</NavLink>
           <NavLink to="/analytics" className={tab}>Analítica</NavLink>
+          {manageFields ? <NavLink to="/agents" className={tab}>Agentes IA</NavLink> : null}
           {manageFields ? <NavLink to="/settings/fields" className={tab}>Configuración</NavLink> : null}
         </nav>
         <main>{children}</main>

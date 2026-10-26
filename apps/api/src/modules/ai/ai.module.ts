@@ -2,11 +2,15 @@ import { Module } from '@nestjs/common';
 import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { AttachmentsModule } from '../attachments';
+import { ContactsModule } from '../contacts';
+import { CustomFieldsModule } from '../custom-fields';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import { AiAdminService } from './ai-admin.service';
 import { AiCreditsService } from './ai-credits.service';
 import { AiGateway } from './ai-gateway.service';
+import { AgentsController } from './agents/agents.controller';
+import { AgentsService } from './agents/agents.service';
 import { AiAdminController, AiCreditsController } from './ai.controller';
 import { FakeAiProvider } from './ai.fake';
 import { AI_PROVIDER, NoAiProvider, type AIProvider } from './ai.ports';
@@ -22,20 +26,21 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
   return cfg.ai.provider === 'openai' ? new OpenAiProvider() : cfg.ai.provider === 'fake' ? new FakeAiProvider() : new NoAiProvider();
 }
 
-/** IA (M8, ADR-53): créditos (M8.1) y conocimiento (M8.2). Después: agentes, prueba y agente en vivo. */
+/** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2) y agentes (M8.3). Después: prueba y agente en vivo. */
 @Module({
-  imports: [OrganizationsModule, PlatformModule, AttachmentsModule],
-  controllers: [AiCreditsController, AiAdminController, KnowledgeController],
+  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule],
+  controllers: [AiCreditsController, AiAdminController, KnowledgeController, AgentsController],
   providers: [
     AiCreditsService,
     AiAdminService,
     AiGateway,
     KnowledgeService,
+    AgentsService,
     KnowledgeProcessorService,
     KnowledgeJob,
     { provide: AI_PROVIDER, useFactory: buildAiProvider, inject: [APP_CONFIG] },
     { provide: VECTOR_STORE, useFactory: () => new PgArrayVectorStore() },
   ],
-  exports: [AiCreditsService, AiGateway, KnowledgeService, KnowledgeJob],
+  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, KnowledgeJob],
 })
 export class AiModule {}

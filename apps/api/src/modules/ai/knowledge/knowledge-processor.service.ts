@@ -12,7 +12,7 @@ import { AiGateway, AiUnavailableError, EMBEDDING_MODEL } from '../ai-gateway.se
 import { creditsFor } from '../credits';
 import { estimateTokens } from './chunker';
 import { parseDocument, ParseError, type DocumentKind } from './document-parser';
-import { MAX_CHUNKS_PER_ORG, VECTOR_STORE, type VectorStore } from './vector-store';
+import { MAX_CHUNKS_PER_AGENT, MAX_CHUNKS_PER_ORG, VECTOR_STORE, type VectorStore } from './vector-store';
 
 export const KNOWLEDGE_BATCH = 3;
 export const KNOWLEDGE_MAX_ATTEMPTS = 5;
@@ -80,9 +80,10 @@ export class KnowledgeProcessorService {
       // 1) El archivo y su texto (fuera de toda transacción)
       const bytes = await this.storage.get(doc.storageKey);
       const parsed = await parseDocument(doc.kind as DocumentKind, bytes);
-      // 2) El tope de fragmentos de la empresa
+      // 2) Los topes de fragmentos: un documento no puede pasar del tope de un agente (si no, ningún agente podría usarlo entero) y la biblioteca tiene un tope total
+      if (parsed.chunks.length > MAX_CHUNKS_PER_AGENT) throw new LimitError(`El documento es demasiado largo (${parsed.chunks.length.toLocaleString('es-EC')} fragmentos; el máximo es ${MAX_CHUNKS_PER_AGENT.toLocaleString('es-EC')}): divídelo en varios`);
       const others = await this.db.withTenant((tx) => this.store.count(tx, doc.id));
-      if (others + parsed.chunks.length > MAX_CHUNKS_PER_ORG) throw new LimitError(`La biblioteca llegó a su tope de ${MAX_CHUNKS_PER_ORG.toLocaleString('es-EC')} fragmentos: borra documentos que ya no uses o divide este en uno más corto`);
+      if (others + parsed.chunks.length > MAX_CHUNKS_PER_ORG) throw new LimitError(`La biblioteca llegó a su tope de ${MAX_CHUNKS_PER_ORG.toLocaleString('es-EC')} fragmentos: borra documentos que ya no uses`);
       // 3) Reservar créditos (el peor caso) ANTES de gastar
       const reserve = await this.worstCaseCredits(parsed.chars);
       holdId = (await this.credits.reserve({ credits: reserve, kind: 'use', ref: `Documento: ${doc.name}` })).holdId;

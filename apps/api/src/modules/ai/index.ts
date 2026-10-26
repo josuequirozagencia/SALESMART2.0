@@ -11,3 +11,6 @@ export { KnowledgeService, MAX_DOCUMENTS, MIN_SCORE, type DocumentView, type Doc
 export { VECTOR_STORE, PgArrayVectorStore, MAX_CHUNKS_PER_ORG, normalize, toBytes, fromBytes, type VectorStore, type VectorHit } from './knowledge/vector-store';
 export { chunkText, chunkTable, cleanText, TARGET_CHARS, MAX_CHUNK_CHARS, OVERLAP_CHARS } from './knowledge/chunker';
 export { detectKind, parseDocument, parseCsv, decodeText, ParseError, MAX_DOCUMENT_BYTES, MAX_TEXT_CHARS, type DocumentKind } from './knowledge/document-parser';
+export { AgentsService, MAX_AGENTS, MAX_PHOTO_BYTES, type AgentCard, type AgentDetail, type AgentOptions, type PreviewView } from './agents/agents.service';
+export { composePrompt, unknownAgentVariables, AGENT_BUILT_IN, COVERS, type Cover, type PromptInput, type ComposedPrompt } from './agents/agent-prompt';
+export { MAX_CHUNKS_PER_AGENT } from './knowledge/vector-store';

@@ -375,7 +375,7 @@ describe('procesar documentos', () => {
     const d = await up(T.alice, HORARIOS, 'nuevo.txt');
     expect(await run()).toBe(1);
     expect(await docRow(d['id'] as string)).toMatchObject({ status: 'error', error_code: 'limit' });
-    expect(String((await docRow(d['id'] as string))['error_message'])).toContain('5.000');
+    expect(String((await docRow(d['id'] as string))['error_message'])).toContain('50.000');
     expect(ai.calls).toHaveLength(0);
   });
 

@@ -36,16 +36,18 @@ export interface VectorStore {
   replace(tx: TenantTx, documentId: string, chunks: readonly ChunkToStore[]): Promise<void>;
   /** Borra los fragmentos de un documento. */
   remove(tx: TenantTx, documentId: string): Promise<void>;
-  /** Los fragmentos más parecidos a la pregunta, de mayor a menor. Solo cuenta documentos vigentes, activos y listos. */
-  search(tx: TenantTx, query: readonly number[], options: SearchOptions): Promise<VectorHit[]>;
+  /** Los fragmentos más parecidos a la pregunta, de mayor a menor. Solo cuenta documentos vigentes, activos y listos. `truncated`: había más fragmentos de los que se recorren (hay que acotar a menos documentos). */
+  search(tx: TenantTx, query: readonly number[], options: SearchOptions): Promise<{ hits: VectorHit[]; truncated: boolean }>;
   /** Cuántos fragmentos tiene la empresa (para el tope). */
   count(tx: TenantTx, exceptDocumentId?: string): Promise<number>;
 }
 
 export const VECTOR_STORE = Symbol('VECTOR_STORE');
 
-/** Tope de fragmentos que se recorren en una búsqueda (ADR-53: unos 5 000 por agente). Pasado esto, la búsqueda por fuerza bruta deja de ser razonable y hay que pasar a pgvector. */
-export const MAX_CHUNKS_PER_ORG = 5000;
+/** Tope de fragmentos que se recorren en UNA búsqueda y que puede tener un agente entre todos sus documentos (ADR-53: unos 5 000). Pasado esto, la búsqueda por fuerza bruta deja de ser razonable y hay que pasar a pgvector. */
+export const MAX_CHUNKS_PER_AGENT = 5000;
+/** Tope de fragmentos de TODA la biblioteca de una empresa (M8.3: el tope por agente pasó a ser el de arriba; este solo acota el almacenamiento). */
+export const MAX_CHUNKS_PER_ORG = 50_000;
 const INSERT_BATCH = 100;
 
 /** El vector como float32 en bruto (lo que se guarda en la base). */
@@ -86,17 +88,18 @@ export class PgArrayVectorStore implements VectorStore {
     await tx.delete(documentChunks).where(eq(documentChunks.documentId, documentId));
   }
 
-  async search(tx: TenantTx, query: readonly number[], options: SearchOptions): Promise<VectorHit[]> {
-    if (options.documentIds && options.documentIds.length === 0) return [];
+  async search(tx: TenantTx, query: readonly number[], options: SearchOptions): Promise<{ hits: VectorHit[]; truncated: boolean }> {
+    if (options.documentIds && options.documentIds.length === 0) return { hits: [], truncated: false };
     const q = Float32Array.from(normalize(query));
     const rows = await tx
       .select({ id: documentChunks.id, documentId: documentChunks.documentId, ordinal: documentChunks.ordinal, content: documentChunks.content, embedding: documentChunks.embedding })
       .from(documentChunks)
       .innerJoin(knowledgeDocuments, and(eq(knowledgeDocuments.id, documentChunks.documentId), eq(knowledgeDocuments.organizationId, documentChunks.organizationId)))
       .where(and(isNull(knowledgeDocuments.deletedAt), eq(knowledgeDocuments.active, true), eq(knowledgeDocuments.status, 'ready'), options.documentIds ? inArray(knowledgeDocuments.id, [...options.documentIds]) : undefined))
-      .limit(MAX_CHUNKS_PER_ORG);
+      .limit(MAX_CHUNKS_PER_AGENT + 1);
+    const truncated = rows.length > MAX_CHUNKS_PER_AGENT;
     const hits: VectorHit[] = [];
-    for (const r of rows) {
+    for (const r of rows.slice(0, MAX_CHUNKS_PER_AGENT)) {
       const e = fromBytes(r.embedding);
       if (e.length !== q.length) continue; // un vector de otra dimensión (modelo anterior) no se compara
       let dot = 0;
@@ -104,7 +107,7 @@ export class PgArrayVectorStore implements VectorStore {
       if (dot >= options.minScore) hits.push({ chunkId: r.id, documentId: r.documentId, ordinal: r.ordinal, content: r.content, score: dot });
     }
     hits.sort((a, b) => b.score - a.score || a.ordinal - b.ordinal);
-    return hits.slice(0, options.limit);
+    return { hits: hits.slice(0, options.limit), truncated };
   }
 
   async count(tx: TenantTx, exceptDocumentId?: string): Promise<number> {

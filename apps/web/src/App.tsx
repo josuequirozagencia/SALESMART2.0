@@ -7,6 +7,7 @@ import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
 import { MetaPage } from './features/meta/MetaPage';
+import { AgentsPage } from './features/agents/AgentsPage';
 import { CreditsPage } from './features/ai/CreditsPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { AiCreditsPage } from './features/platform/AiCreditsPage';
@@ -124,6 +125,7 @@ export function App() {
         <Route path="/settings/meta" element={<MetaPage />} />
         <Route path="/settings/ghl" element={<GhlPage />} />
         <Route path="/settings/credits" element={<CreditsPage />} />
+        <Route path="/agents" element={<AgentsPage />} />
         <Route path="/settings/knowledge" element={<KnowledgePage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/queues" element={<QueuesPage />} />
