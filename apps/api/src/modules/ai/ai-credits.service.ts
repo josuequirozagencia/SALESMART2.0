@@ -105,13 +105,13 @@ export class AiCreditsService {
     const welcome = await this.directory.welcomeCredits();
     const userId = TenantContext.current().userId ?? null;
     return this.db.withTenant(async (tx) => {
+      // Primero se bloquea el monedero: los reintentos simultáneos de una misma llave se ponen en fila y los que llegan después ven el movimiento ya confirmado (si se mirara la llave antes, dos a la vez chocarían con el índice único)
+      const w = await this.lockWallet(tx, welcome);
       const [prior] = await tx.select().from(aiLedger).where(eq(aiLedger.idempotencyKey, input.idempotencyKey)).limit(1);
       if (prior) {
         if (prior.kind !== 'grant' || prior.credits !== input.credits || prior.ref !== input.note || prior.createdBy !== userId) throw new ConflictError('IDEMPOTENCY_MISMATCH', 'Esa llave ya se usó con otros datos');
-        const [w] = await tx.select().from(aiWallets).limit(1);
-        return { item: clientItem(prior), balance: w?.balanceCache ?? prior.balanceAfter, replayed: true };
+        return { item: clientItem(prior), balance: w.balanceCache, replayed: true };
       }
-      const w = await this.lockWallet(tx, welcome);
       const balance = w.balanceCache + input.credits;
       const [row] = await tx.insert(aiLedger).values({ kind: 'grant', credits: input.credits, balanceAfter: balance, ref: input.note, idempotencyKey: input.idempotencyKey, createdBy: userId, createdAt: new Date() }).returning();
       await tx.update(aiWallets).set({ balanceCache: balance, updatedAt: new Date() }).where(eq(aiWallets.id, w.id));
