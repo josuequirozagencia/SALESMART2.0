@@ -1480,3 +1480,22 @@ Cuarta y última rebanada de M5.6 (ver DECIDE 1 de M5.6a). Cierra lo que ADR-50 
 - **Pruebas.** API: 20 nuevas de integración (lista y memoria, A↔B, asesor, conexión, errores, vínculo, historial, tabla de solo inserción) y 4 del adaptador contra el servidor simulado, más el contract test común; web: 5 nuevas.
 - **Lo que NO hace.** Quitar a un contacto de un flujo, inscripción masiva o por reglas, elegir la fecha de inicio del flujo, ver el avance del contacto dentro del flujo, ni crear flujos desde aquí.
 - **DECIDE (recomendación entre paréntesis):** (1) **permiso nuevo `ghl.enroll` para administrador y asesor** (recomendado: inscribir dispara automatizaciones de GHL, que pueden escribirle al cliente; por eso no basta `contacts.write` y no va en el acceso de solo lectura; alternativa: solo administrador); (2) **el asesor solo inscribe a los contactos que ve** (recomendado: igual que contactos y chats); (3) **llamada síncrona con registro propio** en vez de cola con reintentos (recomendado: es una acción de una persona que espera el resultado, y un reintento automático podría inscribir dos veces; costo: si GHL está caído hay que volver a pulsar); (4) **un fallo pasajero no se registra** (recomendado: el historial muestra lo que GHL decidió, no los tropiezos de red); (5) **margen de 60 s contra duplicados** (recomendado: cubre el doble clic sin impedir volver a inscribir después, que GHL puede permitir o no); (6) **solo flujos publicados** (recomendado: un borrador no recibe contactos en GHL).
+
+## ADR-53 — IA: agentes, conocimiento y créditos (M8)
+**Estado: APROBADO el 2026-10-26 por el responsable de producto, las 13 decisiones con las recomendaciones de `docs/M8_PLAN.md` §7.** Aplica ADR-19 (créditos IA), ADR-20 (agentes en galería y prueba), ADR-42 (bóveda y proveedores) y ADR-24 (RLS). Plan por rebanadas en `docs/M8_PLAN.md`.
+
+### Decisiones propuestas (ver `docs/M8_PLAN.md` §7 para el razonamiento)
+1. **Cinco rebanadas:** M8.1 créditos · M8.2 conocimiento (RAG) · M8.3 agentes · M8.4 simulador de prueba · M8.5 agente en vivo en el Inbox.
+2. **`VectorStore` sin extensión al inicio** (vector en `real[]`, similitud coseno filtrada por empresa y agente, tope de fragmentos por agente) y cambio a **pgvector** cuando se verifique en CI y en Railway. Alternativa: pgvector desde el principio (cambia la imagen de CI y exige comprobar Railway antes).
+3. **Un solo proveedor de IA al inicio: OpenAI** (chat y embeddings) detrás de `AIProvider`; lista de modelos y precio por token definidos por el Súper Admin.
+4. **Créditos:** descuento de `⌈costo USD × (1 + margen) ÷ USD por crédito⌉` con **reservar y liquidar** bajo bloqueo de la fila del monedero; el saldo se deriva del libro (solo inserción).
+5. **Sin compra con tarjeta ni recarga automática** hasta elegir la pasarela: créditos por bienvenida y regalo del Súper Admin.
+6. **Costo y margen solo en el servidor** (`app_platform`); el cliente ve créditos, nunca USD de costo, margen ni proveedor.
+7. **KB v1:** TXT, CSV, PDF con texto y DOCX (hasta 10 MB); Excel e imágenes después.
+8. **Biblioteca de documentos por empresa asignable a agentes** (ADR-20 prevalece sobre la frase de F16 «cada agente tiene su propia KB»); nada cruza empresas.
+9. **«No inventar»:** solo se entregan al modelo los fragmentos sobre un umbral de similitud; sin respaldo, el agente no afirma datos y ofrece un asesor.
+10. **Agente en vivo:** un canal, un agente; un mensaje humano pausa la IA; herramientas v1 (campos permitidos, transferir a una persona, crear tarea); no pisa campos editados por personas; auditoría con origen IA.
+11. **Prueba:** consume créditos `kind = test` con tope diario por empresa.
+12. **Privacidad:** al proveedor solo viaja lo necesario (sin teléfono ni correo por omisión); el contenido no se registra en logs.
+13. **Foto del agente:** subida con tipo y tamaño verificados y URL firmada.
+14. **Sin validar contra OpenAI real:** formato de las respuestas, costos y, sobre todo, que el modelo se abstenga de inventar; se valida con la clave del Súper Admin.
