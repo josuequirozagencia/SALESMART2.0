@@ -8,6 +8,7 @@ import { AuthModule, LocalAccessResolver } from './modules/auth';
 import { AttributionModule } from './modules/attribution';
 import { AiModule } from './modules/ai';
 import { FormsModule } from './modules/forms';
+import { AutomationsModule } from './modules/automations';
 import { GhlModule } from './modules/ghl';
 import { ChannelsModule } from './modules/channels';
 import { InboxModule } from './modules/inbox';
@@ -25,5 +26,5 @@ import { SlaModule } from './modules/sla';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), FormsModule, GhlModule.register(), AiModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), FormsModule, AutomationsModule, GhlModule.register(), AiModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

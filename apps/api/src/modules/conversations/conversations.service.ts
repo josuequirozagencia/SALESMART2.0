@@ -2,6 +2,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit, type AuditSource } from '../audit';
+import { DomainEventBus } from '../events';
 import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { RealtimeService } from '../realtime';
@@ -57,6 +58,7 @@ export class ConversationsService {
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(AutoMessagesService) private readonly autoMessages: AutoMessagesService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
+    @Optional() @Inject(DomainEventBus) private readonly events?: DomainEventBus,
   ) {}
 
   /**
@@ -94,6 +96,7 @@ export class ConversationsService {
     if (inserted.length === 0) return { duplicate: true, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
 
     this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: inserted[0]!.id, kind: 'created' } });
+    await this.events?.emit(tx, { type: 'message_received', contactId: contact.id, key: `message_received:${inserted[0]!.id}`, channelId: channelAccountId, conversationId: conv.id, kind: m.kind });
 
     // Adjunto entrante (M5.6d): el mensaje queda, y aparte el archivo en `message_attachments` para que la tarea `attachments` lo descargue y lo revise (no bloquea la ingesta)
     if (m.media && FILE_KINDS.has(m.kind)) {

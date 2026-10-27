@@ -1,11 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, gt, isNull, sql } from 'drizzle-orm';
-import { channelAccounts, contacts, conversations, forms, messages, tasks, type TenantTx } from '../../db';
-import { ConflictError, NotFoundError, ValidationError } from '../../errors';
+import { and, eq, gt, isNull } from 'drizzle-orm';
+import { forms, tasks, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
-import { ConversationsService } from '../conversations';
-import { RealtimeService } from '../realtime';
-import { renderedText, TemplatesService } from '../templates';
+import { OutreachService } from '../outreach';
 
 type FormRow = typeof forms.$inferSelect;
 export type FollowUpResult = 'none' | 'task' | 'template' | 'template_task';
@@ -46,11 +43,7 @@ export const FOLLOW_UP_TASK_DUE_MS = 60 * 60_000;
  */
 @Injectable()
 export class FormFollowUpService {
-  constructor(
-    @Inject(TemplatesService) private readonly templates: TemplatesService,
-    @Inject(ConversationsService) private readonly conversationsSvc: ConversationsService,
-    @Inject(RealtimeService) private readonly realtime: RealtimeService,
-  ) {}
+  constructor(@Inject(OutreachService) private readonly outreach: OutreachService) {}
 
   async run(tx: TenantTx, i: FollowUpInput): Promise<FollowUpResult> {
     const sent = i.form.followUpChannelId && i.form.followUpTemplateId ? await this.sendTemplate(tx, i, i.form.followUpChannelId, i.form.followUpTemplateId) : false;
@@ -60,40 +53,9 @@ export class FormFollowUpService {
 
   /** Deja la plantilla en cola; false si no se pudo por cualquier motivo previsible (el lead no se pierde: queda la tarea). */
   private async sendTemplate(tx: TenantTx, i: FollowUpInput, channelId: string, templateId: string): Promise<boolean> {
-    const [c] = await tx.select({ consent: contacts.consent }).from(contacts).where(and(eq(contacts.id, i.contactId), isNull(contacts.deletedAt))).limit(1);
-    if (!c || c.consent === 'revoked') return false;
-    const [ch] = await tx.select({ id: channelAccounts.id, queueId: channelAccounts.queueId }).from(channelAccounts).where(and(eq(channelAccounts.id, channelId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(channelAccounts.provider, 'meta_cloud'))).limit(1);
-    if (!ch) return false;
-    let prepared;
-    let row;
-    try {
-      row = await this.templates.getSendable(tx, channelId, templateId);
-      const params = Object.fromEntries(Object.entries(i.form.followUpParams).map(([k, v]) => [k, resolveParam(v, { name: i.name, formName: i.form.name })]));
-      prepared = this.templates.prepare(row, params);
-    } catch (e) {
-      if (e instanceof NotFoundError || e instanceof ConflictError || e instanceof ValidationError) return false; // plantilla borrada, ya no aprobada o con valores que Meta rechazaría
-      throw e;
-    }
-    const conv = await this.conversationsSvc.openFor(tx, i.contactId, channelId, i.phone.replace(/\D/g, ''), 'api');
-    if (conv.created) {
-      // La conversación nace asignada al responsable del lead (pendiente de aceptar); sin responsable, sin asignar. No hay mensaje del cliente: ni cronómetro de respuesta
-      await tx
-        .update(conversations)
-        .set({ queueId: i.form.queueId ?? ch.queueId, ...(i.ownerId ? { ownerId: i.ownerId, assignedAt: i.now, assignmentSource: 'distribution', status: 'pending' } : {}), updatedAt: i.now })
-        .where(eq(conversations.id, conv.id));
-      if (i.ownerId) await writeAudit(tx, { entityType: 'conversation', entityId: conv.id, field: 'owner_id', oldValue: null, newValue: i.ownerId, source: 'api' });
-    }
-    const template = { id: row.id, name: row.name, language: row.language, category: row.category, buttons: prepared.rendered.buttons, send: prepared.send };
-    const [m] = await tx
-      .insert(messages)
-      .values({ conversationId: conv.id, channelAccountId: channelId, direction: 'out', senderType: 'automation', kind: 'template', body: renderedText(prepared.rendered), meta: { template }, status: 'queued', sentAt: i.now, attempts: 0, nextAttemptAt: i.now })
-      .returning({ id: messages.id });
-    await tx
-      .update(conversations)
-      .set({ lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${i.now.toISOString()}::timestamptz), ${i.now.toISOString()}::timestamptz)`, updatedAt: i.now })
-      .where(eq(conversations.id, conv.id));
-    this.realtime.touchHere(conv.id, { ...(conv.created ? { created: true } : {}), message: { id: m!.id, kind: 'created' } });
-    return true;
+    const params = Object.fromEntries(Object.entries(i.form.followUpParams).map(([k, v]) => [k, resolveParam(v, { name: i.name, formName: i.form.name })]));
+    const r = await this.outreach.sendTemplate(tx, { contactId: i.contactId, phone: i.phone, channelId, templateId, params, queueId: i.form.queueId, ownerId: i.ownerId, now: i.now });
+    return r.sent;
   }
 
   /** La tarea para el responsable; false si no hay responsable o ya existe una igual abierta (de las últimas 24 h). */

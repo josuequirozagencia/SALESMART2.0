@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { contactPhones, contacts, Database, opportunities, type TenantTx } from '../../db';
 import { AppError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
+import { DomainEventBus } from '../events';
 import { writeAudit, type AuditSource } from '../audit';
 import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OrgMembersService, type OrgPerson } from '../organizations';
@@ -116,6 +117,7 @@ export class ContactsService {
     @Inject(CompaniesService) private readonly companies: CompaniesService,
     @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
     @Inject(ContactListsRepository) private readonly lists: ContactListsRepository,
+    @Optional() @Inject(DomainEventBus) private readonly events?: DomainEventBus,
   ) {}
 
   async list(scope: ContactScope, q: ListContactsQuery): Promise<ContactList> {
@@ -158,6 +160,7 @@ export class ContactsService {
       const customNew = Object.fromEntries(customChanges.map((x) => [x.key, x.newValue]));
       const tagChange = input.tag_ids && input.tag_ids.length > 0 ? await this.tagging.setCustom(tx, c.id, input.tag_ids) : null;
       await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}), ...(tagChange ? { tags: tagChange.after } : {}) }, source: 'manual' });
+      await this.events?.emit(tx, { type: 'contact_created', contactId: c.id, key: `contact_created:${c.id}`, source: 'manual' });
       return { row: c, phones: await this.repo.phonesOf(tx, [c.id]), extras: await this.extras(tx, [c.id]) };
       })
       .catch((e: unknown) => {
@@ -288,6 +291,7 @@ export class ContactsService {
     const [c] = await tx.insert(contacts).values({ name: finalName, source, consent: 'unknown', createdBy: null }).returning();
     await tx.insert(contactPhones).values({ contactId: c!.id, e164, isPrimary: true });
     await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: finalName, source, consent: 'unknown', phones: [e164] }, source: audit });
+    await this.events?.emit(tx, { type: 'contact_created', contactId: c!.id, key: `contact_created:${c!.id}`, source });
     return { id: c!.id, created: true };
   }
 

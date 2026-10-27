@@ -246,6 +246,15 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/embed/v1.js', kind: 'public' },
   { route: 'OPTIONS /v1/public/forms/:token/submit', kind: 'public' },
   { route: 'POST /v1/public/forms/:token/submit', kind: 'public' },
+  // Automatizaciones (M9.3, ADR-54). Pruebas: test/automations/automations.test.ts (A↔B, permisos, validación, motor, ciclos, atomicidad)
+  { route: 'GET /v1/automations', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'POST /v1/automations', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'GET /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'PATCH /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'POST /v1/automations/:id/activate', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'POST /v1/automations/:id/pause', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'GET /v1/automations/:id/runs', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'DELETE /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   // Agente de IA en vivo en el Inbox (M8.5). Pruebas: test/ai/agent-runtime.test.ts
   { route: 'GET /v1/conversations/:id/ai', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
   { route: 'POST /v1/conversations/:id/ai/pause', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },

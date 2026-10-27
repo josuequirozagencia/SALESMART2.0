@@ -4,6 +4,7 @@ import { contacts, Database, metaEvents, queueProducts, queues, saleChangeReques
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { AttributionService } from '../attribution';
+import { DomainEventBus } from '../events';
 import { writeAudit } from '../audit';
 import { loadConversation, scopeOf, type InboxAccess } from '../inbox';
 import { OpportunitiesService } from '../opportunities';
@@ -131,6 +132,7 @@ export class SalesService {
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
+    @Optional() @Inject(DomainEventBus) private readonly events?: DomainEventBus,
   ) {}
 
   // ------------------------------------------------------------------ opciones del formulario
@@ -222,6 +224,7 @@ export class SalesService {
     const oppId = await this.opportunities.markWon(tx, s.contactId, scope.userId);
     if (oppId) await tx.update(sales).set({ opportunityId: oppId }).where(eq(sales.id, s.id));
     await this.sla.stopOpen(tx, c.id, 'sale', now);
+    await this.events?.emit(tx, { type: 'sale_created', contactId: s.contactId, key: `sale_created:${s.id}`, saleId: s.id, total: String(s.amount) });
     this.realtime?.touchHere(c.id);
     return { sale: await this.viewOne(tx, s.id), created: true };
   }

@@ -1,8 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { contactPhones, contacts, Database, opportunities, pipelines, pipelineStages, stageHistory, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
+import { DomainEventBus } from '../events';
 import { writeAudit } from '../audit';
 import { ContactsService, type ContactScope } from '../contacts';
 import { OrgMembersService } from '../organizations';
@@ -78,6 +79,7 @@ export class OpportunitiesService {
     @Inject(PipelinesService) private readonly pipelinesSvc: PipelinesService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(SystemTagsService) private readonly systemTags: SystemTagsService,
+    @Optional() @Inject(DomainEventBus) private readonly events?: DomainEventBus,
   ) {}
 
   /**
@@ -118,6 +120,7 @@ export class OpportunitiesService {
     await tx.update(opportunities).set({ stageId: won.id, status: 'won', lostReason: null, closedAt: now, stageEnteredAt: now, updatedAt: now }).where(eq(opportunities.id, opp.id));
     await tx.insert(stageHistory).values({ opportunityId: opp.id, fromStageId: opp.stageId, toStageId: won.id, userId, origin: 'system' });
     await writeAudit(tx, { entityType: AUDIT, entityId: opp.id, field: 'stage_id', oldValue: opp.stageId, newValue: { stage_id: won.id, status: 'won' }, source: 'automation' });
+    await this.events?.emit(tx, { type: 'stage_changed', contactId, key: `stage_changed:${opp.id}:${won.id}:${now.getTime()}`, opportunityId: opp.id, pipelineId: opp.pipelineId, fromStageId: opp.stageId, toStageId: won.id, status: 'won' });
     return opp.id;
   }
 
@@ -144,7 +147,32 @@ export class OpportunitiesService {
     await tx.update(opportunities).set({ stageId: target.id, stageEnteredAt: now, updatedAt: now }).where(eq(opportunities.id, opp.id));
     await tx.insert(stageHistory).values({ opportunityId: opp.id, fromStageId: opp.stageId, toStageId: target.id, userId, origin: 'system' });
     await writeAudit(tx, { entityType: AUDIT, entityId: opp.id, field: 'stage_id', oldValue: opp.stageId, newValue: { stage_id: target.id, status: 'open' }, source: 'automation' });
+    await this.events?.emit(tx, { type: 'stage_changed', contactId, key: `stage_changed:${opp.id}:${target.id}:${now.getTime()}`, opportunityId: opp.id, pipelineId: opp.pipelineId, fromStageId: opp.stageId, toStageId: target.id, status: 'open' });
     return opp.id;
+  }
+
+  /**
+   * Una automatización mueve la oportunidad ABIERTA más reciente del contacto en el pipeline de la etapa a esa etapa (M9.3, ADR-54). Solo etapas abiertas y visibles: ganar tiene su propio proceso (la venta)
+   * y perder exige un motivo. Historial con origen `automation` y auditoría; anuncia el cambio de etapa (con el origen de la cadena, para cortar ciclos). Devuelve qué pasó.
+   */
+  async moveByRule(tx: TenantTx, contactId: string, stageId: string): Promise<'moved' | 'same' | 'no_opportunity' | 'invalid_stage'> {
+    const [target] = await tx.select().from(pipelineStages).where(and(eq(pipelineStages.id, stageId), isNull(pipelineStages.deletedAt))).limit(1);
+    if (!target || target.isHidden || target.kind !== 'open') return 'invalid_stage';
+    const [opp] = await tx
+      .select()
+      .from(opportunities)
+      .where(and(eq(opportunities.contactId, contactId), eq(opportunities.pipelineId, target.pipelineId), eq(opportunities.status, 'open'), isNull(opportunities.deletedAt)))
+      .orderBy(desc(opportunities.createdAt))
+      .limit(1)
+      .for('update');
+    if (!opp) return 'no_opportunity';
+    if (opp.stageId === target.id) return 'same';
+    const now = new Date();
+    await tx.update(opportunities).set({ stageId: target.id, stageEnteredAt: now, updatedAt: now }).where(eq(opportunities.id, opp.id));
+    await tx.insert(stageHistory).values({ opportunityId: opp.id, fromStageId: opp.stageId, toStageId: target.id, userId: null, origin: 'automation' });
+    await writeAudit(tx, { entityType: AUDIT, entityId: opp.id, field: 'stage_id', oldValue: opp.stageId, newValue: { stage_id: target.id, status: 'open' }, source: 'automation' });
+    await this.events?.emit(tx, { type: 'stage_changed', contactId, key: `stage_changed:${opp.id}:${target.id}:${now.getTime()}`, opportunityId: opp.id, pipelineId: opp.pipelineId, fromStageId: opp.stageId, toStageId: target.id, status: 'open' });
+    return 'moved';
   }
 
   /**
@@ -161,6 +189,7 @@ export class OpportunitiesService {
     const [row] = await tx.insert(opportunities).values({ pipelineId: pipeline.id, stageId: stage.id, contactId: input.contactId, amount: '0.00', ownerId: input.ownerId, status: 'open', createdBy: null }).returning({ id: opportunities.id });
     await tx.insert(stageHistory).values({ opportunityId: row!.id, fromStageId: null, toStageId: stage.id, userId: null, origin: 'system' });
     await writeAudit(tx, { entityType: AUDIT, entityId: row!.id, newValue: { contact_id: input.contactId, pipeline_id: pipeline.id, stage_id: stage.id, amount: '0.00', owner_id: input.ownerId }, source: 'api' });
+    await this.events?.emit(tx, { type: 'opportunity_created', contactId: input.contactId, key: `opportunity_created:${row!.id}`, opportunityId: row!.id, pipelineId: pipeline.id, stageId: stage.id });
     return row!.id;
   }
 
@@ -229,6 +258,7 @@ export class OpportunitiesService {
           .returning();
         await tx.insert(stageHistory).values({ opportunityId: row!.id, fromStageId: null, toStageId: stage.id, userId: sc.userId, origin: 'manual' });
         await writeAudit(tx, { entityType: AUDIT, entityId: row!.id, newValue: { contact_id: contact.id, pipeline_id: pipeline.id, stage_id: stage.id, amount: row!.amount, owner_id: owner }, source: 'manual' });
+        await this.events?.emit(tx, { type: 'opportunity_created', contactId: contact.id, key: `opportunity_created:${row!.id}`, opportunityId: row!.id, pipelineId: pipeline.id, stageId: stage.id });
         return { row: row!, contacts: await this.contactCards(tx, [contact.id]), history: await this.history(tx, row!.id) };
       })
       .catch((e: unknown) => {
@@ -282,6 +312,7 @@ export class OpportunitiesService {
           .returning();
         await tx.insert(stageHistory).values({ opportunityId: id, fromStageId: cur.stageId, toStageId: target.id, userId: sc.userId, origin: 'manual' });
         await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'stage_id', oldValue: cur.stageId, newValue: { stage_id: target.id, status: kind }, source: 'manual' });
+        await this.events?.emit(tx, { type: 'stage_changed', contactId: cur.contactId, key: `stage_changed:${id}:${target.id}:${now.getTime()}`, opportunityId: id, pipelineId: cur.pipelineId, fromStageId: cur.stageId, toStageId: target.id, status: kind });
         return { row: row!, contacts: await this.contactCards(tx, [row!.contactId]), history: await this.history(tx, id) };
       })
       .catch((e: unknown) => {

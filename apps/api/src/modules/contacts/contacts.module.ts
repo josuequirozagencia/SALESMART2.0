@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { CustomFieldsModule } from '../custom-fields';
+import { EventsModule } from '../events';
 import { OrganizationsModule } from '../organizations';
 import { TagsModule } from '../tags';
 import { CompaniesService } from './companies.service';
@@ -19,5 +20,5 @@ import { NotesService } from './notes.service';
 import { TasksService } from './tasks.service';
 
 /** Contactos del CRM (M3.1, ADR-43) con sus campos personalizados (M3.2, ADR-44). Usa `OrgMembersService` (organizations) para las personas: las membresías son de identidad (ADR-25). */
-@Module({ imports: [OrganizationsModule, CustomFieldsModule, TagsModule], controllers: [ContactsController, ContactListsController, ContactImportsController, ContactExportController, CompaniesController, ContactCompaniesController, NotesController, TasksController], providers: [ContactsRepository, ContactsService, ContactListsRepository, ContactListsService, ContactImportsRepository, ContactImportsService, ContactExportService, CompaniesService, NotesService, TasksService], exports: [ContactsService] })
+@Module({ imports: [EventsModule, OrganizationsModule, CustomFieldsModule, TagsModule], controllers: [ContactsController, ContactListsController, ContactImportsController, ContactExportController, CompaniesController, ContactCompaniesController, NotesController, TasksController], providers: [ContactsRepository, ContactsService, ContactListsRepository, ContactListsService, ContactImportsRepository, ContactImportsService, ContactExportService, CompaniesService, NotesService, TasksService], exports: [ContactsService] })
 export class ContactsModule {}

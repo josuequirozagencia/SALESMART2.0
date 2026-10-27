@@ -1,7 +1,9 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { TenantTx } from '../../db';
 import { ValidationError, type ErrorDetail } from '../../errors';
 import { TenantContext } from '../../tenant';
+import { DomainEventBus } from '../events';
 import { CustomFieldsRepository, type DefinitionRow } from './custom-fields.repository';
 import { coerceValue, display, fromColumns, toColumns, type CustomEntity, type CustomValue, type CustomValues, type FieldType, type Normalized } from './field-types';
 
@@ -35,7 +37,17 @@ const path = (key: string): string => `custom_fields.${key}`;
  */
 @Injectable()
 export class CustomValuesService {
-  constructor(@Inject(CustomFieldsRepository) private readonly repo: CustomFieldsRepository) {}
+  constructor(
+    @Inject(CustomFieldsRepository) private readonly repo: CustomFieldsRepository,
+    @Optional() @Inject(DomainEventBus) private readonly events?: DomainEventBus,
+  ) {}
+
+  /** Un campo de un contacto cambió (por una persona, la IA, un formulario o una automatización): se anuncia dentro de la transacción para que las automatizaciones puedan reaccionar (M9.3). */
+  private async announce(tx: TenantTx, entity: string, contactId: string, key: string, oldValue: CustomValue | null, newValue: CustomValue | null): Promise<void> {
+    if (entity !== 'contact') return;
+    const text = (v: CustomValue | null): string | null => (v === null ? null : (typeof v === 'string' ? v : JSON.stringify(v)).slice(0, 200));
+    await this.events?.emit(tx, { type: 'field_changed', contactId, key: `field_changed:${contactId}:${key}:${randomUUID()}`, field: key, oldValue: text(oldValue), newValue: text(newValue) });
+  }
 
   /** Campos activos de una entidad por variable (para resolver filtros por campo personalizado). */
   async definitionsByKey(tx: TenantTx, entity: CustomEntity): Promise<Map<string, { id: string; type: string }>> {
@@ -113,6 +125,7 @@ export class CustomValuesService {
       }
       await this.repo.upsertValue(tx, { entity: 'contact', entityId: contactId, definitionId: def.id }, toColumns(norm), null);
       out.changes.push({ key: def.varKey, oldValue: null, newValue: display(norm) });
+      await this.announce(tx, 'contact', contactId, def.varKey, null, display(norm));
     }
     return out;
   }
@@ -162,6 +175,7 @@ export class CustomValuesService {
       }
       await this.repo.upsertValue(tx, { entity: 'contact', entityId: contactId, definitionId: def.id }, toColumns(norm), null);
       out.changes.push({ key: def.varKey, oldValue, newValue });
+      await this.announce(tx, 'contact', contactId, def.varKey, oldValue, newValue);
     }
     return out;
   }
@@ -209,6 +223,7 @@ export class CustomValuesService {
       if (JSON.stringify(oldValue) === JSON.stringify(newValue)) continue;
       await this.repo.upsertValue(tx, { entity, entityId, definitionId: def.id }, toColumns(norm), userId);
       changes.push({ key: def.varKey, oldValue, newValue });
+      await this.announce(tx, entity, entityId, def.varKey, oldValue, newValue);
     }
     return changes;
   }
