@@ -147,6 +147,23 @@ export class OpportunitiesService {
     return opp.id;
   }
 
+  /**
+   * Un formulario público trae un lead (M9.1, ADR-09/54): abre una oportunidad en el pipeline y la etapa del formulario (sin ellos, el primer pipeline y su primera etapa abierta) para el contacto, con su historial
+   * (origen `system`) y auditoría con origen `api`. Si el contacto YA tiene una oportunidad abierta en ese pipeline no hace nada (no duplica ni mueve lo que una persona ya trabaja). Devuelve la oportunidad
+   * creada o null. Dentro de la transacción de quien llama.
+   */
+  async openForLead(tx: TenantTx, input: { contactId: string; pipelineId: string | null; stageId: string | null; ownerId: string | null }): Promise<string | null> {
+    await this.pipelinesSvc.ensureDefault(tx);
+    const pipeline = await this.pipelineFor(tx, input.pipelineId ?? undefined);
+    const [open] = await tx.select({ id: opportunities.id }).from(opportunities).where(and(eq(opportunities.pipelineId, pipeline.id), eq(opportunities.contactId, input.contactId), eq(opportunities.status, 'open'), isNull(opportunities.deletedAt))).limit(1);
+    if (open) return null;
+    const stage = await this.openStageFor(tx, pipeline.id, input.stageId ?? undefined);
+    const [row] = await tx.insert(opportunities).values({ pipelineId: pipeline.id, stageId: stage.id, contactId: input.contactId, amount: '0.00', ownerId: input.ownerId, status: 'open', createdBy: null }).returning({ id: opportunities.id });
+    await tx.insert(stageHistory).values({ opportunityId: row!.id, fromStageId: null, toStageId: stage.id, userId: null, origin: 'system' });
+    await writeAudit(tx, { entityType: AUDIT, entityId: row!.id, newValue: { contact_id: input.contactId, pipeline_id: pipeline.id, stage_id: stage.id, amount: '0.00', owner_id: input.ownerId }, source: 'api' });
+    return row!.id;
+  }
+
   async list(scope: ContactScope, q: ListOpportunitiesQuery): Promise<{ items: OpportunityView[]; next_cursor: string | null }> {
     const sc = this.scope(scope);
     const page = await this.db.withTenant(async (tx) => {

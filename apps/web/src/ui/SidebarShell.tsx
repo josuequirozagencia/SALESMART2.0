@@ -23,6 +23,7 @@ const ICONS = {
   shield: 'M12 3l8 3v6c0 4.5-3.2 8.2-8 9-4.8-.8-8-4.5-8-9V6z',
   clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z M12 7v5l3 2',
   card: 'M3 6h18v12H3z M3 10h18 M7 15h3',
+  form: 'M6 3h12a1 1 0 0 1 1 1v16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z M9 8h6 M9 12h6 M9 16h4',
   plug: 'M9 2v6 M15 2v6 M6 8h12v4a6 6 0 0 1-12 0z M12 18v4',
   menu: 'M4 6h16 M4 12h16 M4 18h16',
   close: 'M6 6l12 12 M18 6L6 18',

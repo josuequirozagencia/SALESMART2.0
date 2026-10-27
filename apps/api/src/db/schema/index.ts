@@ -1,7 +1,7 @@
 // Esquema de producción. En M0 (bloque 2) NO hay tablas de negocio: se añaden con sus módulos.
 // Toda tabla se declara con tenantTable() / platformTable() (helpers.ts) y se registra en db/audit/catalog.ts.
 export { tenantTable, platformTable, identityTable } from './helpers';
-export { users, organizations, organizationMembers, sessions, authThrottle, emailVerifications, signupAttempts, disposableDomains, passwordResets, roles, permissions, rolePermissions, trials, trialConfig, plans, invitations, organizationOwnershipHistory, accessSessions, attributionEndpoints, ghlRoutes } from './identity';
+export { users, organizations, organizationMembers, sessions, authThrottle, emailVerifications, signupAttempts, disposableDomains, passwordResets, roles, permissions, rolePermissions, trials, trialConfig, plans, invitations, organizationOwnershipHistory, accessSessions, attributionEndpoints, ghlRoutes, formRoutes } from './identity';
 export { auditLogs, platformAudit } from './audit';
 export { providerCredentials, providerSelection } from './providers';
 export { contacts, contactPhones, tags, contactTags, metaEvents, contactLists, contactListMembers, contactImports, contactImportRows, companies, contactCompanies, notes, tasks } from './crm';
@@ -25,3 +25,4 @@ export { aiWallets, aiLedger, aiHolds, aiPricing, aiOrgPricing } from './ai';
 export { knowledgeDocuments, documentChunks, aiModelPrices } from './ai-knowledge';
 export { agents, agentDocuments, agentChannels, agentTestRuns } from './ai-agents';
 export { aiConversationState, aiToolCalls } from './ai-runtime';
+export { forms, formFields, formSubmissions } from './forms';

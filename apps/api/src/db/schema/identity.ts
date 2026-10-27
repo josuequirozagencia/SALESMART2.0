@@ -473,3 +473,18 @@ export const ghlRoutes = identityTable(
     uniqueIndex('ghl_routes_org_uq').on(t.organizationId),
   ],
 );
+
+/**
+ * Punto de entrada PÚBLICO de cada formulario (M9.1, ADR-09/54). Tabla de IDENTIDAD: el visitante de una landing llega sin sesión y hay que saber de qué empresa y formulario es antes de que exista
+ * contexto. El identificador es un UUID v4 aleatorio (el «token» de la URL: solo permite ENVIAR; nada se lee con él). Una fila por formulario; el formulario mismo (estado, campos, destino) vive en `forms`.
+ */
+export const formRoutes = identityTable(
+  'form_routes',
+  {
+    id: uuid('id').primaryKey(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    formId: uuid('form_id').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex('form_routes_form_uq').on(t.organizationId, t.formId)],
+);

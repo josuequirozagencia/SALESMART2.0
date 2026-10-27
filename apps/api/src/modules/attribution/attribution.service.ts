@@ -90,6 +90,39 @@ export class AttributionService {
   }
 
   /**
+   * Un formulario público trajo un lead (M9.1, ADR-09/54): etiqueta del sistema `Lead` y evento Lead hacia Meta como evento de **sitio web** (`action_source: website`). El `event_id` es el MISMO que el
+   * Pixel de la página usa para deduplicar (lo manda el visitante; si no, uno propio). Los datos del usuario van con huella SHA-256 (teléfono, correo); `fbc`, `fbp`, la IP y el navegador van
+   * como los pide Meta (sin huella) y solo si el visitante los trajo. Se envía sin ventana de gracia; sin credenciales de Meta el evento espera pendiente. Idempotente por `event_id`.
+   */
+  async onFormLead(tx: TenantTx, lead: { contactId: string; eventId: string; phone: string; email: string | null; fbc: string | null; fbp: string | null; ip: string | null; userAgent: string | null; sourceUrl: string | null; formName: string }, now = new Date()): Promise<void> {
+    const userData: Record<string, unknown> = { ph: [phoneHash(lead.phone)] };
+    if (lead.email) userData['em'] = [sha256(lead.email.trim().toLowerCase())];
+    if (lead.fbc) userData['fbc'] = lead.fbc;
+    if (lead.fbp) userData['fbp'] = lead.fbp;
+    if (lead.ip) userData['client_ip_address'] = lead.ip;
+    if (lead.userAgent) userData['client_user_agent'] = lead.userAgent;
+    await tx
+      .insert(metaEvents)
+      .values({
+        eventId: lead.eventId,
+        type: 'Lead',
+        contactId: lead.contactId,
+        sendAfter: now,
+        payload: {
+          event_name: 'Lead',
+          event_time: Math.floor(now.getTime() / 1000),
+          event_id: lead.eventId,
+          action_source: 'website',
+          ...(lead.sourceUrl ? { event_source_url: lead.sourceUrl } : {}),
+          user_data: userData,
+          custom_data: { form: lead.formName },
+        },
+      })
+      .onConflictDoNothing();
+    await this.tags.apply(tx, lead.contactId, 'lead');
+  }
+
+  /**
    * El sistema pone la etiqueta `Venta` a un contacto (lo hará ventas en M6) y se encola el Purchase por el TOTAL de la venta (ADR-18) con ventana de gracia,
    * cancelable mientras esté pendiente. Si el contacto no llegó por un anuncio de Meta no hay a quién atribuir: queda `skipped` (con el motivo).
    * Dentro de la transacción del que llama (la venta). Idempotente por venta.

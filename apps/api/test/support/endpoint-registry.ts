@@ -230,6 +230,20 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/agents/:id/photo', kind: 'tenant', isolationTest: '../../ai/agents.test.ts' },
   // Simulador de prueba del agente (M8.4). Pruebas: test/ai/agent-test.test.ts
   { route: 'POST /v1/agents/:id/test', kind: 'tenant', isolationTest: '../../ai/agent-test.test.ts' },
+  // Formularios embebibles (M9.1). Pruebas: test/forms/forms.test.ts (A↔B, permisos, estructura, publicación) y test/forms/forms-public.test.ts (envío público)
+  { route: 'GET /v1/forms', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'POST /v1/forms', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'GET /v1/forms/:id', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'PATCH /v1/forms/:id', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'PUT /v1/forms/:id/fields', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'POST /v1/forms/:id/publish', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'POST /v1/forms/:id/pause', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'GET /v1/forms/:id/submissions', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  { route: 'DELETE /v1/forms/:id', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
+  // Entrada pública (sin sesión): token opaco + Origin + captcha + límites
+  { route: 'GET /v1/public/forms/:token', kind: 'public' },
+  { route: 'OPTIONS /v1/public/forms/:token/submit', kind: 'public' },
+  { route: 'POST /v1/public/forms/:token/submit', kind: 'public' },
   // Agente de IA en vivo en el Inbox (M8.5). Pruebas: test/ai/agent-runtime.test.ts
   { route: 'GET /v1/conversations/:id/ai', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
   { route: 'POST /v1/conversations/:id/ai/pause', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },

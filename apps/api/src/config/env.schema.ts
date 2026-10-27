@@ -71,6 +71,8 @@ export const envSchema = z.object({
   /** Remitente verificado en Resend: «Sales Smart <no-reply@dominio>» o solo la dirección. */
   MAIL_FROM: z.string().max(200).regex(/^(?:[^<>\r\n]{1,80} <[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,}>|[^\s@<>]+@[^\s@<>]+\.[^\s@<>]{2,})$/, 'debe ser «Nombre <correo@dominio>» o «correo@dominio»').optional(),
   TURNSTILE_SECRET_KEY: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'formato inválido').optional(),
+  // Clave PÚBLICA de Turnstile (la que se incrusta en las páginas): la usan los formularios embebibles (M9.1). No es un secreto.
+  TURNSTILE_SITE_KEY: z.string().regex(/^[A-Za-z0-9_-]{8,200}$/, 'formato inválido').optional(),
   /**
    * Clave maestra (KEK) con la que se envuelven las claves de datos de las credenciales de los proveedores (ADR-42): EXACTAMENTE 32 bytes en base64
    * (`openssl rand -base64 32`). Opcional: sin ella la API arranca, pero guardar credenciales responde 503. Distinta de cualquier otra clave.

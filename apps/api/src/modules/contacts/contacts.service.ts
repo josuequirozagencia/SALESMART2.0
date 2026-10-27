@@ -317,6 +317,19 @@ export class ContactsService {
   }
 
   /**
+   * El visitante marcó el consentimiento explícito de un formulario (M9.1, ADR-09): un contacto con consentimiento «sin definir» pasa a «concedido». **Nunca revierte** una revocación (quien pidió no
+   * recibir mensajes lo cambia una persona, no un formulario). Dentro de la transacción del que llama; audita con su origen. Devuelve true si cambió.
+   */
+  async grantConsentIfUnknown(tx: TenantTx, id: string, audit: AuditSource): Promise<boolean> {
+    const row = await this.repo.lockById(tx, id);
+    if (!row || row.consent !== 'unknown') return false;
+    const now = new Date();
+    await tx.update(contacts).set({ consent: 'granted', consentUpdatedAt: now, updatedAt: now }).where(eq(contacts.id, id));
+    await writeAudit(tx, { entityType: 'contact', entityId: id, field: 'consent', oldValue: 'unknown', newValue: 'granted', source: audit });
+    return true;
+  }
+
+  /**
    * Registra un clic de Click-to-WhatsApp (ADR-45): el PRIMER toque nunca se sobrescribe; el último sí (salvo un clic más antiguo que el último registrado);
    * el mismo `ctwa_cl_id` que ya es el último no cambia nada. Devuelve qué se tocó.
    */

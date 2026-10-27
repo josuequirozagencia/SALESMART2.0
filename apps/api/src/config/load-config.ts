@@ -34,6 +34,8 @@ export interface AppConfig {
     readonly resendApiKey: string | undefined;
     readonly mailFrom: string | undefined;
     readonly turnstileSecret: string | undefined;
+    /** Clave pública de Turnstile para los formularios embebibles (no es secreta). */
+    readonly turnstileSiteKey: string | undefined;
     /** Llavero de la bóveda de credenciales de proveedores (ADR-42): claves en base64 (el decodificado lo hace la bóveda). Undefined = sin bóveda. */
     readonly credentialsKeys: { readonly current: { readonly version: number; readonly key: string }; readonly previous: { readonly version: number; readonly key: string } | undefined } | undefined;
   };
@@ -224,7 +226,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       verifyIpMaxPerHour: e.SIGNUP_VERIFY_IP_MAX_PER_HOUR,
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
-    providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, credentialsKeys },
+    providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, turnstileSiteKey: e.TURNSTILE_SITE_KEY, credentialsKeys },
     channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER },
     ai: { provider: e.AI_PROVIDER },
     attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },

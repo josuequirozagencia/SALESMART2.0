@@ -84,6 +84,39 @@ export class CustomValuesService {
     return out;
   }
 
+  /**
+   * Llena en un contacto los campos personalizados que mandó un formulario (M9.1, ADR-09/54): **solo los que están vacíos**; lo que el contacto ya tiene, lo haya escrito quien lo haya escrito, no se
+   * cambia. Cada campo se decide por separado y no falla por completo: el campo debe existir y estar activo, y el valor ser válido para su tipo. Escribe sin usuario (`updated_by` nulo).
+   */
+  async fillEmpty(tx: TenantTx, contactId: string, input: Readonly<Record<string, unknown>>): Promise<AiFieldOutcome> {
+    const defs = new Map((await this.repo.list(tx, 'contact', false)).map((d) => [d.varKey, d]));
+    const out: AiFieldOutcome = { changes: [], unchanged: [], rejected: [] };
+    const prepared: Array<{ def: DefinitionRow; norm: Normalized }> = [];
+    for (const [key, raw] of Object.entries(input)) {
+      const def = defs.get(key);
+      if (!def) {
+        out.rejected.push({ key, reason: 'ese campo no existe o está archivado' });
+        continue;
+      }
+      const r = coerceValue(def.type as FieldType, def.options, raw);
+      if (!r.ok) out.rejected.push({ key, reason: r.message });
+      else if (r.value !== null) prepared.push({ def, norm: r.value });
+    }
+    if (prepared.length === 0) return out;
+    const existing = new Map((await this.repo.valuesOf(tx, 'contact', [contactId], prepared.map((p) => p.def.id))).map((r) => [r.definitionId, r]));
+    for (const { def, norm } of prepared) {
+      const row = existing.get(def.id);
+      const oldValue = row ? fromColumns(def.type as FieldType, row) : null;
+      if (oldValue !== null) {
+        out.unchanged.push(def.varKey);
+        continue;
+      }
+      await this.repo.upsertValue(tx, { entity: 'contact', entityId: contactId, definitionId: def.id }, toColumns(norm), null);
+      out.changes.push({ key: def.varKey, oldValue: null, newValue: display(norm) });
+    }
+    return out;
+  }
+
   /** Los campos ACTIVOS de los contactos con esas variables, en el orden pedido (los archivados o inexistentes no aparecen). */
   async contactFields(tx: TenantTx, keys: readonly string[]): Promise<AiFieldDef[]> {
     const byKey = new Map((await this.repo.list(tx, 'contact', false)).map((d) => [d.varKey, d]));

@@ -49,6 +49,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'AGENT_TEST_LIMIT': case 'AGENT_EXISTS': case 'AGENT_LIMIT': case 'AGENT_INCOMPLETE': case 'AGENT_CHUNK_LIMIT': case 'CHANNEL_HAS_AGENT': case 'AGENT_PHOTO_TOO_LARGE': case 'AGENT_PHOTO_UNSUPPORTED': case 'AGENT_PHOTO_EMPTY': case 'AGENT_PHOTO_UPLOAD_FAILED': return e.message;
     // Conocimiento (ADR-53): el servidor ya redacta el motivo
     case 'DOCUMENT_EXISTS': case 'DOCUMENT_LIMIT': case 'DOCUMENT_BUSY': case 'DOCUMENT_TOO_LARGE': case 'DOCUMENT_UNSUPPORTED': case 'DOCUMENT_EMPTY': case 'DOCUMENT_UPLOAD_FAILED': return e.message;
+    // Formularios (ADR-09/54): el servidor ya redacta el motivo
+    case 'FORM_EXISTS': case 'FORM_LIMIT': case 'FORM_INCOMPLETE': return e.message;
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo
     case 'HOLIDAY_EXISTS': case 'HOLIDAY_LIMIT': return e.message;
     // Inbox (ADR-16/50): el servidor ya redacta el motivo
