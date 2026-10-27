@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { DomainEvent, DomainEventType } from '../events';
+import { parseDestination } from './address-guard';
 
 /**
  * Modelo PURO de las automatizaciones (M9.3, ADR-54; F20): la forma válida de una regla (disparador, condiciones y acciones), si un hecho la dispara y si un contacto cumple sus condiciones.
@@ -156,7 +157,7 @@ function meets(c: ConditionDef, f: ContactFacts): boolean {
 
 // ---------------------------------------------------------------------------------------------- acciones
 
-export const ACTION_TYPES = ['assign_user', 'assign_queue', 'move_stage', 'set_field', 'add_tag', 'remove_tag', 'create_task', 'send_text', 'send_template', 'wait', 'run_rule', 'start_agent'] as const;
+export const ACTION_TYPES = ['assign_user', 'assign_queue', 'move_stage', 'set_field', 'add_tag', 'remove_tag', 'create_task', 'send_text', 'send_template', 'wait', 'run_rule', 'start_agent', 'http_request'] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
 export const ACTION_LABEL: Record<ActionType, string> = {
@@ -172,6 +173,7 @@ export const ACTION_LABEL: Record<ActionType, string> = {
   wait: 'Esperar',
   run_rule: 'Ejecutar otra automatización',
   start_agent: 'Activar al agente de IA en la conversación',
+  http_request: 'Llamar a otro sistema (HTTP)',
 };
 
 /** Cuánto puede esperar una regla como mínimo y como máximo en una sola espera. */
@@ -185,6 +187,41 @@ export const waitMs = (a: { amount: number; unit: WaitUnit }): number => a.amoun
 export function waitText(a: { amount: number; unit: WaitUnit }): string {
   const one = a.amount === 1;
   return `${a.amount} ${{ minutes: one ? 'minuto' : 'minutos', hours: one ? 'hora' : 'horas', days: one ? 'día' : 'días' }[a.unit]}`;
+}
+
+/** Cuántas llamadas HTTP puede tener una regla como máximo. */
+export const MAX_HTTP_ACTIONS = 3;
+/** Las variables que puede llevar el cuerpo de una llamada HTTP (nunca la dirección: no se ponen datos personales en una dirección). */
+export const HTTP_VARIABLES = ['nombre', 'primer_nombre', 'correo', 'telefono', 'id'] as const;
+export type HttpVariable = (typeof HTTP_VARIABLES)[number];
+export type HttpVariables = Record<HttpVariable, string>;
+const HTTP_VARIABLE = /\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}/g;
+/** Los valores de ejemplo con los que se comprueba, al guardar, que el cuerpo sigue siendo JSON válido. */
+const HTTP_SAMPLE: HttpVariables = { nombre: 'Ana "la" Pérez', primer_nombre: 'Ana', correo: 'ana@ejemplo.com', telefono: '+593999999999', id: '018f2a5c-0000-7000-8000-000000000000' };
+
+/** Las variables del cuerpo que no existen (vacío si todas son válidas). */
+export function unknownHttpVariables(template: string): string[] {
+  return [...template.matchAll(HTTP_VARIABLE)].map((m) => m[1]!).filter((v) => !(HTTP_VARIABLES as readonly string[]).includes(v.toLowerCase()));
+}
+/** Las variables que el cuerpo usa (para dejar constancia de qué datos salieron). */
+export function httpVariablesUsed(template: string): HttpVariable[] {
+  return [...new Set([...template.matchAll(HTTP_VARIABLE)].map((m) => m[1]!.toLowerCase()).filter((v): v is HttpVariable => (HTTP_VARIABLES as readonly string[]).includes(v)))];
+}
+/** Arma el cuerpo: cada variable se reemplaza por su valor ESCAPADO como texto JSON (un nombre con comillas no rompe ni inyecta nada). */
+export function renderHttpBody(template: string, v: HttpVariables): string {
+  return template.replace(HTTP_VARIABLE, (m, name: string) => {
+    const key = name.toLowerCase() as HttpVariable;
+    return (HTTP_VARIABLES as readonly string[]).includes(key) ? JSON.stringify(v[key]).slice(1, -1) : m;
+  });
+}
+/** Si el cuerpo, ya armado, es un objeto o una lista JSON. */
+export function isJsonContainer(text: string): boolean {
+  try {
+    const j: unknown = JSON.parse(text);
+    return typeof j === 'object' && j !== null;
+  } catch {
+    return false;
+  }
 }
 
 export const actionSchema = z.discriminatedUnion('type', [
@@ -201,6 +238,22 @@ export const actionSchema = z.discriminatedUnion('type', [
     .refine((a) => waitMs(a) >= MIN_WAIT_MS && waitMs(a) <= MAX_WAIT_MS, { message: 'La espera va de 1 minuto a 30 días', path: ['amount'] }),
   z.strictObject({ type: z.literal('run_rule'), automation_id: uuid }),
   z.strictObject({ type: z.literal('start_agent') }),
+  z
+    .strictObject({ type: z.literal('http_request'), method: z.enum(['GET', 'POST']), url: z.string().trim().min(1).max(2000), body: z.string().max(4000).optional() })
+    .superRefine((a, ctx) => {
+      const issue = (path: string, message: string): void => ctx.addIssue({ code: 'custom', path: [path], message });
+      if (a.url.includes('{{')) issue('url', 'La dirección no puede llevar variables: no se ponen datos personales en una dirección');
+      else {
+        const d = parseDestination(a.url);
+        if (!d.ok) issue('url', d.message);
+      }
+      if (a.method === 'GET' && a.body !== undefined && a.body.trim() !== '') issue('body', 'Una llamada GET no lleva cuerpo');
+      if (a.method === 'POST' && a.body !== undefined && a.body.trim() !== '') {
+        const bad = unknownHttpVariables(a.body);
+        if (bad.length > 0) issue('body', `Variable desconocida: ${bad.map((b) => `{{${b}}}`).join(', ')}. Disponibles: ${HTTP_VARIABLES.map((h) => `{{${h}}}`).join(', ')}`);
+        else if (!isJsonContainer(renderHttpBody(a.body, HTTP_SAMPLE))) issue('body', 'El cuerpo debe ser un JSON válido (un objeto o una lista); pon las variables entre comillas, por ejemplo {"nombre": "{{nombre}}"}');
+      }
+    }),
   z.strictObject({ type: z.literal('send_template'), channel_id: uuid, template_id: uuid, params: z.record(z.string().regex(/^(?:(?:header|body):[A-Za-z0-9_]{1,30}|button:\d{1,2}:[A-Za-z0-9_]{1,30})$/), z.string().max(200)).default({}) }),
 ]);
 export type ActionDef = z.infer<typeof actionSchema>;

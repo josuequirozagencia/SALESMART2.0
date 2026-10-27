@@ -1,13 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
-import { automationRuns, automationRunSteps, automations, channelAccounts, contacts, Database, pipelines, pipelineStages, queues, tags, type TenantTx } from '../../db';
+import { automationRuns, automationRunSteps, automations, automationSettings, channelAccounts, contacts, Database, pipelines, pipelineStages, queues, tags, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ValidationError, type ErrorDetail } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { CustomValuesService } from '../custom-fields';
 import { OrgMembersService } from '../organizations';
 import { TemplatesService } from '../templates';
-import { ACTION_LABEL, definitionSchema, renderParam, MAX_AUTOMATIONS, type ActionDef, type ConditionDef, type TriggerDef } from './automation-model';
+import { hostAllowed, parseDestination } from './address-guard';
+import { ACTION_LABEL, definitionSchema, renderParam, MAX_AUTOMATIONS, MAX_HTTP_ACTIONS, type ActionDef, type ConditionDef, type TriggerDef } from './automation-model';
 import type { CreateAutomationDto, RunsQuery, UpdateAutomationDto } from './automations.dto';
 
 const AUDIT = 'automation';
@@ -268,6 +269,9 @@ export class AutomationsService {
 
     // Acciones
     const validate = await this.custom.validator(tx, 'contact');
+    const httpCount = def.actions.filter((a) => a.type === 'http_request').length;
+    if (httpCount > MAX_HTTP_ACTIONS) add('actions', `Una automatización puede tener como máximo ${MAX_HTTP_ACTIONS} llamadas HTTP`, 'too_many');
+    const allowedHosts = httpCount > 0 ? ((await tx.select({ hosts: automationSettings.httpAllowedHosts }).from(automationSettings).limit(1))[0]?.hosts ?? []) : [];
     for (const [i, a] of def.actions.entries()) {
       const p = `actions.${i}`;
       switch (a.type) {
@@ -300,6 +304,11 @@ export class AutomationsService {
         case 'send_text':
         case 'start_agent':
           break;
+        case 'http_request': {
+          const d = parseDestination(a.url);
+          if (d.ok && !hostAllowed(d.host, allowedHosts)) add(`${p}.url`, `El dominio ${d.host} no está en la lista de permitidos: agrégalo en «Destinos permitidos»`, 'host_not_allowed');
+          break;
+        }
         case 'wait':
           if (i === def.actions.length - 1) add(p, 'Después de esperar tiene que haber otra acción: esperar al final no hace nada', 'nothing_after');
           break;

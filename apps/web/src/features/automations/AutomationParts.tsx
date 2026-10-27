@@ -7,8 +7,8 @@ import { useFollowUpTemplates } from '../forms/useForms';
 import { usePipelines } from '../pipelines/usePipelines';
 import { useQueues } from '../queues/useQueues';
 import { useTags } from '../tags/useTags';
-import { ACTION_HINT, ACTION_LABEL, ACTIONS, CONSENT_LABEL, NO_VALUE_OPS, OP_LABEL, opsFor, SOURCE_SUGGESTIONS, TRIGGER_LABEL, TRIGGERS, UNIT_LABEL } from './labels';
-import { useAutomations, type Action, type ActionType, type Condition, type Trigger, type TriggerType, type WaitUnit } from './useAutomations';
+import { ACTION_HINT, ACTION_LABEL, ACTIONS, CONSENT_LABEL, HTTP_VARIABLE_HELP, hostCovered, NO_VALUE_OPS, OP_LABEL, opsFor, SOURCE_SUGGESTIONS, TRIGGER_LABEL, TRIGGERS, UNIT_LABEL } from './labels';
+import { useAutomations, useAutomationSettings, type Action, type ActionType, type Condition, type Trigger, type TriggerType, type WaitUnit } from './useAutomations';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const small = '!px-3 !py-1.5 !text-[12.5px]';
@@ -22,7 +22,8 @@ export function useRuleOptions() {
   const channels = useChannels().data?.items ?? [];
   const people = useOwners(true).data ?? [];
   const rules = useAutomations().data?.items ?? [];
-  return { rules, fields, tags, customTags: tags.filter((t) => !t.is_system), pipelines, queues, channels, official: channels.filter((c) => c.is_official && c.status === 'active'), people };
+  const allowedHosts = useAutomationSettings().data?.http_allowed_hosts ?? [];
+  return { allowedHosts, rules, fields, tags, customTags: tags.filter((t) => !t.is_system), pipelines, queues, channels, official: channels.filter((c) => c.is_official && c.status === 'active'), people };
 }
 type Options = ReturnType<typeof useRuleOptions>;
 
@@ -207,7 +208,7 @@ export function ActionCard({ a, index, count, selfId, onChange, onRemove, onMove
     const t = templates.find((x) => x.id === id);
     onChange({ ...a, template_id: id, params: t ? Object.fromEntries(t.variables.map((v, i) => [v.id, a.params?.[v.id] ?? (i === 0 ? '{{primer_nombre}}' : '')])) : {} });
   };
-  const retype = (type: ActionType): void => onChange(type === 'create_task' ? { type, assignee: 'owner' } : type === 'send_template' ? { type, params: {} } : type === 'wait' ? { type, amount: 1, unit: 'hours' } : { type });
+  const retype = (type: ActionType): void => onChange(type === 'create_task' ? { type, assignee: 'owner' } : type === 'send_template' ? { type, params: {} } : type === 'wait' ? { type, amount: 1, unit: 'hours' } : type === 'http_request' ? { type, method: 'POST', url: '', body: '' } : { type });
   const openStages = o.pipelines.flatMap((p) => p.stages.filter((s) => s.kind === 'open' && !s.is_hidden).map((s) => ({ id: s.id, label: o.pipelines.length > 1 ? `${p.name} · ${s.name}` : s.name })));
   const aria = (what: string): string => `Acción ${n}: ${what}`;
   return (
@@ -272,6 +273,7 @@ export function ActionCard({ a, index, count, selfId, onChange, onRemove, onMove
           </Select>
         </div>
       ) : null}
+      {a.type === 'http_request' ? <HttpFields a={a} aria={aria} set={set} o={o} /> : null}
       {a.type === 'run_rule' ? (
         <Select aria-label={aria('automatización')} value={a.automation_id ?? ''} onChange={(v) => set({ automation_id: v })}>
           <option value="">Elige una automatización</option>
@@ -310,4 +312,38 @@ export function ActionCard({ a, index, count, selfId, onChange, onRemove, onMove
       </div>
     </li>
   );
+}
+
+/** Los datos de una llamada HTTP: método, dirección y cuerpo, con el aviso si el dominio aún no está autorizado. */
+function HttpFields({ a, aria, set, o }: { a: Action; aria: (what: string) => string; set: (p: Partial<Action>) => void; o: Options }) {
+  const method = a.method ?? 'POST';
+  const host = hostOf(a.url);
+  return (
+    <div className="grid gap-2">
+      <div className="grid gap-2 min-[560px]:grid-cols-[8rem_1fr]">
+        <Select aria-label={aria('método')} value={method} onChange={(v) => set({ method: v as 'GET' | 'POST' })}>
+          <option value="POST">POST</option>
+          <option value="GET">GET</option>
+        </Select>
+        <Input aria-label={aria('dirección')} value={a.url ?? ''} maxLength={2000} placeholder="https://hooks.ejemplo.com/..." onChange={(e) => set({ url: e.target.value })} />
+      </div>
+      {a.url && a.url.trim() !== '' && host && !hostCovered(host, o.allowedHosts) ? <p role="alert" className="text-[12.5px] font-semibold text-[var(--crit,#b42318)]">El dominio {host} aún no está autorizado: agrégalo en «Destinos permitidos» (arriba, en la lista de automatizaciones).</p> : null}
+      {method === 'POST' ? (
+        <label className="grid gap-1 text-[13px] font-semibold">
+          Cuerpo (JSON, opcional)
+          <textarea aria-label={aria('cuerpo')} className="min-h-[84px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 font-mono text-[13px] font-normal text-fg" maxLength={4000} value={a.body ?? ''} placeholder={'{"nombre": "{{nombre}}", "telefono": "{{telefono}}"}'} onChange={(e) => set({ body: e.target.value })} />
+          <span className="text-[12px] font-normal text-muted">Variables: {HTTP_VARIABLE_HELP.join(', ')}. Ponlas entre comillas. Salen datos personales del contacto hacia ese dominio.</span>
+        </label>
+      ) : null}
+    </div>
+  );
+}
+
+/** El dominio de una dirección (null si todavía no es una dirección válida: se está escribiendo). */
+function hostOf(url: string | undefined): string | null {
+  try {
+    return url ? new URL(url).hostname : null;
+  } catch {
+    return null;
+  }
 }

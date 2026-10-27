@@ -1,9 +1,10 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Patch, Post, Put, Query } from '@nestjs/common';
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { AutomationDryRunService } from './automation-dry-run.service';
-import { createAutomationSchema, runsQuerySchema, testAutomationSchema, updateAutomationSchema, type CreateAutomationDto, type RunsQuery, type TestAutomationDto, type UpdateAutomationDto } from './automations.dto';
+import { AutomationSettingsService } from './automation-settings.service';
+import { createAutomationSchema, runsQuerySchema, testAutomationSchema, updateAutomationSchema, updateSettingsSchema, type CreateAutomationDto, type RunsQuery, type TestAutomationDto, type UpdateAutomationDto, type UpdateSettingsDto } from './automations.dto';
 import { AutomationsService } from './automations.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -15,12 +16,26 @@ export class AutomationsController {
   constructor(
     @Inject(AutomationsService) private readonly automations: AutomationsService,
     @Inject(AutomationDryRunService) private readonly dryRun: AutomationDryRunService,
+    @Inject(AutomationSettingsService) private readonly settings: AutomationSettingsService,
   ) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
   list() {
     return this.automations.list();
+  }
+
+  /** Ajustes de las automatizaciones: la lista de dominios a los que pueden llamar. Va ANTES de `:id`. */
+  @Get('settings')
+  @Header('Cache-Control', 'no-store')
+  getSettings() {
+    return this.settings.get();
+  }
+
+  @Put('settings')
+  @Header('Cache-Control', 'no-store')
+  putSettings(@Body(new ZodValidationPipe(updateSettingsSchema)) b: UpdateSettingsDto) {
+    return this.settings.update(b);
   }
 
   @Post()

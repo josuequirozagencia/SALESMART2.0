@@ -1,8 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
-import { automations, contactPhones, contacts, conversations, Database, opportunities, pipelineStages, tags, type TenantTx } from '../../db';
+import { automationSettings, automations, contactPhones, contacts, conversations, Database, opportunities, pipelineStages, tags, type TenantTx } from '../../db';
 import { NotFoundError } from '../../errors';
 import { AgentRuntimeService } from '../ai';
+import { hostAllowed, parseDestination } from './address-guard';
 import { OrgMembersService } from '../organizations';
 import { OutreachService } from '../outreach';
 import { AutomationEnqueueService } from './automation-enqueue.service';
@@ -83,6 +84,13 @@ export class AutomationDryRunService {
     const skip = (detail: string): Pick<DryStep, 'would' | 'detail'> => ({ would: 'skip', detail });
     const fail = (detail: string): Pick<DryStep, 'would' | 'detail'> => ({ would: 'fail', detail });
     switch (a.type) {
+      case 'http_request': {
+        const d = parseDestination(a.url);
+        if (!d.ok) return fail(d.message);
+        const [s] = await tx.select({ hosts: automationSettings.httpAllowedHosts }).from(automationSettings).limit(1);
+        if (!hostAllowed(d.host, s?.hosts ?? [])) return fail(`El dominio ${d.host} no está en la lista de permitidos de la empresa`);
+        return doIt(`Llamaría a ${d.host} (${a.method}${a.method === 'POST' && a.body?.trim() ? ', con datos del contacto' : ''})`);
+      }
       case 'wait':
         return doIt(`Esperaría ${waitText(a)} y seguiría con las acciones siguientes`);
       case 'run_rule': {

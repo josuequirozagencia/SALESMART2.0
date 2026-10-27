@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useState, type FormEvent } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import { reason } from './reason';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { AutomationEditor } from './AutomationEditor';
 import { STATUS_KIND, STATUS_LABEL, TRIGGER_LABEL } from './labels';
-import { useAutomationMutations, useAutomations, type Automation } from './useAutomations';
+import { useAutomationMutations, useAutomations, useAutomationSettings, useSaveAutomationSettings, type Automation } from './useAutomations';
 
 function summary(a: Automation): string {
   const parts = [TRIGGER_LABEL[a.trigger.type], `${a.actions.length} ${a.actions.length === 1 ? 'acción' : 'acciones'}`];
@@ -43,7 +44,40 @@ function Row({ a }: { a: Automation }) {
   );
 }
 
+/** La lista de dominios a los que las automatizaciones pueden llamar (acción «llamada HTTP»): uno por línea. */
+function AllowedHostsDialog({ onClose }: { onClose: () => void }) {
+  const q = useAutomationSettings();
+  const save = useSaveAutomationSettings();
+  const [text, setText] = useState<string | null>(null);
+  const [error, setError] = useState<string>();
+  const [ok, setOk] = useState(false);
+  const value = text ?? (q.data?.http_allowed_hosts ?? []).join('\n');
+  const submit = (e: FormEvent): void => {
+    e.preventDefault();
+    setError(undefined);
+    setOk(false);
+    save.mutate(value.split('\n').map((l) => l.trim()).filter((l) => l !== ''), { onSuccess: (r) => { setText(r.http_allowed_hosts.join('\n')); setOk(true); }, onError: (e2) => setError(reason(e2, 'No pudimos guardar los dominios.')) });
+  };
+  return (
+    <Modal title="Destinos permitidos" onClose={onClose}>
+      <form onSubmit={submit} noValidate className="grid gap-3">
+        <p className="text-[13px] text-muted">Las automatizaciones solo pueden llamar (HTTP) a los dominios de esta lista. Escribe uno por línea, por ejemplo <b>hooks.zapier.com</b> o <b>*.n8n.cloud</b> (el comodín cubre los subdominios, no el dominio base). Solo https; nunca direcciones IP.</p>
+        {q.isLoading ? <Spinner label="Cargando los dominios" /> : null}
+        {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los dominios.')}</Alert> : null}
+        <label className="grid gap-1 text-[13px] font-semibold">
+          Dominios autorizados
+          <textarea className="min-h-[120px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 font-mono text-[13px] font-normal text-fg" value={value} onChange={(e) => { setOk(false); setText(e.target.value); }} />
+        </label>
+        {error ? <Alert>{error}</Alert> : null}
+        {ok ? <Alert kind="ok">Dominios guardados.</Alert> : null}
+        <div className="flex justify-end gap-2"><Button type="button" onClick={onClose}>Cerrar</Button><Button type="submit" variant="primary" loading={save.isPending}>Guardar dominios</Button></div>
+      </form>
+    </Modal>
+  );
+}
+
 function List() {
+  const [hosts, setHosts] = useState(false);
   const q = useAutomations();
   const nav = useNavigate();
   const items = q.data?.items ?? [];
@@ -52,13 +86,17 @@ function List() {
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[22px] font-bold">Automatizaciones</h1>
-        <Button variant="primary" disabled={items.length >= max} onClick={() => nav('/automations/new')}>Nueva automatización</Button>
+        <span className="flex flex-wrap gap-2">
+          <Button onClick={() => setHosts(true)}>Destinos permitidos</Button>
+          <Button variant="primary" disabled={items.length >= max} onClick={() => nav('/automations/new')}>Nueva automatización</Button>
+        </span>
       </div>
       <p className="max-w-[70ch] text-[13px] text-muted">Una automatización hace por ti lo repetitivo: <b>cuando ocurre</b> algo (llega un contacto, un mensaje, cambia una etapa…), <b>si se cumple</b> lo que pidas, <b>hace</b> esto otro (asignar, etiquetar, crear una tarea, enviar un mensaje…).</p>
       {q.isLoading ? <Spinner label="Cargando automatizaciones" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')}</Alert> : null}
       {q.data && items.length === 0 ? <p className="text-[13px] text-muted">Aún no tienes automatizaciones. Crea la primera, pruébala con un contacto y luego actívala.</p> : null}
       {items.length > 0 ? <ul aria-label="Automatizaciones" className="grid gap-2">{items.map((a) => <Row key={a.id} a={a} />)}</ul> : null}
+      {hosts ? <AllowedHostsDialog onClose={() => setHosts(false)} /> : null}
     </div>
   );
 }

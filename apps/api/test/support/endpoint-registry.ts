@@ -249,6 +249,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Automatizaciones (M9.3, ADR-54). Pruebas: test/automations/automations.test.ts (A↔B, permisos, validación, motor, ciclos, atomicidad)
   { route: 'GET /v1/automations', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'POST /v1/automations', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'GET /v1/automations/settings', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'PUT /v1/automations/settings', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'GET /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'PATCH /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'POST /v1/automations/:id/activate', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },

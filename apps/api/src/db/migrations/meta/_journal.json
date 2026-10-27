@@ -701,6 +701,20 @@
       "when": 1793102611076,
       "tag": "0099_m95a_automation_waits",
       "breakpoints": true
+    },
+    {
+      "idx": 100,
+      "version": "7",
+      "when": 1793111213768,
+      "tag": "0100_m95b_automation_settings",
+      "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793111230452,
+      "tag": "0101_m95b_automation_settings_grants",
+      "breakpoints": true
     }
   ]
 }

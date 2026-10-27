@@ -7,6 +7,24 @@ import { users } from './identity';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
+/**
+ * Ajustes de las automatizaciones de la empresa (M9.5b, ADR-54). Una fila por empresa, que se crea al primer cambio. `http_allowed_hosts` es la **lista de permitidos** de la acción «llamada HTTP»:
+ * solo se puede llamar a estos dominios (exactos o `*.dominio`). Sin fila no hay ninguno: la acción no puede llamar a nada hasta que el administrador autorice un dominio. Sin DELETE.
+ */
+export const automationSettings = tenantTable(
+  'automation_settings',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    httpAllowedHosts: text('http_allowed_hosts').array().notNull().default(sql`'{}'::text[]`),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('automation_settings_hosts_len', sql`cardinality(${t['httpAllowedHosts']!}) <= 20`),
+    uniqueIndex('automation_settings_org_uq').on(t['organizationId']!),
+  ],
+);
+
 export const AUTOMATION_TRIGGERS = ['contact_created', 'message_received', 'opportunity_created', 'stage_changed', 'field_changed', 'sale_created'] as const;
 
 /**

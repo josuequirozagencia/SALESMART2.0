@@ -6,6 +6,8 @@
 //   POST /v1/automations/:id/activate
 //   POST /v1/automations/:id/pause
 //   POST /v1/automations/:id/test
+//   GET /v1/automations/settings
+//   PUT /v1/automations/settings
 //   GET /v1/automations/:id/runs
 //   DELETE /v1/automations/:id
 import 'reflect-metadata';
@@ -24,6 +26,7 @@ import { DomainEventBus } from '../../src/modules/events';
 import { AutomationsJob, AutomationsModule } from '../../src/modules/automations';
 import { AutomationActionsService } from '../../src/modules/automations/automation-actions.service';
 import { MAX_AUTOMATIONS, MAX_DEPTH, MAX_RUNS_PER_CONTACT_HOUR } from '../../src/modules/automations/automation-model';
+import { FakeOutboundHttp, OUTBOUND_HTTP, OutboundError } from '../../src/modules/automations/outbound-http';
 import { ChannelsModule } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
 import { CustomFieldsModule } from '../../src/modules/custom-fields';
@@ -62,7 +65,7 @@ let T: Record<'alice' | 'carol' | 'bob', string>;
 const saved = { ...process.env };
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE automation_run_steps, automation_runs, automations, message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, whatsapp_accounts, channel_routes, channel_accounts, tasks, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, custom_field_values, custom_field_definitions, contact_phones, contacts, queue_members, queue_distribution_state, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE automation_settings, automation_run_steps, automation_runs, automations, message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, whatsapp_accounts, channel_routes, channel_accounts, tasks, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, custom_field_values, custom_field_definitions, contact_phones, contacts, queue_members, queue_distribution_state, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
   }
@@ -141,8 +144,8 @@ beforeAll(async () => {
   admin = new Client({ connectionString: info.adminDbUrl });
   await admin.connect();
   hash = await new Argon2idHasher().hash(PW);
-  for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'STORAGE_PROVIDER', 'VIRUS_SCANNER', 'AUDIO_TRANSCODER', 'AI_PROVIDER', 'CAPI_PROVIDER', 'WHATSAPP_PROVIDER', 'PROVIDER_CREDENTIALS_KEY']) delete process.env[k];
-  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: process.env['TEST_LOG'] ?? 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: 'http://localhost:5173', MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', STORAGE_PROVIDER: 'fake', VIRUS_SCANNER: 'fake', AI_PROVIDER: 'fake', CAPI_PROVIDER: 'fake', WHATSAPP_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: randomBytes(32).toString('base64') });
+  for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'STORAGE_PROVIDER', 'VIRUS_SCANNER', 'AUDIO_TRANSCODER', 'AI_PROVIDER', 'HTTP_OUT_PROVIDER', 'CAPI_PROVIDER', 'WHATSAPP_PROVIDER', 'PROVIDER_CREDENTIALS_KEY']) delete process.env[k];
+  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: process.env['TEST_LOG'] ?? 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: 'http://localhost:5173', MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', STORAGE_PROVIDER: 'fake', VIRUS_SCANNER: 'fake', AI_PROVIDER: 'fake', HTTP_OUT_PROVIDER: 'fake', CAPI_PROVIDER: 'fake', WHATSAPP_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: randomBytes(32).toString('base64') });
   delete process.env['DATABASE_URL_OWNER'];
   app = await NestFactory.create(TestAppModule, { logger: false, abortOnError: false });
   configureApp(app);
@@ -897,5 +900,191 @@ describe('prueba en seco de las acciones nuevas', () => {
     expect(out.actions[1]!.detail).toContain('2 horas');
     expect(out.actions[3]!.detail).toBe('No hay una conversación abierta con el contacto');
     expect(await snapshot()).toEqual(before);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════ M9.5b: llamada HTTP
+
+describe('llamada HTTP: lista de permitidos', () => {
+  const settings = (token: string | undefined, hosts: unknown) => call('PUT', '/automations/settings', token, { http_allowed_hosts: hosts });
+
+  it('sin sesión 401, el asesor 403 y cada empresa tiene su propia lista (A↔B)', async () => {
+    expect((await call('GET', '/automations/settings')).status).toBe(401);
+    expect((await settings(undefined, [])).status).toBe(401);
+    expect((await call('GET', '/automations/settings', T.carol)).status).toBe(403);
+    expect((await settings(T.carol, ['mi-sistema.com'])).status).toBe(403);
+    expect(await json(await call('GET', '/automations/settings', T.alice))).toEqual({ http_allowed_hosts: [], limits: { max_hosts: 20 } });
+    expect((await settings(T.alice, ['mi-sistema.com'])).status).toBe(200);
+    expect((await json<{ http_allowed_hosts: string[] }>(await call('GET', '/automations/settings', T.alice))).http_allowed_hosts).toEqual(['mi-sistema.com']);
+    expect((await json<{ http_allowed_hosts: string[] }>(await call('GET', '/automations/settings', T.bob))).http_allowed_hosts).toEqual([]);
+  });
+
+  it('normaliza y quita repetidos; rechaza IP, localhost, direcciones completas y más de 20, con el motivo; y deja auditoría', async () => {
+    const ok = await json<{ http_allowed_hosts: string[] }>(await settings(T.alice, [' Mi-Sistema.COM ', 'mi-sistema.com', '*.n8n.cloud']));
+    expect(ok.http_allowed_hosts).toEqual(['mi-sistema.com', '*.n8n.cloud']);
+    expect((await admin.query(`SELECT source, new_value FROM audit_logs WHERE entity_type = 'automation_settings' AND field = 'http_allowed_hosts'`)).rows).toEqual([{ source: 'manual', new_value: ['mi-sistema.com', '*.n8n.cloud'] }]);
+    for (const bad of [['127.0.0.1'], ['localhost'], ['https://mi-sistema.com'], ['mi-sistema.com:8080'], ['*'], ['8.8.8.8'], ['bien.com', '10.0.0.1']]) {
+      const r = await settings(T.alice, bad);
+      expect(r.status, JSON.stringify(bad)).toBe(400);
+      expect(JSON.stringify(await r.json())).toContain('no es un dominio válido');
+    }
+    expect((await settings(T.alice, Array.from({ length: 21 }, (_, i) => `d${i}.ejemplo.com`))).status).toBe(400);
+    expect((await settings(T.alice, 'mi-sistema.com')).status).toBe(400);
+    // lo que no cambió no deja otro rastro
+    await settings(T.alice, ['mi-sistema.com', '*.n8n.cloud']);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM audit_logs WHERE entity_type = 'automation_settings'`)).rows[0].n).toBe(1);
+  });
+});
+
+describe('llamada HTTP: validación al guardar', () => {
+  const http = (over: Record<string, unknown> = {}) => ({ type: 'http_request', method: 'POST', url: 'https://hooks.ejemplo.com/hook/abc', body: '{"nombre": "{{nombre}}"}', ...over });
+  const mk1 = (a: unknown) => call('POST', '/automations', T.alice, body('Llamada ' + Math.random(), { type: 'contact_created', filter: {} }, [a]));
+
+  it('el dominio debe estar en la lista; con él autorizado se guarda', async () => {
+    const r = await mk1(http());
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(await r.json())).toContain('no está en la lista de permitidos');
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: ['hooks.ejemplo.com'] });
+    expect((await mk1(http())).status).toBe(201);
+    // un comodín cubre subdominios, no el dominio base
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: ['*.ejemplo.com'] });
+    expect((await mk1(http())).status).toBe(201);
+    expect((await mk1(http({ url: 'https://ejemplo.com/x' }))).status).toBe(400);
+  });
+
+  it('rechaza direcciones que no son https, con puerto, con credenciales, IP, localhost o con variables', async () => {
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: ['hooks.ejemplo.com'] });
+    for (const url of ['http://hooks.ejemplo.com/x', 'https://hooks.ejemplo.com:8443/x', 'https://u:p@hooks.ejemplo.com/x', 'https://127.0.0.1/x', 'https://localhost/x', 'https://[::1]/x', 'https://2130706433/x', 'https://hooks.ejemplo.com/{{telefono}}', 'no-es-una-direccion', '']) {
+      expect((await mk1(http({ url }))).status, url).toBe(400);
+    }
+  });
+
+  it('el cuerpo debe ser JSON con variables conocidas; GET no lleva cuerpo; las formas desconocidas se rechazan', async () => {
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: ['hooks.ejemplo.com'] });
+    for (const b of ['no es json', '"solo texto"', '{"a": {{id}}}', '{"clave": "{{password}}"}', '{"a": 1']) expect((await mk1(http({ body: b }))).status, b).toBe(400);
+    expect((await mk1(http({ method: 'GET', body: '{"a":1}' }))).status).toBe(400);
+    expect((await mk1(http({ method: 'GET', body: undefined }))).status).toBe(201);
+    expect((await mk1(http({ method: 'POST', body: undefined }))).status).toBe(201);
+    expect((await mk1(http({ method: 'PUT' }))).status).toBe(400);
+    expect((await mk1(http({ method: 'DELETE' }))).status).toBe(400);
+    expect((await mk1(http({ headers: { Authorization: 'x' } }))).status).toBe(400);
+  });
+
+  it('una regla puede tener a lo sumo 3 llamadas HTTP', async () => {
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: ['hooks.ejemplo.com'] });
+    const four = [http(), http(), http(), http()];
+    const r = await call('POST', '/automations', T.alice, body('Cuatro', { type: 'contact_created', filter: {} }, four));
+    expect(r.status).toBe(400);
+    expect(JSON.stringify(await r.json())).toContain('como máximo 3 llamadas HTTP');
+    expect((await call('POST', '/automations', T.alice, body('Tres', { type: 'contact_created', filter: {} }, four.slice(0, 3)))).status).toBe(201);
+  });
+});
+
+describe('llamada HTTP: ejecución', () => {
+  const fake = (): FakeOutboundHttp => app.get(OUTBOUND_HTTP, { strict: false }) as FakeOutboundHttp;
+  const http = (over: Record<string, unknown> = {}) => ({ type: 'http_request', method: 'POST', url: 'https://hooks.ejemplo.com/hook/secreto-123?token=abc', body: '{"nombre": "{{nombre}}", "correo": "{{correo}}", "telefono": "{{telefono}}", "id": "{{id}}"}', ...over });
+  const allowed = async () => call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: ['hooks.ejemplo.com'] });
+  const withContact = async (name = 'Lucía Paredes') => mkContact(T.alice, name, { email: 'lucia@ejemplo.com', phones: ['+593984217730'] });
+
+  it('llama una vez con el cuerpo armado (valores escapados), la llave de idempotencia y deja solo el dominio en el historial y la auditoría', async () => {
+    fake().reset();
+    await allowed();
+    const r = await live(T.alice, body('Avisar', { type: 'contact_created', filter: {} }, [http()]));
+    const c = await withContact('Ana "la" Pérez');
+    await drain();
+    expect(fake().sent).toHaveLength(1);
+    const sent = fake().sent[0]!;
+    expect(sent.method).toBe('POST');
+    expect(sent.url.href).toBe('https://hooks.ejemplo.com/hook/secreto-123?token=abc');
+    expect(JSON.parse(sent.body!)).toEqual({ nombre: 'Ana "la" Pérez', correo: 'lucia@ejemplo.com', telefono: '+593984217730', id: c });
+    const [run] = await runsOf(T.alice, r.id);
+    expect(sent.idempotencyKey).toBe(`${run!.id}:1`);
+    expect(run).toMatchObject({ status: 'done' });
+    expect(run!.steps[0]).toMatchObject({ action: 'http_request', outcome: 'done', detail: 'Llamada a hooks.ejemplo.com: respondió 200' });
+    const audit = (await admin.query(`SELECT source, new_value FROM audit_logs WHERE entity_type = 'contact' AND field = 'http_request'`)).rows;
+    expect(audit).toEqual([{ source: 'automation', new_value: { host: 'hooks.ejemplo.com', method: 'POST', status: 200, variables: ['nombre', 'correo', 'telefono', 'id'] } }]);
+    expect(JSON.stringify([audit, run])).not.toMatch(/secreto-123|token=abc|lucia@ejemplo|593984217730/);
+  });
+
+  it('GET sin cuerpo y POST sin cuerpo se mandan sin datos del contacto', async () => {
+    fake().reset();
+    await allowed();
+    await live(T.alice, body('Solo avisar', { type: 'contact_created', filter: {} }, [http({ method: 'GET', body: undefined }), http({ method: 'POST', body: undefined })]));
+    await withContact();
+    await drain();
+    expect(fake().sent.map((s) => [s.method, s.body])).toEqual([['GET', null], ['POST', null]]);
+    expect(fake().sent.map((s) => s.idempotencyKey.split(':')[1])).toEqual(['1', '2']);
+  });
+
+  it('un código de error o una redirección fallan el paso (con su motivo), no se reintentan y no frenan las demás acciones', async () => {
+    fake().reset();
+    await allowed();
+    const tag = await mkTag(T.alice, 'Despues');
+    const r = await live(T.alice, body('Falla', { type: 'contact_created', filter: {} }, [http(), http(), { type: 'add_tag', tag_id: tag }]));
+    fake().reply({ status: 500 }, { status: 302 });
+    const c = await withContact();
+    await drain();
+    const [run] = await runsOf(T.alice, r.id);
+    expect(run!.steps.map((s) => [s.outcome, s.detail])).toEqual([['failed', 'hooks.ejemplo.com respondió 500'], ['failed', 'hooks.ejemplo.com respondió 302: las redirecciones no se siguen'], ['done', expect.any(String)]]);
+    expect(run).toMatchObject({ status: 'failed', reason: '2 acciones fallaron' });
+    expect(await tagNames(c)).toEqual(['Despues']);
+    expect(fake().sent).toHaveLength(2); // sin reintentos
+    expect((await dbRuns())[0]!['attempts']).toBe(0);
+    // aunque el destino respondió con error, lo que ya salió queda auditado
+    expect((await admin.query(`SELECT new_value->>'status' AS s FROM audit_logs WHERE field = 'http_request' ORDER BY id`)).rows.map((x) => x.s)).toEqual(['500', '302']);
+  });
+
+  it('un fallo de red (tiempo agotado, dirección bloqueada, sin conexión) falla el paso con un texto sin la dirección', async () => {
+    fake().reset();
+    await allowed();
+    const r = await live(T.alice, body('Red', { type: 'contact_created', filter: {} }, [http(), http(), http()]));
+    fake().reply(new OutboundError('timeout', 'El servidor de destino tardó demasiado en responder'), new OutboundError('blocked', 'El destino apunta a una dirección que no es pública y no se permite'), new OutboundError('connect', 'No se pudo conectar con el servidor de destino'));
+    await withContact();
+    await drain();
+    const [run] = await runsOf(T.alice, r.id);
+    expect(run!.steps.map((s) => s.detail)).toEqual(['Llamada a hooks.ejemplo.com: El servidor de destino tardó demasiado en responder', 'Llamada a hooks.ejemplo.com: El destino apunta a una dirección que no es pública y no se permite', 'Llamada a hooks.ejemplo.com: No se pudo conectar con el servidor de destino']);
+    expect(JSON.stringify(run)).not.toMatch(/secreto-123|token=abc/);
+    // no salió ningún dato: no hay auditoría de envío
+    expect((await admin.query(`SELECT count(*)::int AS n FROM audit_logs WHERE field = 'http_request'`)).rows[0].n).toBe(0);
+  });
+
+  it('si el dominio se quita de la lista DESPUÉS de guardar la regla, la llamada no sale y el paso falla con el motivo', async () => {
+    fake().reset();
+    await allowed();
+    const r = await live(T.alice, body('Quitada', { type: 'contact_created', filter: {} }, [http()]));
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: [] });
+    await withContact();
+    await drain();
+    expect(fake().sent).toHaveLength(0);
+    expect((await runsOf(T.alice, r.id))[0]!.steps[0]).toMatchObject({ outcome: 'failed', detail: 'El dominio hooks.ejemplo.com no está en la lista de permitidos de la empresa' });
+  });
+
+  it('la lista de una empresa no autoriza a la otra', async () => {
+    fake().reset();
+    await call('PUT', '/automations/settings', T.bob, { http_allowed_hosts: ['hooks.ejemplo.com'] });
+    expect((await call('POST', '/automations', T.alice, body('De A', { type: 'contact_created', filter: {} }, [http()]))).status).toBe(400);
+  });
+
+  it('un contacto sin correo ni teléfono manda esos valores vacíos (no «undefined» ni «null»)', async () => {
+    fake().reset();
+    await allowed();
+    await live(T.alice, body('Vacíos', { type: 'contact_created', filter: {} }, [http()]));
+    await mkContact(T.alice, 'Sin datos');
+    await drain();
+    expect(JSON.parse(fake().sent[0]!.body!)).toMatchObject({ nombre: 'Sin datos', correo: '', telefono: '' });
+  });
+
+  it('la prueba en seco dice que llamaría (o por qué no) sin llamar a nadie', async () => {
+    fake().reset();
+    await allowed();
+    const r = await mk(T.alice, body('Probar', { type: 'contact_created', filter: {} }, [http(), http({ method: 'GET', body: undefined })]));
+    const c = await withContact();
+    await call('PUT', '/automations/settings', T.alice, { http_allowed_hosts: [] });
+    const out = await json<{ actions: Array<{ would: string; detail: string }> }>(await call('POST', `/automations/${r.id}/test`, T.alice, { contact_id: c }));
+    expect(out.actions.map((a) => a.would)).toEqual(['fail', 'fail']);
+    await allowed();
+    const ok = await json<{ actions: Array<{ would: string; detail: string }> }>(await call('POST', `/automations/${r.id}/test`, T.alice, { contact_id: c }));
+    expect(ok.actions.map((a) => [a.would, a.detail])).toEqual([['do', 'Llamaría a hooks.ejemplo.com (POST, con datos del contacto)'], ['do', 'Llamaría a hooks.ejemplo.com (GET)']]);
+    expect(fake().sent).toHaveLength(0);
   });
 });

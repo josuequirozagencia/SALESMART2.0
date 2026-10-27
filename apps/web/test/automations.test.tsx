@@ -23,8 +23,8 @@ const DRY: DryRun = {
   actions: [{ position: 1, action: 'add_tag', label: 'Poner una etiqueta', would: 'do', detail: 'Pondría la etiqueta «Nuevo»', after_wait: false }, { position: 2, action: 'create_task', label: 'Crear una tarea', would: 'skip', detail: 'El contacto no tiene responsable a quien asignarle la tarea', after_wait: false }],
 };
 
-interface World { others: Automation[]; rule: Automation | null; calls: Record<string, Call[]>; runs: Run[]; dry: DryRun; fail?: Record<string, () => ReturnType<Handler>> }
-const world = (over: Partial<World> = {}): World => ({ others: [], rule: RULE, calls: {}, runs: [], dry: DRY, ...over });
+interface World { hosts: string[]; others: Automation[]; rule: Automation | null; calls: Record<string, Call[]>; runs: Run[]; dry: DryRun; fail?: Record<string, () => ReturnType<Handler>> }
+const world = (over: Partial<World> = {}): World => ({ hosts: [], others: [], rule: RULE, calls: {}, runs: [], dry: DRY, ...over });
 const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
 
 function server(w: World, me = ME_ADMIN): Record<string, Handler> {
@@ -39,6 +39,11 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
     'GET /contacts/owners': () => ({ body: { items: [{ id: 'u1', name: 'Ana Pérez', email: 'ana@empresa.test', role: 'client_admin' }, { id: 'u9', name: 'Carolina Vera', email: 'caro@empresa.test', role: 'advisor' }] } }),
     'GET /channels/c1/templates': () => ({ body: { items: [{ id: 'tp1', channel_id: 'c1', name: 'seguimiento', language: 'es', category: 'utility', status: 'approved', parameter_format: 'named', header: null, body: 'Hola {{nombre}}, ¿pudiste revisar la propuesta?', footer: null, buttons: [], variables: [{ id: 'body:nombre', part: 'body', key: 'nombre', buttonIndex: null, example: 'Ana' }], sendable: true, unsupported_reason: null, rejected_reason: null, synced_at: AT }], synced_at: AT, sync_error: null } }),
     'GET /contacts': guard('contacts', () => ({ body: { items: [{ id: 'c1', name: 'Lucía Paredes', email: null, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null, custom_fields: {}, tags: [], companies: [] }], next_cursor: null, total: null, access: {} } as never })),
+    'GET /automations/settings': () => ({ body: { http_allowed_hosts: w.hosts, limits: { max_hosts: 20 } } }),
+    'PUT /automations/settings': guard('settings', (c) => {
+      w.hosts = (c.body as { http_allowed_hosts: string[] }).http_allowed_hosts.map((h) => h.toLowerCase());
+      return { body: { http_allowed_hosts: w.hosts, limits: { max_hosts: 20 } } };
+    }),
     'GET /automations': guard('list', () => ({ body: { items: [...(w.rule ? [w.rule] : []), ...w.others], limits: { max_automations: 50 } } })),
     'POST /automations': guard('create', (c) => {
       const b = c.body as Pick<Automation, 'name' | 'description' | 'trigger' | 'conditions' | 'actions'>;
@@ -353,3 +358,64 @@ describe('Automatizaciones · esperar, ejecutar otra regla y activar al agente',
     expect(res.getByText(/después de esperar: se estima con lo de ahora/)).toBeInTheDocument();
   });
 });
+
+describe('Automatizaciones · llamada HTTP y destinos permitidos', () => {
+  it('«Destinos permitidos» muestra la lista, guarda una por línea y enseña el motivo del servidor si un dominio no vale', async () => {
+    const w = world({ hosts: ['hooks.zapier.com'] });
+    mockApi(server(w));
+    renderApp('/automations');
+    await userEvent.click(await screen.findByRole('button', { name: 'Destinos permitidos' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Destinos permitidos' }));
+    const box = await dlg.findByLabelText('Dominios autorizados');
+    await waitFor(() => expect(box).toHaveValue('hooks.zapier.com'));
+    await userEvent.type(box, '\n  *.n8n.cloud  \n\n');
+    await userEvent.click(dlg.getByRole('button', { name: 'Guardar dominios' }));
+    await waitFor(() => expect(w.calls['settings']).toHaveLength(1));
+    expect(w.calls['settings']![0]!.body).toEqual({ http_allowed_hosts: ['hooks.zapier.com', '*.n8n.cloud'] });
+    expect(await dlg.findByText('Dominios guardados.')).toBeInTheDocument();
+  });
+
+  it('un dominio inválido muestra el detalle que da el servidor', async () => {
+    const w = world({ fail: { settings: () => ({ status: 400, body: { error: { code: 'VALIDATION_ERROR', message: 'x', request_id: 'r', details: [{ path: 'http_allowed_hosts.0', code: 'invalid', message: '«127.0.0.1» no es un dominio válido: escribe un nombre como «mi-sistema.com»' }] } } }) } });
+    mockApi(server(w));
+    renderApp('/automations');
+    await userEvent.click(await screen.findByRole('button', { name: 'Destinos permitidos' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Destinos permitidos' }));
+    await userEvent.type(await dlg.findByLabelText('Dominios autorizados'), '127.0.0.1');
+    await userEvent.click(dlg.getByRole('button', { name: 'Guardar dominios' }));
+    expect(await dlg.findByText(/no es un dominio válido/)).toBeInTheDocument();
+  });
+
+  it('una llamada HTTP pide método, dirección y cuerpo; avisa si el dominio no está autorizado; GET no tiene cuerpo; se guarda tal como la espera el servidor', async () => {
+    const w = world({ hosts: ['hooks.zapier.com'], rule: { ...RULE, actions: [{ type: 'add_tag', tag_id: 't1' }] } });
+    mockApi(server(w));
+    renderApp('/automations/a1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Agregar acción' }));
+    await userEvent.selectOptions(screen.getByLabelText('Acción 2: qué hacer'), 'Llamar a otro sistema (HTTP)');
+    expect(screen.getByLabelText('Acción 2: método')).toHaveValue('POST');
+    const url = screen.getByLabelText('Acción 2: dirección');
+    await userEvent.type(url, 'https://otro-sistema.com/hook');
+    expect(await screen.findByRole('alert')).toHaveTextContent('otro-sistema.com aún no está autorizado');
+    await userEvent.clear(url);
+    await userEvent.type(url, 'https://hooks.zapier.com/hooks/catch/1/abc');
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    expect(screen.getByText(/Salen datos personales del contacto hacia ese dominio/)).toBeInTheDocument();
+    fireBody(screen.getByLabelText('Acción 2: cuerpo'), '{"nombre": "{{nombre}}"}');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
+    expect((w.calls['patch']![0]!.body as { actions: unknown[] }).actions[1]).toEqual({ type: 'http_request', method: 'POST', url: 'https://hooks.zapier.com/hooks/catch/1/abc', body: '{"nombre": "{{nombre}}"}' });
+    // con GET el cuerpo desaparece y no se manda
+    await userEvent.selectOptions(screen.getByLabelText('Acción 2: método'), 'GET');
+    expect(screen.queryByLabelText('Acción 2: cuerpo')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(2));
+    expect((w.calls['patch']![1]!.body as { actions: unknown[] }).actions[1]).toEqual({ type: 'http_request', method: 'GET', url: 'https://hooks.zapier.com/hooks/catch/1/abc' });
+  });
+});
+
+/** Escribe un texto con llaves en un campo (userEvent.type interpreta «{» como una tecla especial). */
+function fireBody(el: HTMLElement, text: string): void {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!;
+  setter.call(el, text);
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}

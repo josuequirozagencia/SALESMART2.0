@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { automations, contactPhones, contacts, conversations, tags, tasks, type TenantTx } from '../../db';
+import { automations, automationSettings, contactPhones, contacts, conversations, tags, tasks, type TenantTx } from '../../db';
 import { AppError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AgentRuntimeService } from '../ai';
@@ -12,18 +12,22 @@ import type { OrgDirectory } from '../organizations';
 import { OutreachService } from '../outreach';
 import { AssignmentService } from '../queues';
 import { ContactTaggingService } from '../tags';
+import { hostAllowed, parseDestination } from './address-guard';
 import { AutomationEnqueueService } from './automation-enqueue.service';
-import { renderParam, renderText, type ActionDef } from './automation-model';
+import { httpVariablesUsed, renderHttpBody, renderParam, renderText, type ActionDef } from './automation-model';
+import { OUTBOUND_HTTP, OUTBOUND_MAX_BODY_BYTES, OutboundError, type OutboundHttp } from './outbound-http';
 
 /** Lo que una acción necesita saber de la ejecución. */
 export interface ActionContext {
   readonly contactId: string;
   readonly now: Date;
   readonly dir: OrgDirectory;
+  /** Posición de la acción en la ejecución (para la llave de idempotencia de una llamada HTTP). */
+  readonly step: number;
 }
 
 export interface StepOutcome {
-  readonly outcome: 'done' | 'skipped';
+  readonly outcome: 'done' | 'skipped' | 'failed';
   /** Una frase corta, sin datos personales (se guarda en el historial de la ejecución). */
   readonly detail: string;
 }
@@ -51,6 +55,7 @@ export class AutomationActionsService {
     @Inject(OutreachService) private readonly outreach: OutreachService,
     @Inject(AutomationEnqueueService) private readonly enqueue: AutomationEnqueueService,
     @Inject(AgentRuntimeService) private readonly agents: AgentRuntimeService,
+    @Inject(OUTBOUND_HTTP) private readonly outbound: OutboundHttp,
   ) {}
 
   async execute(tx: TenantTx, a: ActionDef, ctx: ActionContext): Promise<StepOutcome> {
@@ -77,6 +82,8 @@ export class AutomationActionsService {
           return await this.runRule(tx, a.automation_id, ctx);
         case 'start_agent':
           return await this.startAgent(tx, ctx);
+        case 'http_request':
+          return await this.httpRequest(tx, a, ctx);
         case 'wait':
           throw new ActionFailed('La espera la maneja el motor, no una acción'); // no debería llegar: el motor corta aquí la ejecución
       }
@@ -189,5 +196,35 @@ export class AutomationActionsService {
     if (!t.ok) throw new ActionSkipped({ no_conversation: 'No hay una conversación abierta con el contacto', no_agent: 'La conexión de la conversación no tiene un agente de IA activo', already_active: 'El agente de IA ya está activo en la conversación' }[t.reason]);
     await this.agents.resume(tx, t.conversationId, 'automation');
     return done('Agente de IA activado en la conversación');
+  }
+
+  /**
+   * Llama a otro sistema (M9.5b, ADR-54): solo a un dominio de la lista de permitidos de la empresa, por https, sin seguir redirecciones, a una dirección pública validada, con 10 s de límite.
+   * El cuerpo lleva solo las variables del contacto que el administrador puso, escapadas como JSON. Un fallo DEVUELVE «failed» (no lanza): lanzarlo deshace el SAVEPOINT y con él la
+   * auditoría de lo que ya salió. En la auditoría y el historial queda el dominio, el método y el código de respuesta —nunca la dirección completa, el cuerpo ni la respuesta—.
+   */
+  private async httpRequest(tx: TenantTx, a: Extract<ActionDef, { type: 'http_request' }>, ctx: ActionContext): Promise<StepOutcome> {
+    const dest = parseDestination(a.url);
+    if (!dest.ok) throw new ActionFailed(dest.message);
+    const [settings] = await tx.select({ hosts: automationSettings.httpAllowedHosts }).from(automationSettings).limit(1);
+    if (!hostAllowed(dest.host, settings?.hosts ?? [])) throw new ActionFailed(`El dominio ${dest.host} no está en la lista de permitidos de la empresa`);
+    const [c] = await tx.select({ id: contacts.id, name: contacts.name, email: contacts.email }).from(contacts).where(and(eq(contacts.id, ctx.contactId), isNull(contacts.deletedAt))).limit(1);
+    if (!c) throw new ActionFailed('El contacto ya no existe');
+    const [p] = await tx.select({ e164: contactPhones.e164 }).from(contactPhones).where(and(eq(contactPhones.contactId, ctx.contactId), isNull(contactPhones.deletedAt))).orderBy(desc(contactPhones.isPrimary), contactPhones.createdAt).limit(1);
+    const template = a.method === 'POST' && a.body !== undefined && a.body.trim() !== '' ? a.body : null;
+    const body = template === null ? null : renderHttpBody(template, { nombre: c.name, primer_nombre: c.name.trim().split(/\s+/)[0] ?? '', correo: c.email ?? '', telefono: p?.e164 ?? '', id: c.id });
+    if (body !== null && Buffer.byteLength(body, 'utf8') > OUTBOUND_MAX_BODY_BYTES) throw new ActionFailed(`El cuerpo pasa de ${OUTBOUND_MAX_BODY_BYTES / 1024} KB una vez armado`);
+    const origin = currentAutomationOrigin();
+    let status: number;
+    try {
+      status = (await this.outbound.send({ url: dest.url, method: a.method, body, idempotencyKey: `${origin?.runId ?? 'sin-origen'}:${ctx.step}` })).status;
+    } catch (e) {
+      if (e instanceof OutboundError) throw new ActionFailed(`Llamada a ${dest.host}: ${e.message}`);
+      throw e;
+    }
+    await writeAudit(tx, { entityType: 'contact', entityId: ctx.contactId, field: 'http_request', oldValue: null, newValue: { host: dest.host, method: a.method, status, variables: template === null ? [] : httpVariablesUsed(template) }, source: 'automation' });
+    if (status >= 200 && status < 300) return done(`Llamada a ${dest.host}: respondió ${status}`);
+    if (status >= 300 && status < 400) return { outcome: 'failed', detail: `${dest.host} respondió ${status}: las redirecciones no se siguen` };
+    return { outcome: 'failed', detail: `${dest.host} respondió ${status}` };
   }
 }

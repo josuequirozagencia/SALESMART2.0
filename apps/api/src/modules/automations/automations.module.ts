@@ -9,7 +9,11 @@ import { OutreachModule } from '../outreach';
 import { QueuesModule } from '../queues';
 import { TagsModule } from '../tags';
 import { TemplatesModule } from '../templates';
+import type { AppConfig } from '../../config';
+import { APP_CONFIG } from '../../tokens';
 import { AutomationDryRunService } from './automation-dry-run.service';
+import { AutomationSettingsService } from './automation-settings.service';
+import { FakeOutboundHttp, OUTBOUND_HTTP, SafeHttpClient, type OutboundHttp } from './outbound-http';
 import { AutomationActionsService } from './automation-actions.service';
 import { AutomationEnqueueService } from './automation-enqueue.service';
 import { AutomationRunnerService } from './automation-runner.service';
@@ -21,7 +25,7 @@ import { AutomationsService } from './automations.service';
 @Module({
   imports: [AiModule, ContactsModule, CustomFieldsModule, EventsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TemplatesModule],
   controllers: [AutomationsController],
-  providers: [AutomationsService, AutomationEnqueueService, AutomationActionsService, AutomationRunnerService, AutomationDryRunService, AutomationsJob],
+  providers: [AutomationsService, AutomationEnqueueService, AutomationActionsService, AutomationRunnerService, AutomationDryRunService, AutomationSettingsService, { provide: OUTBOUND_HTTP, useFactory: (cfg: AppConfig): OutboundHttp => (cfg.automations.httpProvider === 'fake' ? new FakeOutboundHttp() : new SafeHttpClient()), inject: [APP_CONFIG] }, AutomationsJob],
   exports: [AutomationsJob],
 })
 export class AutomationsModule {}

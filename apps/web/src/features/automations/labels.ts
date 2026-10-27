@@ -27,6 +27,7 @@ export const ACTION_LABEL: Record<ActionType, string> = {
   wait: 'Esperar',
   run_rule: 'Ejecutar otra automatización',
   start_agent: 'Activar al agente de IA en la conversación',
+  http_request: 'Llamar a otro sistema (HTTP)',
 };
 export const ACTIONS = Object.keys(ACTION_LABEL) as ActionType[];
 
@@ -43,8 +44,17 @@ export const ACTION_HINT: Record<ActionType, string> = {
   send_template: 'Puede abrir la conversación. Necesita una plantilla aprobada por Meta.',
   wait: 'La ejecución se pausa y sigue con las acciones de abajo cuando pase el tiempo (de 1 minuto a 30 días). Si pausas o borras la regla, o borras al contacto, no continúa; si editas la regla, lo que ya empezó sigue como estaba.',
   run_rule: 'Corre otra automatización activa con este contacto, en su propia ejecución y solo si el contacto cumple sus condiciones. Si se llaman en círculo, se corta.',
+  http_request: 'Avisa a otro sistema (n8n, Zapier, tu CRM…). Solo a dominios que autorices en «Destinos permitidos», por https y sin seguir redirecciones. Si el destino pide una clave, va dentro de la dirección (solo la ve el administrador); no se guardan ni la dirección completa ni la respuesta, solo el dominio y el código.',
   start_agent: 'El agente de la conexión de la conversación contesta lo que el cliente escriba desde ahora (lo anterior no). Si una persona escribe después, el agente se pausa otra vez.',
 };
+export const HTTP_VARIABLE_HELP = ['{{nombre}}', '{{primer_nombre}}', '{{correo}}', '{{telefono}}', '{{id}}'];
+
+/** ¿Este dominio está cubierto por la lista de permitidos? Igual que en el servidor (que es quien decide): exacto o `*.dominio` (nunca el dominio base). */
+export function hostCovered(host: string, allowed: readonly string[]): boolean {
+  const h = host.toLowerCase().replace(/\.$/, '');
+  return allowed.some((p) => (p.startsWith('*.') ? h.endsWith(p.slice(1)) && h.length > p.length - 1 : h === p));
+}
+
 export const UNIT_LABEL: Record<WaitUnit, string> = { minutes: 'minutos', hours: 'horas', days: 'días' };
 
 export const RUN_LABEL = { queued: 'En cola', waiting: 'Esperando', done: 'Hecha', skipped: 'Omitida', failed: 'Con fallos' } as const;

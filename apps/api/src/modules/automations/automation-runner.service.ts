@@ -79,7 +79,7 @@ export class AutomationRunnerService {
           await tx.update(automationRuns).set({ resumeActions: rest, nextAttemptAt: new Date(now.getTime() + waitMs(parsed.data)), attempts: 0 }).where(eq(automationRuns.id, run.id));
           return 'waiting';
         }
-        const step = parsed.success ? await this.step(tx, parsed.data, { contactId: run.contactId, now, dir }, origin) : { outcome: 'failed' as const, detail: 'La acción guardada no es válida' };
+        const step = parsed.success ? await this.step(tx, parsed.data, { contactId: run.contactId, now, dir, step: position }, origin) : { outcome: 'failed' as const, detail: 'La acción guardada no es válida' };
         const type = (raw as { type?: unknown }).type;
         await tx.insert(automationRunSteps).values({ runId: run.id, position, actionType: typeof type === 'string' ? type.slice(0, 40) : 'unknown', outcome: step.outcome, detail: step.detail.slice(0, 500) });
       }
@@ -90,7 +90,7 @@ export class AutomationRunnerService {
   }
 
   /** Una acción en su SAVEPOINT. Lo previsto (omitida, fallida) se anota; lo inesperado sube y revierte la ejecución completa. */
-  private async step(tx: TenantTx, action: ActionDef, ctx: { contactId: string; now: Date; dir: OrgDirectory }, origin: { runId: string; depth: number; chain: readonly string[] }): Promise<{ outcome: 'done' | 'skipped' | 'failed'; detail: string }> {
+  private async step(tx: TenantTx, action: ActionDef, ctx: { contactId: string; now: Date; dir: OrgDirectory; step: number }, origin: { runId: string; depth: number; chain: readonly string[] }): Promise<{ outcome: 'done' | 'skipped' | 'failed'; detail: string }> {
     await tx.execute(sql`SAVEPOINT automation_step`);
     try {
       const r = await withAutomationOrigin(origin, () => this.actions.execute(tx, action, ctx));

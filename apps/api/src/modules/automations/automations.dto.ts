@@ -32,5 +32,8 @@ export const runsQuerySchema = z.object({
 });
 export type RunsQuery = z.infer<typeof runsQuerySchema>;
 
+export const updateSettingsSchema = z.strictObject({ http_allowed_hosts: z.array(z.string().max(255)).max(100) });
+export type UpdateSettingsDto = z.infer<typeof updateSettingsSchema>;
+
 export const testAutomationSchema = z.strictObject({ contact_id: z.uuid() });
 export type TestAutomationDto = z.infer<typeof testAutomationSchema>;

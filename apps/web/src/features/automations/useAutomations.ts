@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
 export type TriggerType = 'contact_created' | 'message_received' | 'opportunity_created' | 'stage_changed' | 'field_changed' | 'sale_created';
-export type ActionType = 'assign_user' | 'assign_queue' | 'move_stage' | 'set_field' | 'add_tag' | 'remove_tag' | 'create_task' | 'send_text' | 'send_template' | 'wait' | 'run_rule' | 'start_agent';
+export type ActionType = 'assign_user' | 'assign_queue' | 'move_stage' | 'set_field' | 'add_tag' | 'remove_tag' | 'create_task' | 'send_text' | 'send_template' | 'wait' | 'run_rule' | 'start_agent' | 'http_request';
 export type WaitUnit = 'minutes' | 'hours' | 'days';
 export type AutomationStatus = 'draft' | 'active' | 'paused';
 
@@ -39,6 +39,10 @@ export interface Action {
   unit?: WaitUnit;
   /** Ejecutar otra automatización. */
   automation_id?: string;
+  /** Llamada HTTP: método, dirección (https, sin variables) y cuerpo JSON (solo POST). */
+  method?: 'GET' | 'POST';
+  url?: string;
+  body?: string;
 }
 
 export interface Automation {
@@ -119,12 +123,29 @@ export function cleanAction(a: Action): Action {
       return { type: a.type, automation_id: a.automation_id ?? '' };
     case 'start_agent':
       return { type: a.type };
+    case 'http_request': {
+      const method = a.method ?? 'POST';
+      return { type: a.type, method, url: (a.url ?? '').trim(), ...(method === 'POST' && (a.body ?? '').trim() !== '' ? { body: a.body } : {}) };
+    }
   }
 }
 
 /** Las automatizaciones de la empresa (solo el administrador; para el resto el servidor responde 403). */
 export function useAutomations() {
   return useQuery({ queryKey: ['automations'], retry: false, queryFn: () => api<AutomationList>('/automations') });
+}
+
+/** Los dominios a los que las automatizaciones pueden llamar (lista de permitidos de la empresa). */
+export interface AutomationSettings {
+  http_allowed_hosts: string[];
+  limits: { max_hosts: number };
+}
+export function useAutomationSettings() {
+  return useQuery({ queryKey: ['automation-settings'], retry: false, queryFn: () => api<AutomationSettings>('/automations/settings') });
+}
+export function useSaveAutomationSettings() {
+  const qc = useQueryClient();
+  return useMutation({ mutationFn: (hosts: string[]) => api<AutomationSettings>('/automations/settings', { method: 'PUT', body: { http_allowed_hosts: hosts } }), onSettled: () => qc.invalidateQueries({ queryKey: ['automation-settings'] }) });
 }
 
 export function useAutomationRuns(id: string, enabled: boolean) {
