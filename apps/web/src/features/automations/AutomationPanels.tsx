@@ -83,7 +83,7 @@ export function TestPanel({ rule, dirty, fieldName, tagName }: { rule: Automatio
                   <span className="text-muted">{a.position}.</span>
                   <b>{a.label}</b>
                   <Pill kind={WOULD_KIND[a.would]}>{WOULD_LABEL[a.would]}</Pill>
-                  <span className="text-[12.5px] text-muted">{a.detail}</span>
+                  <span className="text-[12.5px] text-muted">{a.detail}{a.after_wait ? ' (después de esperar: se estima con lo de ahora)' : ''}</span>
                 </li>
               ))}
             </ol>
@@ -114,6 +114,7 @@ export function RunsPanel({ rule }: { rule: Automation }) {
                 {r.depth > 0 ? <Pill kind="info">Encadenada</Pill> : null}
                 <time dateTime={r.at} className="text-muted">{new Date(r.at).toLocaleString('es-EC')}</time>
               </span>
+              {r.resume_at ? <span className="text-[12.5px] text-muted">Sigue el {new Date(r.resume_at).toLocaleString('es-EC')}</span> : null}
               {r.reason ? <span className="text-[12.5px] text-muted">{r.reason}</span> : null}
               {r.steps.length > 0 ? (
                 <ol aria-label={`Pasos de la ejecución de ${r.contact.name}`} className="grid gap-1">

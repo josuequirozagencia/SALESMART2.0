@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from '../ai';
 import { ContactsModule } from '../contacts';
 import { CustomFieldsModule } from '../custom-fields';
 import { EventsModule } from '../events';
@@ -18,7 +19,7 @@ import { AutomationsService } from './automations.service';
 
 /** Automatizaciones (M9.3, ADR-54; F20): reglas «cuando ocurre esto, si se cumple aquello, haz esto otro». El encolador escucha los hechos del negocio y el motor los ejecuta con una tarea periódica. */
 @Module({
-  imports: [ContactsModule, CustomFieldsModule, EventsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TemplatesModule],
+  imports: [AiModule, ContactsModule, CustomFieldsModule, EventsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TemplatesModule],
   controllers: [AutomationsController],
   providers: [AutomationsService, AutomationEnqueueService, AutomationActionsService, AutomationRunnerService, AutomationDryRunService, AutomationsJob],
   exports: [AutomationsJob],

@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lt, or, sql } from 'drizzle-orm';
 import { automationRuns, automationRunSteps, automations, channelAccounts, contacts, Database, pipelines, pipelineStages, queues, tags, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ValidationError, type ErrorDetail } from '../../errors';
 import { TenantContext } from '../../tenant';
@@ -23,14 +23,16 @@ export interface AutomationView {
   actions: ActionDef[];
   version: number;
   /** Ejecuciones de los últimos 7 días por resultado. */
-  recent: { done: number; skipped: number; failed: number; queued: number };
+  recent: { done: number; skipped: number; failed: number; queued: number; waiting: number };
   created_at: string;
   updated_at: string;
 }
 export interface RunView {
   id: string;
   at: string;
-  status: 'queued' | 'done' | 'skipped' | 'failed';
+  /** `waiting`: una acción «esperar» la dejó en pausa hasta `resume_at`. */
+  status: 'queued' | 'waiting' | 'done' | 'skipped' | 'failed';
+  resume_at: string | null;
   reason: string | null;
   event_type: string;
   depth: number;
@@ -83,7 +85,7 @@ export class AutomationsService {
     const cur = this.decodeCursor(q.cursor);
     return this.db.withTenant(async (tx) => {
       await this.byId(tx, id);
-      const conds = [eq(automationRuns.automationId, id), ...(q.status ? [eq(automationRuns.status, q.status)] : []), ...(cur ? [or(lt(automationRuns.createdAt, cur.at), and(eq(automationRuns.createdAt, cur.at), lt(automationRuns.id, cur.id)))!] : [])];
+      const conds = [eq(automationRuns.automationId, id), ...(q.status === 'waiting' ? [eq(automationRuns.status, 'queued'), isNotNull(automationRuns.resumeActions)] : q.status === 'queued' ? [eq(automationRuns.status, 'queued'), isNull(automationRuns.resumeActions)] : q.status ? [eq(automationRuns.status, q.status)] : []), ...(cur ? [or(lt(automationRuns.createdAt, cur.at), and(eq(automationRuns.createdAt, cur.at), lt(automationRuns.id, cur.id)))!] : [])];
       const rows = await tx
         .select({ r: automationRuns, contactName: contacts.name })
         .from(automationRuns)
@@ -100,7 +102,8 @@ export class AutomationsService {
         items: page.map(({ r, contactName }) => ({
           id: r.id,
           at: r.createdAt.toISOString(),
-          status: r.status as RunView['status'],
+          status: r.status === 'queued' && r.resumeActions !== null ? 'waiting' : (r.status as RunView['status']),
+          resume_at: r.status === 'queued' && r.resumeActions !== null ? r.nextAttemptAt.toISOString() : null,
           reason: r.reason,
           event_type: r.eventType,
           depth: r.depth,
@@ -143,7 +146,7 @@ export class AutomationsService {
         const next = { trigger: patch.trigger ?? shape(cur).trigger, conditions: patch.conditions ?? shape(cur).conditions, actions: patch.actions ?? shape(cur).actions };
         const defChanged = patch.trigger !== undefined || patch.conditions !== undefined || patch.actions !== undefined;
         if (defChanged) {
-          await this.assertReferences(tx, next, people);
+          await this.assertReferences(tx, next, people, id);
           if (cur.status === 'active' && next.actions.length === 0) throw bad('actions', 'required', 'Una automatización activa necesita al menos una acción: pausa la regla para quitarlas todas');
         }
         const set: Partial<typeof automations.$inferInsert> = { updatedAt: new Date() };
@@ -189,7 +192,7 @@ export class AutomationsService {
       if (cur.status === 'active') return cur;
       const def = shape(cur);
       if (def.actions.length === 0) throw bad('actions', 'required', 'Agrega al menos una acción para activar la automatización');
-      await this.assertReferences(tx, def, people);
+      await this.assertReferences(tx, def, people, id);
       const [updated] = await tx.update(automations).set({ status: 'active', updatedAt: new Date() }).where(eq(automations.id, id)).returning();
       await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'status', oldValue: cur.status, newValue: 'active', source: 'manual' });
       return updated!;
@@ -226,7 +229,7 @@ export class AutomationsService {
   }
 
   /** Que todo lo que la definición nombra exista en esta empresa y encaje (la forma ya la validó el esquema). */
-  async assertReferences(tx: TenantTx, def: { trigger: TriggerDef; conditions: readonly ConditionDef[]; actions: readonly ActionDef[] }, people: ReadonlySet<string>): Promise<void> {
+  async assertReferences(tx: TenantTx, def: { trigger: TriggerDef; conditions: readonly ConditionDef[]; actions: readonly ActionDef[] }, people: ReadonlySet<string>, selfId?: string): Promise<void> {
     const parsed = definitionSchema.safeParse(def);
     if (!parsed.success) throw new ValidationError(parsed.error.issues.map((i) => ({ path: i.path.join('.'), code: 'invalid', message: i.message })));
     const issues: ErrorDetail[] = [];
@@ -295,7 +298,16 @@ export class AutomationsService {
           if (a.assignee !== 'owner' && !people.has(a.assignee)) add(`${p}.assignee`, 'Esa persona no puede recibir trabajo en la empresa');
           break;
         case 'send_text':
+        case 'start_agent':
           break;
+        case 'wait':
+          if (i === def.actions.length - 1) add(p, 'Después de esperar tiene que haber otra acción: esperar al final no hace nada', 'nothing_after');
+          break;
+        case 'run_rule': {
+          if (a.automation_id === selfId) add(`${p}.automation_id`, 'Una automatización no puede ejecutarse a sí misma', 'self');
+          else if ((await tx.select({ id: automations.id }).from(automations).where(and(eq(automations.id, a.automation_id), isNull(automations.deletedAt))).limit(1)).length === 0) add(`${p}.automation_id`, 'La automatización no existe');
+          break;
+        }
         case 'send_template':
           if (!(await exists.channel(a.channel_id, true))) add(`${p}.channel_id`, 'La conexión no existe o no es de WhatsApp oficial');
           else {
@@ -333,13 +345,13 @@ export class AutomationsService {
     const out = new Map<string, AutomationView['recent']>();
     if (ids.length === 0) return out;
     const rows = await tx
-      .select({ id: automationRuns.automationId, status: automationRuns.status, n: sql<number>`count(*)::int` })
+      .select({ id: automationRuns.automationId, status: automationRuns.status, waiting: sql<boolean>`${automationRuns.resumeActions} is not null`, n: sql<number>`count(*)::int` })
       .from(automationRuns)
       .where(and(inArray(automationRuns.automationId, [...ids]), sql`${automationRuns.createdAt} >= ${since.toISOString()}::timestamptz`))
-      .groupBy(automationRuns.automationId, automationRuns.status);
+      .groupBy(automationRuns.automationId, automationRuns.status, sql`${automationRuns.resumeActions} is not null`);
     for (const r of rows) {
-      const cur = out.get(r.id) ?? { done: 0, skipped: 0, failed: 0, queued: 0 };
-      cur[r.status as keyof AutomationView['recent']] = r.n;
+      const cur = out.get(r.id) ?? { done: 0, skipped: 0, failed: 0, queued: 0, waiting: 0 };
+      cur[(r.status === 'queued' && r.waiting ? 'waiting' : r.status) as keyof AutomationView['recent']] += r.n;
       out.set(r.id, cur);
     }
     return out;
@@ -353,7 +365,7 @@ export class AutomationsService {
       status: r.status as AutomationView['status'],
       ...shape(r),
       version: r.version,
-      recent: recent ?? { done: 0, skipped: 0, failed: 0, queued: 0 },
+      recent: recent ?? { done: 0, skipped: 0, failed: 0, queued: 0, waiting: 0 },
       created_at: r.createdAt.toISOString(),
       updated_at: r.updatedAt.toISOString(),
     };

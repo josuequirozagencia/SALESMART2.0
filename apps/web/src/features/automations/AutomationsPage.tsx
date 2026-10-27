@@ -15,9 +15,9 @@ function summary(a: Automation): string {
 }
 
 function recent(a: Automation): string {
-  const { done, failed, skipped, queued } = a.recent;
-  if (done + failed + skipped + queued === 0) return 'Sin ejecuciones en los últimos 7 días';
-  return [done > 0 ? `${done} ${done === 1 ? 'hecha' : 'hechas'}` : '', failed > 0 ? `${failed} con fallos` : '', skipped > 0 ? `${skipped} ${skipped === 1 ? 'omitida' : 'omitidas'}` : '', queued > 0 ? `${queued} en cola` : ''].filter(Boolean).join(' · ') + ' en 7 días';
+  const { done, failed, skipped, queued, waiting } = a.recent;
+  if (done + failed + skipped + queued + waiting === 0) return 'Sin ejecuciones en los últimos 7 días';
+  return [done > 0 ? `${done} ${done === 1 ? 'hecha' : 'hechas'}` : '', failed > 0 ? `${failed} con fallos` : '', skipped > 0 ? `${skipped} ${skipped === 1 ? 'omitida' : 'omitidas'}` : '', queued > 0 ? `${queued} en cola` : '', waiting > 0 ? `${waiting} esperando` : ''].filter(Boolean).join(' · ') + ' en 7 días';
 }
 
 function Row({ a }: { a: Automation }) {

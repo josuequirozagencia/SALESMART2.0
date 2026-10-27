@@ -62,6 +62,8 @@ export const automationRuns = tenantTable(
     depth: integer('depth').notNull().default(0),
     chain: uuid('chain').array().notNull().default(sql`'{}'::uuid[]`),
     causeRunId: uuid('cause_run_id'),
+    /** Las acciones que faltan por hacer cuando la ejecución está ESPERANDO (M9.5, ADR-54): una acción «esperar» deja la ejecución en cola con la hora en que sigue (`next_attempt_at`) y estas acciones, tal como eran al empezar (editar la regla no cambia lo que ya empezó). Nulo = no está esperando. */
+    resumeActions: jsonb('resume_actions').$type<Array<Record<string, unknown>>>(),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
     startedAt: ts('started_at'),
@@ -74,6 +76,7 @@ export const automationRuns = tenantTable(
     check('automation_runs_status_valid', sql`${t['status']!} IN ('queued', 'done', 'skipped', 'failed')`),
     check('automation_runs_depth_valid', sql`${t['depth']!} BETWEEN 0 AND 10 AND ${t['attempts']!} >= 0`),
     check('automation_runs_context_shape', sql`jsonb_typeof(${t['context']!}) = 'object' AND length(${t['context']!}::text) <= 2000`),
+    check('automation_runs_resume_shape', sql`${t['resumeActions']!} IS NULL OR (jsonb_typeof(${t['resumeActions']!}) = 'array' AND jsonb_array_length(${t['resumeActions']!}) BETWEEN 1 AND 10)`),
     check('automation_runs_reason_len', sql`${t['reason']!} IS NULL OR length(${t['reason']!}) <= 500`),
     uniqueIndex('automation_runs_event_uq').on(t['organizationId']!, t['automationId']!, t['eventKey']!),
     index('automation_runs_due_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'queued'`),

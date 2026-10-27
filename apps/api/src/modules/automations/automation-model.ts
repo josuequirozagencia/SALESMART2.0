@@ -156,7 +156,7 @@ function meets(c: ConditionDef, f: ContactFacts): boolean {
 
 // ---------------------------------------------------------------------------------------------- acciones
 
-export const ACTION_TYPES = ['assign_user', 'assign_queue', 'move_stage', 'set_field', 'add_tag', 'remove_tag', 'create_task', 'send_text', 'send_template'] as const;
+export const ACTION_TYPES = ['assign_user', 'assign_queue', 'move_stage', 'set_field', 'add_tag', 'remove_tag', 'create_task', 'send_text', 'send_template', 'wait', 'run_rule', 'start_agent'] as const;
 export type ActionType = (typeof ACTION_TYPES)[number];
 
 export const ACTION_LABEL: Record<ActionType, string> = {
@@ -169,7 +169,23 @@ export const ACTION_LABEL: Record<ActionType, string> = {
   create_task: 'Crear una tarea',
   send_text: 'Enviar un mensaje de texto',
   send_template: 'Enviar una plantilla de WhatsApp',
+  wait: 'Esperar',
+  run_rule: 'Ejecutar otra automatización',
+  start_agent: 'Activar al agente de IA en la conversación',
 };
+
+/** Cuánto puede esperar una regla como mínimo y como máximo en una sola espera. */
+export const MIN_WAIT_MS = 60_000;
+export const MAX_WAIT_MS = 30 * 86_400_000;
+export const WAIT_UNITS = { minutes: 60_000, hours: 3_600_000, days: 86_400_000 } as const;
+export type WaitUnit = keyof typeof WAIT_UNITS;
+/** Lo que dura una espera, en milisegundos. */
+export const waitMs = (a: { amount: number; unit: WaitUnit }): number => a.amount * WAIT_UNITS[a.unit];
+/** «2 horas», «1 día»…: para el historial y la prueba. */
+export function waitText(a: { amount: number; unit: WaitUnit }): string {
+  const one = a.amount === 1;
+  return `${a.amount} ${{ minutes: one ? 'minuto' : 'minutos', hours: one ? 'hora' : 'horas', days: one ? 'día' : 'días' }[a.unit]}`;
+}
 
 export const actionSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('assign_user'), user_id: uuid }),
@@ -180,6 +196,11 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('remove_tag'), tag_id: uuid }),
   z.strictObject({ type: z.literal('create_task'), title: z.string().trim().min(1).max(120), due_in_hours: z.number().int().min(0).max(720).optional(), assignee: z.union([z.literal('owner'), uuid]).default('owner') }),
   z.strictObject({ type: z.literal('send_text'), text: z.string().trim().min(1).max(1000) }),
+  z
+    .strictObject({ type: z.literal('wait'), amount: z.number().int().min(1).max(43_200), unit: z.enum(['minutes', 'hours', 'days']) })
+    .refine((a) => waitMs(a) >= MIN_WAIT_MS && waitMs(a) <= MAX_WAIT_MS, { message: 'La espera va de 1 minuto a 30 días', path: ['amount'] }),
+  z.strictObject({ type: z.literal('run_rule'), automation_id: uuid }),
+  z.strictObject({ type: z.literal('start_agent') }),
   z.strictObject({ type: z.literal('send_template'), channel_id: uuid, template_id: uuid, params: z.record(z.string().regex(/^(?:(?:header|body):[A-Za-z0-9_]{1,30}|button:\d{1,2}:[A-Za-z0-9_]{1,30})$/), z.string().max(200)).default({}) }),
 ]);
 export type ActionDef = z.infer<typeof actionSchema>;

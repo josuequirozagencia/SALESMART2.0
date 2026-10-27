@@ -12,19 +12,19 @@ const RULE: Automation = {
   trigger: { type: 'contact_created', filter: { source: 'meta_ctwa' } },
   conditions: [{ field: 'consent', op: 'eq', value: 'unknown' }],
   actions: [{ type: 'add_tag', tag_id: 't1' }, { type: 'create_task', title: 'Llamar a {{primer_nombre}}', due_in_hours: 2, assignee: 'owner' }],
-  version: 1, recent: { done: 0, skipped: 0, failed: 0, queued: 0 }, created_at: AT, updated_at: AT,
+  version: 1, recent: { done: 0, skipped: 0, failed: 0, queued: 0, waiting: 0 }, created_at: AT, updated_at: AT,
 };
 const RUN: Run = {
-  id: 'r1', at: AT, status: 'failed', reason: '1 acción falló', event_type: 'contact_created', depth: 1, contact: { id: 'c1', name: 'Lucía Paredes' },
+  id: 'r1', at: AT, status: 'failed', resume_at: null, reason: '1 acción falló', event_type: 'contact_created', depth: 1, contact: { id: 'c1', name: 'Lucía Paredes' },
   steps: [{ position: 1, action: 'add_tag', label: 'Poner una etiqueta', outcome: 'done', detail: 'Etiqueta «Nuevo» puesta' }, { position: 2, action: 'create_task', label: 'Crear una tarea', outcome: 'failed', detail: 'Esa persona ya no puede recibir trabajo en la empresa' }],
 };
 const DRY: DryRun = {
   contact: { id: 'c1', name: 'Lucía Paredes' }, conditions: [{ index: 0, met: true }], meets: true,
-  actions: [{ position: 1, action: 'add_tag', label: 'Poner una etiqueta', would: 'do', detail: 'Pondría la etiqueta «Nuevo»' }, { position: 2, action: 'create_task', label: 'Crear una tarea', would: 'skip', detail: 'El contacto no tiene responsable a quien asignarle la tarea' }],
+  actions: [{ position: 1, action: 'add_tag', label: 'Poner una etiqueta', would: 'do', detail: 'Pondría la etiqueta «Nuevo»', after_wait: false }, { position: 2, action: 'create_task', label: 'Crear una tarea', would: 'skip', detail: 'El contacto no tiene responsable a quien asignarle la tarea', after_wait: false }],
 };
 
-interface World { rule: Automation | null; calls: Record<string, Call[]>; runs: Run[]; dry: DryRun; fail?: Record<string, () => ReturnType<Handler>> }
-const world = (over: Partial<World> = {}): World => ({ rule: RULE, calls: {}, runs: [], dry: DRY, ...over });
+interface World { others: Automation[]; rule: Automation | null; calls: Record<string, Call[]>; runs: Run[]; dry: DryRun; fail?: Record<string, () => ReturnType<Handler>> }
+const world = (over: Partial<World> = {}): World => ({ others: [], rule: RULE, calls: {}, runs: [], dry: DRY, ...over });
 const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
 
 function server(w: World, me = ME_ADMIN): Record<string, Handler> {
@@ -39,7 +39,7 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
     'GET /contacts/owners': () => ({ body: { items: [{ id: 'u1', name: 'Ana Pérez', email: 'ana@empresa.test', role: 'client_admin' }, { id: 'u9', name: 'Carolina Vera', email: 'caro@empresa.test', role: 'advisor' }] } }),
     'GET /channels/c1/templates': () => ({ body: { items: [{ id: 'tp1', channel_id: 'c1', name: 'seguimiento', language: 'es', category: 'utility', status: 'approved', parameter_format: 'named', header: null, body: 'Hola {{nombre}}, ¿pudiste revisar la propuesta?', footer: null, buttons: [], variables: [{ id: 'body:nombre', part: 'body', key: 'nombre', buttonIndex: null, example: 'Ana' }], sendable: true, unsupported_reason: null, rejected_reason: null, synced_at: AT }], synced_at: AT, sync_error: null } }),
     'GET /contacts': guard('contacts', () => ({ body: { items: [{ id: 'c1', name: 'Lucía Paredes', email: null, phones: [{ e164: '+593984217730', primary: true }], owner: null, source: 'manual', consent: 'unknown', consent_updated_at: null, custom_fields: {}, tags: [], companies: [] }], next_cursor: null, total: null, access: {} } as never })),
-    'GET /automations': guard('list', () => ({ body: { items: w.rule ? [w.rule] : [], limits: { max_automations: 50 } } })),
+    'GET /automations': guard('list', () => ({ body: { items: [...(w.rule ? [w.rule] : []), ...w.others], limits: { max_automations: 50 } } })),
     'POST /automations': guard('create', (c) => {
       const b = c.body as Pick<Automation, 'name' | 'description' | 'trigger' | 'conditions' | 'actions'>;
       w.rule = { ...RULE, id: 'a2', status: 'draft', ...b };
@@ -84,12 +84,12 @@ describe('Automatizaciones · menú y lista', () => {
   });
 
   it('lista cada regla con su estado, su resumen y cómo le ha ido; sin reglas invita a crear la primera', async () => {
-    mockApi(server(world({ rule: { ...RULE, status: 'active', recent: { done: 12, failed: 1, skipped: 2, queued: 0 } } })));
+    mockApi(server(world({ rule: { ...RULE, status: 'active', recent: { done: 12, failed: 1, skipped: 2, queued: 0, waiting: 3 } } })));
     renderApp('/automations');
     const row = within((await screen.findByText(NAME)).closest('li')!);
     expect(row.getByText('Activa')).toBeInTheDocument();
     expect(row.getByText(/Se crea un contacto · 1 condición · 2 acciones/)).toBeInTheDocument();
-    expect(row.getByText(/12 hechas · 1 con fallos · 2 omitidas en 7 días/)).toBeInTheDocument();
+    expect(row.getByText(/12 hechas · 1 con fallos · 2 omitidas · 3 esperando en 7 días/)).toBeInTheDocument();
   });
 
   it('sin reglas dice cómo empezar', async () => {
@@ -287,5 +287,69 @@ describe('Automatizaciones · probar e historial', () => {
     renderApp('/automations/a1');
     await userEvent.click(await screen.findByRole('tab', { name: 'Historial' }));
     expect(await screen.findByText(/Todavía no se ha ejecutado/)).toBeInTheDocument();
+  });
+});
+
+describe('Automatizaciones · esperar, ejecutar otra regla y activar al agente', () => {
+  const ANOTHER: Automation = { ...RULE, id: 'a9', name: 'Seguimiento de ventas', status: 'paused', actions: [{ type: 'add_tag', tag_id: 't1' }] };
+
+  it('una espera pide cuánto y en qué unidad, y se guarda tal como la espera el servidor', async () => {
+    const w = world({ rule: { ...RULE, actions: [{ type: 'add_tag', tag_id: 't1' }] } });
+    mockApi(server(w));
+    renderApp('/automations/a1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Agregar acción' }));
+    await userEvent.selectOptions(screen.getByLabelText('Acción 2: qué hacer'), 'Esperar');
+    expect(screen.getByLabelText('Acción 2: cuánto esperar')).toHaveValue(1);
+    await userEvent.clear(screen.getByLabelText('Acción 2: cuánto esperar'));
+    await userEvent.type(screen.getByLabelText('Acción 2: cuánto esperar'), '3');
+    await userEvent.selectOptions(screen.getByLabelText('Acción 2: unidad de la espera'), 'días');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
+    expect((w.calls['patch']![0]!.body as { actions: unknown[] }).actions).toEqual([{ type: 'add_tag', tag_id: 't1' }, { type: 'wait', amount: 3, unit: 'days' }]);
+  });
+
+  it('ejecutar otra automatización ofrece las demás reglas (no esta misma) y marca las que no están activas', async () => {
+    const w = world({ others: [ANOTHER] });
+    mockApi(server(w));
+    renderApp('/automations/a1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Agregar acción' }));
+    await userEvent.selectOptions(screen.getByLabelText('Acción 3: qué hacer'), 'Ejecutar otra automatización');
+    const pick = within(screen.getByLabelText('Acción 3: automatización'));
+    expect(pick.getByRole('option', { name: 'Seguimiento de ventas (en pausa)' })).toBeInTheDocument();
+    expect(pick.queryByRole('option', { name: NAME })).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Acción 3: automatización'), 'Seguimiento de ventas (en pausa)');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
+    expect((w.calls['patch']![0]!.body as { actions: Array<Record<string, unknown>> }).actions[2]).toEqual({ type: 'run_rule', automation_id: 'a9' });
+  });
+
+  it('activar al agente de IA no pide datos y se guarda solo con su tipo', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/automations/a1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Agregar acción' }));
+    await userEvent.selectOptions(screen.getByLabelText('Acción 3: qué hacer'), 'Activar al agente de IA en la conversación');
+    expect(screen.getByText(/contesta lo que el cliente escriba desde ahora/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
+    expect((w.calls['patch']![0]!.body as { actions: Array<Record<string, unknown>> }).actions[2]).toEqual({ type: 'start_agent' });
+  });
+
+  it('el historial muestra «Esperando» con la hora en que sigue; la prueba avisa que lo de después de esperar es una estimación de ahora', async () => {
+    const waiting: Run = { ...RUN, id: 'r2', status: 'waiting', resume_at: '2026-10-29T15:00:00.000Z', reason: null, steps: [{ position: 1, action: 'wait', label: 'Esperar', outcome: 'done', detail: 'Espera de 2 días' }] };
+    const dry: DryRun = { ...DRY, actions: [{ position: 1, action: 'wait', label: 'Esperar', would: 'do', detail: 'Esperaría 2 días y seguiría con las acciones siguientes', after_wait: false }, { position: 2, action: 'add_tag', label: 'Poner una etiqueta', would: 'do', detail: 'Pondría la etiqueta «Nuevo»', after_wait: true }] };
+    mockApi(server(world({ runs: [waiting], dry })));
+    renderApp('/automations/a1');
+    await userEvent.click(await screen.findByRole('tab', { name: 'Historial' }));
+    const row = within((await screen.findByText('Lucía Paredes')).closest('li')!);
+    expect(row.getByText('Esperando')).toBeInTheDocument();
+    expect(row.getByText(/Sigue el/)).toBeInTheDocument();
+    expect(row.getByText('Espera de 2 días')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('tab', { name: 'Probar' }));
+    await userEvent.type(screen.getByLabelText('Buscar contacto'), 'Luc');
+    await userEvent.click(await screen.findByRole('button', { name: 'Probar con Lucía Paredes' }));
+    const res = within(await screen.findByRole('region', { name: 'Resultado de la prueba' }));
+    expect(res.getByText(/Esperaría 2 días/)).toBeInTheDocument();
+    expect(res.getByText(/después de esperar: se estima con lo de ahora/)).toBeInTheDocument();
   });
 });

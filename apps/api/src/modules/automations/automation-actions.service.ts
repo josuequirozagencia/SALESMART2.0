@@ -1,15 +1,18 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
-import { contactPhones, contacts, conversations, tags, tasks, type TenantTx } from '../../db';
+import { automations, contactPhones, contacts, conversations, tags, tasks, type TenantTx } from '../../db';
 import { AppError } from '../../errors';
 import { writeAudit } from '../audit';
+import { AgentRuntimeService } from '../ai';
 import { ContactsService } from '../contacts';
 import { CustomValuesService } from '../custom-fields';
+import { currentAutomationOrigin } from '../events';
 import { OpportunitiesService } from '../opportunities';
 import type { OrgDirectory } from '../organizations';
 import { OutreachService } from '../outreach';
 import { AssignmentService } from '../queues';
 import { ContactTaggingService } from '../tags';
+import { AutomationEnqueueService } from './automation-enqueue.service';
 import { renderParam, renderText, type ActionDef } from './automation-model';
 
 /** Lo que una acción necesita saber de la ejecución. */
@@ -46,6 +49,8 @@ export class AutomationActionsService {
     @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
     @Inject(OutreachService) private readonly outreach: OutreachService,
+    @Inject(AutomationEnqueueService) private readonly enqueue: AutomationEnqueueService,
+    @Inject(AgentRuntimeService) private readonly agents: AgentRuntimeService,
   ) {}
 
   async execute(tx: TenantTx, a: ActionDef, ctx: ActionContext): Promise<StepOutcome> {
@@ -68,6 +73,12 @@ export class AutomationActionsService {
           return await this.sendText(tx, a.text, ctx);
         case 'send_template':
           return await this.sendTemplate(tx, a, ctx);
+        case 'run_rule':
+          return await this.runRule(tx, a.automation_id, ctx);
+        case 'start_agent':
+          return await this.startAgent(tx, ctx);
+        case 'wait':
+          throw new ActionFailed('La espera la maneja el motor, no una acción'); // no debería llegar: el motor corta aquí la ejecución
       }
     } catch (e) {
       // Un error de negocio previsto (validación, conflicto, no encontrado) no es una falla del sistema: el paso falla con su mensaje y la regla sigue
@@ -156,5 +167,27 @@ export class AutomationActionsService {
     const r = await this.outreach.sendTemplate(tx, { contactId: ctx.contactId, phone: p.e164, channelId: a.channel_id, templateId: a.template_id, params, queueId: null, ownerId: c.ownerId, now: ctx.now });
     if (r.sent) return done('Plantilla en cola');
     throw new ActionSkipped({ revoked: 'El contacto revocó su consentimiento', channel_unavailable: 'La conexión no está activa', template_unavailable: 'La plantilla ya no está disponible o sus valores no son válidos' }[r.reason]);
+  }
+
+  /** Pide ejecutar otra automatización sobre este contacto: pasa por las mismas defensas que un hecho (profundidad, ciclo, tope por hora) y por sus condiciones, y corre en su propia ejecución. */
+  private async runRule(tx: TenantTx, ruleId: string, ctx: ActionContext): Promise<StepOutcome> {
+    const [target] = await tx.select().from(automations).where(and(eq(automations.id, ruleId), isNull(automations.deletedAt))).limit(1);
+    if (!target) throw new ActionFailed('La automatización que debía ejecutar ya no existe');
+    if (target.status !== 'active') throw new ActionSkipped(`«${target.name}» no está activa`);
+    const origin = currentAutomationOrigin();
+    const r = await this.enqueue.callRule(tx, target, ctx.contactId, origin, `call:${origin?.runId ?? 'sin-origen'}:${target.id}`);
+    if (r === 'queued') return done(`Se ejecutará «${target.name}»`);
+    if (r === 'no_match') throw new ActionSkipped(`El contacto no cumple las condiciones de «${target.name}»`);
+    if (r === 'duplicate') throw new ActionSkipped(`Ya se había pedido ejecutar «${target.name}» desde esta ejecución`);
+    // Se DEVUELVE (no se lanza): lanzarlo deshace el SAVEPOINT y con él la ejecución «omitida» que dejó el encolador, que es justo lo que se quiere poder ver en el historial
+    return { outcome: 'skipped', detail: `«${target.name}» se omitió (ciclo, demasiadas reglas encadenadas o tope por hora): mira su historial` };
+  }
+
+  /** Activa al agente de IA de la conexión en la conversación abierta del contacto: desde ahora contesta lo que escriba el cliente (lo anterior no se contesta). */
+  private async startAgent(tx: TenantTx, ctx: ActionContext): Promise<StepOutcome> {
+    const t = await this.agents.startTarget(tx, ctx.contactId);
+    if (!t.ok) throw new ActionSkipped({ no_conversation: 'No hay una conversación abierta con el contacto', no_agent: 'La conexión de la conversación no tiene un agente de IA activo', already_active: 'El agente de IA ya está activo en la conversación' }[t.reason]);
+    await this.agents.resume(tx, t.conversationId, 'automation');
+    return done('Agente de IA activado en la conversación');
   }
 }

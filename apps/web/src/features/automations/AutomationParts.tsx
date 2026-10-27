@@ -7,8 +7,8 @@ import { useFollowUpTemplates } from '../forms/useForms';
 import { usePipelines } from '../pipelines/usePipelines';
 import { useQueues } from '../queues/useQueues';
 import { useTags } from '../tags/useTags';
-import { ACTION_HINT, ACTION_LABEL, ACTIONS, CONSENT_LABEL, NO_VALUE_OPS, OP_LABEL, opsFor, SOURCE_SUGGESTIONS, TRIGGER_LABEL, TRIGGERS } from './labels';
-import type { Action, ActionType, Condition, Trigger, TriggerType } from './useAutomations';
+import { ACTION_HINT, ACTION_LABEL, ACTIONS, CONSENT_LABEL, NO_VALUE_OPS, OP_LABEL, opsFor, SOURCE_SUGGESTIONS, TRIGGER_LABEL, TRIGGERS, UNIT_LABEL } from './labels';
+import { useAutomations, type Action, type ActionType, type Condition, type Trigger, type TriggerType, type WaitUnit } from './useAutomations';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const small = '!px-3 !py-1.5 !text-[12.5px]';
@@ -21,7 +21,8 @@ export function useRuleOptions() {
   const queues = useQueues().data?.items ?? [];
   const channels = useChannels().data?.items ?? [];
   const people = useOwners(true).data ?? [];
-  return { fields, tags, customTags: tags.filter((t) => !t.is_system), pipelines, queues, channels, official: channels.filter((c) => c.is_official && c.status === 'active'), people };
+  const rules = useAutomations().data?.items ?? [];
+  return { rules, fields, tags, customTags: tags.filter((t) => !t.is_system), pipelines, queues, channels, official: channels.filter((c) => c.is_official && c.status === 'active'), people };
 }
 type Options = ReturnType<typeof useRuleOptions>;
 
@@ -197,7 +198,7 @@ export function ConditionRow({ c, index, onChange, onRemove, o }: { c: Condition
 
 // ------------------------------------------------------------------------------------------------ acciones
 
-export function ActionCard({ a, index, count, onChange, onRemove, onMove, o }: { a: Action; index: number; count: number; onChange: (a: Action) => void; onRemove: () => void; onMove: (d: -1 | 1) => void; o: Options }) {
+export function ActionCard({ a, index, count, selfId, onChange, onRemove, onMove, o }: { a: Action; index: number; count: number; selfId: string | undefined; onChange: (a: Action) => void; onRemove: () => void; onMove: (d: -1 | 1) => void; o: Options }) {
   const n = index + 1;
   const set = (patch: Partial<Action>): void => onChange({ ...a, ...patch });
   const templates = useFollowUpTemplates(a.type === 'send_template' ? (a.channel_id ?? '') : '').data?.items.filter((t) => t.sendable) ?? [];
@@ -206,7 +207,7 @@ export function ActionCard({ a, index, count, onChange, onRemove, onMove, o }: {
     const t = templates.find((x) => x.id === id);
     onChange({ ...a, template_id: id, params: t ? Object.fromEntries(t.variables.map((v, i) => [v.id, a.params?.[v.id] ?? (i === 0 ? '{{primer_nombre}}' : '')])) : {} });
   };
-  const retype = (type: ActionType): void => onChange(type === 'create_task' ? { type, assignee: 'owner' } : type === 'send_template' ? { type, params: {} } : { type });
+  const retype = (type: ActionType): void => onChange(type === 'create_task' ? { type, assignee: 'owner' } : type === 'send_template' ? { type, params: {} } : type === 'wait' ? { type, amount: 1, unit: 'hours' } : { type });
   const openStages = o.pipelines.flatMap((p) => p.stages.filter((s) => s.kind === 'open' && !s.is_hidden).map((s) => ({ id: s.id, label: o.pipelines.length > 1 ? `${p.name} · ${s.name}` : s.name })));
   const aria = (what: string): string => `Acción ${n}: ${what}`;
   return (
@@ -262,6 +263,20 @@ export function ActionCard({ a, index, count, onChange, onRemove, onMove, o }: {
       ) : null}
       {a.type === 'send_text' ? (
         <textarea aria-label={aria('texto del mensaje')} className="min-h-[84px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] text-fg" maxLength={1000} value={a.text ?? ''} placeholder="Hola {{primer_nombre}}, ¿en qué te ayudamos?" onChange={(e) => set({ text: e.target.value })} />
+      ) : null}
+      {a.type === 'wait' ? (
+        <div className="grid gap-2 min-[560px]:grid-cols-2">
+          <Input aria-label={aria('cuánto esperar')} type="number" min={1} max={43200} value={a.amount ?? ''} onChange={(e) => set({ amount: e.target.value === '' ? undefined : Math.max(1, Math.trunc(Number(e.target.value))) })} />
+          <Select aria-label={aria('unidad de la espera')} value={a.unit ?? 'hours'} onChange={(v) => set({ unit: v as WaitUnit })}>
+            {(Object.keys(UNIT_LABEL) as WaitUnit[]).map((u) => <option key={u} value={u}>{UNIT_LABEL[u]}</option>)}
+          </Select>
+        </div>
+      ) : null}
+      {a.type === 'run_rule' ? (
+        <Select aria-label={aria('automatización')} value={a.automation_id ?? ''} onChange={(v) => set({ automation_id: v })}>
+          <option value="">Elige una automatización</option>
+          {o.rules.filter((r) => r.id !== selfId).map((r) => <option key={r.id} value={r.id}>{r.name}{r.status === 'active' ? '' : r.status === 'paused' ? ' (en pausa)' : ' (borrador)'}</option>)}
+        </Select>
       ) : null}
       {a.type === 'send_template' ? (
         <div className="grid gap-2">

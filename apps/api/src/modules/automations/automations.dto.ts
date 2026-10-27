@@ -26,7 +26,7 @@ export const updateAutomationSchema = z
 export type UpdateAutomationDto = z.infer<typeof updateAutomationSchema>;
 
 export const runsQuerySchema = z.object({
-  status: z.enum(['queued', 'done', 'skipped', 'failed']).optional(),
+  status: z.enum(['queued', 'waiting', 'done', 'skipped', 'failed']).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(25),
   cursor: z.string().max(200).optional(),
 });

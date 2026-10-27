@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { agents, aiConversationState, conversations, Database, messages, type TenantTx } from '../../../db';
 import { ConflictError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
@@ -325,14 +325,44 @@ export class AgentRuntimeService {
   }
 
   /** Reanuda al agente: desde ahora contesta lo que escriba el cliente (lo anterior no se contesta). Solo lo hace una persona. */
-  async resume(tx: TenantTx, conversationId: string): Promise<void> {
+  async resume(tx: TenantTx, conversationId: string, source: 'manual' | 'automation' = 'manual'): Promise<void> {
     const agentId = await this.channelAgent(tx, conversationId);
     if (!agentId) throw new ConflictError('NO_AGENT', 'Esta conexión no tiene un agente de IA activo');
     const now = new Date();
+    const [prior] = await tx.select({ status: aiConversationState.status }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).limit(1);
     await this.ensureState(tx, conversationId, agentId);
     const [last] = await tx.select({ at: sql<Date | null>`max(${messages.sentAt})` }).from(messages).where(and(eq(messages.conversationId, conversationId), eq(messages.direction, 'in')));
     await tx.update(aiConversationState).set({ resumedAt: now, handledUntil: last?.at ? new Date(last.at) : now, turns: 0, unsupportedStreak: 0, attempts: 0, nextAttemptAt: now, processingStartedAt: null }).where(eq(aiConversationState.conversationId, conversationId));
-    await this.setState(tx, conversationId, agentId, { status: 'active', reason: null }, now, 'manual');
+    await this.setState(tx, conversationId, agentId, { status: 'active', reason: null }, now, source);
+    // Si no estaba pausado, el estado no cambia y `setState` no deja rastro: una automatización sí debe dejarlo (nota para el equipo y auditoría), porque es quien tomó la decisión
+    if (source === 'automation' && (!prior || prior.status === 'active')) {
+      const [conv] = await tx.select({ channelAccountId: conversations.channelAccountId }).from(conversations).where(eq(conversations.id, conversationId)).limit(1);
+      const name = (await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0]?.name ?? 'de IA';
+      if (conv) await tx.insert(messages).values({ conversationId, channelAccountId: conv.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: `Una automatización activó al agente ${name}.`.slice(0, 2000), status: 'internal', sentAt: now });
+      await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'ai_agent', oldValue: prior ? { status: prior.status, reason: null } : null, newValue: { status: 'active', reason: null }, source: 'automation' });
+      this.realtime.touchHere(conversationId, {});
+    }
+  }
+
+  /**
+   * A qué conversación y con qué agente iría una automatización que activa al agente (M9.5, ADR-54): la conversación NO finalizada más reciente del contacto, con el agente activo de su conexión.
+   * Solo lee (lo usan la acción y la prueba en seco, para decir lo mismo). Si el agente ya está activo en ella no hay nada que hacer.
+   */
+  async startTarget(tx: TenantTx, contactId: string): Promise<{ ok: true; conversationId: string; agentId: string } | { ok: false; reason: 'no_conversation' | 'no_agent' | 'already_active' }> {
+    const [conv] = await tx
+      .select({ id: conversations.id, status: conversations.status })
+      .from(conversations)
+      .where(and(eq(conversations.contactId, contactId), sql`${conversations.status} <> 'closed'`))
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt))
+      .limit(1);
+    if (!conv) return { ok: false, reason: 'no_conversation' };
+    const agentId = await this.channelAgent(tx, conv.id);
+    if (!agentId) return { ok: false, reason: 'no_agent' };
+    const [st] = await tx.select({ status: aiConversationState.status, resumedAt: aiConversationState.resumedAt }).from(aiConversationState).where(eq(aiConversationState.conversationId, conv.id)).limit(1);
+    // Ya atiende: está activo y una persona lo reanudó, o nadie trabaja la conversación (sin asignar / pendiente) y no está pausado
+    const unattended = conv.status === 'unassigned' || conv.status === 'pending';
+    if ((!st && unattended) || (st?.status === 'active' && (st.resumedAt !== null || unattended))) return { ok: false, reason: 'already_active' };
+    return { ok: true, conversationId: conv.id, agentId };
   }
 
   /** El agente activo de la conexión de la conversación (null si no hay o está apagado). */
@@ -366,7 +396,7 @@ export class AgentRuntimeService {
     const [conv] = await tx.select({ channelAccountId: conversations.channelAccountId }).from(conversations).where(eq(conversations.id, conversationId)).limit(1);
     const name = agentName ?? (await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0]?.name ?? 'de IA';
     if (conv) {
-      const body = to.status === 'active' ? `Una persona reanudó al agente ${name}.` : to.reason ? handoffNote(name, to.reason) : null;
+      const body = to.status === 'active' ? (source === 'automation' ? `Una automatización activó al agente ${name}.` : `Una persona reanudó al agente ${name}.`) : to.reason ? handoffNote(name, to.reason) : null;
       if (body) await tx.insert(messages).values({ conversationId, channelAccountId: conv.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: body.slice(0, 2000), status: 'internal', sentAt: now });
     }
     await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'ai_agent', oldValue: { status: cur.status, reason: cur.reason }, newValue: { status: to.status, reason: to.reason }, source });

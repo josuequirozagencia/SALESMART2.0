@@ -6,7 +6,7 @@ import { APP_LOGGER } from '../../tokens';
 import { withAutomationOrigin } from '../events';
 import type { OrgDirectory } from '../organizations';
 import { ActionFailed, ActionSkipped, AutomationActionsService } from './automation-actions.service';
-import { actionSchema, type ActionDef } from './automation-model';
+import { actionSchema, waitMs, waitText, type ActionDef } from './automation-model';
 
 /** Ejecuciones que una pasada toma por empresa. */
 export const RUN_BATCH = 25;
@@ -17,7 +17,7 @@ const BACKOFF_MS = 10_000;
 export const STALE_MS = 24 * 60 * 60 * 1000;
 
 type Run = typeof automationRuns.$inferSelect;
-type Outcome = 'done' | 'skipped' | 'failed' | 'retry';
+type Outcome = 'done' | 'skipped' | 'failed' | 'retry' | 'waiting';
 
 /**
  * El motor de las automatizaciones (M9.3, ADR-54; F20): toma las ejecuciones en cola y hace lo que la regla dice. Cada ejecución corre ENTERA en una transacción (`FOR UPDATE SKIP LOCKED`: varias
@@ -55,25 +55,36 @@ export class AutomationRunnerService {
     return this.db.withTenant(async (tx) => {
       const [run] = await tx.select().from(automationRuns).where(and(eq(automationRuns.id, id), eq(automationRuns.status, 'queued'))).limit(1).for('update', { skipLocked: true });
       if (!run) return 'skipped'; // otra instancia la tomó o ya se resolvió
-      if (now.getTime() - run.createdAt.getTime() > STALE_MS) return this.close(tx, run, 'skipped', 'Quedó en cola demasiado tiempo y ya no se ejecuta', now);
+      // Una ejecución que ya empezó y está esperando puede tardar días: lo de «demasiado tiempo en cola» solo vale para la que aún no empezó
+      const resuming = run.resumeActions !== null;
+      if (!resuming && now.getTime() - run.createdAt.getTime() > STALE_MS) return this.close(tx, run, 'skipped', 'Quedó en cola demasiado tiempo y ya no se ejecuta', now);
 
       const [rule] = await tx.select().from(automations).where(and(eq(automations.id, run.automationId), eq(automations.status, 'active'), isNull(automations.deletedAt))).limit(1);
       if (!rule) return this.close(tx, run, 'skipped', 'La automatización se pausó o se borró antes de ejecutarse', now);
       const [contact] = await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.id, run.contactId), isNull(contacts.deletedAt))).limit(1);
       if (!contact) return this.close(tx, run, 'skipped', 'El contacto ya no existe', now);
 
-      await tx.update(automationRuns).set({ startedAt: now }).where(eq(automationRuns.id, run.id));
+      await tx.update(automationRuns).set({ startedAt: run.startedAt ?? now }).where(eq(automationRuns.id, run.id));
       const origin = { runId: run.id, depth: run.depth, chain: run.chain };
-      let failed = 0;
-      let position = 0;
-      for (const raw of rule.actions) {
+      // Lo que falta por hacer: tras una espera, las acciones tal como eran al empezar (editar la regla no cambia lo que ya empezó)
+      const pending = (resuming ? run.resumeActions : rule.actions) as Array<Record<string, unknown>>;
+      let position = resuming ? (await tx.select({ n: sql<number>`count(*)::int` }).from(automationRunSteps).where(eq(automationRunSteps.runId, run.id)))[0]!.n : 0;
+      for (const [index, raw] of pending.entries()) {
         position += 1;
         const parsed = actionSchema.safeParse(raw);
+        if (parsed.success && parsed.data.type === 'wait') {
+          const rest = pending.slice(index + 1);
+          await tx.insert(automationRunSteps).values({ runId: run.id, position, actionType: 'wait', outcome: 'done', detail: rest.length > 0 ? `Espera de ${waitText(parsed.data)}` : 'No hay acciones después de la espera: no hay nada más que hacer' });
+          if (rest.length === 0) break;
+          await tx.update(automationRuns).set({ resumeActions: rest, nextAttemptAt: new Date(now.getTime() + waitMs(parsed.data)), attempts: 0 }).where(eq(automationRuns.id, run.id));
+          return 'waiting';
+        }
         const step = parsed.success ? await this.step(tx, parsed.data, { contactId: run.contactId, now, dir }, origin) : { outcome: 'failed' as const, detail: 'La acción guardada no es válida' };
-        if (step.outcome === 'failed') failed += 1;
         const type = (raw as { type?: unknown }).type;
         await tx.insert(automationRunSteps).values({ runId: run.id, position, actionType: typeof type === 'string' ? type.slice(0, 40) : 'unknown', outcome: step.outcome, detail: step.detail.slice(0, 500) });
       }
+      // Los fallos se cuentan sobre TODOS los pasos de la ejecución (una espera la parte en tramos)
+      const failed = (await tx.select({ n: sql<number>`count(*)::int` }).from(automationRunSteps).where(and(eq(automationRunSteps.runId, run.id), eq(automationRunSteps.outcome, 'failed'))))[0]!.n;
       return this.close(tx, run, failed > 0 ? 'failed' : 'done', failed > 0 ? `${failed} ${failed === 1 ? 'acción falló' : 'acciones fallaron'}` : null, now);
     });
   }
@@ -94,7 +105,7 @@ export class AutomationRunnerService {
   }
 
   private async close(tx: TenantTx, run: Run, status: 'done' | 'skipped' | 'failed', reason: string | null, now: Date): Promise<Outcome> {
-    await tx.update(automationRuns).set({ status, reason, finishedAt: now }).where(eq(automationRuns.id, run.id));
+    await tx.update(automationRuns).set({ status, reason, finishedAt: now, resumeActions: null }).where(eq(automationRuns.id, run.id));
     return status;
   }
 

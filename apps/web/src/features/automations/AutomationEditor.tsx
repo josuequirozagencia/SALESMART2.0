@@ -132,7 +132,7 @@ function EditorBody({ rule }: { rule: Automation | null }) {
             {draft.actions.length === 0 ? <p className="text-[13px] text-muted">Aún no hay acciones: agrega al menos una para poder activarla.</p> : null}
             {draft.actions.length > 0 ? (
               <ol aria-label="Acciones" className="grid gap-2">
-                {draft.actions.map((a, i) => <ActionCard key={i} a={a} index={i} count={draft.actions.length} o={o} onChange={(x) => setAction(i, x)} onRemove={() => patch({ actions: draft.actions.filter((_, j) => j !== i) })} onMove={(d) => moveAction(i, d)} />)}
+                {draft.actions.map((a, i) => <ActionCard key={i} a={a} index={i} count={draft.actions.length} selfId={rule?.id} o={o} onChange={(x) => setAction(i, x)} onRemove={() => patch({ actions: draft.actions.filter((_, j) => j !== i) })} onMove={(d) => moveAction(i, d)} />)}
               </ol>
             ) : null}
             <div><Button disabled={draft.actions.length >= MAX_ACTIONS} onClick={() => patch({ actions: [...draft.actions, { type: 'add_tag' }] })}>Agregar acción</Button></div>

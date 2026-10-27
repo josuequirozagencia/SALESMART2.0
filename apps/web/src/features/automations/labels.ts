@@ -1,5 +1,5 @@
 import type { PillKind } from '../../ui/Pill';
-import type { ActionType, AutomationStatus, TriggerType } from './useAutomations';
+import type { ActionType, AutomationStatus, TriggerType, WaitUnit } from './useAutomations';
 
 export const STATUS_LABEL: Record<AutomationStatus, string> = { draft: 'Borrador', active: 'Activa', paused: 'En pausa' };
 export const STATUS_KIND: Record<AutomationStatus, PillKind> = { draft: 'muted', active: 'ok', paused: 'warn' };
@@ -24,6 +24,9 @@ export const ACTION_LABEL: Record<ActionType, string> = {
   create_task: 'Crear una tarea',
   send_text: 'Enviar un mensaje de texto',
   send_template: 'Enviar una plantilla de WhatsApp',
+  wait: 'Esperar',
+  run_rule: 'Ejecutar otra automatización',
+  start_agent: 'Activar al agente de IA en la conversación',
 };
 export const ACTIONS = Object.keys(ACTION_LABEL) as ActionType[];
 
@@ -38,10 +41,14 @@ export const ACTION_HINT: Record<ActionType, string> = {
   create_task: 'Usa {{nombre}} o {{primer_nombre}} en el título.',
   send_text: 'Solo a una conversación abierta y dentro de las 24 horas desde el último mensaje del cliente. Nunca abre una conversación.',
   send_template: 'Puede abrir la conversación. Necesita una plantilla aprobada por Meta.',
+  wait: 'La ejecución se pausa y sigue con las acciones de abajo cuando pase el tiempo (de 1 minuto a 30 días). Si pausas o borras la regla, o borras al contacto, no continúa; si editas la regla, lo que ya empezó sigue como estaba.',
+  run_rule: 'Corre otra automatización activa con este contacto, en su propia ejecución y solo si el contacto cumple sus condiciones. Si se llaman en círculo, se corta.',
+  start_agent: 'El agente de la conexión de la conversación contesta lo que el cliente escriba desde ahora (lo anterior no). Si una persona escribe después, el agente se pausa otra vez.',
 };
+export const UNIT_LABEL: Record<WaitUnit, string> = { minutes: 'minutos', hours: 'horas', days: 'días' };
 
-export const RUN_LABEL = { queued: 'En cola', done: 'Hecha', skipped: 'Omitida', failed: 'Con fallos' } as const;
-export const RUN_KIND: Record<keyof typeof RUN_LABEL, PillKind> = { queued: 'info', done: 'ok', skipped: 'muted', failed: 'crit' };
+export const RUN_LABEL = { queued: 'En cola', waiting: 'Esperando', done: 'Hecha', skipped: 'Omitida', failed: 'Con fallos' } as const;
+export const RUN_KIND: Record<keyof typeof RUN_LABEL, PillKind> = { queued: 'info', waiting: 'accent', done: 'ok', skipped: 'muted', failed: 'crit' };
 export const STEP_LABEL = { done: 'Hecho', skipped: 'Omitido', failed: 'Falló' } as const;
 export const STEP_KIND = { done: 'ok', skipped: 'muted', failed: 'crit' } as const satisfies Record<string, PillKind>;
 export const WOULD_LABEL = { do: 'Lo haría', skip: 'Se omitiría', fail: 'Fallaría' } as const;

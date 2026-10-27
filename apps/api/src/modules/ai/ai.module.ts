@@ -55,6 +55,6 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     { provide: AI_PROVIDER, useFactory: buildAiProvider, inject: [APP_CONFIG] },
     { provide: VECTOR_STORE, useFactory: () => new PgArrayVectorStore() },
   ],
-  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, KnowledgeJob, AgentRuntimeJob],
+  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, KnowledgeJob, AgentRuntimeJob, AgentRuntimeService],
 })
 export class AiModule {}

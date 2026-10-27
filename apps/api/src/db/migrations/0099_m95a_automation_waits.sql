@@ -1,0 +1,2 @@
+ALTER TABLE "automation_runs" ADD COLUMN "resume_actions" jsonb;--> statement-breakpoint
+ALTER TABLE "automation_runs" ADD CONSTRAINT "automation_runs_resume_shape" CHECK ("automation_runs"."resume_actions" IS NULL OR (jsonb_typeof("automation_runs"."resume_actions") = 'array' AND jsonb_array_length("automation_runs"."resume_actions") BETWEEN 1 AND 10));

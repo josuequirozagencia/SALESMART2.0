@@ -286,7 +286,7 @@ describe('motor: disparadores, condiciones y acciones', () => {
     const [run] = await runsOf(T.alice, r.id);
     expect(run).toMatchObject({ status: 'done', reason: null });
     expect(run!.steps).toEqual([{ position: 1, action: 'add_tag', label: 'Poner una etiqueta', outcome: 'done', detail: 'Etiqueta «Bienvenida» puesta' }]);
-    expect((await json<Rule>(await call('GET', `/automations/${r.id}`, T.alice))).recent).toEqual({ done: 1, skipped: 0, failed: 0, queued: 0 });
+    expect((await json<Rule>(await call('GET', `/automations/${r.id}`, T.alice))).recent).toEqual({ done: 1, skipped: 0, failed: 0, queued: 0, waiting: 0 });
     // volver a correr el motor no repite nada
     expect(await drain()).toBe(0);
     expect(await dbRuns()).toHaveLength(1);
@@ -683,5 +683,219 @@ describe('prueba en seco: qué haría la regla con un contacto, sin escribir nad
     expect((await call('POST', `/automations/${r.id}/test`, undefined, { contact_id: mine })).status).toBe(401);
     expect((await call('POST', `/automations/${r.id}/test`, T.alice, { contact_id: mine, extra: 1 })).status).toBe(400);
     expect((await call('POST', `/automations/${r.id}/test`, T.alice, {})).status).toBe(400);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════ M9.5a: esperar, ejecutar otra regla, activar al agente
+
+describe('esperar', () => {
+  const H = 3_600_000;
+  const tagOf = tagNames;
+
+  it('una espera deja la ejecución en pausa y sigue cuando llega su hora, con los pasos numerados de corrido', async () => {
+    const a = await mkTag(T.alice, 'Antes');
+    const b = await mkTag(T.alice, 'Despues');
+    const r = await live(T.alice, body('Con espera', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: a }, { type: 'wait', amount: 2, unit: 'hours' }, { type: 'add_tag', tag_id: b }, { type: 'create_task', title: 'Seguir a {{primer_nombre}}', assignee: IDS.carol }]));
+    const c = await mkContact(T.alice, 'Lucía Paredes');
+    const t0 = new Date();
+    await drain(() => t0);
+    expect(await tagOf(c)).toEqual(['Antes']);
+    let [run] = await runsOf(T.alice, r.id);
+    expect(run).toMatchObject({ status: 'waiting', resume_at: new Date(t0.getTime() + 2 * H).toISOString() });
+    expect(run!.steps.map((s) => [s.position, s.action, s.outcome, s.detail])).toEqual([[1, 'add_tag', 'done', expect.any(String)], [2, 'wait', 'done', 'Espera de 2 horas']]);
+    expect((await json<{ items: Rule[] }>(await call('GET', '/automations', T.alice))).items[0]!.recent).toMatchObject({ waiting: 1, queued: 0 });
+    // antes de la hora no pasa nada
+    await drain(() => new Date(t0.getTime() + 1 * H));
+    expect(await tagOf(c)).toEqual(['Antes']);
+    expect(((await json<{ items: Run[] }>(await call('GET', `/automations/${r.id}/runs?status=waiting`, T.alice))).items).length).toBe(1);
+    // llegada su hora, continúa
+    await drain(() => new Date(t0.getTime() + 2 * H + 1000));
+    [run] = await runsOf(T.alice, r.id);
+    expect(run).toMatchObject({ status: 'done', resume_at: null });
+    expect(await tagOf(c)).toEqual(['Antes', 'Despues']);
+    expect(run!.steps.map((s) => [s.position, s.action, s.outcome])).toEqual([[1, 'add_tag', 'done'], [2, 'wait', 'done'], [3, 'add_tag', 'done'], [4, 'create_task', 'done']]);
+    expect((await tasksOf())[0]).toMatchObject({ title: 'Seguir a Lucía' });
+    expect((await dbRuns())[0]!['resume_actions']).toBeNull();
+  });
+
+  it('una espera de días no se descarta por «demasiado tiempo en cola»', async () => {
+    const b = await mkTag(T.alice, 'Despues');
+    const r = await live(T.alice, body('Tres días', { type: 'contact_created', filter: {} }, [{ type: 'wait', amount: 3, unit: 'days' }, { type: 'add_tag', tag_id: b }]));
+    const c = await mkContact(T.alice);
+    const t0 = new Date();
+    await drain(() => t0);
+    await drain(() => new Date(t0.getTime() + 3 * 24 * H + 60_000));
+    expect((await runsOf(T.alice, r.id))[0]).toMatchObject({ status: 'done' });
+    expect(await tagOf(c)).toEqual(['Despues']);
+  });
+
+  it('editar la regla mientras espera NO cambia lo que ya empezó; pausarla o borrar al contacto sí lo cancela, con su motivo', async () => {
+    const x = await mkTag(T.alice, 'Original');
+    const y = await mkTag(T.alice, 'Editada');
+    const r = await live(T.alice, body('Editable', { type: 'contact_created', filter: {} }, [{ type: 'wait', amount: 1, unit: 'hours' }, { type: 'add_tag', tag_id: x }]));
+    const c1 = await mkContact(T.alice, 'Uno');
+    const t0 = new Date();
+    await drain(() => t0);
+    expect((await call('PATCH', `/automations/${r.id}`, T.alice, { actions: [{ type: 'wait', amount: 1, unit: 'hours' }, { type: 'add_tag', tag_id: y }] })).status).toBe(200);
+    await drain(() => new Date(t0.getTime() + 2 * H));
+    expect(await tagOf(c1)).toEqual(['Original']);
+    // pausar la regla cancela lo que espera
+    const c2 = await mkContact(T.alice, 'Dos');
+    const t1 = new Date();
+    await drain(() => t1);
+    expect((await call('POST', `/automations/${r.id}/pause`, T.alice)).status).toBe(200);
+    await drain(() => new Date(t1.getTime() + 2 * H));
+    expect(await tagOf(c2)).toEqual([]);
+    expect((await runsOf(T.alice, r.id)).find((x2) => x2.contact.name === 'Dos')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('pausó') });
+    // reactivar y borrar al contacto mientras espera
+    await activate(T.alice, r.id);
+    const c3 = await mkContact(T.alice, 'Tres');
+    const t2 = new Date();
+    await drain(() => t2);
+    expect((await call('DELETE', `/contacts/${c3}`, T.alice)).status).toBeLessThan(300);
+    await drain(() => new Date(t2.getTime() + 2 * H));
+    expect((await runsOf(T.alice, r.id)).find((x2) => x2.contact.name === 'Tres')).toMatchObject({ status: 'skipped', reason: 'El contacto ya no existe' });
+  });
+
+  it('un paso que falló antes de la espera cuenta al final: la ejecución termina «con fallos»', async () => {
+    const b = await mkTag(T.alice, 'Despues');
+    await mkField(T.alice, 'Servicio');
+    const r = await live(T.alice, body('Falla y espera', { type: 'contact_created', filter: {} }, [{ type: 'set_field', field: 'servicio', value: 'x' }, { type: 'wait', amount: 5, unit: 'minutes' }, { type: 'add_tag', tag_id: b }]));
+    const field = (await json<{ items: Array<{ id: string; key: string }> }>(await call('GET', '/custom-fields', T.alice))).items.find((f) => f.key === 'servicio')!;
+    await mkContact(T.alice);
+    expect((await call('POST', `/custom-fields/${field.id}/archive`, T.alice)).status).toBe(200);
+    const t0 = new Date();
+    await drain(() => t0);
+    await drain(() => new Date(t0.getTime() + 6 * 60_000));
+    const [run] = await runsOf(T.alice, r.id);
+    expect(run).toMatchObject({ status: 'failed', reason: '1 acción falló' });
+    expect(run!.steps.map((s) => s.outcome)).toEqual(['failed', 'done', 'done']);
+  });
+
+  it('el servidor valida las esperas: de 1 minuto a 30 días, y no puede ser la última acción', async () => {
+    const tag = await mkTag(T.alice, 'Nuevo');
+    const mkw = (a: Record<string, unknown>, tail = true) => body('Espera ' + JSON.stringify(a), { type: 'contact_created', filter: {} }, [a, ...(tail ? [{ type: 'add_tag', tag_id: tag }] : [])]);
+    expect((await call('POST', '/automations', T.alice, mkw({ type: 'wait', amount: 1, unit: 'minutes' }))).status).toBe(201);
+    expect((await call('POST', '/automations', T.alice, mkw({ type: 'wait', amount: 30, unit: 'days' }))).status).toBe(201);
+    for (const bad of [{ type: 'wait', amount: 0, unit: 'minutes' }, { type: 'wait', amount: 31, unit: 'days' }, { type: 'wait', amount: 1, unit: 'weeks' }, { type: 'wait', amount: 1.5, unit: 'hours' }, { type: 'wait', unit: 'hours' }, { type: 'wait', amount: 1, unit: 'hours', extra: 1 }]) {
+      expect((await call('POST', '/automations', T.alice, mkw(bad))).status, JSON.stringify(bad)).toBe(400);
+    }
+    const last = await call('POST', '/automations', T.alice, mkw({ type: 'wait', amount: 2, unit: 'hours' }, false));
+    expect(last.status).toBe(400);
+    expect(JSON.stringify(await last.json())).toContain('esperar al final no hace nada');
+  });
+});
+
+describe('ejecutar otra automatización', () => {
+  const calls = (target: string) => body('Llama a otra', { type: 'contact_created', filter: {} }, [{ type: 'run_rule', automation_id: target }]);
+
+  it('la regla llamada corre en su propia ejecución (encadenada, con su hecho «rule_call») y la que llama anota qué pasó', async () => {
+    const tag = await mkTag(T.alice, 'Llamada');
+    const target = await live(T.alice, body('Ayudante', { type: 'sale_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }]));
+    const caller = await live(T.alice, calls(target.id));
+    const c = await mkContact(T.alice);
+    await drain();
+    const [cr] = await runsOf(T.alice, caller.id);
+    expect(cr).toMatchObject({ status: 'done', depth: 0 });
+    expect(cr!.steps[0]).toMatchObject({ action: 'run_rule', outcome: 'done', detail: 'Se ejecutará «Ayudante»' });
+    const [tr] = await runsOf(T.alice, target.id);
+    expect(tr).toMatchObject({ status: 'done', event_type: 'rule_call', depth: 1 });
+    expect(await tagNames(c)).toEqual(['Llamada']);
+  });
+
+  it('la regla llamada evalúa sus condiciones y debe estar activa; si no, el paso se omite sin dejar ejecución', async () => {
+    const tag = await mkTag(T.alice, 'Llamada');
+    await mkField(T.alice, 'Servicio');
+    const conditional = await live(T.alice, body('Con condición', { type: 'sale_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }], [{ field: 'custom:servicio', op: 'eq', value: 'corte' }]));
+    const draft = await mk(T.alice, body('Borrador', { type: 'sale_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }]));
+    const a = await live(T.alice, body('Llama a dos', { type: 'contact_created', filter: {} }, [{ type: 'run_rule', automation_id: conditional.id }, { type: 'run_rule', automation_id: draft.id }]));
+    await mkContact(T.alice);
+    await drain();
+    const [run] = await runsOf(T.alice, a.id);
+    expect(run!.steps.map((s) => [s.outcome, s.detail])).toEqual([['skipped', 'El contacto no cumple las condiciones de «Con condición»'], ['skipped', '«Borrador» no está activa']]);
+    expect(await dbRuns()).toHaveLength(1); // solo la de la regla que llama
+  });
+
+  it('el servidor valida el destino: debe existir en la empresa y no puede ser la misma regla', async () => {
+    const tag = await mkTag(T.alice, 'Nuevo');
+    const mine = await mk(T.alice, body('Mía', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }]));
+    const theirs = await mk(T.bob, body('De B', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: await mkTag(T.bob, 'B') }]));
+    expect((await call('POST', '/automations', T.alice, calls(GHOST))).status).toBe(400);
+    expect((await call('POST', '/automations', T.alice, calls(theirs.id))).status).toBe(400);
+    const self = await call('PATCH', `/automations/${mine.id}`, T.alice, { actions: [{ type: 'run_rule', automation_id: mine.id }] });
+    expect(self.status).toBe(400);
+    expect(JSON.stringify(await self.json())).toContain('no puede ejecutarse a sí misma');
+    expect((await call('POST', '/automations', T.alice, calls(mine.id))).status).toBe(201);
+  });
+
+  it('dos reglas que se llaman entre sí no se ciclan: la segunda vuelta de la primera se omite y queda registrada', async () => {
+    const tag = await mkTag(T.alice, 'Hecho');
+    const a = await live(T.alice, body('A', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }]));
+    const b = await live(T.alice, body('B', { type: 'sale_created', filter: {} }, [{ type: 'run_rule', automation_id: a.id }]));
+    expect((await call('PATCH', `/automations/${a.id}`, T.alice, { actions: [{ type: 'run_rule', automation_id: b.id }] })).status).toBe(200);
+    await mkContact(T.alice);
+    await drain();
+    const runsA = await runsOf(T.alice, a.id);
+    expect(runsA.map((r) => r.status).sort()).toEqual(['done', 'skipped']);
+    expect(runsA.find((r) => r.status === 'skipped')!.reason).toContain('Ciclo');
+    expect((await runsOf(T.alice, b.id))[0]!.steps[0]).toMatchObject({ outcome: 'skipped', detail: expect.stringContaining('se omitió') });
+  });
+});
+
+describe('activar al agente de IA', () => {
+  it('activa al agente de la conexión en la conversación abierta; si ya está activo, no hay agente o no hay conversación, se omite', async () => {
+    const mkChannel = async (name: string, waba: string, phone: string) => (await json<{ id: string }>(await call('POST', '/channels', T.alice, { name, waba_id: waba, phone_number_id: phone, access_token: FAKE_WHATSAPP_TOKEN }))).id;
+    const ch = await mkChannel('Ventas', '1234567890123', '1090123456789');
+    const ch2 = await mkChannel('Sin agente', '1234567890124', '1090123456790');
+    const agent = (await json<{ id: string }>(await call('POST', '/agents', T.alice, { name: 'Sofía' }))).id;
+    expect((await call('PATCH', `/agents/${agent}`, T.alice, { personality: 'Cálida y cercana.', objective: 'Ayudar con horarios', active: true })).status).toBe(200);
+    expect((await call('PUT', `/agents/${agent}/channels`, T.alice, { channel_ids: [ch] })).status).toBe(200);
+    const r = await live(T.alice, body('Activar IA', { type: 'message_received', filter: {} }, [{ type: 'start_agent' }]));
+    const conversations = app.get(ConversationsService, { strict: false });
+    const db = app.get(Database, { strict: false });
+    const inbound = (channel: string, id: string, from: string, name: string) =>
+      TenantContext.run({ organizationId: ORG_A }, () =>
+        db.withTenant((tx) => conversations.ingestInbound(tx, channel, { externalId: id, from, fromRaw: from.slice(1), profileName: name, kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date() }, { now: new Date(), timeZone: 'UTC', assignable: new Set<string>() })),
+      );
+    // 1) una persona ya trabaja la conversación: la automatización activa al agente
+    await inbound(ch, 'wamid.1', '+593984217730', 'Marta Lema');
+    await admin.query(`UPDATE conversations SET status = 'working', owner_id = $1, assigned_at = now() WHERE peer_id = '593984217730'`, [IDS.carol]);
+    await drain();
+    const st = (await admin.query(`SELECT s.status, s.resumed_at, s.reason, a.name FROM ai_conversation_state s JOIN agents a ON a.id = s.agent_id`)).rows;
+    expect(st).toEqual([{ status: 'active', resumed_at: expect.any(Date), reason: null, name: 'Sofía' }]);
+    expect((await runsOf(T.alice, r.id))[0]!.steps[0]).toMatchObject({ action: 'start_agent', outcome: 'done' });
+    expect((await admin.query(`SELECT body FROM messages WHERE sender_type = 'system'`)).rows.map((m) => m.body)).toContain('Una automatización activó al agente Sofía.');
+    expect((await admin.query(`SELECT source FROM audit_logs WHERE entity_type = 'conversation' AND field = 'ai_agent'`)).rows).toEqual([{ source: 'automation' }]);
+    // 2) con otro mensaje, el agente ya estaba activo
+    await inbound(ch, 'wamid.2', '+593984217730', 'Marta Lema');
+    await drain();
+    expect((await runsOf(T.alice, r.id))[0]!.steps[0]).toMatchObject({ outcome: 'skipped', detail: 'El agente de IA ya está activo en la conversación' });
+    // 3) una conexión sin agente
+    await inbound(ch2, 'wamid.3', '+593984217731', 'Otro');
+    await drain();
+    expect((await runsOf(T.alice, r.id)).find((x) => x.contact.name === 'Otro')!.steps[0]).toMatchObject({ outcome: 'skipped', detail: expect.stringContaining('no tiene un agente de IA activo') });
+  });
+
+  it('un contacto sin conversación abierta se omite', async () => {
+    const r = await live(T.alice, body('Activar IA', { type: 'contact_created', filter: {} }, [{ type: 'start_agent' }]));
+    await mkContact(T.alice);
+    await drain();
+    expect((await runsOf(T.alice, r.id))[0]!.steps[0]).toMatchObject({ outcome: 'skipped', detail: 'No hay una conversación abierta con el contacto' });
+  });
+});
+
+describe('prueba en seco de las acciones nuevas', () => {
+  it('dice que esperaría, ejecutaría otra regla y activaría al agente (o por qué no), sin escribir nada', async () => {
+    const tag = await mkTag(T.alice, 'Nuevo');
+    const target = await live(T.alice, body('Ayudante', { type: 'sale_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }]));
+    const r = await mk(T.alice, body('Con todo', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }, { type: 'wait', amount: 2, unit: 'hours' }, { type: 'run_rule', automation_id: target.id }, { type: 'start_agent' }]));
+    const c = await mkContact(T.alice);
+    const snapshot = async () => (await admin.query(`SELECT (SELECT count(*) FROM automation_runs)::int AS runs, (SELECT count(*) FROM audit_logs)::int AS audit`)).rows[0];
+    const before = await snapshot();
+    const out = await json<{ actions: Array<{ action: string; would: string; detail: string; after_wait: boolean }> }>(await call('POST', `/automations/${r.id}/test`, T.alice, { contact_id: c }));
+    expect(out.actions.map((a) => [a.action, a.would, a.after_wait])).toEqual([['add_tag', 'do', false], ['wait', 'do', false], ['run_rule', 'do', true], ['start_agent', 'skip', true]]);
+    expect(out.actions[1]!.detail).toContain('2 horas');
+    expect(out.actions[3]!.detail).toBe('No hay una conversación abierta con el contacto');
+    expect(await snapshot()).toEqual(before);
   });
 });

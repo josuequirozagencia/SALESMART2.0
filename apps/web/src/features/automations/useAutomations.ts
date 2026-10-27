@@ -2,7 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
 export type TriggerType = 'contact_created' | 'message_received' | 'opportunity_created' | 'stage_changed' | 'field_changed' | 'sale_created';
-export type ActionType = 'assign_user' | 'assign_queue' | 'move_stage' | 'set_field' | 'add_tag' | 'remove_tag' | 'create_task' | 'send_text' | 'send_template';
+export type ActionType = 'assign_user' | 'assign_queue' | 'move_stage' | 'set_field' | 'add_tag' | 'remove_tag' | 'create_task' | 'send_text' | 'send_template' | 'wait' | 'run_rule' | 'start_agent';
+export type WaitUnit = 'minutes' | 'hours' | 'days';
 export type AutomationStatus = 'draft' | 'active' | 'paused';
 
 export interface Trigger {
@@ -33,6 +34,11 @@ export interface Action {
   channel_id?: string;
   template_id?: string;
   params?: Record<string, string>;
+  /** Esperar: cuánto y en qué unidad (de 1 minuto a 30 días). */
+  amount?: number;
+  unit?: WaitUnit;
+  /** Ejecutar otra automatización. */
+  automation_id?: string;
 }
 
 export interface Automation {
@@ -45,7 +51,7 @@ export interface Automation {
   actions: Action[];
   version: number;
   /** Ejecuciones de los últimos 7 días por resultado. */
-  recent: { done: number; skipped: number; failed: number; queued: number };
+  recent: { done: number; skipped: number; failed: number; queued: number; waiting: number };
   created_at: string;
   updated_at: string;
 }
@@ -71,7 +77,9 @@ export interface RunStep {
 export interface Run {
   id: string;
   at: string;
-  status: 'queued' | 'done' | 'skipped' | 'failed';
+  /** `waiting`: una acción «esperar» la dejó en pausa hasta `resume_at`. */
+  status: 'queued' | 'waiting' | 'done' | 'skipped' | 'failed';
+  resume_at: string | null;
   reason: string | null;
   event_type: string;
   depth: number;
@@ -82,7 +90,7 @@ export interface DryRun {
   contact: { id: string; name: string };
   conditions: Array<{ index: number; met: boolean }>;
   meets: boolean;
-  actions: Array<{ position: number; action: string; label: string; would: 'do' | 'skip' | 'fail'; detail: string }>;
+  actions: Array<{ position: number; action: string; label: string; would: 'do' | 'skip' | 'fail'; detail: string; after_wait: boolean }>;
 }
 
 /** Solo conserva los datos que corresponden al tipo de la acción (lo demás el servidor lo rechazaría por forma estricta). */
@@ -105,6 +113,12 @@ export function cleanAction(a: Action): Action {
       return { type: a.type, text: a.text ?? '' };
     case 'send_template':
       return { type: a.type, channel_id: a.channel_id ?? '', template_id: a.template_id ?? '', params: a.params ?? {} };
+    case 'wait':
+      return { type: a.type, amount: a.amount ?? 1, unit: a.unit ?? 'hours' };
+    case 'run_rule':
+      return { type: a.type, automation_id: a.automation_id ?? '' };
+    case 'start_agent':
+      return { type: a.type };
   }
 }
 

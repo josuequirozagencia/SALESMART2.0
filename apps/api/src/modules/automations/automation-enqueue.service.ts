@@ -33,47 +33,56 @@ export class AutomationEnqueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onEvent(tx: TenantTx, event: DomainEvent, origin: AutomationOrigin | null): Promise<void> {
-    const depth = origin ? origin.depth + 1 : 0;
     const rules = await tx
       .select()
       .from(automations)
       .where(and(eq(automations.triggerType, event.type), eq(automations.status, 'active'), isNull(automations.deletedAt)));
     const matching = rules.filter((r) => matchesTrigger(r.triggerType as DomainEvent['type'], r.triggerFilter, event));
     if (matching.length === 0) return;
-
-    let facts: ContactFacts | null = null;
-    for (const r of matching) {
-      const base = { automationId: r.id, contactId: event.contactId, eventType: event.type, eventKey: event.key, context: contextOf(event), depth, chain: [...(origin?.chain ?? []), r.id], causeRunId: origin?.runId ?? null };
-      if (depth > MAX_DEPTH) {
-        await this.record(tx, { ...base, status: 'skipped', reason: `Se superó el máximo de ${MAX_DEPTH} reglas encadenadas` });
-        continue;
-      }
-      if (origin?.chain.includes(r.id)) {
-        await this.record(tx, { ...base, status: 'skipped', reason: 'Ciclo: esta regla ya participó en la cadena que la volvió a disparar' });
-        continue;
-      }
-      const conditions = r.conditions as ConditionDef[];
-      if (conditions.length > 0) {
-        facts ??= await this.factsOf(tx, event.contactId);
-        if (!facts || !meetsConditions(conditions, facts)) continue; // no aplica: no deja rastro
-      }
-      const [{ n } = { n: 0 }] = await tx
-        .select({ n: sql<number>`count(*)::int` })
-        .from(automationRuns)
-        .where(and(eq(automationRuns.automationId, r.id), eq(automationRuns.contactId, event.contactId), inArray(automationRuns.status, ['queued', 'done', 'failed']), sql`${automationRuns.createdAt} > now() - interval '1 hour'`));
-      if (n >= MAX_RUNS_PER_CONTACT_HOUR) {
-        await this.record(tx, { ...base, status: 'skipped', reason: `Tope de ${MAX_RUNS_PER_CONTACT_HOUR} ejecuciones por hora para este contacto` });
-        continue;
-      }
-      await this.record(tx, { ...base, status: 'queued', reason: null });
-    }
+    let facts: ContactFacts | null | undefined;
+    const factsOnce = async (): Promise<ContactFacts | null> => (facts === undefined ? (facts = await this.factsOf(tx, event.contactId)) : facts);
+    for (const r of matching) await this.consider(tx, r, { contactId: event.contactId, eventType: event.type, eventKey: event.key, context: contextOf(event) }, origin, factsOnce);
   }
 
-  private async record(tx: TenantTx, v: { automationId: string; contactId: string; eventType: string; eventKey: string; context: Record<string, unknown>; depth: number; chain: string[]; causeRunId: string | null; status: 'queued' | 'skipped'; reason: string | null }): Promise<void> {
-    await tx
+  /**
+   * Otra regla pide ejecutar a esta (acción «ejecutar otra automatización», M9.5): pasa por LAS MISMAS defensas que un hecho (profundidad, ciclo, tope por hora) y por sus condiciones, y deja
+   * una ejecución en cola (no corre dentro de la de quien la llama). Devuelve qué pasó para que quien llama lo anote en su paso.
+   */
+  async callRule(tx: TenantTx, rule: typeof automations.$inferSelect, contactId: string, origin: AutomationOrigin | null, key: string): Promise<'queued' | 'skipped' | 'no_match' | 'duplicate'> {
+    return this.consider(tx, rule, { contactId, eventType: 'rule_call', eventKey: key, context: { caller_run_id: origin?.runId ?? null } }, origin, () => this.factsOf(tx, contactId));
+  }
+
+  private async consider(
+    tx: TenantTx,
+    r: typeof automations.$inferSelect,
+    ev: { contactId: string; eventType: string; eventKey: string; context: Record<string, unknown> },
+    origin: AutomationOrigin | null,
+    getFacts: () => Promise<ContactFacts | null>,
+  ): Promise<'queued' | 'skipped' | 'no_match' | 'duplicate'> {
+    const depth = origin ? origin.depth + 1 : 0;
+    const base = { automationId: r.id, contactId: ev.contactId, eventType: ev.eventType, eventKey: ev.eventKey, context: ev.context, depth, chain: [...(origin?.chain ?? []), r.id], causeRunId: origin?.runId ?? null };
+    if (depth > MAX_DEPTH) return this.record(tx, { ...base, status: 'skipped', reason: `Se superó el máximo de ${MAX_DEPTH} reglas encadenadas` });
+    if (origin?.chain.includes(r.id)) return this.record(tx, { ...base, status: 'skipped', reason: 'Ciclo: esta regla ya participó en la cadena que la volvió a disparar' });
+    const conditions = r.conditions as ConditionDef[];
+    if (conditions.length > 0) {
+      const facts = await getFacts();
+      if (!facts || !meetsConditions(conditions, facts)) return 'no_match'; // no aplica: no deja rastro
+    }
+    const [{ n } = { n: 0 }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(automationRuns)
+      .where(and(eq(automationRuns.automationId, r.id), eq(automationRuns.contactId, ev.contactId), inArray(automationRuns.status, ['queued', 'done', 'failed']), sql`${automationRuns.createdAt} > now() - interval '1 hour'`));
+    if (n >= MAX_RUNS_PER_CONTACT_HOUR) return this.record(tx, { ...base, status: 'skipped', reason: `Tope de ${MAX_RUNS_PER_CONTACT_HOUR} ejecuciones por hora para este contacto` });
+    return this.record(tx, { ...base, status: 'queued', reason: null });
+  }
+
+  private async record(tx: TenantTx, v: { automationId: string; contactId: string; eventType: string; eventKey: string; context: Record<string, unknown>; depth: number; chain: string[]; causeRunId: string | null; status: 'queued' | 'skipped'; reason: string | null }): Promise<'queued' | 'skipped' | 'duplicate'> {
+    const rows = await tx
       .insert(automationRuns)
       .values({ ...v, finishedAt: v.status === 'skipped' ? new Date() : null })
-      .onConflictDoNothing();
+      .onConflictDoNothing()
+      .returning({ id: automationRuns.id });
+    return rows.length === 0 ? 'duplicate' : v.status;
   }
 
   /** Lo que se sabe del contacto para evaluar condiciones; null si ya no existe. */

@@ -2,10 +2,11 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull, ne, or } from 'drizzle-orm';
 import { automations, contactPhones, contacts, conversations, Database, opportunities, pipelineStages, tags, type TenantTx } from '../../db';
 import { NotFoundError } from '../../errors';
+import { AgentRuntimeService } from '../ai';
 import { OrgMembersService } from '../organizations';
 import { OutreachService } from '../outreach';
 import { AutomationEnqueueService } from './automation-enqueue.service';
-import { ACTION_LABEL, actionSchema, meetsConditions, renderParam, renderText, type ActionDef, type ConditionDef } from './automation-model';
+import { ACTION_LABEL, actionSchema, meetsConditions, renderParam, renderText, waitText, type ActionDef, type ConditionDef, type ContactFacts } from './automation-model';
 
 /** Qué haría una acción con este contacto, ahora: `do` la haría, `skip` la omitiría (ya estaba hecho, no hay a quién…), `fail` no podría (algo que nombra ya no existe). */
 export interface DryStep {
@@ -14,6 +15,8 @@ export interface DryStep {
   label: string;
   would: 'do' | 'skip' | 'fail';
   detail: string;
+  /** Va después de una espera: se estima con lo de AHORA, no con lo que habrá pasado cuando termine de esperar. */
+  after_wait: boolean;
 }
 export interface DryRunView {
   contact: { id: string; name: string };
@@ -36,6 +39,7 @@ export class AutomationDryRunService {
     @Inject(AutomationEnqueueService) private readonly enqueue: AutomationEnqueueService,
     @Inject(OutreachService) private readonly outreach: OutreachService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
+    @Inject(AgentRuntimeService) private readonly agents: AgentRuntimeService,
   ) {}
 
   async test(automationId: string, contactId: string): Promise<DryRunView> {
@@ -53,16 +57,18 @@ export class AutomationDryRunService {
       if (!meets) return out;
       const now = new Date();
       let position = 0;
+      let afterWait = false;
       for (const raw of rule.actions) {
         position += 1;
         const parsed = actionSchema.safeParse(raw);
         const type = (raw as { type?: unknown }).type;
         if (!parsed.success) {
-          out.actions.push({ position, action: typeof type === 'string' ? type : 'unknown', label: 'Acción no válida', would: 'fail', detail: 'La acción guardada no es válida' });
+          out.actions.push({ position, action: typeof type === 'string' ? type : 'unknown', label: 'Acción no válida', would: 'fail', detail: 'La acción guardada no es válida', after_wait: afterWait });
           continue;
         }
-        const r = await this.preview(tx, parsed.data, { contactId, name: c.name, ownerId: c.ownerId, customs: facts?.customs ?? {}, tagIds: facts?.tagIds ?? new Set<string>(), people, now });
-        out.actions.push({ position, action: parsed.data.type, label: ACTION_LABEL[parsed.data.type], ...r });
+        const r = await this.preview(tx, parsed.data, { contactId, name: c.name, ownerId: c.ownerId, customs: facts?.customs ?? {}, tagIds: facts?.tagIds ?? new Set<string>(), people, now, facts, selfId: rule.id });
+        out.actions.push({ position, action: parsed.data.type, label: ACTION_LABEL[parsed.data.type], ...r, after_wait: afterWait });
+        if (parsed.data.type === 'wait') afterWait = true;
       }
       return out;
     });
@@ -71,12 +77,28 @@ export class AutomationDryRunService {
   private async preview(
     tx: TenantTx,
     a: ActionDef,
-    k: { contactId: string; name: string; ownerId: string | null; customs: Readonly<Record<string, unknown>>; tagIds: ReadonlySet<string>; people: ReadonlySet<string>; now: Date },
+    k: { contactId: string; name: string; ownerId: string | null; customs: Readonly<Record<string, unknown>>; tagIds: ReadonlySet<string>; people: ReadonlySet<string>; now: Date; facts: ContactFacts | null; selfId: string },
   ): Promise<Pick<DryStep, 'would' | 'detail'>> {
     const doIt = (detail: string): Pick<DryStep, 'would' | 'detail'> => ({ would: 'do', detail });
     const skip = (detail: string): Pick<DryStep, 'would' | 'detail'> => ({ would: 'skip', detail });
     const fail = (detail: string): Pick<DryStep, 'would' | 'detail'> => ({ would: 'fail', detail });
     switch (a.type) {
+      case 'wait':
+        return doIt(`Esperaría ${waitText(a)} y seguiría con las acciones siguientes`);
+      case 'run_rule': {
+        const [target] = await tx.select().from(automations).where(and(eq(automations.id, a.automation_id), isNull(automations.deletedAt))).limit(1);
+        if (!target) return fail('La automatización que debía ejecutar ya no existe');
+        if (target.id === k.selfId) return skip('Una automatización no puede ejecutarse a sí misma');
+        if (target.status !== 'active') return skip(`«${target.name}» no está activa`);
+        const conds = target.conditions as ConditionDef[];
+        if (conds.length > 0 && (!k.facts || !meetsConditions(conds, k.facts))) return skip(`El contacto no cumple las condiciones de «${target.name}»`);
+        return doIt(`Ejecutaría «${target.name}» (corre en su propia ejecución)`);
+      }
+      case 'start_agent': {
+        const t = await this.agents.startTarget(tx, k.contactId);
+        if (t.ok) return doIt('Activaría al agente de IA: contestaría lo que el cliente escriba desde ahora');
+        return skip({ no_conversation: 'No hay una conversación abierta con el contacto', no_agent: 'La conexión de la conversación no tiene un agente de IA activo', already_active: 'El agente de IA ya está activo en la conversación' }[t.reason]);
+      }
       case 'assign_user': {
         if (!k.people.has(a.user_id)) return fail('Esa persona ya no puede recibir trabajo en la empresa');
         const others = await tx
