@@ -96,7 +96,8 @@ async function purchase(org: string, over: { amount?: number; now?: Date; saleId
 }
 const run = (org: string, now: Date) => inOrg(org, () => app.get(CapiSenderService).runDue(now));
 const status = async (eventId: string): Promise<string> => (await admin.query(`SELECT status FROM meta_events WHERE event_id = $1`, [eventId])).rows[0].status as string;
-const due = (): Date => new Date(NOW.getTime() + 3 * DAY);
+// «Reintentar» deja el evento listo desde la hora REAL: la hora de la prueba no puede quedar en el pasado de hoy
+const due = (): Date => new Date(Math.max(NOW.getTime() + 3 * DAY, Date.now() + 60_000));
 
 beforeAll(async () => {
   admin = new Client({ connectionString: info.adminDbUrl });
