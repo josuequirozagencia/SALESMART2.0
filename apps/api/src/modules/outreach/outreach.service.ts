@@ -40,25 +40,33 @@ export class OutreachService {
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
   ) {}
 
-  /** Deja una plantilla de WhatsApp en cola para el contacto, abriendo la conversación si no hay una. */
-  async sendTemplate(tx: TenantTx, i: TemplateOutreach): Promise<OutreachOutcome> {
+  /**
+   * Lo que hace falta para enviar la plantilla y no depende de escribir nada: consentimiento, conexión activa de WhatsApp oficial y plantilla enviable con sus valores. Solo lee: lo usan el envío y la
+   * prueba en seco de las automatizaciones (así dicen lo mismo).
+   */
+  async checkTemplate(tx: TenantTx, i: Pick<TemplateOutreach, 'contactId' | 'channelId' | 'templateId' | 'params'>): Promise<{ ok: true; ch: { id: string; queueId: string | null }; row: Awaited<ReturnType<TemplatesService['getSendable']>>; prepared: ReturnType<TemplatesService['prepare']> } | { ok: false; reason: 'revoked' | 'channel_unavailable' | 'template_unavailable' }> {
     const [c] = await tx.select({ consent: contacts.consent }).from(contacts).where(and(eq(contacts.id, i.contactId), isNull(contacts.deletedAt))).limit(1);
-    if (!c || c.consent === 'revoked') return { sent: false, reason: 'revoked' };
+    if (!c || c.consent === 'revoked') return { ok: false, reason: 'revoked' };
     const [ch] = await tx
       .select({ id: channelAccounts.id, queueId: channelAccounts.queueId })
       .from(channelAccounts)
       .where(and(eq(channelAccounts.id, i.channelId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(channelAccounts.provider, 'meta_cloud')))
       .limit(1);
-    if (!ch) return { sent: false, reason: 'channel_unavailable' };
-    let prepared;
-    let row;
+    if (!ch) return { ok: false, reason: 'channel_unavailable' };
     try {
-      row = await this.templates.getSendable(tx, i.channelId, i.templateId);
-      prepared = this.templates.prepare(row, { ...i.params });
+      const row = await this.templates.getSendable(tx, i.channelId, i.templateId);
+      return { ok: true, ch, row, prepared: this.templates.prepare(row, { ...i.params }) };
     } catch (e) {
-      if (e instanceof NotFoundError || e instanceof ConflictError || e instanceof ValidationError) return { sent: false, reason: 'template_unavailable' }; // plantilla borrada, ya no aprobada o con valores que Meta rechazaría
+      if (e instanceof NotFoundError || e instanceof ConflictError || e instanceof ValidationError) return { ok: false, reason: 'template_unavailable' }; // plantilla borrada, ya no aprobada o con valores que Meta rechazaría
       throw e;
     }
+  }
+
+  /** Deja una plantilla de WhatsApp en cola para el contacto, abriendo la conversación si no hay una. */
+  async sendTemplate(tx: TenantTx, i: TemplateOutreach): Promise<OutreachOutcome> {
+    const plan = await this.checkTemplate(tx, i);
+    if (!plan.ok) return { sent: false, reason: plan.reason };
+    const { ch, row, prepared } = plan;
     const conv = await this.conversationsSvc.openFor(tx, i.contactId, i.channelId, i.phone.replace(/\D/g, ''), 'api');
     if (conv.created) {
       // La conversación nace asignada al responsable del lead (pendiente de aceptar); sin responsable, sin asignar. No hay mensaje del cliente: ni cronómetro de respuesta
@@ -75,26 +83,33 @@ export class OutreachService {
   }
 
   /**
-   * Un texto libre automático en la conversación ABIERTA más reciente del contacto, solo dentro de la ventana de 24 h de WhatsApp (en un canal sin ventana, como GoHighLevel, siempre). Nunca abre una
-   * conversación: sin conversación abierta o con la ventana cerrada no hay a quién ni cómo escribirle, y devuelve el motivo.
+   * A qué conversación iría un texto libre automático: la ABIERTA más reciente del contacto, solo dentro de la ventana de 24 h de WhatsApp (en un canal sin ventana, como GoHighLevel, siempre). Nunca abre
+   * una conversación: sin conversación abierta o con la ventana cerrada no hay a quién ni cómo escribirle. Con `lock` bloquea la fila (para escribir); sin él solo lee (prueba en seco).
    */
-  async sendText(tx: TenantTx, i: { contactId: string; text: string; now: Date }): Promise<{ sent: true; conversationId: string } | { sent: false; reason: 'revoked' | 'no_conversation' | 'window_closed' | 'channel_unavailable' }> {
+  async textTarget(tx: TenantTx, i: { contactId: string; now: Date }, lock: boolean): Promise<{ ok: true; conversationId: string; channelId: string } | { ok: false; reason: 'revoked' | 'no_conversation' | 'window_closed' | 'channel_unavailable' }> {
     const [c] = await tx.select({ consent: contacts.consent }).from(contacts).where(and(eq(contacts.id, i.contactId), isNull(contacts.deletedAt))).limit(1);
-    if (!c || c.consent === 'revoked') return { sent: false, reason: 'revoked' };
-    const [conv] = await tx
+    if (!c || c.consent === 'revoked') return { ok: false, reason: 'revoked' };
+    const q = tx
       .select({ id: conversations.id, channelId: conversations.channelAccountId, lastInboundAt: conversations.lastInboundAt, provider: channelAccounts.provider, state: channelAccounts.status })
       .from(conversations)
       .innerJoin(channelAccounts, and(eq(channelAccounts.id, conversations.channelAccountId), isNull(channelAccounts.deletedAt)))
       .where(and(eq(conversations.contactId, i.contactId), sql`${conversations.status} <> 'closed'`))
       .orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt))
-      .limit(1)
-      .for('update', { of: conversations });
-    if (!conv) return { sent: false, reason: 'no_conversation' };
-    if (conv.state !== 'active') return { sent: false, reason: 'channel_unavailable' };
-    if (conv.provider !== 'ghl' && (!conv.lastInboundAt || i.now.getTime() - conv.lastInboundAt.getTime() >= WINDOW_MS)) return { sent: false, reason: 'window_closed' };
-    const m = await this.queue(tx, conv.id, conv.channelId, 'text', i.text, {}, i.now);
-    this.realtime.touchHere(conv.id, { message: { id: m, kind: 'created' } });
-    return { sent: true, conversationId: conv.id };
+      .limit(1);
+    const [conv] = lock ? await q.for('update', { of: conversations }) : await q;
+    if (!conv) return { ok: false, reason: 'no_conversation' };
+    if (conv.state !== 'active') return { ok: false, reason: 'channel_unavailable' };
+    if (conv.provider !== 'ghl' && (!conv.lastInboundAt || i.now.getTime() - conv.lastInboundAt.getTime() >= WINDOW_MS)) return { ok: false, reason: 'window_closed' };
+    return { ok: true, conversationId: conv.id, channelId: conv.channelId };
+  }
+
+  /** Un texto libre automático en la conversación que `textTarget` elige; devuelve el motivo si no se puede. */
+  async sendText(tx: TenantTx, i: { contactId: string; text: string; now: Date }): Promise<{ sent: true; conversationId: string } | { sent: false; reason: 'revoked' | 'no_conversation' | 'window_closed' | 'channel_unavailable' }> {
+    const t = await this.textTarget(tx, i, true);
+    if (!t.ok) return { sent: false, reason: t.reason };
+    const m = await this.queue(tx, t.conversationId, t.channelId, 'text', i.text, {}, i.now);
+    this.realtime.touchHere(t.conversationId, { message: { id: m, kind: 'created' } });
+    return { sent: true, conversationId: t.conversationId };
   }
 
   /** El mensaje de salida automático, en cola; no cambia el estado ni el responsable de la conversación. */

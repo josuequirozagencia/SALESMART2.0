@@ -8,6 +8,7 @@ import { OutreachModule } from '../outreach';
 import { QueuesModule } from '../queues';
 import { TagsModule } from '../tags';
 import { TemplatesModule } from '../templates';
+import { AutomationDryRunService } from './automation-dry-run.service';
 import { AutomationActionsService } from './automation-actions.service';
 import { AutomationEnqueueService } from './automation-enqueue.service';
 import { AutomationRunnerService } from './automation-runner.service';
@@ -19,7 +20,7 @@ import { AutomationsService } from './automations.service';
 @Module({
   imports: [ContactsModule, CustomFieldsModule, EventsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TemplatesModule],
   controllers: [AutomationsController],
-  providers: [AutomationsService, AutomationEnqueueService, AutomationActionsService, AutomationRunnerService, AutomationsJob],
+  providers: [AutomationsService, AutomationEnqueueService, AutomationActionsService, AutomationRunnerService, AutomationDryRunService, AutomationsJob],
   exports: [AutomationsJob],
 })
 export class AutomationsModule {}

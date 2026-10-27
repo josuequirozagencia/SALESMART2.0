@@ -31,3 +31,6 @@ export const runsQuerySchema = z.object({
   cursor: z.string().max(200).optional(),
 });
 export type RunsQuery = z.infer<typeof runsQuerySchema>;
+
+export const testAutomationSchema = z.strictObject({ contact_id: z.uuid() });
+export type TestAutomationDto = z.infer<typeof testAutomationSchema>;

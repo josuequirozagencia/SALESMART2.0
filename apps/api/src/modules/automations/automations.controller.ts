@@ -2,7 +2,8 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Patch, 
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
-import { createAutomationSchema, runsQuerySchema, updateAutomationSchema, type CreateAutomationDto, type RunsQuery, type UpdateAutomationDto } from './automations.dto';
+import { AutomationDryRunService } from './automation-dry-run.service';
+import { createAutomationSchema, runsQuerySchema, testAutomationSchema, updateAutomationSchema, type CreateAutomationDto, type RunsQuery, type TestAutomationDto, type UpdateAutomationDto } from './automations.dto';
 import { AutomationsService } from './automations.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -11,7 +12,10 @@ const idParam = new ZodValidationPipe(z.uuid());
 @RequirePermission('automations.manage')
 @Controller('automations')
 export class AutomationsController {
-  constructor(@Inject(AutomationsService) private readonly automations: AutomationsService) {}
+  constructor(
+    @Inject(AutomationsService) private readonly automations: AutomationsService,
+    @Inject(AutomationDryRunService) private readonly dryRun: AutomationDryRunService,
+  ) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
@@ -49,6 +53,14 @@ export class AutomationsController {
   @Header('Cache-Control', 'no-store')
   pause(@Param('id', idParam) id: string) {
     return this.automations.pause(id);
+  }
+
+  /** Prueba en seco: qué haría la regla con este contacto, sin escribir nada. */
+  @Post(':id/test')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  test(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(testAutomationSchema)) b: TestAutomationDto) {
+    return this.dryRun.test(id, b.contact_id);
   }
 
   @Get(':id/runs')

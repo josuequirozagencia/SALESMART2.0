@@ -8,6 +8,7 @@ import { InboxPage } from './features/inbox/InboxPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
 import { MetaPage } from './features/meta/MetaPage';
 import { AgentsPage } from './features/agents/AgentsPage';
+import { AutomationsPage } from './features/automations/AutomationsPage';
 import { FormsPage } from './features/forms/FormsPage';
 import { CreditsPage } from './features/ai/CreditsPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
@@ -128,6 +129,7 @@ export function App() {
         <Route path="/settings/credits" element={<CreditsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/forms" element={<FormsPage />} />
+        <Route path="/automations/:id?" element={<AutomationsPage />} />
         <Route path="/settings/knowledge" element={<KnowledgePage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/settings/queues" element={<QueuesPage />} />

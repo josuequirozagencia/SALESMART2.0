@@ -253,6 +253,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'POST /v1/automations/:id/activate', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'POST /v1/automations/:id/pause', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'POST /v1/automations/:id/test', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'GET /v1/automations/:id/runs', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'DELETE /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   // Agente de IA en vivo en el Inbox (M8.5). Pruebas: test/ai/agent-runtime.test.ts

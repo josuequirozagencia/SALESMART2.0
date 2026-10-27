@@ -5,6 +5,7 @@
 //   PATCH /v1/automations/:id
 //   POST /v1/automations/:id/activate
 //   POST /v1/automations/:id/pause
+//   POST /v1/automations/:id/test
 //   GET /v1/automations/:id/runs
 //   DELETE /v1/automations/:id
 import 'reflect-metadata';
@@ -608,5 +609,79 @@ describe('defensas: ciclos, profundidad, tope por hora, atomicidad y fallos', ()
     for (let i = 0; i < 3; i += 1) await mkContact(T.alice, `Cliente ${i}`);
     expect(await app.get(AutomationsJob, { strict: false }).run(new Date())).toBe(3);
     expect((await runsOf(T.alice, r.id)).every((x) => x.status === 'done')).toBe(true);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════ prueba en seco
+
+describe('prueba en seco: qué haría la regla con un contacto, sin escribir nada', () => {
+  interface Dry { contact: { id: string; name: string }; conditions: Array<{ index: number; met: boolean }>; meets: boolean; actions: Array<{ position: number; action: string; would: string; detail: string }> }
+  const dry = async (token: string, rule: string, contact: string) => call('POST', `/automations/${rule}/test`, token, { contact_id: contact });
+  const counts = async () => (await admin.query(`SELECT (SELECT count(*) FROM tasks)::int AS tasks, (SELECT count(*) FROM contact_tags)::int AS tags, (SELECT count(*) FROM messages)::int AS messages, (SELECT count(*) FROM automation_runs)::int AS runs, (SELECT count(*) FROM audit_logs)::int AS audit, (SELECT count(*) FROM stage_history)::int AS history`)).rows[0] as Record<string, number>;
+
+  it('dice qué haría cada acción y no escribe nada (ni tareas, ni etiquetas, ni mensajes, ni ejecuciones, ni auditoría)', async () => {
+    const tag = await mkTag(T.alice, 'Nuevo');
+    const other = await mkTag(T.alice, 'Otra');
+    const st = await pipelineWithStages();
+    const r = await mk(
+      T.alice,
+      body('Combo', { type: 'contact_created', filter: {} }, [
+        { type: 'add_tag', tag_id: tag },
+        { type: 'remove_tag', tag_id: other }, // no la tiene → omitiría
+        { type: 'create_task', title: 'Llamar a {{primer_nombre}}' },
+        { type: 'move_stage', stage_id: st.open2 },
+        { type: 'assign_user', user_id: IDS.carol },
+        { type: 'send_text', text: 'Hola' }, // sin conversación → omitiría
+      ]),
+    );
+    const c = await mkContact(T.alice, 'Lucía Paredes', { owner_id: IDS.carol });
+    const opp = await mkOpp(c, st.pipeline, st.open1);
+    await admin.query(`UPDATE opportunities SET owner_id = $1 WHERE id = $2`, [IDS.carol, opp]); // ya es de la misma persona → asignar la omitiría
+    const before = await counts();
+    const res = await dry(T.alice, r.id, c);
+    expect(res.status).toBe(200);
+    const out = await json<Dry>(res);
+    expect(out).toMatchObject({ contact: { id: c, name: 'Lucía Paredes' }, meets: true, conditions: [] });
+    expect(out.actions.map((a) => [a.position, a.action, a.would])).toEqual([[1, 'add_tag', 'do'], [2, 'remove_tag', 'skip'], [3, 'create_task', 'do'], [4, 'move_stage', 'do'], [5, 'assign_user', 'skip'], [6, 'send_text', 'skip']]);
+    expect(out.actions[2]!.detail).toContain('Llamar a Lucía');
+    expect(out.actions[5]!.detail).toContain('conversación');
+    expect(await counts()).toEqual(before);
+    expect(await tagNames(c)).toEqual([]);
+  });
+
+  it('si el contacto no cumple las condiciones lo dice (y cuál) y no lista acciones', async () => {
+    const tag = await mkTag(T.alice, 'Nuevo');
+    await mkField(T.alice, 'Servicio');
+    const r = await mk(T.alice, body('Condicionada', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }], [{ field: 'custom:servicio', op: 'eq', value: 'corte' }, { field: 'consent', op: 'eq', value: 'unknown' }]));
+    const c = await mkContact(T.alice);
+    const out = await json<Dry>(await dry(T.alice, r.id, c));
+    expect(out).toMatchObject({ meets: false, conditions: [{ index: 0, met: false }, { index: 1, met: true }], actions: [] });
+  });
+
+  it('una persona que ya no puede recibir trabajo, la etapa oculta y el consentimiento revocado se ven como fallo u omisión', async () => {
+    const st = await pipelineWithStages();
+    const r = await live(T.alice, body('Varias', { type: 'contact_created', filter: {} }, [{ type: 'move_stage', stage_id: st.open2 }, { type: 'assign_user', user_id: IDS.carol }, { type: 'send_text', text: 'Hola' }]));
+    await admin.query(`UPDATE pipeline_stages SET is_hidden = true WHERE id = $1`, [st.open2]);
+    await admin.query(`UPDATE organization_members SET status = 'suspended' WHERE user_id = $1`, [IDS.carol]).catch(() => undefined);
+    app.get(OrgDirectoryService).invalidate();
+    const c = await mkContact(T.alice);
+    await admin.query(`UPDATE contacts SET consent = 'revoked' WHERE id = $1`, [c]);
+    const out = await json<Dry>(await dry(T.alice, r.id, c));
+    expect(out.actions[0]).toMatchObject({ action: 'move_stage', would: 'fail' });
+    expect(out.actions[2]).toMatchObject({ action: 'send_text', would: 'skip', detail: expect.stringContaining('consentimiento') });
+  });
+
+  it('aislamiento y permisos: contacto o regla de otra empresa 404, contacto inexistente 404, forma estricta 400, asesor 403, sin sesión 401', async () => {
+    const tag = await mkTag(T.alice, 'Nuevo');
+    const r = await mk(T.alice, body('X', { type: 'contact_created', filter: {} }, [{ type: 'add_tag', tag_id: tag }]));
+    const mine = await mkContact(T.alice);
+    const theirs = await mkContact(T.bob, 'Cliente de B');
+    expect((await dry(T.alice, r.id, theirs)).status).toBe(404);
+    expect((await dry(T.alice, r.id, GHOST)).status).toBe(404);
+    expect((await dry(T.bob, r.id, theirs)).status).toBe(404);
+    expect((await dry(T.carol, r.id, mine)).status).toBe(403);
+    expect((await call('POST', `/automations/${r.id}/test`, undefined, { contact_id: mine })).status).toBe(401);
+    expect((await call('POST', `/automations/${r.id}/test`, T.alice, { contact_id: mine, extra: 1 })).status).toBe(400);
+    expect((await call('POST', `/automations/${r.id}/test`, T.alice, {})).status).toBe(400);
   });
 });
