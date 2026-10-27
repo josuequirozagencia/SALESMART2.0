@@ -18,6 +18,16 @@ function usePolling(): { list: number; thread: number } {
   return live ? { list: LIVE_LIST_POLL_MS, thread: LIVE_THREAD_POLL_MS } : { list: LIST_POLL_MS, thread: THREAD_POLL_MS };
 }
 
+/**
+ * Conversaciones sin leer, para la insignia del menú lateral. Solo se consulta FUERA del Inbox (ahí el listado ya trae los conteos y la insignia conserva el último valor); la conexión en vivo la
+ * refresca y, sin ella, una consulta lenta. Si falla, la insignia simplemente no aparece.
+ */
+export function useInboxUnread(enabled: boolean): number {
+  const poll = usePolling();
+  const q = useQuery({ queryKey: ['inbox-unread'], enabled, retry: false, staleTime: 30_000, refetchInterval: poll.list, queryFn: async () => (await api<ConversationList>('/conversations?tab=working&limit=1')).counts?.unread ?? 0 });
+  return q.data ?? 0;
+}
+
 export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, sla: '' };
 
 /** Cuántos filtros (además de la pestaña) están puestos. */

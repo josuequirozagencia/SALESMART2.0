@@ -18,6 +18,7 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
     const flush = (): void => {
       timer = undefined;
       void qc.invalidateQueries({ queryKey: ['conversations'] });
+      void qc.invalidateQueries({ queryKey: ['inbox-unread'] });
       for (const id of conversations) {
         void qc.invalidateQueries({ queryKey: ['conversation', id] });
         void qc.invalidateQueries({ queryKey: ['messages', id] });
@@ -32,7 +33,7 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
         timer ??= setTimeout(flush, COALESCE_MS);
       },
       onResync: () => {
-        for (const key of ['conversations', 'conversation', 'messages', 'scheduled', 'conversation-ai']) void qc.invalidateQueries({ queryKey: [key] });
+        for (const key of ['conversations', 'inbox-unread', 'conversation', 'messages', 'scheduled', 'conversation-ai']) void qc.invalidateQueries({ queryKey: [key] });
       },
     });
     return () => {
