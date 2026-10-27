@@ -1,7 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
-import { writeAudit } from '../audit';
+import { writeAudit, type AuditSource } from '../audit';
 import { ContactsService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { RealtimeService } from '../realtime';
@@ -193,8 +193,16 @@ export class ConversationsService {
     return 'updated';
   }
 
+  /**
+   * Para quien escribe PRIMERO (un formulario con seguimiento por plantilla, M9.2): la conversación abierta del contacto en el canal, o una nueva sin responsable (el que llama se lo pone).
+   * Misma serialización que la de los mensajes entrantes, así un envío del formulario y un mensaje del cliente a la vez no abren dos conversaciones.
+   */
+  openFor(tx: TenantTx, contactId: string, channelAccountId: string, peerId: string, audit: AuditSource): Promise<{ id: string; created: boolean }> {
+    return this.openConversation(tx, contactId, channelAccountId, peerId, audit);
+  }
+
   /** La conversación abierta del contacto en el canal, o una nueva. Serializa por (contacto, canal): dos mensajes simultáneos no abren dos. */
-  private async openConversation(tx: TenantTx, contactId: string, channelAccountId: string, peerId: string, audit: 'meta' | 'ghl'): Promise<{ id: string; created: boolean }> {
+  private async openConversation(tx: TenantTx, contactId: string, channelAccountId: string, peerId: string, audit: AuditSource): Promise<{ id: string; created: boolean }> {
     await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`conversation:${contactId}:${channelAccountId}`}::text || ':' || app_org()::text), 0))`);
     const [open] = await tx
       .select({ id: conversations.id })

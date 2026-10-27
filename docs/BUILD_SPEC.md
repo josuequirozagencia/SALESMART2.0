@@ -353,7 +353,7 @@ Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con R
 
 **M9 — WhatsApp QR, formularios y automatizaciones**
 `EvolutionProvider`, formularios embebibles (`embed.js`), motor trigger/condición/acción.
-*Avance:* plan por rebanadas en `docs/M9_PLAN.md` (ADR-54; decisiones del plan APROBADAS el 2026-10-27; el QR queda al final y condicionado al spike de ADR-31, que no se ha ejecutado). M9.1 (formularios: constructor y envío público, sin conversación) construida el 2026-10-27.
+*Avance:* plan por rebanadas en `docs/M9_PLAN.md` (ADR-54; decisiones del plan APROBADAS el 2026-10-27; el QR queda al final y condicionado al spike de ADR-31, que no se ha ejecutado). M9.1 (formularios: constructor y envío público, sin conversación) construida el 2026-10-27. M9.2 (`embed.js` servido por nosotros, página alojada e iframe con política de contenido, y seguimiento automático: tarea y plantilla de WhatsApp) construida el 2026-10-27.
 
 **M10 — Telefonía y comisiones**
 `TwilioProvider`, WebRTC, grabación; comisiones con planes, split y reversión.

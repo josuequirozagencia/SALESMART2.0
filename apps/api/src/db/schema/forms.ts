@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm';
 import { boolean, check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
+import { channelAccounts } from './channels';
+import { messageTemplates } from './templates';
 import { contacts, tags } from './crm';
 import { tenantTable } from './helpers';
 import { users } from './identity';
@@ -30,6 +32,13 @@ export const forms = tenantTable(
     redirectUrl: text('redirect_url'),
     allowedDomains: text('allowed_domains').array().notNull().default(sql`'{}'::text[]`),
     phonePrefix: text('phone_prefix').notNull().default('+593'),
+    /** Seguimiento (M9.2): una tarea para el responsable del lead (también es el aviso y el plan B si no puede salir la plantilla). */
+    followUpTask: boolean('follow_up_task').notNull().default(true),
+    /** Seguimiento por WhatsApp: la conexión y la plantilla aprobada que se le envían al lead; ambas o ninguna. */
+    followUpChannelId: uuid('follow_up_channel_id'),
+    followUpTemplateId: uuid('follow_up_template_id'),
+    /** Valores de las variables de la plantilla: texto con `{{nombre}}`, `{{primer_nombre}}` o `{{formulario}}`. */
+    followUpParams: jsonb('follow_up_params').$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -39,6 +48,10 @@ export const forms = tenantTable(
     foreignKey({ name: 'forms_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
     foreignKey({ name: 'forms_pipeline_fk', columns: [t['organizationId']!, t['pipelineId']!], foreignColumns: [pipelines.organizationId, pipelines.id] }),
     foreignKey({ name: 'forms_stage_fk', columns: [t['organizationId']!, t['pipelineId']!, t['stageId']!], foreignColumns: [pipelineStages.organizationId, pipelineStages.pipelineId, pipelineStages.id] }),
+    foreignKey({ name: 'forms_follow_up_channel_fk', columns: [t['organizationId']!, t['followUpChannelId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
+    foreignKey({ name: 'forms_follow_up_template_fk', columns: [t['organizationId']!, t['followUpTemplateId']!], foreignColumns: [messageTemplates.organizationId, messageTemplates.id] }),
+    check('forms_follow_up_pair', sql`(${t['followUpChannelId']!} IS NULL) = (${t['followUpTemplateId']!} IS NULL)`),
+    check('forms_follow_up_params_shape', sql`jsonb_typeof(${t['followUpParams']!}) = 'object' AND length(${t['followUpParams']!}::text) <= 4000`),
     foreignKey({ name: 'forms_extra_tag_fk', columns: [t['organizationId']!, t['extraTagId']!], foreignColumns: [tags.organizationId, tags.id] }),
     check('forms_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 80`),
     check('forms_description_len', sql`${t['description']!} IS NULL OR length(${t['description']!}) <= 300`),
@@ -104,11 +117,14 @@ export const formSubmissions = tenantTable(
     ipHash: text('ip_hash'),
     eventId: text('event_id').notNull(),
     contactCreated: boolean('contact_created').notNull().default(false),
+    /** Qué seguimiento se hizo con este envío: `template` (plantilla en cola), `task` (tarea para el responsable), ambos o ninguno. */
+    followUp: text('follow_up').notNull().default('none'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
     foreignKey({ name: 'form_submissions_form_fk', columns: [t['organizationId']!, t['formId']!], foreignColumns: [forms.organizationId, forms.id] }),
     foreignKey({ name: 'form_submissions_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('form_submissions_follow_up_valid', sql`${t['followUp']!} IN ('none', 'task', 'template', 'template_task')`),
     check('form_submissions_key_len', sql`length(${t['idempotencyKey']!}) BETWEEN 8 AND 100`),
     check('form_submissions_source_len', sql`${t['sourceUrl']!} IS NULL OR length(${t['sourceUrl']!}) <= 500`),
     uniqueIndex('form_submissions_idem_uq').on(t['organizationId']!, t['formId']!, t['idempotencyKey']!),

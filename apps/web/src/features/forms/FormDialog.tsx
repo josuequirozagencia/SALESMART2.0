@@ -5,16 +5,17 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { CopyField } from '../../ui/CopyField';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { useChannels } from '../channels/useChannels';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { Tabs } from '../crm/Tabs';
 import { usePipelines } from '../pipelines/usePipelines';
 import { useQueues } from '../queues/useQueues';
 import { useTags } from '../tags/useTags';
-import { useForm, useFormMutations, useFormSubmissions, type FieldKind, type FormDetail, type FormField } from './useForms';
+import { useFollowUpTemplates, useForm, useFormMutations, useFormSubmissions, type FieldKind, type FormDetail, type FormField } from './useForms';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const areaCls = 'min-h-[84px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] font-normal text-fg';
-type TabKey = 'fields' | 'destination' | 'publish' | 'submissions';
+type TabKey = 'fields' | 'destination' | 'follow' | 'publish' | 'submissions';
 
 export const STATUS_LABEL = { draft: 'Borrador', published: 'Publicado', paused: 'Pausado' } as const;
 export const STATUS_KIND = { draft: 'muted', published: 'ok', paused: 'warn' } as const;
@@ -175,7 +176,97 @@ function DestinationTab({ form }: { form: FormDetail }) {
   );
 }
 
-/** Publicar, pausar o borrar, y los dominios desde los que se acepta el envío. */
+/** Un texto de código listo para copiar (el que se pega en la página del cliente). */
+function CodeBlock({ label, code }: { label: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* sin permiso del portapapeles: el código sigue visible para copiarlo a mano */
+    }
+  };
+  return (
+    <div className="grid gap-1">
+      <span className="flex items-center justify-between gap-2 text-[12.5px] font-semibold">{label}<Button className="!px-3 !py-1 !text-[12px]" aria-label={`Copiar ${label}`} onClick={() => void copy()}>{copied ? 'Copiado' : 'Copiar'}</Button></span>
+      <pre aria-label={label} className="max-h-[180px] overflow-auto whitespace-pre-wrap break-all rounded-xl bg-surface2 p-3 font-mono text-[12px]">{code}</pre>
+    </div>
+  );
+}
+
+/** Seguimiento: qué pasa con cada lead apenas llena el formulario. */
+function FollowUpTab({ form }: { form: FormDetail }) {
+  const m = useFormMutations();
+  const channels = (useChannels().data?.items ?? []).filter((c) => c.status === 'active' && c.provider === 'meta_cloud');
+  const [task, setTask] = useState(form.follow_up.task);
+  const [channel, setChannel] = useState(form.follow_up.channel_id ?? '');
+  const [template, setTemplate] = useState(form.follow_up.template_id ?? '');
+  const [params, setParams] = useState<Record<string, string>>(form.follow_up.params);
+  const [error, setError] = useState<string>();
+  const [ok, setOk] = useState(false);
+  const templates = (useFollowUpTemplates(channel).data?.items ?? []).filter((t) => t.sendable);
+  const chosen = templates.find((t) => t.id === template);
+  const pick = (id: string): void => {
+    setOk(false);
+    setTemplate(id);
+    const t = templates.find((x) => x.id === id);
+    // Valores iniciales: el primer dato lleva el primer nombre de quien llenó el formulario
+    setParams(t ? Object.fromEntries(t.variables.map((v, i) => [v.id, params[v.id] ?? (i === 0 ? '{{primer_nombre}}' : '')])) : {});
+  };
+  const save = async (): Promise<void> => {
+    setOk(false);
+    setError(undefined);
+    if (template && chosen && chosen.variables.some((v) => (params[v.id] ?? '').trim() === '')) return setError('Escribe un valor para cada variable de la plantilla.');
+    try {
+      await m.update.mutateAsync({ id: form.id, patch: { follow_up_task: task, follow_up_channel_id: template ? channel : null, follow_up_template_id: template || null, follow_up_params: template ? params : {} } });
+      setOk(true);
+    } catch (e) {
+      setError(reason(e, 'No pudimos guardar el seguimiento.'));
+    }
+  };
+  return (
+    <div className="grid gap-4">
+      <p className="text-[13px] text-muted">Qué pasa con cada persona apenas llena el formulario, además de quedar como contacto con su oportunidad.</p>
+      <section aria-label="Tarea para el responsable" className="grid gap-2">
+        <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={task} onChange={(e) => { setOk(false); setTask(e.target.checked); }} />Crear una tarea para el responsable del lead (vence en 1 hora)</label>
+        <p className="text-[12.5px] text-muted">Es el aviso al asesor. Si no hay responsable (la cola no reparte), no se crea.</p>
+      </section>
+      <section aria-label="Plantilla de WhatsApp" className="grid gap-3">
+        <h3 className="text-[13.5px] font-bold">Escribirle por WhatsApp con una plantilla</h3>
+        <p className="text-[12.5px] text-muted">La primera vez hay que escribirle con una plantilla aprobada por Meta. Si la conexión tiene un agente de IA activo, atenderá lo que el lead conteste. Si la plantilla no se puede enviar, el lead no se pierde: queda la tarea.</p>
+        {channels.length === 0 ? <Alert kind="info">Aún no tienes una conexión de WhatsApp oficial activa. Conéctala en Configuración › Conexiones.</Alert> : (
+          <>
+            <Field label="Conexión">
+              {(f) => <select {...f} className={selectCls} value={channel} onChange={(e) => { setOk(false); setChannel(e.target.value); setTemplate(''); setParams({}); }}><option value="">Sin plantilla</option>{channels.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>}
+            </Field>
+            {channel ? (
+              <Field label="Plantilla" hint="Solo se ofrecen las aprobadas y que se pueden enviar.">
+                {(f) => <select {...f} className={selectCls} value={template} onChange={(e) => pick(e.target.value)}><option value="">Elige una plantilla</option>{templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.language})</option>)}</select>}
+              </Field>
+            ) : null}
+            {chosen ? (
+              <div className="grid gap-2 rounded-xl border border-line p-3">
+                <p className="text-[12.5px]"><b>Texto:</b> {chosen.body}</p>
+                {chosen.variables.length === 0 ? <p className="text-[12.5px] text-muted">Esta plantilla no lleva variables.</p> : null}
+                {chosen.variables.map((v) => (
+                  <Field key={v.id} label={`Variable «${v.key}»${v.part === 'header' ? ' (encabezado)' : v.part === 'button' ? ' (botón)' : ''}`} hint={'Puedes usar {{nombre}}, {{primer_nombre}} y {{formulario}}.' + (v.example ? ` Ejemplo de Meta: ${v.example}` : '')}>
+                    {(f) => <Input {...f} value={params[v.id] ?? ''} maxLength={200} onChange={(e) => { setOk(false); setParams((cur) => ({ ...cur, [v.id]: e.target.value })); }} />}
+                  </Field>
+                ))}
+              </div>
+            ) : null}
+          </>
+        )}
+      </section>
+      <div><Button variant="primary" loading={m.update.isPending} onClick={() => void save()}>Guardar seguimiento</Button></div>
+      <Result ok={ok} error={error} />
+    </div>
+  );
+}
+
+/** Publicar, pausar o borrar, los dominios desde los que se acepta el envío y el código para ponerlo en la página. */
 function PublishTab({ form, onDeleted }: { form: FormDetail; onDeleted: () => void }) {
   const m = useFormMutations();
   const [domains, setDomains] = useState(form.allowed_domains.join('\n'));
@@ -193,7 +284,12 @@ function PublishTab({ form, onDeleted }: { form: FormDetail; onDeleted: () => vo
     }
   };
   const saveDomains = (): Promise<void> => run(() => m.update.mutateAsync({ id: form.id, patch: { allowed_domains: domains.split('\n').map((d) => d.trim()).filter(Boolean) } }), 'No pudimos guardar los dominios.');
-  const definition = `${window.location.origin}/v1/public/forms/${form.public_token}`;
+  const origin = window.location.origin;
+  const definition = `${origin}/v1/public/forms/${form.public_token}`;
+  const page = `${definition}/page`;
+  const script = `<script src="${origin}/v1/embed/v1.js" data-form="${form.public_token}" async></script>`;
+  const iframe = `<iframe src="${page}" title="${form.name.replace(/["<>&]/g, '')}" width="100%" height="640" style="border:0" loading="lazy"></iframe>`;
+  const pixel = `<script>\nwindow.addEventListener('salesmart:lead', function (e) {\n  if (window.fbq) fbq('track', 'Lead', {}, { eventID: e.detail.event_id });\n});\n</script>`;
   return (
     <div className="grid gap-4">
       <section aria-label="Estado" className="grid gap-2">
@@ -209,10 +305,24 @@ function PublishTab({ form, onDeleted }: { form: FormDetail; onDeleted: () => vo
         </Field>
         <div><Button loading={m.update.isPending} onClick={() => void saveDomains()}>Guardar dominios</Button></div>
       </section>
-      <section aria-label="Identificador público" className="grid gap-2">
+      <section aria-label="Código para tu página" className="grid gap-3">
+        <h3 className="text-[13.5px] font-bold">Ponlo en tu página</h3>
+        {form.status !== 'published' ? <Alert kind="info">Publica el formulario para que reciba envíos desde tu página.</Alert> : null}
+        <CodeBlock label="Código para incrustar (recomendado)" code={script} />
+        <p className="text-[12.5px] text-muted">Pégalo donde quieras que aparezca. El formulario se dibuja aislado del estilo de tu página y solo funciona en los dominios autorizados.</p>
+        <CodeBlock label="Código de iframe" code={iframe} />
+        <CopyField label="Enlace directo al formulario" value={page} />
+        <CodeBlock label="Para medir con el Pixel de Meta (opcional)" code={pixel} />
+        <p className="text-[12.5px] text-muted">Con el código para incrustar, tu página recibe el evento «salesmart:lead» con el identificador que también enviamos a Meta: así el Pixel y la API de Conversiones cuentan el mismo lead una sola vez. En un iframe el navegador no comparte las cookies de tu sitio, así que la coincidencia es menor.</p>
         <CopyField label="Dirección pública del formulario" value={definition} />
-        <p className="text-[12.5px] text-muted">El código para incrustarlo en tu página llega en el siguiente paso. Esta dirección solo permite leer el formulario y enviarlo; no da acceso a nada más.</p>
+        <p className="text-[12.5px] text-muted">Esa dirección solo permite leer el formulario y enviarlo; no da acceso a nada más.</p>
       </section>
+      {form.status === 'published' ? (
+        <section aria-label="Vista previa" className="grid gap-2">
+          <h3 className="text-[13.5px] font-bold">Vista previa</h3>
+          <iframe title="Vista previa del formulario" src={page} className="h-[520px] w-full rounded-xl border border-line bg-white" />
+        </section>
+      ) : null}
       <Result ok={ok} error={error} />
       <section aria-label="Borrar" className="grid gap-2 border-t border-line pt-3">
         {confirm ? (
@@ -261,9 +371,10 @@ export function FormDialog({ id, onClose }: { id: string; onClose: () => void })
       {f ? (
         <div className="grid gap-3">
           <p className="flex flex-wrap items-center gap-2 text-[13px] text-muted"><Pill kind={STATUS_KIND[f.status]}>{STATUS_LABEL[f.status]}</Pill>{f.submissions} {f.submissions === 1 ? 'envío' : 'envíos'}</p>
-          <Tabs label="Secciones del formulario" tabs={[['fields', 'Campos'], ['destination', 'Destino'], ['publish', 'Publicación'], ['submissions', 'Envíos']] as const} active={tab} onChange={setTab} />
+          <Tabs label="Secciones del formulario" tabs={[['fields', 'Campos'], ['destination', 'Destino'], ['follow', 'Seguimiento'], ['publish', 'Publicación'], ['submissions', 'Envíos']] as const} active={tab} onChange={setTab} />
           {tab === 'fields' ? <FieldsTab key={f.id} form={f} /> : null}
           {tab === 'destination' ? <DestinationTab form={f} /> : null}
+          {tab === 'follow' ? <FollowUpTab form={f} /> : null}
           {tab === 'publish' ? <PublishTab form={f} onDeleted={onClose} /> : null}
           {tab === 'submissions' ? <SubmissionsTab form={f} /> : null}
         </div>

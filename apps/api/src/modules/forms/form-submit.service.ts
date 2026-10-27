@@ -16,6 +16,7 @@ import { CustomValuesService } from '../custom-fields';
 import { OpportunitiesService } from '../opportunities';
 import { FormRoutesService, OrgDirectoryService } from '../organizations';
 import { DistributionService } from '../queues';
+import { FormFollowUpService } from './form-follow-up.service';
 import { ContactTaggingService } from '../tags';
 import { hostOfOrigin, oneLine, originAllowed, validateSubmission, type FieldSpec, type Submission } from './form-model';
 import type { PublicSubmitDto } from './forms.dto';
@@ -67,6 +68,7 @@ export class FormSubmitService {
     @Inject(OpportunitiesService) private readonly opportunities: OpportunitiesService,
     @Inject(AttributionService) private readonly attribution: AttributionService,
     @Inject(DistributionService) private readonly distribution: DistributionService,
+    @Inject(FormFollowUpService) private readonly followUp: FormFollowUpService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(CAPTCHA_VERIFIER) private readonly captcha: CaptchaVerifier,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
@@ -92,6 +94,11 @@ export class FormSubmitService {
         },
       };
     }).then((r) => r.form);
+  }
+
+  /** Lo que hace falta para la página alojada del formulario: su nombre y los dominios que pueden incrustarla. 404 uniforme como el resto. */
+  async hostedPage(token: string): Promise<{ name: string; domains: readonly string[] }> {
+    return this.withForm(token, ({ form }) => ({ name: form.name, domains: form.allowedDomains }));
   }
 
   /** Respuesta al preflight CORS: el origen permitido o 403. */
@@ -168,10 +175,12 @@ export class FormSubmitService {
       if (t) await this.tagging.addCustom(tx, contactId, [t.id]);
     }
 
+    // Seguimiento: plantilla de WhatsApp (si hay) y tarea para el responsable; el resultado queda anotado en el envío
+    const follow = await this.followUp.run(tx, { form, contactId, name: s.name, phone: s.phone, ownerId, now });
     // La tabla es de solo inserción: el id se decide antes, para que el evento Lead (que lo lleva en su identificador) y el envío se escriban de una vez
     const submissionId = uuidv7();
     const eventId = body.event_id ?? `lead:form:${submissionId}`;
-    await tx.insert(formSubmissions).values({ id: submissionId, formId: form.id, contactId, idempotencyKey: idemKey, payload: s.clean, utm: cleanUtm(body.utm), sourceUrl: cleanUrl(body.source_url), ipHash: meta.ip ? sha256(meta.ip).slice(0, 32) : null, eventId, contactCreated: created });
+    await tx.insert(formSubmissions).values({ id: submissionId, formId: form.id, contactId, idempotencyKey: idemKey, payload: s.clean, utm: cleanUtm(body.utm), sourceUrl: cleanUrl(body.source_url), ipHash: meta.ip ? sha256(meta.ip).slice(0, 32) : null, eventId, contactCreated: created, followUp: follow });
     await this.attribution.onFormLead(
       tx,
       {

@@ -15,7 +15,7 @@ const FIELDS: FormField[] = [
 const detail = (over: Partial<FormDetail> = {}): FormDetail => ({
   id: 'f1', name: 'Landing de cursos', description: null, status: 'draft', field_count: 3, submissions: 0, last_submission_at: null, public_token: '8a1d2e3f-0000-4000-8000-000000000001', created_at: AT,
   queue_id: null, pipeline_id: null, stage_id: null, extra_tag_id: null, consent_text: 'Acepto que me contacten por WhatsApp y por teléfono para atender mi solicitud.', thanks_message: '¡Gracias! Recibimos tus datos y te contactaremos en breve.', redirect_url: null,
-  allowed_domains: [], phone_prefix: '+593', fields: FIELDS, missing: ['autoriza al menos un dominio desde el que se enviará (por ejemplo «mi-sitio.com»)'], ...over,
+  allowed_domains: [], phone_prefix: '+593', follow_up: { task: true, channel_id: null, template_id: null, params: {} }, fields: FIELDS, missing: ['autoriza al menos un dominio desde el que se enviará (por ejemplo «mi-sitio.com»)'], ...over,
 });
 const card = (d: FormDetail): FormCard => ({ id: d.id, name: d.name, description: d.description, status: d.status, field_count: d.fields.length, submissions: d.submissions, last_submission_at: d.last_submission_at, public_token: d.public_token, created_at: d.created_at });
 
@@ -30,6 +30,18 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
     'GET /custom-fields': () => ({ body: { items: [{ id: 'cf1', entity: 'contact', name: 'Ciudad', key: 'ciudad', type: 'text', options: null, required: false, show_in_form: true, position: 0, archived_at: null, created_at: AT }], access: { manage: me.role === 'client_admin' } } }),
     'GET /queues': () => ({ body: { items: [{ id: 'q1', name: 'Captación' }, { id: 'q2', name: 'Soporte' }], access: { manage: true } } as never }),
     'GET /pipelines': () => ({ body: { items: [{ id: 'p1', name: 'Ventas', position: 0, appointment_stage_id: null, opportunity_count: 0, stages: [{ id: 's1', name: 'Nuevo lead', position: 0, kind: 'open', is_hidden: false, color: 'violet', opportunity_count: 0 }, { id: 's2', name: 'Ganada', position: 1, kind: 'won', is_hidden: false, color: 'green', opportunity_count: 0 }] }], access: { manage: true, write: true, view_all: true } } as never }),
+    'GET /channels': () => ({ body: { items: [{ id: 'c1', provider: 'meta_cloud', is_official: true, name: 'WhatsApp Norte', status: 'active' }, { id: 'c2', provider: 'meta_cloud', is_official: true, name: 'Apagada', status: 'disabled' }], access: { manage: true } } as never }),
+    'GET /channels/c1/templates': () => ({
+      body: {
+        items: [
+          { id: 'tp1', channel_id: 'c1', name: 'seguimiento_nombrado', language: 'es', category: 'utility', status: 'approved', parameter_format: 'named', header: null, body: 'Hola {{nombre}}, ¿pudiste revisar la propuesta de {{servicio}}?', footer: null, buttons: [], variables: [{ id: 'body:nombre', part: 'body', key: 'nombre', buttonIndex: null, example: 'Ana' }, { id: 'body:servicio', part: 'body', key: 'servicio', buttonIndex: null, example: null }], sendable: true, unsupported_reason: null, rejected_reason: null, synced_at: AT },
+          { id: 'tp2', channel_id: 'c1', name: 'bienvenida', language: 'es', category: 'utility', status: 'approved', parameter_format: 'positional', header: null, body: 'Hola, gracias por escribirnos.', footer: null, buttons: [], variables: [], sendable: true, unsupported_reason: null, rejected_reason: null, synced_at: AT },
+          { id: 'tp3', channel_id: 'c1', name: 'en_revision', language: 'es', category: 'utility', status: 'pending', parameter_format: 'positional', header: null, body: 'Tu pedido {{1}}', footer: null, buttons: [], variables: [{ id: 'body:1', part: 'body', key: '1', buttonIndex: null, example: null }], sendable: false, unsupported_reason: 'Meta todavía la está revisando', rejected_reason: null, synced_at: AT },
+        ],
+        synced_at: AT,
+        sync_error: null,
+      },
+    }),
     'GET /tags': () => ({ body: { items: [{ id: 't0', name: 'Lead', color: '#6a44f2', system_key: 'lead', is_system: true }, { id: 't1', name: 'Curso de uñas', color: '#aa3366', system_key: null, is_system: false }], access: { manage: true } } }),
     'GET /forms': guard('list', () => ({ body: { items: w.form ? [card(w.form)] : [], limits: { max_forms: 50 } } })),
     'POST /forms': guard('create', (c) => {
@@ -306,5 +318,103 @@ describe('Formularios · envíos', () => {
     const d = await open();
     await goTab(d, 'Envíos');
     expect(await d.findByText('Todavía no hay envíos.')).toBeInTheDocument();
+  });
+});
+
+describe('Formularios · seguimiento', () => {
+  it('la tarea para el responsable se activa o apaga y se guarda; sin conexión de WhatsApp lo explica', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Seguimiento');
+    const task = await d.findByLabelText(/Crear una tarea para el responsable del lead/);
+    expect(task).toBeChecked();
+    await userEvent.click(task);
+    await userEvent.click(d.getByRole('button', { name: 'Guardar seguimiento' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ follow_up_task: false, follow_up_channel_id: null, follow_up_template_id: null, follow_up_params: {} }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('elige conexión (solo activas) y plantilla (solo enviables), pide el valor de cada variable con sugerencias y lo manda con las claves de la plantilla', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Seguimiento');
+    const channel = await d.findByLabelText('Conexión');
+    expect(within(channel).queryByRole('option', { name: 'Apagada' })).not.toBeInTheDocument();
+    await userEvent.selectOptions(channel, 'c1');
+    const tpl = await d.findByLabelText('Plantilla');
+    await waitFor(() => expect(within(tpl).getByRole('option', { name: 'seguimiento_nombrado (es)' })).toBeInTheDocument());
+    expect(within(tpl).queryByRole('option', { name: /en_revision/ })).not.toBeInTheDocument(); // pendiente de aprobación
+    await userEvent.selectOptions(tpl, 'tp1');
+    expect(await d.findByText(/Hola \{\{nombre\}\}, ¿pudiste revisar la propuesta de \{\{servicio\}\}\?/)).toBeInTheDocument();
+    expect(d.getByLabelText('Variable «nombre»')).toHaveValue('{{primer_nombre}}'); // sugerencia para la primera
+    // falta el segundo valor: no se envía
+    await userEvent.click(d.getByRole('button', { name: 'Guardar seguimiento' }));
+    expect(await d.findByText('Escribe un valor para cada variable de la plantilla.')).toBeInTheDocument();
+    expect(w.calls['patch']).toBeUndefined();
+    await userEvent.click(d.getByLabelText('Variable «servicio»'));
+    await userEvent.paste('cursos de {{formulario}}'); // pegar: «{» tecleado sería una tecla especial
+    await userEvent.click(d.getByRole('button', { name: 'Guardar seguimiento' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ follow_up_task: true, follow_up_channel_id: 'c1', follow_up_template_id: 'tp1', follow_up_params: { 'body:nombre': '{{primer_nombre}}', 'body:servicio': 'cursos de {{formulario}}' } }));
+  });
+
+  it('una plantilla sin variables no pide valores; volver a «Sin plantilla» manda conexión y plantilla en nulo', async () => {
+    const w = world({ form: detail({ follow_up: { task: true, channel_id: 'c1', template_id: 'tp2', params: {} } }) });
+    mockApi(server(w));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Seguimiento');
+    expect(await d.findByText('Esta plantilla no lleva variables.')).toBeInTheDocument();
+    await userEvent.selectOptions(d.getByLabelText('Conexión'), '');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar seguimiento' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ follow_up_channel_id: null, follow_up_template_id: null, follow_up_params: {} }));
+  });
+
+  it('el motivo del servidor al guardar el seguimiento se muestra', async () => {
+    const w = world({ fail: { patch: () => err(400, 'VALIDATION_ERROR', 'x', { body: { error: { code: 'VALIDATION_ERROR', message: 'x', request_id: 'r1', details: [{ path: 'follow_up_template_id', code: 'not_sendable', message: 'Meta todavía la está revisando' }] } } }) } });
+    mockApi(server(w));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Seguimiento');
+    await userEvent.click(await d.findByRole('button', { name: 'Guardar seguimiento' }));
+    expect(await d.findByText('Meta todavía la está revisando')).toBeInTheDocument();
+  });
+});
+
+describe('Formularios · código para la página', () => {
+  it('muestra el código para incrustar, el iframe, el enlace directo y el del Pixel, con el token del formulario', async () => {
+    mockApi(server(world({ form: detail({ status: 'published', missing: [] }) })));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Publicación');
+    const code = within(await d.findByRole('region', { name: 'Código para tu página' }));
+    const token = '8a1d2e3f-0000-4000-8000-000000000001';
+    expect(code.getByLabelText('Código para incrustar (recomendado)')).toHaveTextContent(`<script src="${window.location.origin}/v1/embed/v1.js" data-form="${token}" async></script>`);
+    expect(code.getByLabelText('Código de iframe')).toHaveTextContent(`<iframe src="${window.location.origin}/v1/public/forms/${token}/page"`);
+    expect(code.getByLabelText('Enlace directo al formulario')).toHaveValue(`${window.location.origin}/v1/public/forms/${token}/page`);
+    expect(code.getByLabelText('Para medir con el Pixel de Meta (opcional)')).toHaveTextContent("fbq('track', 'Lead', {}, { eventID: e.detail.event_id })");
+    expect(code.getByRole('button', { name: 'Copiar Código para incrustar (recomendado)' })).toBeInTheDocument();
+  });
+
+  it('la vista previa solo aparece con el formulario publicado y usa la página alojada; en borrador avisa que hay que publicar', async () => {
+    const w = world({ form: detail({ status: 'published', missing: [] }) });
+    mockApi(server(w));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Publicación');
+    const frame = await d.findByTitle('Vista previa del formulario');
+    expect(frame).toHaveAttribute('src', `${window.location.origin}/v1/public/forms/8a1d2e3f-0000-4000-8000-000000000001/page`);
+  });
+
+  it('en borrador no hay vista previa y avisa que hay que publicar', async () => {
+    mockApi(server(world()));
+    renderApp('/forms');
+    const d = await open();
+    await goTab(d, 'Publicación');
+    expect(await d.findByText(/Publica el formulario para que reciba envíos desde tu página/)).toBeInTheDocument();
+    expect(d.queryByTitle('Vista previa del formulario')).not.toBeInTheDocument();
   });
 });

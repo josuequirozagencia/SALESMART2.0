@@ -30,7 +30,10 @@ test('ADR-23 completo: registro → verificación → prueba → extensión → 
 
   // Entra solo y ve su prueba con acceso a todo
   await expect(page.getByRole('heading', { name: 'Hola, Mi Empresa E2E' })).toBeVisible();
-  await expect(page.getByText(/Ana E2E · Administrador/)).toBeVisible();
+  // La persona y su rol aparecen al pie del menú lateral
+  const side = page.getByRole('complementary', { name: 'Menú principal' });
+  await expect(side).toContainText('Ana E2E');
+  await expect(side).toContainText('Administrador');
   const banner = page.getByRole('region', { name: 'Prueba gratuita' });
   await expect(banner).toContainText(/te quedan (6|7) días/);
 

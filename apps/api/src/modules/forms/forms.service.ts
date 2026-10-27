@@ -1,11 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
-import { contacts, Database, formFields, forms, formSubmissions, pipelines, pipelineStages, queues, tags, type TenantTx } from '../../db';
+import { channelAccounts, contacts, Database, formFields, forms, formSubmissions, pipelines, pipelineStages, queues, tags, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ValidationError, type ErrorDetail } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { CustomValuesService } from '../custom-fields';
 import { FormRoutesService } from '../organizations';
+import { TemplatesService } from '../templates';
+import { resolveParam } from './form-follow-up.service';
 import { customKeyOf, keyFromLabel, normalizeDomains, validateStructure, type FieldSpec } from './form-model';
 import type { CreateFormDto, SetFieldsDto, SubmissionsQuery, UpdateFormDto } from './forms.dto';
 
@@ -45,6 +47,7 @@ export interface FormDetail extends FormCard {
   redirect_url: string | null;
   allowed_domains: string[];
   phone_prefix: string;
+  follow_up: { task: boolean; channel_id: string | null; template_id: string | null; params: Record<string, string> };
   fields: FieldView[];
   /** Qué le falta para poder publicarse (vacío = lista). */
   missing: string[];
@@ -76,6 +79,7 @@ export class FormsService {
     @Inject(Database) private readonly db: Database,
     @Inject(FormRoutesService) private readonly routes: FormRoutesService,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
+    @Inject(TemplatesService) private readonly templates: TemplatesService,
   ) {}
 
   // ------------------------------------------------------------------ lectura
@@ -103,7 +107,7 @@ export class FormsService {
       return { row, fields, n: s?.n ?? 0, last: s?.last ?? null };
     });
     const token = (await this.tokens([id])).get(id) ?? '';
-    return { ...this.card(row, fields.length, n, last, token), queue_id: row.queueId, pipeline_id: row.pipelineId, stage_id: row.stageId, extra_tag_id: row.extraTagId, consent_text: row.consentText, thanks_message: row.thanksMessage, redirect_url: row.redirectUrl, allowed_domains: row.allowedDomains, phone_prefix: row.phonePrefix, fields: fields.map(fieldView), missing: this.missing(row, fields) };
+    return { ...this.card(row, fields.length, n, last, token), queue_id: row.queueId, pipeline_id: row.pipelineId, stage_id: row.stageId, extra_tag_id: row.extraTagId, consent_text: row.consentText, thanks_message: row.thanksMessage, redirect_url: row.redirectUrl, allowed_domains: row.allowedDomains, phone_prefix: row.phonePrefix, follow_up: { task: row.followUpTask, channel_id: row.followUpChannelId, template_id: row.followUpTemplateId, params: row.followUpParams }, fields: fields.map(fieldView), missing: this.missing(row, fields) };
   }
 
   /** Lo recibido por el formulario, lo más reciente primero. */
@@ -171,6 +175,7 @@ export class FormsService {
       .withTenant(async (tx) => {
         const cur = await this.byId(tx, id, true);
         await this.assertDestination(tx, { queueId: patch.queue_id, pipelineId: patch.pipeline_id !== undefined ? patch.pipeline_id : cur.pipelineId, stageId: patch.stage_id, extraTagId: patch.extra_tag_id, stageGiven: patch.stage_id !== undefined, pipelineGiven: patch.pipeline_id !== undefined, curStageId: cur.stageId });
+        await this.assertFollowUp(tx, cur, patch);
         const set: Partial<typeof forms.$inferInsert> = { updatedAt: new Date() };
         const changes: Array<{ field: string; oldValue: unknown; newValue: unknown }> = [];
         const note = <K extends keyof typeof forms.$inferInsert>(field: string, key: K, oldV: unknown, newV: (typeof forms.$inferInsert)[K]): void => {
@@ -193,6 +198,10 @@ export class FormsService {
         if (patch.redirect_url !== undefined) note('redirect_url', 'redirectUrl', cur.redirectUrl, patch.redirect_url || null);
         if (domains) note('allowed_domains', 'allowedDomains', cur.allowedDomains, domains.ok);
         if (patch.phone_prefix !== undefined) note('phone_prefix', 'phonePrefix', cur.phonePrefix, patch.phone_prefix);
+        if (patch.follow_up_task !== undefined) note('follow_up_task', 'followUpTask', cur.followUpTask, patch.follow_up_task);
+        if (patch.follow_up_channel_id !== undefined) note('follow_up_channel_id', 'followUpChannelId', cur.followUpChannelId, patch.follow_up_channel_id);
+        if (patch.follow_up_template_id !== undefined) note('follow_up_template_id', 'followUpTemplateId', cur.followUpTemplateId, patch.follow_up_template_id);
+        if (patch.follow_up_params !== undefined) note('follow_up_params', 'followUpParams', cur.followUpParams, patch.follow_up_params);
         if (changes.length === 0) return;
         await tx.update(forms).set(set).where(eq(forms.id, id));
         for (const c of changes) await writeAudit(tx, { entityType: AUDIT, entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
@@ -292,6 +301,35 @@ export class FormsService {
     const [row] = await (lock ? q.for('update') : q).limit(1);
     if (!row) throw new NotFoundError();
     return row;
+  }
+
+  /**
+   * El seguimiento por plantilla: conexión y plantilla van juntas; la conexión debe ser de WhatsApp oficial y estar activa; la plantilla, de esa conexión y enviable; y los valores de las variables
+   * deben alcanzar para llenarla (se prueba con un nombre de ejemplo).
+   */
+  private async assertFollowUp(tx: TenantTx, cur: FormRow, patch: UpdateFormDto): Promise<void> {
+    if (patch.follow_up_channel_id === undefined && patch.follow_up_template_id === undefined && patch.follow_up_params === undefined) return;
+    const channelId = patch.follow_up_channel_id !== undefined ? patch.follow_up_channel_id : cur.followUpChannelId;
+    const templateId = patch.follow_up_template_id !== undefined ? patch.follow_up_template_id : cur.followUpTemplateId;
+    if ((channelId === null) !== (templateId === null)) throw bad('follow_up_template_id', 'needs_both', 'Elige la conexión y la plantilla juntas, o ninguna');
+    if (channelId === null || templateId === null) return;
+    const [ch] = await tx.select({ id: channelAccounts.id }).from(channelAccounts).where(and(eq(channelAccounts.id, channelId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(channelAccounts.provider, 'meta_cloud'))).limit(1);
+    if (!ch) throw bad('follow_up_channel_id', 'not_found', 'La conexión no existe, está desactivada o no es de WhatsApp oficial');
+    let row;
+    try {
+      row = await this.templates.getSendable(tx, channelId, templateId);
+    } catch (e) {
+      if (e instanceof NotFoundError) throw bad('follow_up_template_id', 'not_found', 'La plantilla no existe en esa conexión');
+      if (e instanceof ConflictError) throw bad('follow_up_template_id', 'not_sendable', e.message);
+      throw e;
+    }
+    const params = patch.follow_up_params ?? cur.followUpParams;
+    try {
+      this.templates.prepare(row, Object.fromEntries(Object.entries(params).map(([k, v]) => [k, resolveParam(v, { name: 'Ana Pérez', formName: cur.name })])));
+    } catch (e) {
+      if (e instanceof ValidationError) throw new ValidationError(e.details.map((d) => ({ ...d, path: 'follow_up_params.' + d.path })));
+      throw e;
+    }
   }
 
   /** Que la cola, el pipeline, la etapa y la etiqueta existan en esta empresa y encajen entre sí. */

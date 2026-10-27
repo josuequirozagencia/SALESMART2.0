@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { z } from 'zod';
 import { TooManyAttemptsError } from '../../errors';
 import { Public, WindowLimiter, ZodValidationPipe } from '../../http';
+import { formPageCsp, formPageHtml } from './form-page';
 import { FormSubmitService } from './form-submit.service';
 import { publicSubmitSchema, type PublicSubmitDto } from './forms.dto';
 
@@ -38,6 +39,19 @@ export class FormsPublicController {
     const gate = this.reads.take(`${req.ip ?? '?'}|${token}`);
     if (!gate.ok) throw new TooManyAttemptsError(gate.retryAfterSeconds);
     return this.submits.definition(token, origin, (o) => cors(res, o));
+  }
+
+  /** La página alojada: el enlace directo y lo que carga el iframe. Con su propia política de contenido (solo los dominios autorizados pueden incrustarla). */
+  @Get(':token/page')
+  @Header('Cache-Control', 'no-store')
+  @Header('X-Content-Type-Options', 'nosniff')
+  async page(@Param('token', tokenParam) token: string, @Req() req: Request, @Res({ passthrough: true }) res: Response): Promise<string> {
+    const gate = this.reads.take(`${req.ip ?? '?'}|${token}`);
+    if (!gate.ok) throw new TooManyAttemptsError(gate.retryAfterSeconds);
+    const p = await this.submits.hostedPage(token);
+    res.setHeader('Content-Security-Policy', formPageCsp(p.domains));
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return formPageHtml({ name: p.name, token });
   }
 
   @Options(':token/submit')

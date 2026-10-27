@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import type { TemplateList } from '../../lib/types';
 
 export type FieldKind = 'text' | 'long_text' | 'email' | 'phone' | 'number' | 'select';
 export type FormStatus = 'draft' | 'published' | 'paused';
@@ -39,6 +40,8 @@ export interface FormDetail extends FormCard {
   redirect_url: string | null;
   allowed_domains: string[];
   phone_prefix: string;
+  /** Seguimiento de cada envío: tarea para el responsable y, opcionalmente, una plantilla de WhatsApp. `params`: valor de cada variable de la plantilla por su clave (`body:1`). */
+  follow_up: { task: boolean; channel_id: string | null; template_id: string | null; params: Record<string, string> };
   fields: FormField[];
   /** Qué le falta para poder publicarse. */
   missing: string[];
@@ -56,6 +59,10 @@ export type FormPatch = Partial<{
   redirect_url: string | null;
   allowed_domains: string[];
   phone_prefix: string;
+  follow_up_task: boolean;
+  follow_up_channel_id: string | null;
+  follow_up_template_id: string | null;
+  follow_up_params: Record<string, string>;
 }>;
 
 export interface FormSubmission {
@@ -74,6 +81,11 @@ export function useForms() {
 
 export function useForm(id: string) {
   return useQuery({ queryKey: ['form', id], retry: false, queryFn: () => api<FormDetail>(`/forms/${id}`) });
+}
+
+/** Las plantillas de una conexión (para elegir la del seguimiento). Sin conexión elegida no consulta. */
+export function useFollowUpTemplates(channelId: string) {
+  return useQuery({ queryKey: ['channel-templates', channelId], enabled: channelId !== '', retry: false, queryFn: () => api<TemplateList>(`/channels/${channelId}/templates`) });
 }
 
 export function useFormSubmissions(id: string, enabled: boolean) {

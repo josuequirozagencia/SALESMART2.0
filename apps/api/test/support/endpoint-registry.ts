@@ -242,6 +242,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/forms/:id', kind: 'tenant', isolationTest: '../../forms/forms.test.ts' },
   // Entrada pública (sin sesión): token opaco + Origin + captcha + límites
   { route: 'GET /v1/public/forms/:token', kind: 'public' },
+  { route: 'GET /v1/public/forms/:token/page', kind: 'public' },
+  { route: 'GET /v1/embed/v1.js', kind: 'public' },
   { route: 'OPTIONS /v1/public/forms/:token/submit', kind: 'public' },
   { route: 'POST /v1/public/forms/:token/submit', kind: 'public' },
   // Agente de IA en vivo en el Inbox (M8.5). Pruebas: test/ai/agent-runtime.test.ts

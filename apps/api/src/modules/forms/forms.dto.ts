@@ -20,6 +20,12 @@ export const updateFormSchema = z
     redirect_url: z.string().trim().max(500).nullable(),
     allowed_domains: z.array(z.string().trim().max(255)).max(MAX_DOMAINS),
     phone_prefix: z.string().regex(/^\+[1-9][0-9]{0,3}$/),
+    /** Seguimiento (M9.2): tarea para el responsable y, opcionalmente, una plantilla de WhatsApp (conexión y plantilla juntas o ninguna). */
+    follow_up_task: z.boolean(),
+    follow_up_channel_id: z.uuid().nullable(),
+    follow_up_template_id: z.uuid().nullable(),
+    /** Valores de las variables de la plantilla, por su clave (`body:1`, `body:nombre`, `header:1`, `button:0:1`). */
+    follow_up_params: z.record(z.string().regex(/^(?:(?:header|body):[A-Za-z0-9_]{1,30}|button:\d{1,2}:[A-Za-z0-9_]{1,30})$/), z.string().max(200)).refine((r) => Object.keys(r).length <= 10, 'Demasiadas variables'),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');

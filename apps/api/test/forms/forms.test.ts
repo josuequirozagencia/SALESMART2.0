@@ -11,23 +11,30 @@
 //   GET /v1/public/forms/:token
 //   OPTIONS /v1/public/forms/:token/submit
 //   POST /v1/public/forms/:token/submit
+//   GET /v1/public/forms/:token/page
+//   GET /v1/embed/v1.js
 import 'reflect-metadata';
+import { randomBytes } from 'node:crypto';
 import { request } from 'node:http';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { FORM_EMBED_SCRIPT } from '@sales-smart/shared';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
+import { FAKE_TEMPLATES, FAKE_WHATSAPP_TOKEN, FakeWhatsAppProvider, WHATSAPP_PROVIDER } from '../../src/modules/channels';
 import { FormsModule } from '../../src/modules/forms';
+import { InboxModule, OutboundDispatcher } from '../../src/modules/inbox';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { Argon2idHasher } from '../../src/security';
+import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, FormsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, FormsModule, InboxModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
 class TestAppModule {}
 
 const info = requireDb();
@@ -49,7 +56,7 @@ let T: Record<'alice' | 'carol' | 'bob', string>;
 const saved = { ...process.env };
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE form_submissions, form_fields, forms, form_routes, meta_events, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, custom_field_values, custom_field_definitions, contact_phones, contacts, queue_members, queue_distribution_state, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, whatsapp_accounts, channel_routes, channel_accounts, tasks, form_submissions, form_fields, forms, form_routes, meta_events, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, custom_field_values, custom_field_definitions, contact_phones, contacts, queue_members, queue_distribution_state, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
   }
@@ -105,8 +112,8 @@ beforeAll(async () => {
   admin = new Client({ connectionString: info.adminDbUrl });
   await admin.connect();
   hash = await new Argon2idHasher().hash(PW);
-  for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'STORAGE_PROVIDER', 'VIRUS_SCANNER', 'AUDIO_TRANSCODER', 'AI_PROVIDER', 'CAPI_PROVIDER']) delete process.env[k];
-  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: process.env['TEST_LOG'] ?? 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: 'http://localhost:5173', MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', STORAGE_PROVIDER: 'fake', VIRUS_SCANNER: 'fake', AI_PROVIDER: 'fake', CAPI_PROVIDER: 'fake' });
+  for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'STORAGE_PROVIDER', 'VIRUS_SCANNER', 'AUDIO_TRANSCODER', 'AI_PROVIDER', 'CAPI_PROVIDER', 'WHATSAPP_PROVIDER', 'PROVIDER_CREDENTIALS_KEY']) delete process.env[k];
+  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: process.env['TEST_LOG'] ?? 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: 'http://localhost:5173', MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', STORAGE_PROVIDER: 'fake', VIRUS_SCANNER: 'fake', AI_PROVIDER: 'fake', CAPI_PROVIDER: 'fake', WHATSAPP_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: randomBytes(32).toString('base64') });
   delete process.env['DATABASE_URL_OWNER'];
   app = await NestFactory.create(TestAppModule, { logger: false, abortOnError: false });
   configureApp(app);
@@ -506,5 +513,209 @@ describe('lo recibido', () => {
     expect(p2.next_cursor).toBeNull();
     expect((await call('GET', `/forms/${form.id}/submissions?cursor=basura`, T.alice)).status).toBe(400);
     expect((await json<{ items: Form[] }>(await call('GET', '/forms', T.alice))).items[0]).toMatchObject({ submissions: 3 });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════ M9.2: publicación y seguimiento
+
+const connectChannel = async (token: string, phoneId: string, name = 'Ventas'): Promise<string> => {
+  const r = await call('POST', '/channels', token, { name, waba_id: '1234567890123', phone_number_id: phoneId, access_token: FAKE_WHATSAPP_TOKEN });
+  expect(r.status).toBe(201);
+  return ((await r.json()) as { id: string }).id;
+};
+const syncTemplates = async (token: string, channel: string): Promise<Array<{ id: string; name: string; language: string }>> => {
+  (app.get(WHATSAPP_PROVIDER, { strict: false }) as FakeWhatsAppProvider).templates = [...FAKE_TEMPLATES];
+  expect((await call('POST', `/channels/${channel}/templates/sync`, token)).status).toBe(200);
+  return (await json<{ items: Array<{ id: string; name: string; language: string }> }>(await call('GET', `/channels/${channel}/templates`, token))).items;
+};
+const templateId = (items: Array<{ id: string; name: string; language: string }>, name: string, language = 'es'): string => items.find((t) => t.name === name && t.language === language)!.id;
+const conversationsOf = async () => (await admin.query(`SELECT * FROM conversations ORDER BY created_at`)).rows as Row[];
+const messagesOf = async () => (await admin.query(`SELECT * FROM messages ORDER BY sent_at, id`)).rows as Row[];
+const tasksOf = async () => (await admin.query(`SELECT * FROM tasks ORDER BY created_at`)).rows as Row[];
+
+describe('el código y la página alojada', () => {
+  it('sirve el embed.js sin sesión: JavaScript, nosniff, cacheable unos minutos, mismo texto para todos y sin datos de ninguna empresa', async () => {
+    const r = await fetch(`${base}/embed/v1.js`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toMatch(/^application\/javascript/);
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(r.headers.get('cache-control')).toMatch(/public, max-age=\d+/);
+    expect(r.headers.get('cross-origin-resource-policy')).toBe('cross-origin');
+    const text = await r.text();
+    expect(text).toBe(FORM_EMBED_SCRIPT);
+    expect(text).toContain('/v1/public/forms/');
+    expect(text).not.toMatch(/\beval\s*\(|innerHTML|document\.write/);
+    for (const secret of [ORG_A, ORG_B, 'sales-smart', 'DATABASE']) expect(text).not.toContain(secret);
+  });
+
+  it('la página alojada lleva el token del formulario, su nombre escapado y una política de contenido que solo deja incrustarla a los dominios autorizados y a la propia aplicación', async () => {
+    const { token, form } = await ready();
+    expect((await patch(T.alice, form.id, { name: 'Landing <b onclick=x>cursos</b> & "más"' })).status).toBe(200);
+    const r = await fetch(`${base}/public/forms/${token}/page`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toMatch(/^text\/html/);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff');
+    const html = await r.text();
+    expect(html).toContain(`data-form="${token}"`);
+    expect(html).toContain('src="/v1/embed/v1.js"');
+    expect(html).toContain('Landing &lt;b onclick=x&gt;cursos&lt;/b&gt; &amp; &quot;más&quot;');
+    expect(html).not.toContain('<b onclick');
+    const csp = r.headers.get('content-security-policy')!;
+    expect(csp).toContain("default-src 'none'");
+    expect(csp).toContain("script-src 'self' https://challenges.cloudflare.com");
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain("frame-ancestors 'self' https://landing.test https://*.promo.test");
+    expect(csp).not.toMatch(/frame-ancestors[^;]*\*(;|$)/);
+    expect(csp).toContain("form-action 'none'");
+  });
+
+  it('la página alojada es 404 si el formulario no está publicado o no existe', async () => {
+    const { token, form } = await ready();
+    await call('POST', `/forms/${form.id}/pause`, T.alice);
+    expect((await fetch(`${base}/public/forms/${token}/page`)).status).toBe(404);
+    expect((await fetch(`${base}/public/forms/00000000-0000-4000-8000-00000000dead/page`)).status).toBe(404);
+    expect((await fetch(`${base}/public/forms/no-es-uuid/page`)).status).toBe(400);
+  });
+});
+
+describe('seguimiento: configuración', () => {
+  it('conexión y plantilla van juntas; se validan la conexión (oficial y activa), la plantilla (de esa conexión y enviable) y los valores de sus variables', async () => {
+    const ch = await connectChannel(T.alice, '1090123456789');
+    const items = await syncTemplates(T.alice, ch);
+    const f = await mk(T.alice);
+    const tpl = templateId(items, 'recordatorio_cita'); // {{1}} {{2}} {{3}}
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: ch })).status).toBe(400); // sola, no
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: ch, follow_up_template_id: tpl })).status).toBe(400); // faltan los valores de las variables
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: ch, follow_up_template_id: templateId(items, 'seguimiento_nombrado'), follow_up_params: { 'body:nombre': '{{primer_nombre}}' } })).status).toBe(400); // falta «servicio»
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: ch, follow_up_template_id: templateId(items, 'en_revision'), follow_up_params: { 'body:1': 'x' } })).status).toBe(400); // pendiente de aprobación
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: ch, follow_up_template_id: '00000000-0000-4000-8000-00000000dead' })).status).toBe(400);
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: '00000000-0000-4000-8000-00000000dead', follow_up_template_id: tpl })).status).toBe(400);
+    const ok = await patch(T.alice, f.id, { follow_up_channel_id: ch, follow_up_template_id: templateId(items, 'seguimiento_nombrado'), follow_up_params: { 'body:nombre': '{{primer_nombre}}', 'body:servicio': 'cursos de {{formulario}}' } });
+    expect(ok.status).toBe(200);
+    expect((await json<Form & { follow_up: Record<string, unknown> }>(ok)).follow_up).toEqual({ task: true, channel_id: ch, template_id: templateId(items, 'seguimiento_nombrado'), params: { 'body:nombre': '{{primer_nombre}}', 'body:servicio': 'cursos de {{formulario}}' } });
+    // sin plantilla otra vez: ambas a nulo
+    expect((await patch(T.alice, f.id, { follow_up_channel_id: null, follow_up_template_id: null })).status).toBe(200);
+    expect((await patch(T.alice, f.id, { follow_up_task: false })).status).toBe(200);
+    expect((await json<Form & { follow_up: { task: boolean } }>(await call('GET', `/forms/${f.id}`, T.alice))).follow_up.task).toBe(false);
+    expect((await patch(T.alice, f.id, { follow_up_params: { 'con espacio': 'x', nombre: 'y' } })).status).toBe(400);
+  });
+
+  it('A↔B: no se puede usar la conexión ni la plantilla de otra empresa', async () => {
+    const chA = await connectChannel(T.alice, '1090123456789');
+    const itemsA = await syncTemplates(T.alice, chA);
+    const fb = await mk(T.bob, 'Formulario de B');
+    expect((await patch(T.bob, fb.id, { follow_up_channel_id: chA, follow_up_template_id: templateId(itemsA, 'bienvenida') })).status).toBe(400);
+  });
+});
+
+describe('seguimiento: lo que pasa con un envío', () => {
+  async function withTemplate(over: Record<string, unknown> = {}, name = 'seguimiento_nombrado', params: Record<string, string> = { 'body:nombre': '{{primer_nombre}}', 'body:servicio': '{{formulario}}' }) {
+    const ch = await connectChannel(T.alice, '1090123456789');
+    const items = await syncTemplates(T.alice, ch);
+    const r = await ready();
+    expect((await patch(T.alice, r.form.id, { follow_up_channel_id: ch, follow_up_template_id: templateId(items, name), follow_up_params: params, ...over })).status).toBe(200);
+    return { ...r, ch };
+  }
+
+  it('abre la conversación con el lead (asignada a su responsable, pendiente), deja la plantilla en cola como mensaje automático con sus variables y crea la tarea del responsable; el envío anota el seguimiento', async () => {
+    const { token, ch } = await withTemplate();
+    const r = await submit(token);
+    expect(r.status).toBe(200);
+    const [c] = await conversationsOf();
+    expect(c).toMatchObject({ channel_account_id: ch, status: 'pending', owner_id: IDS.carol, peer_id: '593984217730' });
+    const [contact] = await contactRows();
+    expect(c!['contact_id']).toBe(contact!['id']);
+    const msgs = await messagesOf();
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]).toMatchObject({ direction: 'out', sender_type: 'automation', kind: 'template', status: 'queued', conversation_id: c!['id'] });
+    expect(String(msgs[0]!['body'])).toBe('Hola Lucía, ¿pudiste revisar la propuesta de Landing de cursos?');
+    const tpl = (msgs[0]!['meta'] as { template: { name: string; language: string; send: unknown[] } }).template;
+    expect(tpl).toMatchObject({ name: 'seguimiento_nombrado', language: 'es' });
+    expect(JSON.stringify(tpl.send)).toContain('Lucía');
+    const t = await tasksOf();
+    expect(t).toHaveLength(1);
+    expect(t[0]).toMatchObject({ assignee_id: IDS.carol, contact_id: contact!['id'], status: 'open' });
+    expect(String(t[0]!['title'])).toBe('Contactar a Lucía Paredes (formulario «Landing de cursos»)');
+    expect(new Date(t[0]!['due_at'] as string).getTime() - Date.now()).toBeGreaterThan(50 * 60_000);
+    expect((await subs())[0]).toMatchObject({ follow_up: 'template_task' });
+    // el cronómetro de respuesta no corre (no hay mensaje del cliente) y no hay conversación para quien no escribió
+    expect((await admin.query(`SELECT 1 FROM response_timers`)).rows).toHaveLength(0);
+  });
+
+  it('la tarea sola cuando no hay plantilla; «sin tarea» y sin plantilla no deja seguimiento; sin responsable no hay a quién asignar la tarea', async () => {
+    const a = await ready();
+    expect((await submit(a.token)).status).toBe(200);
+    expect(await conversationsOf()).toHaveLength(0);
+    expect(await tasksOf()).toHaveLength(1);
+    expect((await subs())[0]).toMatchObject({ follow_up: 'task' });
+    expect((await patch(T.alice, a.form.id, { follow_up_task: false })).status).toBe(200);
+    expect((await submit(a.token, { values: { ...GOOD.values, whatsapp: '0991110000' } })).status).toBe(200);
+    expect((await subs())[1]).toMatchObject({ follow_up: 'none' });
+    expect(await tasksOf()).toHaveLength(1);
+    // sin cola (sin responsable)
+    expect((await patch(T.alice, a.form.id, { follow_up_task: true, queue_id: null })).status).toBe(200);
+    expect((await submit(a.token, { values: { ...GOOD.values, whatsapp: '0992220000' } })).status).toBe(200);
+    expect((await subs())[2]).toMatchObject({ follow_up: 'none' });
+    expect(await tasksOf()).toHaveLength(1);
+  });
+
+  it('no se repite la tarea abierta del mismo contacto, y la plantilla se manda en la misma conversación si ya había una abierta', async () => {
+    const { token } = await withTemplate();
+    expect((await submit(token)).status).toBe(200);
+    expect((await submit(token)).status).toBe(200); // la misma persona otra vez
+    expect(await tasksOf()).toHaveLength(1);
+    expect(await conversationsOf()).toHaveLength(1);
+    expect(await messagesOf()).toHaveLength(2);
+    expect((await subs()).map((s) => s['follow_up'])).toEqual(['template_task', 'template']);
+  });
+
+  it('plan B: si la plantilla ya no se puede enviar, el contacto revocó su consentimiento o los valores no valen, el lead NO se pierde y queda la tarea', async () => {
+    const { token, form, ch } = await withTemplate();
+    // la plantilla dejó de estar aprobada después de configurar el formulario
+    await admin.query(`UPDATE message_templates SET sendable = false, unsupported_reason = 'pausada' WHERE channel_account_id = $1 AND name = 'seguimiento_nombrado'`, [ch]);
+    expect((await submit(token)).status).toBe(200);
+    expect(await conversationsOf()).toHaveLength(0);
+    expect(await messagesOf()).toHaveLength(0);
+    expect((await subs())[0]).toMatchObject({ follow_up: 'task' });
+    await admin.query(`UPDATE message_templates SET sendable = true, unsupported_reason = NULL WHERE channel_account_id = $1 AND name = 'seguimiento_nombrado'`, [ch]);
+    // contacto con consentimiento revocado: no se le escribe, pero el equipo sí se entera
+    const c = (await admin.query(`INSERT INTO contacts(id, organization_id, name, consent) VALUES (gen_random_uuid(), $1, 'Pedro Revocado', 'revoked') RETURNING id`, [ORG_A])).rows[0].id as string;
+    await admin.query(`INSERT INTO contact_phones(id, organization_id, contact_id, e164, is_primary) VALUES (gen_random_uuid(), $1, $2, '+593991234567', true)`, [ORG_A, c]);
+    expect((await submit(token, { values: { ...GOOD.values, whatsapp: '0991234567', nombre: 'Pedro' } })).status).toBe(200);
+    expect(await messagesOf()).toHaveLength(0);
+    expect((await subs())[1]).toMatchObject({ follow_up: 'task' });
+    // una conexión desactivada
+    await admin.query(`UPDATE channel_accounts SET status = 'disabled' WHERE id = $1`, [ch]);
+    expect((await submit(token, { values: { ...GOOD.values, whatsapp: '0993334444' } })).status).toBe(200);
+    expect(await messagesOf()).toHaveLength(0);
+    expect((await subs())[2]).toMatchObject({ follow_up: 'task' });
+    expect(form.id).toBeTruthy();
+  });
+
+  it('el mensaje queda en cola y la tarea periódica lo envía por el proveedor (como los demás mensajes automáticos); la respuesta del lead cae en la misma conversación', async () => {
+    const { token, ch } = await withTemplate();
+    expect((await submit(token)).status).toBe(200);
+    const sentBefore = (app.get(WHATSAPP_PROVIDER, { strict: false }) as FakeWhatsAppProvider).outbox.length;
+    const dispatcher = app.get(OutboundDispatcher);
+    const done = await TenantContext.run({ organizationId: ORG_A }, () => dispatcher.runDue(new Date(Date.now() + 1000)));
+    expect(done).toBeGreaterThanOrEqual(1);
+    const fake = app.get(WHATSAPP_PROVIDER, { strict: false }) as FakeWhatsAppProvider;
+    expect(fake.outbox.length).toBe(sentBefore + 1);
+    expect(fake.outbox.at(-1)).toMatchObject({ template: { name: 'seguimiento_nombrado', language: 'es' } });
+    expect((await messagesOf())[0]).toMatchObject({ status: 'sent' });
+    expect(ch).toBeTruthy();
+  });
+
+  it('A↔B: el seguimiento de un formulario de B no toca conversaciones ni tareas de A', async () => {
+    const a = await withTemplate();
+    expect((await call('POST', '/custom-fields', T.bob, { name: 'Ciudad', type: 'text' })).status).toBe(201);
+    const fb = await mk(T.bob, 'Formulario de B');
+    await patch(T.bob, fb.id, { allowed_domains: ['landing.test'] });
+    const pb = await json<Form>(await call('POST', `/forms/${fb.id}/publish`, T.bob));
+    expect((await submit(pb.public_token, { values: { nombre: 'Beto Cliente', whatsapp: '0984000000' } })).status).toBe(200);
+    expect((await admin.query(`SELECT 1 FROM conversations`)).rows).toHaveLength(0);
+    expect((await admin.query(`SELECT 1 FROM tasks`)).rows).toHaveLength(0); // B no tiene responsable (sin cola): ninguna tarea
+    expect(a.token).toBeTruthy();
   });
 });
