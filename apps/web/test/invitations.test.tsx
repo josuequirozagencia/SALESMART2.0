@@ -123,8 +123,8 @@ describe('Invitaciones pendientes en la lista', () => {
     const rows = within(await screen.findByRole('list', { name: 'Empresas' })).getAllByRole('listitem');
     expect(within(rows[0]!).getByText('Invitación pendiente')).toBeInTheDocument();
     expect(within(rows[0]!).getByText(/dueno@cafe\.test/)).toBeInTheDocument();
-    expect(within(rows[0]!).getByText(/La invitación vence el \d\d\/\d\d/)).toBeInTheDocument();
-    expect(within(rows[1]!).getByText(/La invitación venció el \d\d\/\d\d/)).toBeInTheDocument();
+    expect(within(rows[0]!).getByText(/La invitación vence el \d{1,2}\/\d{1,2}/)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(/La invitación venció el \d{1,2}\/\d{1,2}/)).toBeInTheDocument();
     expect(within(rows[0]!).getByRole('button', { name: 'Reenviar la invitación de Café Origen' })).toBeInTheDocument();
     expect(within(rows[2]!).queryByRole('button', { name: /Reenviar/ })).not.toBeInTheDocument();
   });

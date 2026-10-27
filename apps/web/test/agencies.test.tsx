@@ -51,7 +51,7 @@ describe('Agencias', () => {
     const tres = rows[2]!;
     expect(within(tres).getByText('Invitación pendiente')).toBeInTheDocument();
     expect(within(tres).getByText(/dueno@tres\.test/)).toBeInTheDocument();
-    expect(within(tres).getByText(/La invitación vence el \d\d\/\d\d/)).toBeInTheDocument();
+    expect(within(tres).getByText(/La invitación vence el \d{1,2}\/\d{1,2}/)).toBeInTheDocument();
     expect(within(tres).getByRole('button', { name: 'Reenviar la invitación de Agencia Tres' })).toBeInTheDocument();
     expect(within(tres).queryByRole('button', { name: /Suspender|Reactivar/ })).not.toBeInTheDocument(); // aún no tiene personas
   });

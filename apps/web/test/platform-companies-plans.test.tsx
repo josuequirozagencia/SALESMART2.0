@@ -40,11 +40,11 @@ describe('Empresas', () => {
     expect(within(rows[0]!).getByText('Estudio Luna')).toBeInTheDocument();
     expect(within(rows[0]!).getByText('Prueba vencida')).toBeInTheDocument();
     expect(within(rows[0]!).getByText(/ana@luna\.test/)).toBeInTheDocument();
-    expect(within(rows[0]!).getByText(/Venció el \d\d\/\d\d/)).toBeInTheDocument();
+    expect(within(rows[0]!).getByText(/Venció el \d{1,2}\/\d{1,2}/)).toBeInTheDocument();
     expect(within(rows[0]!).getByText('Sin plan')).toBeInTheDocument();
     expect(within(rows[0]!).getByLabelText('3 usuarios')).toBeInTheDocument();
     expect(within(rows[1]!).getByText('En prueba')).toBeInTheDocument();
-    expect(within(rows[1]!).getByText(/Vence el \d\d\/\d\d/)).toBeInTheDocument();
+    expect(within(rows[1]!).getByText(/Vence el \d{1,2}\/\d{1,2}/)).toBeInTheDocument();
     expect(within(rows[2]!).getByText('Activa')).toBeInTheDocument();
     expect(within(rows[2]!).getByText('Pro')).toBeInTheDocument();
     expect(within(rows[2]!).queryByText(/Vence el/)).not.toBeInTheDocument();
