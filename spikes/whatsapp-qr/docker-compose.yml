@@ -2,7 +2,7 @@
 # Uso local: cp .env.example .env && docker compose up -d
 services:
   evolution:
-    image: atendai/evolution-api:v2.1.1   # fijar versión: Evolution cambia sin aviso
+    image: evoapicloud/evolution-api:v2.3.7   # fijar versión; atendai/evolution-api ya no existe en Docker Hub
     restart: unless-stopped
     ports: ["8080:8080"]
     environment:

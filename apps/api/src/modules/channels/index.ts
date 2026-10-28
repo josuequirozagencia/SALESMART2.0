@@ -10,3 +10,4 @@ export { WebhookEventsService, EVENT_BATCH, EVENT_MAX_ATTEMPTS, PAYLOAD_RETENTIO
 export { MetaWebhookService, WHATSAPP_SERVICE, type ReceiveResult } from './meta-webhook.service';
 export { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
 export type { ChannelView } from './connections.service';
+export { parseEvolutionWebhook, parseStoredEvolution, phoneFromJid, redactEvolutionPayload, verifyEvolutionToken, type EvolutionConnection, type EvolutionConnectionState, type ParsedEvolution } from './evolution-webhook';

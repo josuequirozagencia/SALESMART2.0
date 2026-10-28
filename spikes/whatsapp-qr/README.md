@@ -24,7 +24,7 @@ tail -f events.jsonl                         # eventos recibidos por webhook
 Crear un proyecto Railway **de pruebas** (no el de producción) con 4 servicios:
 1. **Postgres** (plantilla de Railway). Variable de conexión → `DATABASE_CONNECTION_URI` de Evolution.
 2. **Redis** (plantilla de Railway) → `CACHE_REDIS_URI=redis://…/1`.
-3. **evolution**: imagen Docker `atendai/evolution-api:v2.1.1`, puerto 8080, variables de `docker-compose.yml`, `SERVER_URL` = dominio público generado, y un **volumen persistente montado en `/evolution/instances`** (sin esto se pierde la sesión QR en cada deploy).
+3. **evolution**: imagen Docker `evoapicloud/evolution-api:v2.3.7`, puerto 8080, variables de `docker-compose.yml`, `SERVER_URL` = dominio público generado, y un **volumen persistente montado en `/evolution/instances`** (sin esto se pierde la sesión QR en cada deploy).
 4. **receiver**: este mismo directorio (comando `node scripts/webhook-receiver.mjs`) con `WEBHOOK_TOKEN`; usa su URL privada interna como `WEBHOOK_URL` (`http://receiver.railway.internal:4000/hook`).
 
 Luego ejecuta los mismos comandos de A) con `EVO_URL` apuntando al dominio de Railway. **Pruebas B1–B4 de `CHECKLIST.md`** (redeploy, reinicio, caída de Redis) son el corazón del spike.

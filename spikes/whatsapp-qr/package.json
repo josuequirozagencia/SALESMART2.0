@@ -1,0 +1,11 @@
+{
+  "name": "wa-receiver-spike",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node scripts/webhook-receiver.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

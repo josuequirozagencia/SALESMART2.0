@@ -1,0 +1,5 @@
+.env
+.env.*
+events.jsonl
+qr.png
+node_modules
