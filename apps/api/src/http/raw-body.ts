@@ -41,3 +41,46 @@ export function rawBodyFor(paths: readonly string[], limitBytes: number) {
     req.on('error', (e) => next(e));
   };
 }
+
+/**
+ * Lector de cuerpo JSON con un límite propio para UNA ruta (M9.6): el webhook de WhatsApp por QR trae los archivos en base64 dentro del aviso (hasta 25 MB), mientras que el resto de la API conserva el
+ * límite estándar. Lo lee a mano (sin depender de `express`/`body-parser`), lo interpreta y lo deja en `req.body` ya como objeto; un JSON roto responde 400 y uno demasiado grande, 413.
+ */
+export function jsonBodyFor(path: RegExp, limitBytes: number) {
+  return (req: Request & { requestId?: string; _body?: boolean }, res: Response, next: NextFunction): void => {
+    if (req.method !== 'POST' || !path.test(req.path)) return next();
+    const fail = (status: number, code: string, message: string): void => {
+      if (res.headersSent) return;
+      res.setHeader('Connection', 'close');
+      res.status(status).json({ error: { code, message, request_id: req.requestId ?? null, details: [] } });
+      req.resume();
+    };
+    const declared = Number(req.headers['content-length']);
+    if (Number.isFinite(declared) && declared > limitBytes) return fail(413, 'PAYLOAD_TOO_LARGE', 'La solicitud es demasiado grande');
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let rejected = false;
+    req.on('data', (c: Buffer) => {
+      if (rejected) return;
+      size += c.length;
+      if (size > limitBytes) {
+        rejected = true;
+        chunks.length = 0;
+        fail(413, 'PAYLOAD_TOO_LARGE', 'La solicitud es demasiado grande');
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => {
+      if (rejected) return;
+      try {
+        req.body = chunks.length === 0 ? {} : (JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown);
+      } catch {
+        return fail(400, 'VALIDATION_ERROR', 'El cuerpo no es un JSON válido');
+      }
+      req._body = true; // el lector JSON de Nest respeta esta marca y no vuelve a leer
+      next();
+    });
+    req.on('error', (e) => next(e));
+  };
+}

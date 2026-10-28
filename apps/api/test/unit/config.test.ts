@@ -43,7 +43,7 @@ describe('configuración validada', () => {
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
   it('WhatsApp (ADR-50): por defecto el adaptador de Meta; el fake solo fuera de producción; un valor desconocido se rechaza', () => {
-    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta', capiProvider: 'meta', ghlProvider: 'ghl' });
+    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta', capiProvider: 'meta', ghlProvider: 'ghl', qrProvider: 'evolution' });
     expect(loadConfig({ ...good, WHATSAPP_PROVIDER: 'fake' }).channels.whatsappProvider).toBe('fake');
     expect(loadConfig({ ...good, NODE_ENV: 'production' }).channels.whatsappProvider).toBe('meta');
     expect(() => loadConfig({ ...good, NODE_ENV: 'production', WHATSAPP_PROVIDER: 'fake' })).toThrow(/WHATSAPP_PROVIDER/);
@@ -263,5 +263,15 @@ describe('configuración validada', () => {
     const text = JSON.stringify(describeConfig(loadConfig(good)));
     expect(text).not.toMatch(/S3cr3t|Other-S3cr3t|password/i);
     expect(JSON.parse(text).db.app).toEqual({ role: 'app_rw', host: 'db.internal:5432', database: 'ss' });
+  });
+});
+
+describe('configuración validada › WhatsApp por QR (M9.6)', () => {
+  it('por defecto Evolution; none y fake se aceptan fuera de producción; el fake se rechaza en producción y un valor desconocido también', () => {
+    expect(loadConfig(good).channels.qrProvider).toBe('evolution');
+    expect(loadConfig({ ...good, QR_PROVIDER: 'none' }).channels.qrProvider).toBe('none');
+    expect(loadConfig({ ...good, QR_PROVIDER: 'fake' }).channels.qrProvider).toBe('fake');
+    expect(() => loadConfig({ ...good, NODE_ENV: 'production', QR_PROVIDER: 'fake' })).toThrow(/QR_PROVIDER/);
+    expect(() => loadConfig({ ...good, QR_PROVIDER: 'otro' })).toThrow();
   });
 });

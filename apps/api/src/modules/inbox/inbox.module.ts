@@ -5,6 +5,7 @@ import { ChannelsModule } from '../channels';
 import { ContactsModule } from '../contacts';
 import { OpportunitiesModule } from '../opportunities';
 import { OrganizationsModule } from '../organizations';
+import { QrModule } from '../qr';
 import { QueuesModule } from '../queues';
 import { QuickRepliesModule } from '../quick-replies';
 import { SlaModule } from '../sla';
@@ -29,7 +30,7 @@ import { SlaSweepJob } from './sla-sweep.job';
  * entra por los canales) porque envía por el proveedor de `channels`, que a su vez usa `conversations`: así no hay dependencias en círculo.
  */
 @Module({
-  imports: [AttachmentsModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
+  imports: [AttachmentsModule, QrModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, MessagesController, ConversationAttachmentsController, AttachmentsController],
   providers: [ConversationAttachmentsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],

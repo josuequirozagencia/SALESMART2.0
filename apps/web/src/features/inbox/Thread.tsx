@@ -52,9 +52,10 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
         <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
-          <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}</p>
+          <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
         </div>
       </div>
+      {c.channel.kind === 'qr' && c.channel.session === 'down' ? <p role="alert" className="w-full rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[12.5px] font-semibold text-crit">La sesión de WhatsApp por QR está caída. Lo que escribas queda en espera y sale cuando el administrador vuelva a escanear el QR en Configuración › Conexiones.</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Pill kind={status.kind}>{status.label}</Pill>
         <SlaPill sla={c.sla} now={now} />

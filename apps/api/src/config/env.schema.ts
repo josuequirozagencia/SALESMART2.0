@@ -54,6 +54,8 @@ export const envSchema = z.object({
   /** Salida de eventos a la API de Conversiones de Meta (M6.4): `meta` = real con las credenciales de cada empresa; `none` = no enviar nada; `fake` solo para desarrollo/pruebas. */
   CAPI_PROVIDER: z.enum(['meta', 'none', 'fake']).default('meta'),
   /** GoHighLevel (M7, ADR-52): `ghl` = Private Token real con las credenciales de cada empresa; `none` = sin adaptador; `fake` solo para desarrollo/pruebas. */
+  /** WhatsApp por QR (M9.6, ADR-54): `evolution` = Evolution API con la URL y la clave que el Súper Admin guarda en Proveedores › WhatsApp por QR; `none` = sin QR; `fake` solo desarrollo y pruebas (no se permite en producción). */
+  QR_PROVIDER: z.enum(['evolution', 'none', 'fake']).default('evolution'),
   GHL_PROVIDER: z.enum(['ghl', 'none', 'fake']).default('ghl'),
   /** Llamadas HTTP de las automatizaciones (M9.5b, ADR-54): `real` = salida segura (lista de permitidos, solo direcciones públicas); `fake` solo desarrollo y pruebas (no sale a internet) y se rechaza en producción. */
   HTTP_OUT_PROVIDER: z.enum(['real', 'fake']).default('real'),

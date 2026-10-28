@@ -1,3 +1,4 @@
+import { uuidv7 } from '@sales-smart/shared';
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { AppError } from '../../errors';
@@ -88,6 +89,20 @@ export class AttachmentsService {
     } catch (e) {
       if (e instanceof ScanError) throw new AppError(503, 'ATTACHMENT_SCAN_UNAVAILABLE', 'No pudimos revisar el archivo con el antivirus. Inténtalo en unos minutos');
       throw e;
+    }
+  }
+
+  /**
+   * Guarda un archivo que llegó DENTRO de un aviso (WhatsApp por QR, M9.6) bajo una clave temporal de la empresa. El adjunto del mensaje lo toma de ahí (antivirus, reglas de tipo y tamaño) y la borra.
+   * Devuelve null si el almacenamiento no responde: el mensaje se recibe igual y el adjunto queda fallido.
+   */
+  async putInbound(organizationId: string, bytes: Buffer, mime: string): Promise<string | null> {
+    const key = `org/${organizationId}/qr-inbound/${uuidv7()}`;
+    try {
+      await this.storage.put(key, bytes, mime);
+      return key;
+    } catch {
+      return null;
     }
   }
 

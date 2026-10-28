@@ -715,6 +715,20 @@
       "when": 1793111230452,
       "tag": "0101_m95b_automation_settings_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793150519706,
+      "tag": "0102_m96_qr_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 103,
+      "version": "7",
+      "when": 1793150532847,
+      "tag": "0103_m96_qr_sessions_grants",
+      "breakpoints": true
     }
   ]
 }

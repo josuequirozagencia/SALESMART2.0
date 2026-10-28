@@ -4,9 +4,10 @@ import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
 import { Database, webhookEvents, whatsappAccounts, type TenantTx } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { ConversationsService } from '../conversations';
+import { ConversationsService, type NormalizedInboundEvent } from '../conversations';
 import type { OrgDirectory } from '../organizations';
 import type { AssignmentContext } from '../queues';
+import { parseStoredEvolution } from './evolution-webhook';
 import { deepStripNul } from './meta-webhook';
 import { WHATSAPP_PROVIDER, type WhatsAppProvider } from './whatsapp.port';
 
@@ -98,7 +99,7 @@ export class WebhookEventsService {
     try {
       // Un aviso sin contenido (ya vaciado) no tiene nada que procesar
       if (ev.payload) {
-        for (const { event } of this.provider.parseStored(ev.payload, ev.receivedAt).events) {
+        for (const { event } of this.parsedEvents(ev)) {
           for (const m of event.messages) await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
           for (const s of event.statuses) if ((await this.conversations.applyStatus(tx, ev.channelAccountId, s)) === 'unknown') unknownTargets += 1;
           for (const r of event.reactions) if ((await this.conversations.applyReaction(tx, ev.channelAccountId, r)) === 'unknown') unknownTargets += 1;
@@ -126,6 +127,20 @@ export class WebhookEventsService {
       const wait = Math.min(2 ** attempts * 7_500, MAX_BACKOFF_MS);
       await tx.update(webhookEvents).set({ attempts, lastError: label, nextAttemptAt: new Date(now.getTime() + wait) }).where(eq(webhookEvents.id, ev.id));
     }
+  }
+
+  /**
+   * Los eventos normalizados de un aviso guardado. Un aviso de WhatsApp por QR (M9.6) lleva la marca `__qr`: se lee con el lector de Evolution, y el archivo que traía (ya guardado aparte en una clave
+   * temporal) reemplaza al identificador del proveedor, que en este canal no existe. Los demás son de Meta.
+   */
+  private parsedEvents(ev: EventRow): ReadonlyArray<{ event: NormalizedInboundEvent }> {
+    const p = ev.payload as Record<string, unknown>;
+    if (p['__qr'] !== 1) return this.provider.parseStored(p, ev.receivedAt).events;
+    const keys = (typeof p['media_keys'] === 'object' && p['media_keys'] !== null ? p['media_keys'] : {}) as Record<string, unknown>;
+    const parsed = parseStoredEvolution(p['data'] as Record<string, unknown>, String(p['instance']), String(p['event']), ev.receivedAt);
+    return parsed.events.map(({ event }) => ({
+      event: { ...event, messages: event.messages.map((m) => (m.media && typeof keys[m.externalId] === 'string' ? { ...m, media: { ...m.media, id: keys[m.externalId] as string } } : m.media ? { ...m, media: null } : m)) },
+    }));
   }
 
   /** Vacía el contenido de los avisos ya terminados con más de 30 días (minimización de datos personales): la fila queda como registro. */

@@ -100,3 +100,39 @@ export const channelRoutes = identityTable(
     index('channel_routes_org_idx').on(t.organizationId),
   ],
 );
+
+/**
+ * Sesión de WhatsApp por QR de una conexión `evolution` (M9.6, ADR-54/ADR-31; canal NO OFICIAL). Una por conexión. `instance_name` es el nombre de la instancia en Evolution (aleatorio, nunca el de la empresa).
+ * `state`: `created` (sin vincular), `connecting` (esperando el QR o reconectando: NO es una caída), `open` (sesión activa), `logged_out` (el teléfono cerró la sesión: hay que escanear otro QR) y `closed` (se
+ * cayó por otra razón). Las claves de Evolution NO viven aquí (la clave global es de la plataforma) y el token del webhook solo existe como hash en `qr_routes`.
+ */
+export const qrAccounts = tenantTable(
+  'qr_accounts',
+  {
+    channelAccountId: uuid('channel_account_id').notNull(),
+    instanceName: text('instance_name').notNull(),
+    state: text('state').notNull().default('created'),
+    phoneE164: text('phone_e164'),
+    profileName: text('profile_name'),
+    /** Primera vez que la sesión quedó abierta: de ahí corre el calentamiento de los límites de envío. */
+    firstConnectedAt: ts('first_connected_at'),
+    connectedAt: ts('connected_at'),
+    /** Última vez que Evolution avisó de algo de esta sesión. */
+    lastEventAt: ts('last_event_at'),
+    /** Última vez que el latido consultó el estado de la sesión. */
+    lastHeartbeatAt: ts('last_heartbeat_at'),
+    lastError: text('last_error'),
+    /** Desde cuándo está caída la sesión (para decir hace cuánto y para no avisar dos veces). */
+    downSince: ts('down_since'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('qr_accounts_channel_uq').on(t['organizationId']!, t['channelAccountId']!),
+    uniqueIndex('qr_accounts_instance_uq').on(t['instanceName']!),
+    foreignKey({ name: 'qr_accounts_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
+    check('qr_accounts_state_valid', sql`${t['state']!} IN ('created', 'connecting', 'open', 'logged_out', 'closed')`),
+    check('qr_accounts_instance_shape', sql`${t['instanceName']!} ~ '^[a-z0-9-]{8,60}$'`),
+    check('qr_accounts_error_len', sql`${t['lastError']!} IS NULL OR length(${t['lastError']!}) <= 300`),
+  ],
+);

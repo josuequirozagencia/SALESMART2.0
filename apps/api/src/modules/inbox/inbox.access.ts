@@ -124,7 +124,7 @@ export function assertCanReply(scope: InboxScope, c: Pick<ConversationRow, 'stat
     if (collab !== 'reply') throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación, o quien la comparte con permiso para responder, puede responder');
     if (c.status === 'pending') throw new ConflictError('CONVERSATION_NOT_ACCEPTED', 'Quien tiene asignada la conversación aún no la acepta: podrás responder cuando lo haga');
   }
-  if (channel !== 'active') throw new ConflictError('CHANNEL_DISABLED', provider === 'ghl' ? 'La conexión con GoHighLevel está desconectada o su token fue rechazado: el administrador debe revisarla en Configuración › GoHighLevel' : 'La conexión de WhatsApp de esta conversación está desactivada o desconectada');
+  if (channel !== 'active') throw new ConflictError('CHANNEL_DISABLED', provider === 'evolution' ? 'La conexión de WhatsApp por QR está desactivada o fue borrada: el administrador debe revisarla en Configuración › Conexiones' : provider === 'ghl' ? 'La conexión con GoHighLevel está desconectada o su token fue rechazado: el administrador debe revisarla en Configuración › GoHighLevel' : 'La conexión de WhatsApp de esta conversación está desactivada o desconectada');
 }
 
 /** Cómo se relaciona la persona con la conversación (para la interfaz). */
@@ -145,7 +145,7 @@ export interface WindowState {
 }
 
 /** ¿El canal tiene la ventana de 24 h de WhatsApp oficial? GoHighLevel no (cada canal de GHL tiene sus propias reglas y GHL las aplica). */
-export const hasWindow = (provider: string): boolean => provider !== 'ghl';
+export const hasWindow = (provider: string): boolean => provider !== 'ghl' && provider !== 'evolution';
 
 export function windowOf(lastInboundAt: Date | null, now: Date, provider = 'meta_cloud'): WindowState {
   if (!hasWindow(provider)) return { open: true, expires_at: null };

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messageAttachments, messages, queues, responseTimers, type TenantTx } from '../../db';
+import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queues, responseTimers, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
@@ -83,6 +83,8 @@ interface Row {
   channelStatus: string;
   channelDeletedAt: Date | null;
   channelProvider: string;
+  /** Estado de la sesión si el canal es de WhatsApp por QR (M9.6); null en los demás. */
+  qrState: string | null;
   queueName: string | null;
   queueColor: string | null;
   key: string;
@@ -310,10 +312,11 @@ export class InboxService {
 
   private fetchRows(tx: TenantTx, scope: InboxScope, where: SQL, limit: number): Promise<Row[]> {
     return tx
-      .select({ c: conversations, contactName: contacts.name, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, channelProvider: channelAccounts.provider, queueName: queues.name, queueColor: queues.color, key: KEY, collab: collabColumn(scope) })
+      .select({ c: conversations, contactName: contacts.name, channelName: channelAccounts.name, channelStatus: channelAccounts.status, channelDeletedAt: channelAccounts.deletedAt, channelProvider: channelAccounts.provider, qrState: qrAccounts.state, queueName: queues.name, queueColor: queues.color, key: KEY, collab: collabColumn(scope) })
       .from(conversations)
       .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
       .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
+      .leftJoin(qrAccounts, and(eq(qrAccounts.organizationId, channelAccounts.organizationId), eq(qrAccounts.channelAccountId, channelAccounts.id)))
       .leftJoin(queues, and(eq(queues.organizationId, conversations.organizationId), eq(queues.id, conversations.queueId)))
       .where(where)
       .orderBy(desc(ACTIVITY), desc(conversations.id))
@@ -350,6 +353,7 @@ export class InboxService {
       channelName: r.channelName,
       channelState: channelState(r.channelStatus, r.channelDeletedAt),
       channelProvider: r.channelProvider,
+      qrState: r.qrState,
       queue: r.c.queueId && r.queueName !== null ? { id: r.c.queueId, name: r.queueName, color: r.queueColor ?? '#7c5cfa' } : null,
       tags: tagsByContact.get(r.c.contactId) ?? [],
       last: last.get(r.c.id) ?? null,

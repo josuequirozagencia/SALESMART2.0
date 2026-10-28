@@ -151,7 +151,7 @@ export function Composer({ c }: { c: Conversation }) {
           <button type="button" aria-pressed={noteMode} onClick={() => setMode('note')} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${noteMode ? 'border-warn bg-warn-soft text-warn' : 'border-line text-muted hover:text-fg'}`}>Nota interna</button>
         </div>
           ) : null}
-          {c.channel.kind === 'ghl' ? null : <button type="button" onClick={() => setPicker(true)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${c.window.open ? 'border-line text-muted hover:text-fg' : 'border-accent bg-accent text-accent-ink'}`}>Plantillas</button>}
+          {c.channel.kind === 'ghl' || c.channel.kind === 'qr' ? null : <button type="button" onClick={() => setPicker(true)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${c.window.open ? 'border-line text-muted hover:text-fg' : 'border-accent bg-accent text-accent-ink'}`}>Plantillas</button>}
           <button type="button" onClick={() => setManage(true)} className="rounded-full border border-line px-3 py-1 text-[12.5px] font-semibold text-muted hover:text-fg">Respuestas rápidas</button>
         </div>
       ) : null}

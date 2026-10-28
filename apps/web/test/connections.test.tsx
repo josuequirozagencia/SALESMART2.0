@@ -23,6 +23,7 @@ function server(initial: Channel[] = [], opts: { vault?: boolean } = {}) {
     ...authed(ME_ADMIN),
     'GET /channels': () => list(),
     'GET /queues': () => ({ body: { items: QUEUES, limits: { max_queues: 20 } } }),
+    'GET /qr-channels': () => ({ body: { items: [], available: true, limits: { max_channels: 5 } } }),
     'POST /channels': ({ body }) => {
       s.bodies.push(body);
       const b = body as { name: string; waba_id: string; phone_number_id: string };
@@ -239,9 +240,9 @@ describe('Configuración › Conexiones', () => {
   });
 
   it('sin permiso (403) se explica y no se ofrece conectar nada', async () => {
-    mockApi({ ...authed(ME_ADMIN), 'GET /channels': () => err(403, 'FORBIDDEN'), 'GET /queues': () => err(403, 'FORBIDDEN') });
+    mockApi({ ...authed(ME_ADMIN), 'GET /channels': () => err(403, 'FORBIDDEN'), 'GET /queues': () => err(403, 'FORBIDDEN'), 'GET /qr-channels': () => err(403, 'FORBIDDEN') });
     renderApp('/settings/connections');
-    expect(await screen.findByRole('alert')).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar las conexiones.');
+    expect((await screen.findAllByRole('alert'))[0]).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar las conexiones.');
     expect(screen.queryByRole('button', { name: 'Conectar un número' })).not.toBeInTheDocument();
   });
 });

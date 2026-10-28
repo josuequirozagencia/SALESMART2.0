@@ -44,6 +44,8 @@ export interface AppConfig {
     readonly whatsappProvider: 'meta' | 'fake';
     readonly capiProvider: 'meta' | 'none' | 'fake';
     readonly ghlProvider: 'ghl' | 'none' | 'fake';
+    /** WhatsApp por QR (M9.6, ADR-54). */
+    readonly qrProvider: 'evolution' | 'none' | 'fake';
   };
   readonly automations: {
     /** Salida HTTP de las automatizaciones (M9.5b, ADR-54). */
@@ -178,6 +180,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.CAPI_PROVIDER === 'fake') issues.push('CAPI_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.GHL_PROVIDER === 'fake') issues.push('GHL_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.HTTP_OUT_PROVIDER === 'fake') issues.push('HTTP_OUT_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.QR_PROVIDER === 'fake') issues.push('QR_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.AI_PROVIDER === 'fake') issues.push('AI_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.WHATSAPP_PROVIDER === 'fake') issues.push('WHATSAPP_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.STORAGE_PROVIDER === 'fake') issues.push('STORAGE_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
@@ -232,7 +235,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, turnstileSiteKey: e.TURNSTILE_SITE_KEY, credentialsKeys },
-    channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER },
+    channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER, qrProvider: e.QR_PROVIDER },
     automations: { httpProvider: e.HTTP_OUT_PROVIDER },
     ai: { provider: e.AI_PROVIDER },
     attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },

@@ -6,6 +6,7 @@ import { APP_LOGGER } from '../../tokens';
 import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type MediaKind, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
 import { AttachmentsService } from '../attachments';
 import { GhlError, GhlOutboundService, type GhlSendPlan } from '../ghl';
+import { QrOutboundService } from '../qr';
 import { RealtimeService } from '../realtime';
 
 /** Mientras un envío está en curso el mensaje queda «reservado» este tiempo: si el proceso muere a mitad, otra pasada lo retoma. Debe superar el tiempo máximo de espera al proveedor. */
@@ -99,6 +100,8 @@ export class OutboundDispatcher {
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
     // GoHighLevel (M7.4): módulo global; sin él (pruebas de otros módulos) los mensajes de un canal de GHL fallan con su motivo
     @Optional() @Inject(GhlOutboundService) private readonly ghl?: GhlOutboundService,
+    // WhatsApp por QR (M9.6): su envío tiene sus propias reglas (sesión caída que espera, calentamiento); los canales QR van por aquí
+    @Optional() @Inject(QrOutboundService) private readonly qr?: QrOutboundService,
   ) {}
 
   /** Intenta enviar UN mensaje ahora (si está pendiente y le toca). No lanza por un fallo del proveedor: lo anota en el mensaje. */
@@ -119,7 +122,21 @@ export class OutboundDispatcher {
     }
   }
 
+  /** ¿El mensaje sale por una conexión de WhatsApp por QR? */
+  private async isQr(messageId: string): Promise<boolean> {
+    const [row] = await this.db.withTenant((tx) =>
+      tx
+        .select({ provider: channelAccounts.provider })
+        .from(messages)
+        .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, messages.organizationId), eq(channelAccounts.id, messages.channelAccountId)))
+        .where(eq(messages.id, messageId))
+        .limit(1),
+    );
+    return row?.provider === 'evolution';
+  }
+
   private async attempt(messageId: string, now: Date): Promise<DispatchResult> {
+    if (this.qr && (await this.isQr(messageId))) return this.qr.attempt(messageId, now);
     const claimed = await this.claim(messageId, now);
     if (claimed.kind === 'skipped') return { outcome: 'skipped' };
     if (claimed.kind === 'failed') return { outcome: 'failed', code: claimed.code };

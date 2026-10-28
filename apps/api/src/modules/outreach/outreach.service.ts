@@ -99,7 +99,7 @@ export class OutreachService {
     const [conv] = lock ? await q.for('update', { of: conversations }) : await q;
     if (!conv) return { ok: false, reason: 'no_conversation' };
     if (conv.state !== 'active') return { ok: false, reason: 'channel_unavailable' };
-    if (conv.provider !== 'ghl' && (!conv.lastInboundAt || i.now.getTime() - conv.lastInboundAt.getTime() >= WINDOW_MS)) return { ok: false, reason: 'window_closed' };
+    if (conv.provider !== 'ghl' && conv.provider !== 'evolution' && (!conv.lastInboundAt || i.now.getTime() - conv.lastInboundAt.getTime() >= WINDOW_MS)) return { ok: false, reason: 'window_closed' };
     return { ok: true, conversationId: conv.id, channelId: conv.channelId };
   }
 

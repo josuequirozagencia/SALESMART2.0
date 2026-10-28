@@ -192,6 +192,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/ghl/webhook/secret', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
   // Avisos del Workflow de GHL (M7.2, ADR-52). Pública: id opaco + secreto en cabecera. Pruebas: test/ghl/ghl-events.test.ts
   { route: 'POST /v1/integrations/ghl/webhook/:routeId', kind: 'public' },
+  { route: 'POST /v1/integrations/qr/webhook/:routeId', kind: 'public' },
   { route: 'GET /v1/ghl/events', kind: 'tenant', isolationTest: '../../ghl/ghl-events.test.ts' },
   // Etiquetas bidireccionales con GHL (M7.3, ADR-52). Pruebas: test/ghl/ghl-tags.test.ts
   { route: 'GET /v1/ghl/outbox', kind: 'tenant', isolationTest: '../../ghl/ghl-tags.test.ts' },
@@ -249,6 +250,13 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Automatizaciones (M9.3, ADR-54). Pruebas: test/automations/automations.test.ts (A↔B, permisos, validación, motor, ciclos, atomicidad)
   { route: 'GET /v1/automations', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'POST /v1/automations', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
+  { route: 'GET /v1/qr-channels', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'POST /v1/qr-channels', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'GET /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'POST /v1/qr-channels/:id/qr', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'POST /v1/qr-channels/:id/disconnect', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'PATCH /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'DELETE /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'GET /v1/automations/settings', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'PUT /v1/automations/settings', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },
   { route: 'GET /v1/automations/:id', kind: 'tenant', isolationTest: '../../automations/automations.test.ts' },

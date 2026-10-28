@@ -89,7 +89,7 @@ export class InboundMediaService {
     // 1) Credenciales de la conexión por la que llegó
     const creds = await this.db.withTenant(async (tx) => {
       const [row] = await tx
-        .select({ channelId: channelAccounts.id, status: channelAccounts.status, deletedAt: channelAccounts.deletedAt, sealed: channelAccounts.credentialsSealed })
+        .select({ channelId: channelAccounts.id, status: channelAccounts.status, deletedAt: channelAccounts.deletedAt, sealed: channelAccounts.credentialsSealed, provider: channelAccounts.provider })
         .from(conversations)
         .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
         .where(eq(conversations.id, a.conversationId))
@@ -97,12 +97,14 @@ export class InboundMediaService {
       return row;
     });
     if (!creds || creds.deletedAt !== null || creds.status !== 'active') return this.fail(a.id, FAILURE_TEXT.channel);
-    const token = creds.sealed ? this.vault.open(creds.channelId, creds.sealed)?.['access_token'] : undefined;
+    // WhatsApp por QR (M9.6): el archivo llegó DENTRO del aviso y ya está en una clave temporal del almacenamiento (no hay nada que descargar del proveedor ni token por número)
+    const inline = creds.provider === 'evolution';
+    const token = inline ? 'qr' : creds.sealed ? this.vault.open(creds.channelId, creds.sealed)?.['access_token'] : undefined;
     if (!token) return this.fail(a.id, FAILURE_TEXT.credentials);
 
     // 2) Descargar, revisar y guardar (fuera de toda transacción)
     try {
-      const media = await this.provider.downloadMedia({ accessToken: token }, a.sourceMediaId, MAX_BYTES[a.kind]);
+      const media = inline ? { bytes: await this.files.read(a.sourceMediaId), mimeType: a.mimeType } : await this.provider.downloadMedia({ accessToken: token }, a.sourceMediaId, MAX_BYTES[a.kind]);
       if (media.bytes.length === 0) return this.fail(a.id, FAILURE_TEXT.unavailable);
       const mime = baseMime(media.mimeType ?? a.mimeType) || a.mimeType;
       const stored = await this.files.scanAndStore(organizationId, a.id, { bytes: media.bytes, mime });
@@ -112,6 +114,7 @@ export class InboundMediaService {
           .set({ state: 'ready', storageKey: stored.key, sizeBytes: media.bytes.length, checksum: createHash('sha256').update(media.bytes).digest('hex'), mimeType: mime, scanStatus: stored.scanStatus, error: null, nextAttemptAt: null, updatedAt: new Date() })
           .where(and(eq(messageAttachments.id, a.id), eq(messageAttachments.state, 'pending'))),
       );
+      if (inline) await this.files.remove(a.sourceMediaId); // la clave temporal ya cumplió: el archivo definitivo quedó bajo la clave del adjunto
     } catch (e) {
       await this.handleFailure(a, e);
     }

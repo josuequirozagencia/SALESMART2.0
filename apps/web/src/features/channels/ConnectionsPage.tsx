@@ -7,6 +7,7 @@ import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
 import { useQueues } from '../queues/useQueues';
 import { ChannelDialog } from './ChannelDialog';
+import { QrSection } from './QrSection';
 import { TemplatesDialog } from './TemplatesDialog';
 import { useCheckChannel, useChannels, useDisconnectChannel, useUpdateChannel } from './useChannels';
 
@@ -102,6 +103,8 @@ export function ConnectionsPage() {
           </ul>
         )
       ) : null}
+
+      <QrSection />
 
       {templatesOf ? <TemplatesDialog channel={templatesOf} onClose={() => setTemplatesOf(null)} /> : null}
       {dialog ? <ChannelDialog {...(dialog.channel ? { channel: dialog.channel } : {})} onClose={() => setDialog(null)} /> : null}

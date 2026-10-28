@@ -39,7 +39,7 @@ export interface ConversationView {
   /** Cómo se relaciona quien consulta con ella: dueño, colaborador (con o sin permiso de responder) o supervisor (la ve porque ve todo). */
   my_access: MyAccess;
   queue: { id: string; name: string; color: string } | null;
-  channel: { id: string; name: string; state: ChannelState; kind: 'whatsapp' | 'ghl' };
+  channel: { id: string; name: string; state: ChannelState; kind: 'whatsapp' | 'ghl' | 'qr'; /** Solo WhatsApp por QR: `open` · `connecting` (no es una caída) · `down` (hay que volver a escanear el QR). */ session?: 'open' | 'connecting' | 'down' };
   tags: TagView[];
   /** El último mensaje real (las notas internas no cuentan). */
   last_message: LastMessageView | null;
@@ -120,6 +120,7 @@ export interface ConversationParts {
   channelName: string;
   channelState: ChannelState;
   channelProvider: string;
+  qrState: string | null;
   queue: { id: string; name: string; color: string } | null;
   owner: { id: string; name: string } | null;
   participants: ParticipantView[];
@@ -148,7 +149,7 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
     participants: p.participants,
     my_access: myAccessOf(scope, c, p.collab),
     queue: p.queue,
-    channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState, kind: p.channelProvider === 'ghl' ? 'ghl' : 'whatsapp' },
+    channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState, kind: p.channelProvider === 'ghl' ? 'ghl' : p.channelProvider === 'evolution' ? 'qr' : 'whatsapp', ...(p.qrState === null ? {} : { session: p.qrState === 'open' ? ('open' as const) : p.qrState === 'connecting' || p.qrState === 'created' ? ('connecting' as const) : ('down' as const) }) },
     tags: [...p.tags],
     last_message: p.last ? { direction: p.last.direction as 'in' | 'out', kind: p.last.kind, preview: previewOf(p.last.kind, p.last.body), status: p.last.status, at: p.last.sentAt.toISOString() } : null,
     window: windowOf(c.lastInboundAt, now, p.channelProvider),

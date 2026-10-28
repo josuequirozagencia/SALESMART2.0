@@ -488,3 +488,24 @@ export const formRoutes = identityTable(
   },
   (t) => [uniqueIndex('form_routes_form_uq').on(t.organizationId, t.formId)],
 );
+
+/**
+ * Punto de entrada del webhook de una conexión de WhatsApp por QR (M9.6, ADR-54/ADR-31). Tabla de IDENTIDAD: Evolution API avisa SIN sesión y hay que saber de qué empresa y conexión es antes de
+ * que exista contexto. Identificador opaco (v4 aleatorio) en la URL + token que solo se guarda como hash SHA-256 y se entrega a Evolution UNA vez (al crear la instancia o rotarlo). Una fila por conexión.
+ */
+export const qrRoutes = identityTable(
+  'qr_routes',
+  {
+    id: uuid('id').primaryKey(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    channelAccountId: uuid('channel_account_id').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    rotatedAt: ts('rotated_at'),
+    lastUsedAt: ts('last_used_at'),
+  },
+  (t) => [
+    check('qr_routes_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    uniqueIndex('qr_routes_channel_uq').on(t.organizationId, t.channelAccountId),
+  ],
+);

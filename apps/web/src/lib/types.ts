@@ -751,7 +751,7 @@ export interface Conversation {
   my_access: MyAccess;
   queue: { id: string; name: string; color: string } | null;
   /** `kind`: 'ghl' = canal de GoHighLevel (sin ventana de 24 h ni plantillas ni adjuntos); omitido o 'whatsapp' = WhatsApp. */
-  channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed'; kind?: 'whatsapp' | 'ghl' };
+  channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed'; kind?: 'whatsapp' | 'ghl' | 'qr'; /** Solo WhatsApp por QR: `open` · `connecting` (no es una caída) · `down` (hay que volver a escanear el QR). */ session?: 'open' | 'connecting' | 'down' };
   tags: ContactTag[];
   last_message: { direction: 'in' | 'out'; kind: string; preview: string; status: string; at: string } | null;
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */

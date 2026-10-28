@@ -9,6 +9,7 @@ import { AgencyClientsService } from './agency-clients.service';
 import { AttributionEndpointsService } from './attribution-endpoints.service';
 import { FormRoutesService } from './form-routes.service';
 import { GhlRoutesService } from './ghl-routes.service';
+import { QrRoutesService } from './qr-routes.service';
 import { ChannelRoutesService } from './channel-routes.service';
 import { OrgDirectoryService } from './org-directory.service';
 import { OrgMembersService } from './org-members.service';
@@ -25,7 +26,7 @@ import { TrialsService } from './trials.service';
 @Module({
   imports: [AuditModule, PlatformModule, MailModule],
   controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController, AgencyClientsController],
-  providers: [FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
-  exports: [FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
+  providers: [QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
+  exports: [QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
 })
 export class OrganizationsModule {}
