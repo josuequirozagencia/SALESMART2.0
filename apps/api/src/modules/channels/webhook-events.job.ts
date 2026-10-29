@@ -25,14 +25,22 @@ export class WebhookEventsJob implements ScheduledJob {
 
   async run(now: Date): Promise<number> {
     let processed = 0;
-    for (const organizationId of await this.routes.organizationIds()) {
-      // Lo de identidad (zona horaria, quién puede recibir trabajo) se lee ANTES de abrir la transacción de negocio; se guarda 30 s por empresa
-      const dir = await TenantContext.run({ organizationId }, () => this.directory.current());
-      for (let i = 0; i < MAX_BATCHES_PER_RUN; i++) {
-        const n = await TenantContext.run({ organizationId }, () => this.events.runDue(now, dir));
-        processed += n;
-        if (n < EVENT_BATCH) break; // lote incompleto: ya no quedan avisos pendientes
-      }
+    for (const organizationId of await this.routes.organizationIds()) processed += await this.drain(organizationId, now);
+    return processed;
+  }
+
+  /**
+   * Procesa los avisos pendientes de UNA empresa. La tarea periódica lo usa para todas; el webhook de WhatsApp por QR lo llama justo al guardar un aviso para que el
+   * mensaje aparezca al instante (la tarea queda como respaldo: `SKIP LOCKED` evita que dos procesos tomen el mismo aviso).
+   */
+  async drain(organizationId: string, now: Date): Promise<number> {
+    let processed = 0;
+    // Lo de identidad (zona horaria, quién puede recibir trabajo) se lee ANTES de abrir la transacción de negocio; se guarda 30 s por empresa
+    const dir = await TenantContext.run({ organizationId }, () => this.directory.current());
+    for (let i = 0; i < MAX_BATCHES_PER_RUN; i++) {
+      const n = await TenantContext.run({ organizationId }, () => this.events.runDue(now, dir));
+      processed += n;
+      if (n < EVENT_BATCH) break; // lote incompleto: ya no quedan avisos pendientes
     }
     return processed;
   }

@@ -4,7 +4,9 @@ import { Database, qrAccounts } from '../../db';
 import { NotFoundError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { AttachmentsService } from '../attachments';
-import { parseEvolutionWebhook, WebhookEventsService } from '../channels';
+import type { AppLogger } from '../../logger';
+import { APP_LOGGER } from '../../tokens';
+import { parseEvolutionWebhook, WebhookEventsJob, WebhookEventsService } from '../channels';
 import { QrRoutesService } from '../organizations';
 import { QrConnectionsService } from './qr-connections.service';
 
@@ -22,6 +24,8 @@ export class QrWebhookService {
     @Inject(WebhookEventsService) private readonly events: WebhookEventsService,
     @Inject(QrConnectionsService) private readonly connections: QrConnectionsService,
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
+    @Inject(WebhookEventsJob) private readonly drainer: WebhookEventsJob,
+    @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
   async ingest(routeId: string, token: string | undefined, body: unknown, now = new Date()): Promise<void> {
@@ -50,5 +54,11 @@ export class QrWebhookService {
       if (key) media_keys[messageId] = key;
     }
     for (const { raw } of parsed.events) await this.events.store(channelAccountId, parsed.instance, { __qr: 1, instance: parsed.instance, event, data: raw, media_keys }, now);
+    // Procesamiento inmediato: el mensaje aparece sin esperar a la tarea de cada 5 s. Si falla, el aviso ya está guardado y la tarea lo recoge
+    try {
+      await this.drainer.drain(organizationId, now);
+    } catch {
+      this.log.warn({ organization_id: organizationId }, 'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
+    }
   }
 }
