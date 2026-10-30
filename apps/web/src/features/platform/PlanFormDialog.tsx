@@ -71,7 +71,7 @@ export function PlanFormDialog({ plan, catalog, onClose }: { plan: Plan | null; 
           <div className="grid gap-3 min-[520px]:grid-cols-3">
             {limitField('max_users', 'Usuarios')}
             {limitField('max_connections', 'Conexiones')}
-            {limitField('max_queues', 'Colas')}
+            {limitField('max_queues', 'Departamentos')}
           </div>
           <p className="text-[12px] text-muted">Vacío = ilimitado. Los módulos aplican los límites cuando existan.</p>
         </fieldset>

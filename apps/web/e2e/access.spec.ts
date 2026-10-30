@@ -256,7 +256,7 @@ test('empresas y planes: crea un plan, lo asigna a una empresa con la prueba VEN
   await dlg.getByLabel('Agenda').check();
   await dlg.getByRole('button', { name: 'Crear plan' }).click();
   const card = page.getByRole('listitem').filter({ hasText: planName });
-  await expect(card).toContainText('10 usuarios · ilimitados conexiones · ilimitados colas');
+  await expect(card).toContainText('10 usuarios · ilimitados conexiones · ilimitados departamentos');
   await expect(card.getByLabel(`Módulos de ${planName}`)).toContainText('Kanban');
   await expect(card).toContainText('0 empresas');
 
@@ -1361,17 +1361,19 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     // 1) Crea la cola «Ventas», enciende el reparto y elige a los tres
     await uiLogin(page, email);
     await page.getByRole('link', { name: 'Configuración' }).click();
-    await page.getByRole('link', { name: 'Colas' }).click();
-    await expect(page.getByText(/Aún no hay colas/)).toBeVisible();
-    await page.getByRole('button', { name: 'Nueva cola' }).click();
-    const nuevo = page.getByRole('dialog', { name: 'Nueva cola' });
+    await page.getByRole('link', { name: 'Departamentos' }).click();
+    await expect(page.getByText(/Aún no hay departamentos/)).toBeVisible();
+    await page.getByRole('button', { name: 'Nuevo departamento' }).click();
+    const nuevo = page.getByRole('dialog', { name: 'Nuevo departamento' });
+    // Asistente (M10.1): nombre → equipo → horario (el de la empresa) → reparto
     await nuevo.getByLabel('Nombre').fill('Ventas');
-    await nuevo.getByRole('button', { name: 'Crear cola' }).click();
+    await nuevo.getByRole('button', { name: 'Siguiente' }).click();
+    for (const n of ['Ana E2E', 'Carlos E2E', 'Elena E2E']) await nuevo.getByLabel(`${n} atiende este departamento`).check();
+    await nuevo.getByRole('button', { name: 'Siguiente' }).click();
+    await nuevo.getByRole('button', { name: 'Siguiente' }).click();
+    await nuevo.getByLabel('Repartir las conversaciones nuevas automáticamente').check();
+    await nuevo.getByRole('button', { name: 'Terminar' }).click();
     const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
-    await cfg.getByLabel('Repartir las conversaciones nuevas automáticamente').check();
-    for (const n of ['Ana E2E', 'Carlos E2E', 'Elena E2E']) await cfg.getByLabel(`${n} participa`).check();
-    await cfg.getByRole('button', { name: 'Guardar' }).click();
-    await expect(cfg.getByText('Cambios guardados.')).toBeVisible();
     await cfg.getByRole('button', { name: 'Simular 20 conversaciones' }).click();
     const simR = cfg.getByRole('region', { name: 'Resultado de la simulación' });
     for (const n of ['Ana E2E', 'Carlos E2E', 'Elena E2E']) await expect(simR).toContainText(n);
@@ -1380,7 +1382,8 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     await expect(card).toContainText('Reparto activo');
     await expect(card).toContainText('3 asesores');
 
-    // 2) Conecta el número eligiendo esa cola
+    // 2) Conecta el número eligiendo ese departamento (Conexiones sigue en Configuración)
+    await page.getByRole('link', { name: 'Configuración' }).click();
     await page.getByRole('link', { name: 'Conexiones' }).click();
     await page.getByRole('button', { name: 'Conectar un número' }).click();
     const dlg = page.getByRole('dialog', { name: 'Conectar un número de WhatsApp' });
@@ -1388,11 +1391,11 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     await dlg.getByLabel(/WABA ID/).fill('1234567890123');
     await dlg.getByLabel(/Phone number ID/).fill(PHONE_ID);
     await dlg.getByLabel(/Token de acceso permanente/).fill('fake-valid-token');
-    await dlg.getByLabel('Cola por defecto').selectOption({ label: 'Ventas' });
+    await dlg.getByLabel('Departamento por defecto').selectOption({ label: 'Ventas' });
     await dlg.getByRole('button', { name: 'Conectar' }).click();
     const conn = page.getByRole('listitem', { name: 'Línea ventas' });
-    await expect(conn).toContainText('Cola');
-    await expect(conn.getByText('Cola').locator('xpath=following-sibling::dd')).toHaveText('Ventas');
+    await expect(conn).toContainText('Departamento');
+    await expect(conn.getByText('Departamento').locator('xpath=following-sibling::dd')).toHaveText('Ventas');
 
     // 3) Tres clientes distintos escriben (avisos firmados de Meta)
     const hook = `${apiBase}/v1/channels/meta/webhook`;
@@ -1419,7 +1422,7 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     expect((await db.query(`SELECT count(*)::int AS n FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id AND t.organization_id = ct.organization_id WHERE ct.organization_id = $1 AND t.system_key = 'lead'`, [orgId])).rows[0].n).toBe(3); // y son leads
 
     // 5) La pantalla muestra la carga de cada asesor y ya no hay «sin asignar»
-    await page.getByRole('link', { name: 'Colas' }).click();
+    await page.getByRole('link', { name: 'Departamentos' }).click();
     await page.getByRole('button', { name: 'Configurar Ventas' }).click();
     const cfg2 = page.getByRole('dialog', { name: 'Configurar Ventas' });
     await expect(cfg2.getByText('1 abiertas · 1 hoy')).toHaveCount(3);
@@ -1798,7 +1801,7 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     expect(done.response_seconds).toBeLessThan(27 * 60);
 
     // 4) La cola pide reasignar al minuto sin respuesta (desde su configuración)
-    await page.getByRole('link', { name: 'Colas' }).click();
+    await page.getByRole('link', { name: 'Departamentos' }).click();
     await page.getByRole('button', { name: 'Configurar Ventas' }).click();
     const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
     await cfg.getByLabel('Reasignar si nadie responde en (minutos)').fill('1');
@@ -1882,7 +1885,7 @@ test('mensajes automáticos de la cola: el administrador escribe el saludo, el a
     // 1) El administrador escribe los mensajes en la configuración de la cola
     await uiLogin(page, adminEmail);
     await page.getByRole('link', { name: 'Configuración' }).click();
-    await page.getByRole('link', { name: 'Colas' }).click();
+    await page.getByRole('link', { name: 'Departamentos' }).click();
     await page.getByRole('button', { name: 'Configurar Ventas' }).click();
     const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
     const auto = cfg.getByRole('region', { name: 'Mensajes automáticos' });

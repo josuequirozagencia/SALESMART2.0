@@ -124,7 +124,7 @@ export class QueuesService {
     const id = await this.db
       .withTenant(async (tx) => {
         const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(queues).where(isNull(queues.deletedAt));
-        if ((n?.n ?? 0) >= MAX_QUEUES) throw new ConflictError('QUEUE_LIMIT', `Se alcanzó el máximo de ${MAX_QUEUES} colas. Archiva alguna para crear otra`);
+        if ((n?.n ?? 0) >= MAX_QUEUES) throw new ConflictError('QUEUE_LIMIT', `Se alcanzó el máximo de ${MAX_QUEUES} departamentos. Archiva alguno para crear otro`);
         const [q] = await tx
           .insert(queues)
           .values({ name: input.name, ...(input.color ? { color: input.color } : {}), createdBy: TenantContext.current().userId ?? null })
@@ -218,7 +218,7 @@ export class QueuesService {
     await this.db.withTenant(async (tx) => {
       await this.mustGet(tx, id, true);
       const [used] = await tx.select({ n: sql<number>`count(*)::int` }).from(channelAccounts).where(and(eq(channelAccounts.queueId, id), isNull(channelAccounts.deletedAt)));
-      if ((used?.n ?? 0) > 0) throw new ConflictError('QUEUE_IN_USE', 'Hay conexiones que usan esta cola. Cámbialas de cola en «Conexiones» antes de archivarla');
+      if ((used?.n ?? 0) > 0) throw new ConflictError('QUEUE_IN_USE', 'Hay conexiones que usan este departamento. Cámbialas de departamento en «Conexiones» antes de archivarlo');
       const now = new Date();
       await tx.update(queues).set({ deletedAt: now, updatedAt: now }).where(eq(queues.id, id));
       await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'archived', oldValue: false, newValue: true, source: 'manual' });
@@ -259,7 +259,7 @@ export class QueuesService {
     const ctx: AssignmentContext = { now: new Date(), timeZone: dir.timeZone, assignable: dir.assignable };
     return this.db.withTenant(async (tx) => {
       const q = await this.mustGet(tx, id);
-      if (!q.distributionOn) throw new ConflictError('QUEUE_DISTRIBUTION_OFF', 'El reparto de esta cola está apagado. Enciéndelo para repartir');
+      if (!q.distributionOn) throw new ConflictError('QUEUE_DISTRIBUTION_OFF', 'El reparto de este departamento está apagado. Enciéndelo para repartir');
       const assigned = await this.distributeWithin(tx, id, ctx, 500);
       return { assigned, remaining: (await this.unassignedOf(tx, id, 100_000)).length };
     });
@@ -361,6 +361,6 @@ export class QueuesService {
 
   private nameTaken(e: unknown): ConflictError | undefined {
     const cause = (e as { cause?: { code?: string; constraint?: string } } | null)?.cause;
-    return cause?.code === '23505' && cause.constraint === 'queues_org_name_uq' ? new ConflictError('QUEUE_EXISTS', 'Ya existe una cola con ese nombre') : undefined;
+    return cause?.code === '23505' && cause.constraint === 'queues_org_name_uq' ? new ConflictError('QUEUE_EXISTS', 'Ya existe un departamento con ese nombre') : undefined;
   }
 }

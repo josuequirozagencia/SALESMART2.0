@@ -118,7 +118,7 @@ export class AutomationDryRunService {
       }
       case 'assign_queue': {
         const [conv] = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.contactId, k.contactId), eq(conversations.status, 'unassigned'))).orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt)).limit(1);
-        return conv ? doIt('Repartiría la conversación sin asignar con las reglas de la cola') : skip('No hay una conversación sin asignar');
+        return conv ? doIt('Repartiría la conversación sin asignar con las reglas del departamento') : skip('No hay una conversación sin asignar');
       }
       case 'move_stage': {
         const [target] = await tx.select().from(pipelineStages).where(and(eq(pipelineStages.id, a.stage_id), isNull(pipelineStages.deletedAt))).limit(1);

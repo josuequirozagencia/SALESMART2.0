@@ -214,10 +214,10 @@ function ChannelSection() {
         <p className="max-w-[680px] text-[12.5px] text-muted">Los mensajes que lleguen por tus Workflows aparecen en el Inbox como el canal «GoHighLevel», con el mismo reparto, horarios y permisos que WhatsApp. Por ahora solo texto.</p>
       </div>
       <div className="grid items-start gap-3 sm:grid-cols-2">
-        <Field label="Cola de las conversaciones nuevas" hint="Sin cola, las conversaciones quedan «sin asignar» hasta que alguien las tome.">
+        <Field label="Departamento de las conversaciones nuevas" hint="Sin departamento, las conversaciones quedan «sin asignar» hasta que alguien las tome.">
           {(f) => (
             <select {...f} value={queue ?? ''} onChange={(e) => setQueue(e.target.value === '' ? null : e.target.value)} className={`${selectCls} w-full`}>
-              <option value="">Sin cola</option>
+              <option value="">Sin departamento</option>
               {(queues.data?.items ?? []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
             </select>
           )}

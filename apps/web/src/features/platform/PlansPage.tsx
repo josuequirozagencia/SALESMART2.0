@@ -19,7 +19,7 @@ function PlanCard({ plan, catalog, onEdit }: { plan: Plan; catalog: Array<{ key:
         {plan.archived ? <Pill kind="muted">Archivado</Pill> : <Pill kind={plan.companies > 0 ? 'ok' : 'muted'}>{plan.companies} {plan.companies === 1 ? 'empresa' : 'empresas'}</Pill>}
       </div>
       {plan.description ? <p className="text-[12.5px] text-muted">{plan.description}</p> : null}
-      <p className="text-[12.5px]"><b>{limit(plan.max_users)}</b> usuarios · <b>{limit(plan.max_connections)}</b> conexiones · <b>{limit(plan.max_queues)}</b> colas</p>
+      <p className="text-[12.5px]"><b>{limit(plan.max_users)}</b> usuarios · <b>{limit(plan.max_connections)}</b> conexiones · <b>{limit(plan.max_queues)}</b> departamentos</p>
       <div className="flex flex-wrap gap-1.5" aria-label={`Módulos de ${plan.name}`}>
         {on.length === 0 ? <span className="text-[12px] text-muted">Ningún módulo encendido</span> : on.map((f) => <Pill key={f.key} kind="accent">{f.label}</Pill>)}
       </div>

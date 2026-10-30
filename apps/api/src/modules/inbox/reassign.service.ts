@@ -109,7 +109,7 @@ export class ReassignService {
     const who = (id: string | null): string => (id ? (names.get(id) ?? 'otra persona') : 'nadie');
     if (c.rotations >= q.maxRotations) {
       await stopWatching();
-      await this.note(tx, c, `Nadie respondió en ${q.reassignMinutes} min de horario laboral y ya se reasignó ${c.rotations} ${c.rotations === 1 ? 'vez' : 'veces'}, el máximo de la cola. Ya no se reasigna: ${who(c.ownerId)} sigue con la conversación.`, now);
+      await this.note(tx, c, `Nadie respondió en ${q.reassignMinutes} min de horario laboral y ya se reasignó ${c.rotations} ${c.rotations === 1 ? 'vez' : 'veces'}, el máximo del departamento. Ya no se reasigna: ${who(c.ownerId)} sigue con la conversación.`, now);
       return 'exhausted';
     }
     const exclude = new Set<string>([...c.triedOwners, c.ownerId]);
@@ -121,7 +121,7 @@ export class ReassignService {
     }
     if (pick.ownerId === null) {
       await stopWatching();
-      await this.note(tx, c, `Nadie respondió en ${q.reassignMinutes} min de horario laboral y no hay a quién reasignarla en la cola (todas las personas disponibles ya la tuvieron o no pueden recibir más). ${who(c.ownerId)} sigue con la conversación.`, now);
+      await this.note(tx, c, `Nadie respondió en ${q.reassignMinutes} min de horario laboral y no hay a quién reasignarla en el departamento (todas las personas disponibles ya la tuvieron o no pueden recibir más). ${who(c.ownerId)} sigue con la conversación.`, now);
       return 'exhausted';
     }
     const prev = c.ownerId;

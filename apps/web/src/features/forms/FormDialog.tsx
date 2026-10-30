@@ -149,8 +149,8 @@ function DestinationTab({ form }: { form: FormDetail }) {
   return (
     <div className="grid gap-3">
       <section aria-label="Destino del lead" className="grid gap-3">
-        <Field label="Cola" hint="Reparte el lead a un asesor con la regla de la cola. Sin cola, queda sin responsable.">
-          {(f) => <select {...f} className={selectCls} value={queue} onChange={(e) => { setOk(false); setQueue(e.target.value); }}><option value="">Sin cola</option>{queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}</select>}
+        <Field label="Departamento" hint="Reparte el lead a un asesor con la regla del departamento. Sin departamento, queda sin responsable.">
+          {(f) => <select {...f} className={selectCls} value={queue} onChange={(e) => { setOk(false); setQueue(e.target.value); }}><option value="">Sin departamento</option>{queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}</select>}
         </Field>
         <div className="grid gap-3 min-[560px]:grid-cols-2">
           <Field label="Pipeline" hint="Donde se abre la oportunidad.">
@@ -231,7 +231,7 @@ function FollowUpTab({ form }: { form: FormDetail }) {
       <p className="text-[13px] text-muted">Qué pasa con cada persona apenas llena el formulario, además de quedar como contacto con su oportunidad.</p>
       <section aria-label="Tarea para el responsable" className="grid gap-2">
         <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={task} onChange={(e) => { setOk(false); setTask(e.target.checked); }} />Crear una tarea para el responsable del lead (vence en 1 hora)</label>
-        <p className="text-[12.5px] text-muted">Es el aviso al asesor. Si no hay responsable (la cola no reparte), no se crea.</p>
+        <p className="text-[12.5px] text-muted">Es el aviso al asesor. Si no hay responsable (el departamento no reparte), no se crea.</p>
       </section>
       <section aria-label="Plantilla de WhatsApp" className="grid gap-3">
         <h3 className="text-[13.5px] font-bold">Escribirle por WhatsApp con una plantilla</h3>

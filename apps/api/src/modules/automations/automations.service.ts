@@ -279,7 +279,7 @@ export class AutomationsService {
           if (!people.has(a.user_id)) add(`${p}.user_id`, 'Esa persona no puede recibir trabajo en la empresa');
           break;
         case 'assign_queue':
-          if (!(await exists.queue(a.queue_id))) add(`${p}.queue_id`, 'La cola no existe');
+          if (!(await exists.queue(a.queue_id))) add(`${p}.queue_id`, 'El departamento no existe');
           break;
         case 'move_stage': {
           const s = await exists.stage(a.stage_id);

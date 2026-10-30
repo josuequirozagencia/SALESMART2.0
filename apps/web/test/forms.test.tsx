@@ -203,7 +203,7 @@ describe('Formularios · destino', () => {
     const d = await open();
     await goTab(d, 'Destino');
     const dest = within(await d.findByRole('region', { name: 'Destino del lead' }));
-    await userEvent.selectOptions(await dest.findByLabelText('Cola'), 'q1');
+    await userEvent.selectOptions(await dest.findByLabelText('Departamento'), 'q1');
     await userEvent.selectOptions(dest.getByLabelText('Pipeline'), 'p1');
     const stage = dest.getByLabelText('Etapa');
     expect(within(stage).queryByRole('option', { name: 'Ganada' })).not.toBeInTheDocument(); // solo etapas abiertas
@@ -240,7 +240,7 @@ describe('Formularios · destino', () => {
   });
 
   it('el motivo del servidor al guardar el destino se muestra', async () => {
-    const w = world({ fail: { patch: () => err(400, 'VALIDATION_ERROR', 'La cola no existe') } });
+    const w = world({ fail: { patch: () => err(400, 'VALIDATION_ERROR', 'El departamento no existe') } });
     mockApi(server(w));
     renderApp('/forms');
     const d = await open();

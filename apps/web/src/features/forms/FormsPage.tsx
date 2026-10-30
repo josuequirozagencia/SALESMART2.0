@@ -50,7 +50,7 @@ export function FormsPage() {
         <h1 className="text-[22px] font-bold">Formularios</h1>
         <Button variant="primary" disabled={items.length >= max} onClick={() => setOpen('new')}>Nuevo formulario</Button>
       </div>
-      <p className="max-w-[70ch] text-[13px] text-muted">Un formulario capta clientes desde tu página web. Cada persona que lo llena queda como contacto, con su consentimiento, en la cola y el pipeline que elijas.</p>
+      <p className="max-w-[70ch] text-[13px] text-muted">Un formulario capta clientes desde tu página web. Cada persona que lo llena queda como contacto, con su consentimiento, en el departamento y el pipeline que elijas.</p>
       {q.isLoading ? <Spinner label="Cargando formularios" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')}</Alert> : null}
       {q.data && items.length === 0 ? <p className="text-[13px] text-muted">Aún no tienes formularios. Crea el primero para empezar a captar clientes.</p> : null}

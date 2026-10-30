@@ -119,24 +119,24 @@ describe('Configuración › Conexiones', () => {
     expect(antigua.getByRole('button', { name: 'Activar Antigua' })).toBeInTheDocument();
   });
 
-  it('cada conexión dice a qué cola va; al conectar o editar se elige la cola por defecto y se manda solo si cambió', async () => {
+  it('cada conexión dice a qué cola va; al conectar o editar se elige el departamento por defecto y se manda solo si cambió', async () => {
     const s = server([channel({ queue_id: 'q1' }), channel({ id: 'ch2', name: 'Soporte técnico', phone_number_id: '1090123456780' })]);
     const api = mockApi(s.routes);
     renderApp('/settings/connections');
     const ventas = within(await screen.findByRole('listitem', { name: 'Ventas' }));
-    expect(ventas.getByText('Cola').nextElementSibling).toHaveTextContent('Ventas');
-    expect(within(screen.getByRole('listitem', { name: 'Soporte técnico' })).getByText('Cola').nextElementSibling).toHaveTextContent('sin cola');
-    // editar: sin tocar la cola no se manda; cambiarla sí; «Sin cola» la quita
+    expect(ventas.getByText('Departamento').nextElementSibling).toHaveTextContent('Ventas');
+    expect(within(screen.getByRole('listitem', { name: 'Soporte técnico' })).getByText('Departamento').nextElementSibling).toHaveTextContent('sin departamento');
+    // editar: sin tocar el departamento no se manda; cambiarla sí; «Sin departamento» la quita
     await userEvent.click(screen.getByRole('button', { name: 'Editar Ventas' }));
     let d = within(await screen.findByRole('dialog', { name: 'Editar conexión' }));
-    expect(d.getByLabelText('Cola por defecto')).toHaveValue('q1');
-    await userEvent.selectOptions(d.getByLabelText('Cola por defecto'), 'q2');
+    expect(d.getByLabelText('Departamento por defecto')).toHaveValue('q1');
+    await userEvent.selectOptions(d.getByLabelText('Departamento por defecto'), 'q2');
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(api.last('PATCH /channels/ch1')!.body).toEqual({ queue_id: 'q2' });
     await userEvent.click(screen.getByRole('button', { name: 'Editar Ventas' }));
     d = within(await screen.findByRole('dialog', { name: 'Editar conexión' }));
-    await userEvent.selectOptions(d.getByLabelText('Cola por defecto'), '');
+    await userEvent.selectOptions(d.getByLabelText('Departamento por defecto'), '');
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(api.count('PATCH /channels/ch1')).toBe(2));
     expect(api.last('PATCH /channels/ch1')!.body).toEqual({ queue_id: null });
@@ -148,12 +148,12 @@ describe('Configuración › Conexiones', () => {
     renderApp('/settings/connections');
     await userEvent.click(await screen.findByRole('button', { name: 'Conectar un número' }));
     const d = within(await screen.findByRole('dialog', { name: 'Conectar un número de WhatsApp' }));
-    expect(d.getByLabelText('Cola por defecto')).toHaveValue(''); // sin cola por omisión
+    expect(d.getByLabelText('Departamento por defecto')).toHaveValue(''); // sin departamento por omisión
     await userEvent.type(d.getByLabelText(/^Nombre/), 'Ventas');
     await userEvent.type(d.getByLabelText(/WABA ID/), '1234567890123');
     await userEvent.type(d.getByLabelText(/Phone number ID/), '1090123456789');
     await userEvent.type(d.getByLabelText(/Token de acceso permanente/), TOKEN);
-    await userEvent.selectOptions(d.getByLabelText('Cola por defecto'), 'q2');
+    await userEvent.selectOptions(d.getByLabelText('Departamento por defecto'), 'q2');
     await userEvent.click(d.getByRole('button', { name: 'Conectar' }));
     await waitFor(() => expect(s.bodies).toHaveLength(1));
     expect(s.bodies[0]).toMatchObject({ queue_id: 'q2' });

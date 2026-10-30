@@ -4,8 +4,7 @@ import { initials } from '../../lib/format';
 import type { Queue } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
-import { SettingsNav } from '../app/SettingsNav';
-import { NewQueueDialog } from './NewQueueDialog';
+import { DepartmentWizard } from './DepartmentWizard';
 import { MODE_SHORT, QueueDialog } from './QueueDialog';
 import { useQueues } from './useQueues';
 
@@ -19,7 +18,7 @@ function QueueCard({ q, onOpen }: { q: Queue; onOpen: () => void }) {
           <b className="text-[15px]">{q.name}</b>
           <Pill kind={q.distribution_on ? 'ok' : 'muted'}>{q.distribution_on ? 'Reparto activo' : 'Reparto manual'}</Pill>
         </span>
-        {!q.open_now ? <span><Pill kind="muted">Cerrada ahora</Pill></span> : null}
+        {!q.open_now ? <span><Pill kind="muted">Cerrado ahora</Pill></span> : null}
         <span className="flex items-center gap-2 text-[12.5px] text-muted">
           {team.length > 0 ? (
             <>
@@ -52,28 +51,28 @@ export function QueuesPage() {
 
   return (
     <div className="grid gap-4">
-      <SettingsNav />
+      <h1 className="text-[22px] font-bold">Departamentos</h1>
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-[680px] text-[13.5px] text-muted">
-          Una cola es un equipo: define sus asesores y cómo se reparten las conversaciones nuevas. Cada conexión de WhatsApp envía sus conversaciones a una cola (se elige en Conexiones) y la cola decide el asesor.
+          Un departamento es un equipo: define sus asesores y cómo se reparten las conversaciones nuevas. Cada conexión de WhatsApp envía sus conversaciones a un departamento (se elige en Conexiones) y el departamento decide el asesor.
         </p>
-        {q.isSuccess ? <Button variant="primary" disabled={max !== undefined && items.length >= max} onClick={() => setCreating(true)}>Nueva cola</Button> : null}
+        {q.isSuccess ? <Button variant="primary" disabled={max !== undefined && items.length >= max} onClick={() => setCreating(true)}>Nuevo departamento</Button> : null}
       </div>
 
-      {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando colas" /></div> : null}
-      {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar las colas.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
+      {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando departamentos" /></div> : null}
+      {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar los departamentos.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
 
       {q.isSuccess ? (
         items.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[13.5px] text-muted">Aún no hay colas. Crea la primera con «Nueva cola»: sin cola, las conversaciones nuevas quedan sin asignar.</p>
+          <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[13.5px] text-muted">Aún no hay departamentos. Crea el primero con «Nuevo departamento»: sin departamento, las conversaciones nuevas quedan sin asignar.</p>
         ) : (
-          <ul aria-label="Colas" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <ul aria-label="Departamentos" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((x) => <li key={x.id}><QueueCard q={x} onOpen={() => setOpenId(x.id)} /></li>)}
           </ul>
         )
       ) : null}
 
-      {creating ? <NewQueueDialog onClose={() => setCreating(false)} onCreated={(created) => { setCreating(false); setOpenId(created.id); }} /> : null}
+      {creating ? <DepartmentWizard onClose={() => setCreating(false)} onFinished={(id) => { setCreating(false); if (id) setOpenId(id); }} /> : null}
       {open ? <QueueDialog key={open.id} queue={open} onClose={() => setOpenId(undefined)} /> : null}
     </div>
   );

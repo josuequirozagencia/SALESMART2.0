@@ -115,10 +115,10 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
       <form onSubmit={submit} noValidate className="grid gap-3">
         <RiskNotice />
         <Field label="Nombre" required hint="Solo lo ves tú, por ejemplo «Chip de ventas».">{(f) => <Input {...f} value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />}</Field>
-        <Field label="Cola por defecto (opcional)" hint="A dónde van las conversaciones nuevas de este número.">
+        <Field label="Departamento por defecto (opcional)" hint="A dónde van las conversaciones nuevas de este número.">
           {(f) => (
             <select {...f} className={selectCls} value={queue} onChange={(e) => setQueue(e.target.value)}>
-              <option value="">Sin cola</option>
+              <option value="">Sin departamento</option>
               {(queues.data?.items ?? []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
             </select>
           )}
@@ -148,7 +148,7 @@ function QrCard({ c, queueName, onPair, onError }: { c: QrChannel; queueName: st
       </div>
       {down ? <Alert>{c.last_error ?? 'La sesión de WhatsApp está caída.'}{c.down_since ? ` Desde ${shortDateTime(c.down_since)}.` : ''} Los mensajes que escribas esperan y salen cuando vuelvas a escanear el QR.</Alert> : null}
       <dl className="grid gap-x-6 gap-y-1 text-[12.5px] sm:grid-cols-2">
-        <div className="flex gap-1.5"><dt className="text-muted">Cola</dt><dd>{queueName ?? 'sin cola'}</dd></div>
+        <div className="flex gap-1.5"><dt className="text-muted">Departamento</dt><dd>{queueName ?? 'sin departamento'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Calentamiento</dt><dd>Día {c.warmup.day}: hasta {c.warmup.daily_limit} mensajes al día</dd></div>
       </dl>

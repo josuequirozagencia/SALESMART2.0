@@ -16,7 +16,6 @@ export function SettingsNav() {
         <NavLink to="/settings/knowledge" className={tab}>Conocimiento</NavLink>
         <NavLink to="/settings/credits" className={tab}>Créditos IA</NavLink>
         <NavLink to="/settings/connections" className={tab}>Conexiones</NavLink>
-        <NavLink to="/settings/queues" className={tab}>Colas</NavLink>
         <NavLink to="/settings/sla" className={tab}>SLA y horario</NavLink>
         <NavLink to="/settings/quick-replies" className={tab}>Respuestas rápidas</NavLink>
       </nav>

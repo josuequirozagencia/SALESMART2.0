@@ -80,7 +80,7 @@ export class GhlChannelService {
       if (!conn || !cur) throw new NotFoundError();
       if (input.queue_id) {
         const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, input.queue_id), isNull(queues.deletedAt))).limit(1);
-        if (!q) throw new ValidationError([{ path: 'queue_id', code: 'not_found', message: 'La cola no existe' }]);
+        if (!q) throw new ValidationError([{ path: 'queue_id', code: 'not_found', message: 'El departamento no existe' }]);
       }
       const [row] = await tx.select({ settings: channelAccounts.settings }).from(channelAccounts).where(eq(channelAccounts.id, cur.id)).for('update').limit(1);
       const next = { ...(row?.settings ?? {}) };

@@ -16,7 +16,7 @@ export const TRIGGERS = Object.keys(TRIGGER_LABEL) as TriggerType[];
 
 export const ACTION_LABEL: Record<ActionType, string> = {
   assign_user: 'Asignar a una persona',
-  assign_queue: 'Asignar con el reparto de una cola',
+  assign_queue: 'Asignar con el reparto de un departamento',
   move_stage: 'Mover la oportunidad de etapa',
   set_field: 'Cambiar un campo del contacto',
   add_tag: 'Poner una etiqueta',
@@ -34,7 +34,7 @@ export const ACTIONS = Object.keys(ACTION_LABEL) as ActionType[];
 /** Una frase que ayuda a elegir cada acción. */
 export const ACTION_HINT: Record<ActionType, string> = {
   assign_user: 'Cambia el responsable del contacto y de sus oportunidades abiertas. No toca las conversaciones.',
-  assign_queue: 'Reparte la conversación «sin asignar» del contacto con las reglas de esa cola.',
+  assign_queue: 'Reparte la conversación «sin asignar» del contacto con las reglas de ese departamento.',
   move_stage: 'Mueve la oportunidad abierta del contacto en el pipeline de esa etapa. Ganar y perder no se hacen aquí.',
   set_field: 'Escribe un valor en un campo personalizado del contacto.',
   add_tag: 'Solo etiquetas personalizadas: las del sistema las pone el sistema.',

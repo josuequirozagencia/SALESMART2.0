@@ -674,7 +674,7 @@ describe('reasignación por falta de respuesta', () => {
     expect(c).toMatchObject({ owner_id: IDS.eve, rotations: 2 });
     ts = await timers(id);
     expect(ts.at(-1)).toMatchObject({ owner_id: IDS.eve, stopped_at: null, reassign_at: null });
-    expect((await noteTexts(id)).at(-1)).toBe('Nadie respondió en 10 min de horario laboral y ya se reasignó 2 veces, el máximo de la cola. Ya no se reasigna: Eva Mora sigue con la conversación.');
+    expect((await noteTexts(id)).at(-1)).toBe('Nadie respondió en 10 min de horario laboral y ya se reasignó 2 veces, el máximo del departamento. Ya no se reasigna: Eva Mora sigue con la conversación.');
     expect(await sweep(44 * MIN)).toBe(0);
     expect(await noteTexts(id)).toHaveLength(3);
 
@@ -695,7 +695,7 @@ describe('reasignación por falta de respuesta', () => {
     expect(await convRow(a)).toMatchObject({ owner_id: IDS.alice, rotations: 0 });
     expect(await noteTexts(a)).toEqual([]);
     expect(await convRow(b)).toMatchObject({ owner_id: IDS.alice, rotations: 0, tried_owners: [] });
-    expect(await noteTexts(b)).toEqual(['Nadie respondió en 10 min de horario laboral y no hay a quién reasignarla en la cola (todas las personas disponibles ya la tuvieron o no pueden recibir más). Alicia Torres sigue con la conversación.']);
+    expect(await noteTexts(b)).toEqual(['Nadie respondió en 10 min de horario laboral y no hay a quién reasignarla en el departamento (todas las personas disponibles ya la tuvieron o no pueden recibir más). Alicia Torres sigue con la conversación.']);
     expect((await openTimer(b))!.reassign_at).toBeNull(); // no se vuelve a intentar
     expect(await sweep(30 * MIN)).toBe(0);
   });
