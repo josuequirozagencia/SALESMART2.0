@@ -302,3 +302,26 @@ describe('Inbox · columna de datos del contacto', () => {
     expect(await side.findByText('No tienes acceso a las ventas.')).toBeInTheDocument();
   });
 });
+
+describe('Inbox · cabecera del hilo más liviana (M5.9)', () => {
+  it('la cabecera ya no lleva Agendar, Registrar venta ni Inscribir: «Datos del contacto» es un solo ícono con nombre, ayuda y estado, y esas acciones viven en la columna', async () => {
+    const w = world();
+    await open(w);
+    expect(screen.queryByRole('button', { name: 'Agendar' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Registrar venta' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Inscribir en un flujo' })).toBeNull();
+    const icon = await screen.findByRole('button', { name: 'Datos del contacto' });
+    expect(icon).toHaveAttribute('aria-pressed', 'false');
+    expect(icon).toHaveAttribute('title', 'Ver los datos del contacto');
+    expect(icon).toHaveTextContent(''); // solo ícono, sin texto visible
+    expect(icon.className).toMatch(/size-11/); // área táctil de 44 px
+    await userEvent.click(icon);
+    expect(icon).toHaveAttribute('aria-pressed', 'true');
+    expect(icon).toHaveAttribute('title', 'Ocultar los datos del contacto');
+    const side = within(await screen.findByRole('complementary', { name: 'Datos del contacto' }));
+    expect(side.getByRole('button', { name: 'Agendar' })).toBeInTheDocument();
+    expect(side.getByRole('button', { name: 'Registrar venta' })).toBeInTheDocument();
+    // Aceptar / Asignarme siguen en la cabecera, y el reloj de programados también
+    expect(screen.getByRole('button', { name: 'Mensajes programados' })).toBeInTheDocument();
+  });
+});

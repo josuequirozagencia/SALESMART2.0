@@ -15,6 +15,9 @@ import { NotesPanel } from '../crm/NotesPanel';
 import { TasksPanel } from '../crm/TasksPanel';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { ContactOpportunitiesPanel } from '../pipelines/ContactOpportunitiesPanel';
+import { GhlFlowsDialog } from '../ghl/GhlFlowsPanel';
+import { AppointmentDialog } from '../appointments/AppointmentDialog';
+import { SaleDialog } from '../sales/SaleDialog';
 import type { Appointment } from '../appointments/useAppointments';
 import type { Sale } from '../sales/useSales';
 
@@ -69,6 +72,30 @@ function Lazy({ title, children }: { title: string; children: ReactNode }) {
 }
 
 /**
+ * Acciones de la conversación sobre el contacto: agendar una cita, registrar una venta e inscribirlo en un flujo de GoHighLevel. Las pide quien atiende la conversación (su dueño o
+ * quien ve todo) —las mismas reglas que tenían en la cabecera—; el servidor vuelve a verificarlas.
+ */
+function ConversationActions({ c }: { c: Conversation }) {
+  const [sale, setSale] = useState(false);
+  const [appointment, setAppointment] = useState(false);
+  const [flows, setFlows] = useState(false);
+  const can = c.owner !== null && (c.my_access === 'owner' || c.my_access === 'supervisor');
+  if (!can) return null;
+  return (
+    <Block title="Acciones">
+      <div className="flex flex-wrap gap-2">
+        <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setAppointment(true)}>Agendar</Button>
+        <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setSale(true)}>Registrar venta</Button>
+        {c.channel.kind === 'ghl' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setFlows(true)}>Inscribir en un flujo</Button> : null}
+      </div>
+      {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
+      {flows ? <GhlFlowsDialog contact={c.contact} onClose={() => setFlows(false)} /> : null}
+      {sale ? <SaleDialog c={c} onClose={() => setSale(false)} /> : null}
+    </Block>
+  );
+}
+
+/**
  * Columna de datos del contacto en el Inbox (M5.8, Build Spec ADR-157): arranca oculta; se abre con el botón «Datos del contacto» o pulsando su nombre. Junta lo que ya existe en
  * la ficha —datos, origen del lead, campos personalizados, oportunidades abiertas, próxima cita, últimas ventas, notas y tareas— SIN pedir nada nuevo al servidor: cada bloque
  * usa la misma API (y los mismos permisos) que su pantalla; lo que la persona no puede ver, el servidor no lo devuelve y el bloque no aparece.
@@ -95,6 +122,8 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
         </div>
         <button type="button" onClick={onClose} aria-label="Cerrar los datos del contacto" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2">✕</button>
       </div>
+
+      <ConversationActions c={c} />
 
       {q.isPending ? <div className="grid place-items-center py-8 text-muted"><Spinner label="Cargando el contacto" /></div> : null}
       {q.isError ? <div className="p-4"><Alert>{friendlyError(q.error, 'No pudimos cargar los datos del contacto.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert></div> : null}
