@@ -105,7 +105,7 @@ export function DepartmentWizard({ onClose, onFinished }: { onClose: () => void;
       </ol>
       <p className="text-[12.5px] text-muted" aria-live="polite">Paso {step + 1} de {STEPS.length}. Cada paso se guarda al avanzar: puedes cerrar cuando quieras y seguir después desde la configuración del departamento.</p>
 
-      <form onSubmit={(e) => void next(e)} noValidate className="grid gap-3" aria-label={`Paso ${step + 1}: ${STEPS[step]}`}>
+      <form onSubmit={(e) => void next(e)} noValidate className="grid gap-3" aria-label={`Paso ${step + 1} de ${STEPS.length}`}>
         {step === 0 ? (
           <>
             <Field label="Nombre" error={fieldError} hint="Un equipo o área, por ejemplo «Ventas» o «Soporte».">

@@ -1382,7 +1382,8 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     await expect(card).toContainText('Reparto activo');
     await expect(card).toContainText('3 asesores');
 
-    // 2) Conecta el número eligiendo esa cola
+    // 2) Conecta el número eligiendo ese departamento (Conexiones sigue en Configuración)
+    await page.getByRole('link', { name: 'Configuración' }).click();
     await page.getByRole('link', { name: 'Conexiones' }).click();
     await page.getByRole('button', { name: 'Conectar un número' }).click();
     const dlg = page.getByRole('dialog', { name: 'Conectar un número de WhatsApp' });
