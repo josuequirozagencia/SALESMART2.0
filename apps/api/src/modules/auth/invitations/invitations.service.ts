@@ -209,15 +209,13 @@ export class InvitationsService {
         .select({ id: invitations.id, email: invitations.email, role: invitations.role, consumedAt: invitations.consumedAt, lastSentAt: invitations.lastSentAt, orgName: organizations.name, orgKind: organizations.kind, orgDeleted: organizations.deletedAt })
         .from(invitations)
         .innerJoin(organizations, eq(organizations.id, invitations.organizationId))
-        .where(and(eq(invitations.organizationId, orgId), isNull(invitations.consumedAt)))
+        .where(and(eq(invitations.organizationId, orgId), isNull(invitations.consumedAt), isNull(invitations.setup)))
         .for('update', { of: invitations })
         .limit(1);
-      // Una empresa con un administrador activo ya no está «invitada»: lo pendiente son invitaciones de equipo (se reenvían desde «Usuarios»)
-      const [active] = await tx.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.organizationId, orgId), isNull(organizationMembers.revokedAt), eq(organizationMembers.role, 'client_admin'))).limit(1);
-      if (active) throw new ConflictError('INVITATION_ALREADY_ACCEPTED', 'La invitación ya fue aceptada');
+      // Solo la invitación del dueño (sin `setup`): las de equipo se reenvían desde «Usuarios»
       if (!row || row.orgDeleted) {
         // Distingue «no existe» de «ya aceptada» sin filtrar nada más: el Súper Admin ya ve todas las empresas
-        const [any] = await tx.select({ id: invitations.id }).from(invitations).where(eq(invitations.organizationId, orgId)).limit(1);
+        const [any] = await tx.select({ id: invitations.id }).from(invitations).where(and(eq(invitations.organizationId, orgId), isNull(invitations.setup))).limit(1);
         if (any) throw new ConflictError('INVITATION_ALREADY_ACCEPTED', 'La invitación ya fue aceptada');
         throw new NotFoundError();
       }
