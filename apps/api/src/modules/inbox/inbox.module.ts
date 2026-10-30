@@ -19,6 +19,7 @@ import { InboxService } from './inbox.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundJob } from './outbound.job';
 import { OutboundService } from './outbound.service';
+import { ReactionsService } from './reactions.service';
 import { ReassignService } from './reassign.service';
 import { ScheduledMessagesJob } from './scheduled-messages.job';
 import { ScheduledMessagesService } from './scheduled-messages.service';
@@ -32,7 +33,7 @@ import { SlaSweepJob } from './sla-sweep.job';
 @Module({
   imports: [AttachmentsModule, QrModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, MessagesController, ConversationAttachmentsController, AttachmentsController],
-  providers: [ConversationAttachmentsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
+  providers: [ConversationAttachmentsService, ReactionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
 })
 export class InboxModule {}

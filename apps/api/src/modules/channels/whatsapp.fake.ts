@@ -1,5 +1,5 @@
 import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
-import { WhatsAppProviderError, type DownloadedMedia, type MediaKind, type SendMediaInput, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendTemplateInput, type SendTextInput, type SentMessage, type TemplateSendComponent, type WhatsAppCredentials, type WhatsAppErrorCode, type WhatsAppProvider } from './whatsapp.port';
+import { WhatsAppProviderError, type SendReactionInput, type DownloadedMedia, type MediaKind, type SendMediaInput, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendTemplateInput, type SendTextInput, type SentMessage, type TemplateSendComponent, type WhatsAppCredentials, type WhatsAppErrorCode, type WhatsAppProvider } from './whatsapp.port';
 
 /** Token que el fake da por válido (solo desarrollo y pruebas; la configuración prohíbe el fake en producción). */
 export const FAKE_WHATSAPP_TOKEN = 'fake-valid-token';
@@ -57,6 +57,8 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
   readonly calls: Array<{ phoneNumberId: string }> = [];
   /** Todo lo que se «envió» con éxito, en orden (las pruebas lo miran). */
   readonly outbox: FakeSent[] = [];
+  /** Las reacciones que se «enviaron» con éxito, en orden. */
+  readonly reactions: Array<{ phoneNumberId: string; to: string; targetExternalId: string; emoji: string; externalId: string }> = [];
   /** Las plantillas que «tiene» la cuenta de WhatsApp Business (las pruebas las cambian). */
   templates: NormalizedTemplate[] = [...FAKE_TEMPLATES];
   /** Las cuentas (WABA) cuyas plantillas se pidieron. */
@@ -82,6 +84,19 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     this.counter += 1;
     const externalId = `wamid.FAKE.${this.counter}`;
     this.outbox.push({ phoneNumberId, to: input.to, text: input.text, externalId });
+    return Promise.resolve({ externalId });
+  }
+
+  sendReaction(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendReactionInput): Promise<SentMessage> {
+    if (phoneNumberId === FAKE_UNAVAILABLE_ID) return Promise.reject(new WhatsAppProviderError('unavailable', 'El proveedor no responde'));
+    if (!/^[0-9]{8,15}$/.test(input.to)) return Promise.reject(new WhatsAppProviderError('recipient_invalid', 'El número de destino no es válido'));
+    if (input.targetExternalId === '' || input.targetExternalId.length > 256 || input.emoji.length > 16) return Promise.reject(new WhatsAppProviderError('rejected', 'La reacción no es válida para WhatsApp'));
+    if (credentials.accessToken !== FAKE_WHATSAPP_TOKEN) return Promise.reject(new WhatsAppProviderError('invalid_token', 'El proveedor rechazó el token'));
+    if (phoneNumberId.startsWith(FAKE_UNKNOWN_PREFIX)) return Promise.reject(new WhatsAppProviderError('number_not_found', 'El proveedor no encontró el número de la conexión'));
+    if (input.targetExternalId.startsWith('[fallar:rechazo]')) return Promise.reject(new WhatsAppProviderError('rejected', 'El proveedor rechazó la reacción'));
+    this.counter += 1;
+    const externalId = `wamid.FAKE.${this.counter}`;
+    this.reactions.push({ phoneNumberId, to: input.to, targetExternalId: input.targetExternalId, emoji: input.emoji, externalId });
     return Promise.resolve({ externalId });
   }
 

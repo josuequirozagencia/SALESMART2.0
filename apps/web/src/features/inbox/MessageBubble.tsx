@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import type { ChatMessage } from '../../lib/types';
 import { Button } from '../../ui/controls';
+import { QUICK_REACTIONS } from './emoji';
 import { bubbleTime, describeExtra, kindLabel } from './inboxFormat';
 
 const TICK: Record<string, { text: string; label: string; cls: string }> = {
@@ -44,8 +46,30 @@ function Body({ m }: { m: ChatMessage }) {
   );
 }
 
+/**
+ * Menú de reacciones de un mensaje del cliente (M5.8): las seis habituales y, si ya reaccionamos, quitarla. Es un grupo de botones (no un menú de flechas), así que Tab llega a cada
+ * emoji y Esc lo cierra. La reacción sale por WhatsApp; si el proveedor la rechaza, el motivo se muestra debajo de la burbuja.
+ */
+function ReactMenu({ m, onReact }: { m: ChatMessage; onReact: (id: string, emoji: string | null) => void }) {
+  const [open, setOpen] = useState(false);
+  const pick = (emoji: string | null): void => { setOpen(false); onReact(m.id, emoji); };
+  return (
+    <span className="relative self-center" onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}>
+      <button type="button" aria-label="Reaccionar al mensaje" aria-expanded={open} title="Reaccionar" onClick={() => setOpen((v) => !v)} className="grid size-8 place-items-center rounded-full text-[15px] text-muted opacity-60 hover:bg-surface2 hover:opacity-100 focus-visible:opacity-100 max-lg:size-11">☺</button>
+      {open ? (
+        <span role="group" aria-label="Elige una reacción" className="absolute bottom-full left-0 z-10 mb-1 flex gap-0.5 rounded-full border border-line bg-surface p-1 shadow-[var(--shadow)]">
+          {QUICK_REACTIONS.map((e) => (
+            <button key={e} type="button" aria-label={`Reaccionar con ${e}`} aria-pressed={m.my_reaction === e} onClick={() => pick(m.my_reaction === e ? null : e)} className={`grid size-9 place-items-center rounded-full text-[19px] hover:bg-surface2 max-lg:size-11 ${m.my_reaction === e ? 'bg-accent-soft' : ''}`}>{e}</button>
+          ))}
+          {m.my_reaction ? <button type="button" aria-label="Quitar mi reacción" title="Quitar mi reacción" onClick={() => pick(null)} className="grid size-9 place-items-center rounded-full text-[14px] text-muted hover:bg-surface2 max-lg:size-11">✕</button> : null}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
-export function MessageBubble({ m, canRetry, retrying, onRetry }: { m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void }) {
+export function MessageBubble({ m, canRetry, retrying, onRetry, onReact }: { m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined }) {
   if (m.is_note) {
     const auto = m.sender_type === 'system';
     return (
@@ -59,9 +83,11 @@ export function MessageBubble({ m, canRetry, retrying, onRetry }: { m: ChatMessa
     );
   }
   const out = m.direction === 'out';
+  const canReact = !out && onReact !== undefined;
   return (
     <li className={`flex flex-col ${out ? 'items-end' : 'items-start'}`}>
-      <div className={`relative max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-accent-soft text-fg' : 'rounded-tl-sm border border-line bg-surface text-fg'}`}>
+      <div className="flex max-w-full items-start gap-1">
+      <div className={`relative max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-accent-soft text-fg' : 'rounded-tl-sm border border-line bg-surface text-fg'}`}>
         {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{m.author.name.split(' ')[0]}</span> : null}
         {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Agente de IA</span> : null}
         {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}
@@ -77,6 +103,9 @@ export function MessageBubble({ m, canRetry, retrying, onRetry }: { m: ChatMessa
           {out ? <Ticks status={m.status} /> : null}
         </span>
         {m.reaction ? <span role="img" aria-label={`Reacción del cliente: ${m.reaction}`} className="absolute -bottom-3 right-2 rounded-full border border-line bg-surface px-1.5 py-0.5 text-[13px] leading-none shadow-sm">{m.reaction}</span> : null}
+        {m.my_reaction ? <span role="img" aria-label={`Tu reacción: ${m.my_reaction}`} className="absolute -bottom-3 left-2 rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[13px] leading-none shadow-sm">{m.my_reaction}</span> : null}
+      </div>
+      {canReact ? <ReactMenu m={m} onReact={onReact} /> : null}
       </div>
       {m.status === 'failed' ? (
         <div role="alert" className="mt-1 flex max-w-[78%] flex-wrap items-center justify-end gap-2 text-right text-[12.5px] text-crit">

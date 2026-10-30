@@ -56,7 +56,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo
     case 'HOLIDAY_EXISTS': case 'HOLIDAY_LIMIT': return e.message;
     // Inbox (ADR-16/50): el servidor ya redacta el motivo
-    case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': case 'TEMPLATE_NOT_AVAILABLE': case 'CONVERSATION_NOT_ACCEPTED': case 'ALREADY_OWNER': case 'PARTICIPANT_LIMIT': case 'TRANSFER_TARGET_NOT_ALLOWED': case 'SHARE_TARGET_NOT_ALLOWED': return e.message;
+    case 'REACTION_REJECTED': case 'REACTION_UNAVAILABLE': case 'REACTION_UNSUPPORTED': case 'WINDOW_CLOSED': case 'CONVERSATION_CLOSED': case 'CONVERSATION_UNASSIGNED': case 'CONVERSATION_STATE': case 'NOT_OWNER': case 'NOT_ASSIGNABLE': case 'CHANNEL_DISABLED': case 'MESSAGE_NOT_FAILED': case 'TEMPLATE_NOT_AVAILABLE': case 'CONVERSATION_NOT_ACCEPTED': case 'ALREADY_OWNER': case 'PARTICIPANT_LIMIT': case 'TRANSFER_TARGET_NOT_ALLOWED': case 'SHARE_TARGET_NOT_ALLOWED': return e.message;
     // Respuestas rápidas (ADR-50): el servidor ya redacta el motivo
     case 'QUICK_REPLY_EXISTS': case 'QUICK_REPLY_LIMIT': case 'QUICK_REPLY_NOT_YOURS': case 'QUICK_REPLY_SHARE_NOT_ALLOWED': return e.message;
     // Mensajes programados (ADR-50): el servidor ya redacta el motivo

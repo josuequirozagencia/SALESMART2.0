@@ -66,6 +66,8 @@ export interface MessageView {
   extra: Record<string, unknown> | null;
   /** Reacción del cliente a este mensaje (un emoji), o null. */
   reaction: string | null;
+  /** Reacción NUESTRA a este mensaje del cliente (M5.8), o null. */
+  my_reaction: string | null;
   status: string;
   error: string | null;
   sent_at: string;
@@ -161,7 +163,7 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
 type MessageRow = typeof messages.$inferSelect;
 
 /** `wa_id`, el código del último error de envío y la hora de la reacción son de uso interno: no se muestran (la reacción se muestra aparte). */
-const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'template', 'auto', 'ghl_type']);
+const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'my_reaction', 'my_reaction_at', 'template', 'auto', 'ghl_type']);
 
 /** De lo que guarda una plantilla enviada, solo lo que se muestra (nunca los datos de envío). */
 function templateOf(meta: Record<string, unknown>): MessageView['template'] {
@@ -192,6 +194,7 @@ export function messageView(m: MessageRow, author: { id: string; name: string } 
     attachment,
     extra: Object.keys(extra).length > 0 ? extra : null,
     reaction: typeof m.meta['reaction'] === 'string' ? m.meta['reaction'] : null,
+    my_reaction: typeof m.meta['my_reaction'] === 'string' ? m.meta['my_reaction'] : null,
     status: m.status,
     error: m.error,
     sent_at: m.sentAt.toISOString(),

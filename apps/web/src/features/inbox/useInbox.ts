@@ -223,6 +223,15 @@ export interface UploadedAttachment {
   scan_status: string;
 }
 
+/** Reacciona a un mensaje del cliente con un emoji (o la quita con `null`). Falla si el proveedor la rechaza: no hay cola, la persona reintenta. */
+export function useReact(conversationId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ messageId, emoji }: { messageId: string; emoji: string | null }) => api<{ id: string; my_reaction: string | null }>(`/conversations/${conversationId}/messages/${messageId}/reaction`, { method: 'PUT', body: { emoji } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['messages', conversationId] }),
+  });
+}
+
 export function useUploadAttachment(conversationId: string) {
   return useMutation({
     mutationFn: async (file: File): Promise<UploadedAttachment> => {

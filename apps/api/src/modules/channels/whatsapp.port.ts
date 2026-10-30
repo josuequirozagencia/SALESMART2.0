@@ -56,6 +56,13 @@ export interface SendTextInput {
   readonly text: string;
 }
 
+/** Reacción a un mensaje del cliente (M5.8). `emoji` vacío quita la reacción. `targetExternalId` es el identificador que el proveedor le dio al mensaje del cliente. */
+export interface SendReactionInput {
+  readonly to: string;
+  readonly targetExternalId: string;
+  readonly emoji: string;
+}
+
 // ── Plantillas (M5.6a) ──────────────────────────────────────────────────────
 
 /** Categoría que Meta le asigna a la plantilla (de ella depende el cobro). */
@@ -155,6 +162,11 @@ export interface WhatsAppProvider {
   sendText(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendTextInput): Promise<SentMessage>;
   /** Todas las plantillas de la cuenta de WhatsApp Business (`wabaId`), de cualquier estado. Lanza `WhatsAppProviderError` si no se pudo. */
   listTemplates(credentials: WhatsAppCredentials, wabaId: string): Promise<readonly NormalizedTemplate[]>;
+  /**
+   * Reacciona con un emoji a un mensaje que el cliente mandó (M5.8). No es un mensaje: el proveedor solo avisa `sent`. Meta no la entrega si el mensaje tiene más de 30 días, fue
+   * borrado o es otra reacción. Lanza `WhatsAppProviderError` (mensaje seguro) si no se pudo. **Sin validar contra Meta real** (y quitarla con un emoji vacío).
+   */
+  sendReaction(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendReactionInput): Promise<SentMessage>;
   /** Envía una plantilla aprobada desde el número (dentro o fuera de las 24 h). Lanza `WhatsAppProviderError` (mensaje seguro) si no se pudo. */
   sendTemplate(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendTemplateInput): Promise<SentMessage>;
   /** Sube un archivo al proveedor y lo envía en un mensaje desde el número. Lanza `WhatsAppProviderError` (mensaje seguro: sin token, teléfono ni contenido) si no se pudo. */

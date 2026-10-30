@@ -17,6 +17,18 @@ const text = (max: number) =>
 export const replySchema = z.object({ text: text(MAX_MESSAGE_LENGTH) }).strict();
 export type ReplyDto = z.infer<typeof replySchema>;
 
+/** Reaccionar a un mensaje del cliente: un emoji (un solo símbolo, quizá con modificadores) o vacío/null para quitar la reacción. */
+export const reactionSchema = z
+  .object({
+    emoji: z
+      .string()
+      .max(16)
+      .refine((v) => v === '' || /\p{Extended_Pictographic}/u.test(v), 'debe ser un emoji')
+      .nullable(),
+  })
+  .strict();
+export type ReactionDto = z.infer<typeof reactionSchema>;
+
 /** Enviar un adjunto ya subido ( `attachment_id` de `POST …/attachments` ), con pie opcional. */
 export const sendMediaSchema = z.object({ attachment_id: z.uuid(), caption: z.string().trim().max(1024).optional() }).strict();
 export type SendMediaDto = z.infer<typeof sendMediaSchema>;
