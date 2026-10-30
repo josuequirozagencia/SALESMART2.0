@@ -2272,9 +2272,14 @@ test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, canc
     const dlg = carlos.getByRole('dialog', { name: 'Programar mensaje' });
     await dlg.getByRole('button', { name: 'En 30 minutos' }).click();
     await dlg.getByRole('button', { name: 'Programar' }).click();
-    const pending = thread.getByRole('region', { name: 'Mensajes programados' });
-    await expect(pending.getByText('Programado')).toBeVisible();
+    const pending = carlos.getByRole('dialog', { name: 'Mensajes programados' }).getByRole('region', { name: 'Mensajes programados' });
+    const pendingDialog = carlos.getByRole('dialog', { name: 'Mensajes programados' });
+    const openPending = () => thread.getByRole('button', { name: /^Mensajes programados/ }).click();
+    const closePending = () => pendingDialog.getByRole('button', { name: 'Cerrar', exact: true }).click();
+    await openPending();
+    await expect(pending.getByText('Programado', { exact: true })).toBeVisible();
     await expect(pending.getByText('Hola Ana, te recuerdo tu cita de hoy')).toBeVisible();
+    await closePending();
     await expect(box).toHaveValue('');
     const first = (await db.query(`SELECT id, status, created_by, body FROM scheduled_messages WHERE organization_id = $1`, [orgId])).rows as Array<{ id: string; status: string; created_by: string; body: string }>;
     expect(first).toHaveLength(1);
@@ -2286,9 +2291,11 @@ test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, canc
     await thread.getByRole('button', { name: 'Programar mensaje' }).click();
     await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'En 1 hora' }).click();
     await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'Programar' }).click();
+    await openPending();
     await expect(pending.getByText('Este no debe salir')).toBeVisible();
     await pending.getByRole('listitem').filter({ hasText: 'Este no debe salir' }).getByRole('button', { name: /Cancelar el mensaje programado/ }).click();
     await expect(pending.getByText('Se canceló.')).toBeVisible();
+    await closePending();
 
     // 3) Llega su hora (se adelanta en la base): la tarea lo envía por el proveedor, en nombre de Carlos, y aparece en el hilo sin recargar
     await db.query(`UPDATE scheduled_messages SET send_at = now() - interval '5 seconds', created_at = (SELECT max(created_at) FROM messages WHERE conversation_id = $2 AND direction = 'in') + interval '1 second' WHERE id = $1`, [first[0]!.id, conv!.id]); // programado después del último mensaje del cliente
@@ -2298,16 +2305,20 @@ test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, canc
     const sent = (await db.query(`SELECT kind, sender_type, status, created_by FROM messages WHERE conversation_id = $1 AND direction = 'out' AND kind = 'text'`, [conv!.id])).rows;
     expect(sent).toEqual([{ kind: 'text', sender_type: 'human', status: 'sent', created_by: carlosId }]);
     expect((await db.query(`SELECT status, message_id IS NOT NULL AS linked FROM scheduled_messages WHERE id = $1`, [first[0]!.id])).rows[0]).toEqual({ status: 'sent', linked: true });
+    await openPending();
     await expect(pending.getByText('Hola Ana, te recuerdo tu cita de hoy')).toHaveCount(0); // ya es un mensaje del hilo
+    await closePending();
 
     // 4) Programa uno más y el cliente contesta antes: se cancela solo y la lista dice por qué
     await box.fill('Si no respondes te escribo mañana');
     await thread.getByRole('button', { name: 'Programar mensaje' }).click();
     await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'En 1 hora' }).click();
     await carlos.getByRole('dialog', { name: 'Programar mensaje' }).getByRole('button', { name: 'Programar' }).click();
+    await openPending();
     await expect(pending.getByText('Si no respondes te escribo mañana')).toBeVisible();
     await inbound('wamid.PR2', 'Sí, mañana a las 10');
     await expect(pending.getByText('Se canceló porque el cliente escribió antes.')).toBeVisible({ timeout: 60_000 });
+    await closePending();
     expect((await db.query(`SELECT status, reason FROM scheduled_messages WHERE body = 'Si no respondes te escribo mañana'`)).rows[0]).toEqual({ status: 'cancelled', reason: 'customer_replied' });
     expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'out' AND kind = 'text'`, [conv!.id])).rows[0].n).toBe(1); // solo salió el primero
 

@@ -582,7 +582,7 @@ describe('desactivar y quitar', () => {
   it('dos administradores que se desactivan entre sí a la vez: gana uno y la empresa NUNCA se queda sin administrador', async () => {
     const [a, b] = await Promise.all([call('POST', `/users/${IDS.frank}/deactivate`, T.alice, leaveBody('unassign')), call('POST', `/users/${IDS.alice}/deactivate`, T.frank, leaveBody('unassign'))]);
     expect([a.status, b.status].filter((s) => s === 200)).toHaveLength(1);
-    expect([a.status, b.status].some((s) => s === 409 || s === 401 || s === 403)).toBe(true);
+    expect([a.status, b.status].some((s) => s === 409 || s === 401 || s === 403), `estados: ${a.status} y ${b.status}`).toBe(true); // el perdedor recibe un error de negocio, nunca un 500 por interbloqueo
     const admins = (await admin.query(`SELECT count(*)::int AS n FROM organization_members WHERE organization_id = $1 AND role = 'client_admin' AND revoked_at IS NULL`, [ORG_A])).rows[0].n as number;
     expect(admins).toBe(1);
   });

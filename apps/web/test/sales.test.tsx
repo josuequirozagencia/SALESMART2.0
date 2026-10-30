@@ -72,6 +72,8 @@ function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
 }
 
 const openDialog = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+  await screen.findByRole('complementary', { name: 'Datos del contacto' });
   await userEvent.click(await screen.findByRole('button', { name: 'Registrar venta' }));
   return within(await screen.findByRole('dialog', { name: 'Registrar venta' }));
 };
@@ -152,7 +154,8 @@ describe('Registrar venta desde el chat', () => {
     routes['GET /conversations/c1'] = () => ({ body: conv({ my_access: 'collaborator_reply' }) });
     mockApi(routes);
     renderApp('/inbox/c1');
-    await screen.findByRole('heading', { name: 'Ana Torres' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+    await screen.findByRole('complementary', { name: 'Datos del contacto' });
     expect(screen.queryByRole('button', { name: 'Registrar venta' })).toBeNull();
   });
 });

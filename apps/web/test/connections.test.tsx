@@ -321,3 +321,63 @@ describe('Plantillas de una conexión (M5.6a)', () => {
     expect(await d.findAllByText(/Meta rechazó el token: genera uno nuevo y pégalo/)).not.toHaveLength(0);
   });
 });
+
+describe('Configuración › Conexiones como tarjetas (M5.9)', () => {
+  const ghlOk = { configured: true, available: true, auth_type: 'private_token', status: 'active', location_id: 'loc1', token_last4: '1234', last_error: null, last_check_at: null, webhook: { configured: true, id: 'w1', path: '/x', created_at: null, rotated_at: null, last_used_at: null } };
+  const metaOff = { configured: false, available: true, dataset_id: null, token_last4: null, grace_minutes: 30, test_event_code: null, enabled: false, last_error: null, last_check_at: null, counts: {} };
+  const full = (s: ReturnType<typeof server>, over: Record<string, Handler> = {}): Record<string, Handler> => ({
+    ...s.routes,
+    'GET /ghl/connection': () => ({ body: ghlOk }),
+    'GET /meta/settings': () => ({ body: metaOff }),
+    ...over,
+  });
+
+  it('muestra CANALES (cada número, WhatsApp oficial, QR, Messenger, Instagram y TikTok) e INTEGRACIONES (GoHighLevel, API de Conversiones y Calendario de Google) con su estado', async () => {
+    mockApi(full(server([channel(), channel({ id: 'ch2', name: 'Soporte', last_error: 'Token vencido' })])));
+    renderApp('/settings/connections');
+    const canales = within(await screen.findByRole('region', { name: 'Canales' }));
+    expect(canales.getByRole('listitem', { name: 'Ventas' })).toBeInTheDocument();
+    expect(within(canales.getByRole('listitem', { name: 'Soporte' })).getByText('Requiere atención')).toBeInTheDocument();
+    expect(within(canales.getByRole('listitem', { name: 'WhatsApp oficial' })).getByText('Conectada')).toBeInTheDocument();
+    expect(within(canales.getByRole('listitem', { name: 'WhatsApp por QR' })).getByText('No conectada')).toBeInTheDocument();
+    for (const n of ['Messenger', 'Instagram', 'TikTok']) expect(within(canales.getByRole('listitem', { name: n })).getByText('Próximamente')).toBeInTheDocument();
+    const integ = within(screen.getByRole('region', { name: 'Integraciones' }));
+    expect(within(integ.getByRole('listitem', { name: 'GoHighLevel' })).getByText('Conectada')).toBeInTheDocument();
+    expect(within(integ.getByRole('listitem', { name: 'API de Conversiones de Meta' })).getByText('No conectada')).toBeInTheDocument();
+    expect(within(integ.getByRole('listitem', { name: 'Calendario de Google' })).getByText('Próximamente')).toBeInTheDocument();
+    expect(integ.getByRole('link', { name: 'Configurar GoHighLevel' })).toHaveAttribute('href', '/settings/ghl');
+    expect(integ.getByRole('link', { name: 'Configurar la API de Conversiones' })).toHaveAttribute('href', '/settings/meta');
+  });
+
+  it('la tarjeta de WhatsApp por QR lleva SIEMPRE el aviso de que no es oficial, esté conectada o no', async () => {
+    const warning = 'No es la API oficial de WhatsApp. WhatsApp puede bloquear o suspender el número, la sesión puede desconectarse y no hay plantillas aprobadas. No lo uses con tu número principal.';
+    mockApi(full(server(), { 'GET /qr-channels': () => ({ body: { items: [{ id: 'q1', provider: 'evolution', is_official: false, name: 'Chip nuevo', state: 'open', phone: '+593999', profile_name: null, queue_id: null, connected_at: null, last_event_at: null, down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, created_at: '' }], available: true, limits: { max_channels: 5 } } }) }));
+    renderApp('/settings/connections');
+    const qr = within(await screen.findByRole('listitem', { name: 'WhatsApp por QR' }));
+    expect(qr.getByText(warning)).toBeInTheDocument();
+    expect(qr.getByText('No oficial')).toBeInTheDocument();
+    await waitFor(() => expect(qr.getByText('Conectada')).toBeInTheDocument());
+  });
+
+  it('el buscador filtra canales e integraciones por nombre y avisa cuando nada coincide', async () => {
+    mockApi(full(server([channel()])));
+    renderApp('/settings/connections');
+    await screen.findByRole('listitem', { name: 'Messenger' });
+    const box = screen.getByRole('searchbox', { name: 'Buscar conexiones' });
+    await userEvent.type(box, 'gohigh');
+    expect(screen.queryByRole('listitem', { name: 'Messenger' })).not.toBeInTheDocument();
+    expect(screen.getByRole('listitem', { name: 'GoHighLevel' })).toBeInTheDocument();
+    expect(screen.getByText(/Ningún canal coincide con «gohigh»/)).toBeInTheDocument();
+    await userEvent.clear(box);
+    await userEvent.type(box, 'zzz');
+    expect(screen.getByText(/Ninguna integración coincide/)).toBeInTheDocument();
+  });
+
+  it('una integración con error muestra «Requiere atención» y su motivo', async () => {
+    mockApi(full(server(), { 'GET /ghl/connection': () => ({ body: { ...ghlOk, status: 'needs_reconnect', last_error: 'El token fue rechazado' } }) }));
+    renderApp('/settings/connections');
+    const card = within(await screen.findByRole('listitem', { name: 'GoHighLevel' }));
+    await waitFor(() => expect(card.getByText('Requiere atención')).toBeInTheDocument());
+    expect(card.getByText('El token fue rechazado')).toBeInTheDocument();
+  });
+});

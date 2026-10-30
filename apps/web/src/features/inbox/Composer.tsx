@@ -8,7 +8,6 @@ import { AttachmentPicker } from './AttachmentPicker';
 import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
 import { EmojiPicker } from './EmojiPicker';
 import { ScheduleDialog } from './ScheduleDialog';
-import { ScheduledList } from './ScheduledList';
 import { TemplatePicker } from './TemplatePicker';
 import { useConversationQuickReplies, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
 
@@ -193,7 +192,6 @@ export function Composer({ c }: { c: Conversation }) {
           <button type="button" onClick={() => setPendingAttachment(null)} className="ml-auto text-muted hover:text-fg">Quitar</button>
         </div>
       ) : null}
-      <ScheduledList conversationId={c.id} />
       {voice.recording ? (
         <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[13px] font-semibold text-crit">
           <span aria-hidden="true" className="size-2.5 animate-pulse rounded-full bg-crit" />

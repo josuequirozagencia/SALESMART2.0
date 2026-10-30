@@ -140,14 +140,24 @@ export class TeamMembersService {
     };
   }
 
-  /** Bloquea a los administradores vigentes y falla si `userId` es el último: ni bajarlo de rol, ni desactivarlo, ni quitarlo. */
-  private async guardLastAdmin(tx: IdentityTx, orgId: string, userId: string): Promise<void> {
-    const admins = await tx
+  /**
+   * Bloquea a los administradores vigentes SIEMPRE en el mismo orden (por id) y devuelve sus personas. Hay que llamarlo ANTES de bloquear la fila de la persona que se cambia: si dos
+   * administradores se desactivan entre sí a la vez, cada uno bloquearía primero la suya y luego la del otro (orden inverso) y Postgres abortaría uno por interbloqueo (un 500 en
+   * lugar del 409 que merece).
+   */
+  private async lockAdmins(tx: IdentityTx, orgId: string): Promise<Array<{ userId: string }>> {
+    return tx
       .select({ userId: organizationMembers.userId })
       .from(organizationMembers)
       .innerJoin(users, eq(users.id, organizationMembers.userId))
       .where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.role, 'client_admin'), isNull(organizationMembers.revokedAt), eq(users.status, 'active'), isNull(users.deletedAt)))
+      .orderBy(organizationMembers.id)
       .for('update', { of: organizationMembers });
+  }
+
+  /** Falla si `userId` es el último administrador: ni bajarlo de rol, ni desactivarlo, ni quitarlo. */
+  private async guardLastAdmin(tx: IdentityTx, orgId: string, userId: string): Promise<void> {
+    const admins = await this.lockAdmins(tx, orgId);
     const others = admins.filter((a) => a.userId !== userId).length;
     if (admins.some((a) => a.userId === userId) && others === 0) throw new ConflictError('LAST_ADMIN', 'Es el único administrador de la empresa: nombra a otro administrador antes de cambiarle el rol, desactivarlo o quitarlo');
   }
@@ -156,6 +166,7 @@ export class TeamMembersService {
   async changeRole(userId: string, role: TeamRole): Promise<{ before: TeamRole; after: TeamRole; name: string }> {
     const { orgId, actor } = this.ctx();
     return this.db.withIdentity(async (tx) => {
+      await this.lockAdmins(tx, orgId);
       const r = await this.load(tx, orgId, userId, true, 'active');
       const before = r.m.role as TeamRole;
       if (before === role) throw new ConflictError('ROLE_UNCHANGED', 'Esa persona ya tiene ese rol');
@@ -196,6 +207,7 @@ export class TeamMembersService {
     if (userId === actor) throw new ConflictError('SELF_NOT_ALLOWED', 'No puedes hacerlo contigo mismo: pídeselo a otro administrador');
     return this.db.withIdentity(async (tx) => {
       // Quitar también sirve para una persona ya desactivada; desactivar, solo para una activa
+      await this.lockAdmins(tx, orgId);
       const r = await this.load(tx, orgId, userId, true, reason === 'deactivated' ? 'active' : 'any');
       if (r.m.role === 'client_admin' && r.m.revokedAt === null) await this.guardLastAdmin(tx, orgId, userId);
       const now = new Date();

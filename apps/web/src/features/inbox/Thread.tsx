@@ -7,13 +7,11 @@ import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
-import { GhlFlowsDialog } from '../ghl/GhlFlowsPanel';
-import { AppointmentDialog } from '../appointments/AppointmentDialog';
-import { SaleDialog } from '../sales/SaleDialog';
 import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
 import { ContactSidebar } from './ContactSidebar';
 import { ConversationTags } from './ConversationTags';
+import { ScheduledButton } from './ScheduledList';
 import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
@@ -37,9 +35,6 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
   const [dialog, setDialog] = useState(false);
-  const [sale, setSale] = useState(false);
-  const [appointment, setAppointment] = useState(false);
-  const [flows, setFlows] = useState(false);
   const now = useNow(30_000);
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
@@ -55,6 +50,19 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
         <div className="min-w-0 flex-1">
           <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <ScheduledButton conversationId={c.id} />
+          <button
+            type="button"
+            aria-label="Datos del contacto"
+            aria-pressed={contactOpen}
+            title={contactOpen ? 'Ocultar los datos del contacto' : 'Ver los datos del contacto'}
+            onClick={onToggleContact}
+            className={`grid size-11 place-items-center rounded-full border transition ${contactOpen ? 'border-accent bg-accent-soft text-accent' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'}`}
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18v14H3z" /><path d="M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" /><path d="M8 16a4 4 0 0 1 8 0" /></svg>
+          </button>
         </div>
       </div>
       {c.channel.kind === 'qr' && c.channel.session === 'down' ? <p role="alert" className="w-full rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[12.5px] font-semibold text-crit">La sesión de WhatsApp por QR está caída. Lo que escribas queda en espera y sale cuando el administrador vuelva a escanear el QR en Configuración › Conexiones.</p> : null}
@@ -78,17 +86,10 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
             {c.can.take ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('take', 'No pudimos asignarte la conversación.')}>Asignarme</Button> : null}
             {c.can.transfer || c.can.share ? <Button className={SMALL} onClick={() => setDialog(true)}>Transferir</Button> : null}
             {collaborator ? <Button className={SMALL} loading={leave.isPending} onClick={() => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</Button> : null}
-            {c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setAppointment(true)}>Agendar</Button> : null}
-            {c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setSale(true)}>Registrar venta</Button> : null}
-            {c.channel.kind === 'ghl' && c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setFlows(true)}>Inscribir en un flujo</Button> : null}
-            <Button className={SMALL} aria-pressed={contactOpen} onClick={onToggleContact}>{contactOpen ? 'Ocultar datos' : 'Datos del contacto'}</Button>
             {c.can.close ? <Button className={SMALL} onClick={() => setConfirm(true)}>Finalizar</Button> : null}
           </>
         )}
         </div>
-        {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
-        {flows ? <GhlFlowsDialog contact={c.contact} onClose={() => setFlows(false)} /> : null}
-        {sale ? <SaleDialog c={c} onClose={() => setSale(false)} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
       </div>
     </header>
