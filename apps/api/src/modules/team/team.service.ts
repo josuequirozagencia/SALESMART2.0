@@ -7,6 +7,7 @@ import { InvitationsService, memberJoined, type InvitationIssued, type MemberInv
 import { OwnerReleaseService } from '../inbox';
 import { OrgDirectoryService, OrgMembersService, TeamMembersService, type TeamMember, type TeamMemberDetail, type TeamRole } from '../organizations';
 import { QueuesService } from '../queues';
+import { UserHoursService, type HoursDto, type WeekView } from '../sla';
 import type { DepartmentsDto, InviteDto, LeaveDto, PermissionsDto } from './team.dto';
 
 export interface DepartmentRef {
@@ -20,6 +21,8 @@ export interface TeamList {
   invitations: MemberInvitationView[];
 }
 export interface TeamMemberFull extends TeamMemberView {
+  /** Horario laboral propio (reparto automático); null = disponible siempre. */
+  hours: WeekView | null;
   overrides: TeamMemberDetail['overrides'];
   /** Lo que da la plantilla del rol, sin ajustes. */
   template: PermissionKey[];
@@ -56,6 +59,7 @@ export class TeamService implements OnModuleInit {
     @Inject(OrgMembersService) private readonly people: OrgMembersService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(UserHoursService) private readonly userHours: UserHoursService,
   ) {}
 
   /** Los departamentos elegidos al invitar se aplican cuando la persona acepta (la aceptación es pública y de identidad). */
@@ -102,11 +106,11 @@ export class TeamService implements OnModuleInit {
 
   async get(userId: string): Promise<TeamMemberFull> {
     const d = await this.members.get(userId);
-    const [depts, open] = await Promise.all([this.queues.departmentsOf([userId]), this.release.openCount(userId)]);
+    const [depts, open, hours] = await Promise.all([this.queues.departmentsOf([userId]), this.release.openCount(userId), this.userHours.get(userId)]);
     const template = new Set<PermissionKey>(ROLE_PERMISSIONS[d.role]);
     const effective = effectivePermissions(d.role, template, d.overrides);
     const { overrides, ...member } = d;
-    return { ...member, departments: depts.get(userId) ?? [], overrides, template: [...template], effective: [...effective], open_conversations: open };
+    return { ...member, departments: depts.get(userId) ?? [], hours: hours.hours, overrides, template: [...template], effective: [...effective], open_conversations: open };
   }
 
   async invite(dto: InviteDto, holder: ReadonlySet<PermissionKey>): Promise<InvitationIssued & { id: string }> {
@@ -144,6 +148,15 @@ export class TeamService implements OnModuleInit {
     if (m.status !== 'active') throw new ConflictError('MEMBER_INACTIVE', 'Esa persona está desactivada: reactívala antes de cambiar sus departamentos');
     const r = await this.queues.setUserDepartments(userId, dto.queue_ids);
     await this.members.log('queues_changed', userId, r.before, r.after);
+    this.directory.invalidate();
+    return this.get(userId);
+  }
+
+  /** Horario propio de la persona: con él, el reparto automático solo le asigna dentro de su horario. `days: null` lo quita. */
+  async setHours(userId: string, dto: HoursDto): Promise<TeamMemberFull> {
+    const m = await this.members.get(userId);
+    if (m.status !== 'active') throw new ConflictError('MEMBER_INACTIVE', 'Esa persona está desactivada: reactívala antes de cambiar su horario');
+    await this.userHours.set(userId, dto);
     this.directory.invalidate();
     return this.get(userId);
   }

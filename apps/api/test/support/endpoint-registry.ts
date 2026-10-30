@@ -328,6 +328,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/users/:userId', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'PUT /v1/users/:userId/permissions', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'PUT /v1/users/:userId/departments', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
+  { route: 'PUT /v1/users/:userId/hours', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/deactivate', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/remove', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/reactivate', kind: 'tenant', isolationTest: '../../team/team.test.ts' },

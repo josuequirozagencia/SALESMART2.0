@@ -47,7 +47,11 @@ export class DistributionService {
       // Los que ya estaban en la cola conservan su lugar; los nuevos van después, por id
       .sort((a, b) => (order.get(a.userId) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.userId) ?? Number.MAX_SAFE_INTEGER) || a.userId.localeCompare(b.userId));
     if (people.length === 0) return [];
-    const ids = people.map((p) => p.userId);
+    // Quien tiene horario propio y ahora está fuera de él no recibe asignaciones nuevas (M10.4); la simulación con `members` también lo respeta
+    const closed = await this.sla.closedUsers(tx, people.map((p) => p.userId), { now: ctx.now, timeZone: ctx.timeZone });
+    const available = closed.size === 0 ? people : people.filter((p) => !closed.has(p.userId));
+    if (available.length === 0) return [];
+    const ids = available.map((p) => p.userId);
 
     const today = new Map<string, number>();
     if (rules.dailyCap > 0) {
@@ -69,7 +73,7 @@ export class DistributionService {
         .groupBy(conversations.ownerId);
       for (const r of rows) if (r.userId) open.set(r.userId, r.n);
     }
-    return people.map((p) => ({ userId: p.userId, weight: p.weight, todayCount: today.get(p.userId) ?? 0, openCount: open.get(p.userId) ?? 0 }));
+    return available.map((p) => ({ userId: p.userId, weight: p.weight, todayCount: today.get(p.userId) ?? 0, openCount: open.get(p.userId) ?? 0 }));
   }
 
   /**

@@ -35,7 +35,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
     },
     ...(admin ? [{ title: 'Captación', items: [{ to: '/forms', label: 'Formularios', icon: 'form' as const }] }] : []),
     ...(admin ? [{ title: 'IA y automatización', items: [{ to: '/agents', label: 'Agentes IA', icon: 'bot' as const }, { to: '/automations', label: 'Automatizaciones', icon: 'bolt' as const }] }] : []),
-    ...(admin ? [{ title: 'Equipo', items: [{ to: '/departments', label: 'Departamentos', icon: 'team' as const }] }] : []),
+    ...(admin ? [{ title: 'Equipo', items: [{ to: '/users', label: 'Usuarios', icon: 'shield' as const }, { to: '/departments', label: 'Departamentos', icon: 'team' as const }] }] : []),
     {
       title: 'Gestión',
       items: [{ to: '/analytics', label: 'Analítica', icon: 'chart' }, ...(admin ? [{ to: '/settings/fields', label: 'Configuración', icon: 'gear' as const }] : [])],

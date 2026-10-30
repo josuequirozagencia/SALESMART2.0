@@ -357,7 +357,7 @@ Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con R
 
 **M10 — Equipo, departamentos y permisos** (ADR-56; plan M10.1–M10.6, ver `docs/ADR.md`)
 Departamentos (asistente), empresas dentro de Contactos, usuarios con permisos por persona (techo por rol; el asesor nunca recibe `*.view_all`), «Ver como», datos de ejemplo y «Primeros pasos».
-*Avance:* M10.1 y M10.2 mergeadas el 2026-10-30; M10.3 (modelo y API de usuarios) construida el 2026-10-30.
+*Avance:* M10.1 y M10.2 mergeadas el 2026-10-30; M10.3 (modelo y API de usuarios) construida, aprobada y migrada en staging el 2026-10-30; M10.4 (pantalla «Usuarios» y horario por persona con efecto en el reparto) construida el 2026-10-30, pendiente de aprobación.
 
 **M11 — Comisiones** (antes «M10 — Telefonía y comisiones»; confirmado por el responsable el 2026-10-30)
 Comisiones con planes, split y reversión. Requiere su propio ADR antes de programar.

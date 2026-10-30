@@ -743,6 +743,20 @@
       "when": 1793377728281,
       "tag": "0105_m103_team_model_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1793382759554,
+      "tag": "0106_m104_user_hours",
+      "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "7",
+      "when": 1793382767610,
+      "tag": "0107_m104_user_hours_grants",
+      "breakpoints": true
     }
   ]
 }

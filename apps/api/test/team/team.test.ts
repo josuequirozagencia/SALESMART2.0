@@ -9,6 +9,7 @@
 //   PATCH /v1/users/:userId
 //   PUT /v1/users/:userId/permissions
 //   PUT /v1/users/:userId/departments
+//   PUT /v1/users/:userId/hours
 //   POST /v1/users/:userId/deactivate
 //   POST /v1/users/:userId/remove
 //   POST /v1/users/:userId/reactivate
@@ -70,7 +71,7 @@ async function start(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE messages, conversations, conversation_participants, response_timers, webhook_events, queue_distribution_state, queue_members, whatsapp_accounts, channel_accounts, queues, channel_routes, contact_phones, contacts, audit_logs, member_permissions, member_history, invitations, access_sessions, sessions, auth_throttle, signup_attempts, trials, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE user_hours, holidays, business_hours, messages, conversations, conversation_participants, response_timers, webhook_events, queue_distribution_state, queue_members, whatsapp_accounts, channel_accounts, queues, channel_routes, contact_phones, contacts, audit_logs, member_permissions, member_history, invitations, access_sessions, sessions, auth_throttle, signup_attempts, trials, organization_members, organizations, users CASCADE');
   const orgs: Array<[string, string, string]> = [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']];
   for (const [id, kind, name] of orgs) await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'America/Guayaquil')`, [id, kind, name]);
   const users: Array<[string, string, string]> = [[IDS.alice, 'alice@a.test', 'Alicia Torres'], [IDS.frank, 'frank@a.test', 'Francisco Paz'], [IDS.carol, 'carol@a.test', 'Carolina Vera'], [IDS.eve, 'eve@a.test', 'Eva Mora'], [IDS.bob, 'bob@b.test', 'Beto Luna'], [IDS.gina, 'gina@b.test', 'Gina Ríos'], [IDS.root, 'root@plat.test', 'Root']];
@@ -95,7 +96,8 @@ const ok = async <X,>(r: Response, status = 200): Promise<X> => {
 const tokenOf = (url: string): string => new URL(url).hash.replace(/^#token=/, '');
 
 interface Member { user_id: string; name: string; email: string; role: string; status: string; custom_permissions: boolean; departments: Array<{ id: string; name: string }>; deactivated_at: string | null }
-interface Full extends Member { overrides: { grant: string[]; deny: string[] }; template: string[]; effective: string[]; open_conversations: number }
+type Week = Record<string, Array<[string, string]>>;
+interface Full extends Member { hours: Week | null; overrides: { grant: string[]; deny: string[] }; template: string[]; effective: string[]; open_conversations: number }
 interface TeamList { items: Member[]; invitations: Array<{ id: string; email: string; role: string; expired: boolean; setup: { grant: string[]; deny: string[]; queue_ids: string[] } }> }
 interface Leave { user_id: string; status: string; conversations: { action: string; moved: number; to_user_id: string | null }; collaborations_removed: number; sessions_revoked: number }
 const list = async (t: string): Promise<TeamList> => ok<TeamList>(await call('GET', '/users', t));
@@ -150,7 +152,7 @@ describe('acceso', () => {
     const routes: Array<[string, string, unknown?]> = [
       ['GET', '/users'], ['GET', '/users/permissions/catalog'], ['GET', '/users/history'],
       ['POST', '/users/invitations', { email: 'x@y.test', role: 'advisor' }], ['POST', `/users/invitations/${NOBODY}/resend`], ['POST', `/users/invitations/${NOBODY}/cancel`],
-      ['GET', `/users/${IDS.eve}`], ['PATCH', `/users/${IDS.eve}`, { role: 'client_admin' }], ['PUT', `/users/${IDS.eve}/permissions`, { grant: [], deny: [] }], ['PUT', `/users/${IDS.eve}/departments`, { queue_ids: [] }],
+      ['GET', `/users/${IDS.eve}`], ['PATCH', `/users/${IDS.eve}`, { role: 'client_admin' }], ['PUT', `/users/${IDS.eve}/permissions`, { grant: [], deny: [] }], ['PUT', `/users/${IDS.eve}/departments`, { queue_ids: [] }], ['PUT', `/users/${IDS.eve}/hours`, { days: null }],
       ['POST', `/users/${IDS.eve}/deactivate`, leaveBody('unassign')], ['POST', `/users/${IDS.eve}/remove`, leaveBody('unassign')], ['POST', `/users/${IDS.eve}/reactivate`], ['POST', `/users/${IDS.eve}/sessions/revoke`],
     ];
     for (const [m, p, body] of routes) {
@@ -190,7 +192,7 @@ describe('lista, detalle y catálogo', () => {
 
   it('A↔B: una persona de otra empresa es 404 en todas las rutas con :userId y la lista de B no la muestra', async () => {
     const id = IDS.gina; // de B, vista por el administrador de A
-    for (const [m, p, body] of [['GET', `/users/${id}`], ['PATCH', `/users/${id}`, { role: 'client_admin' }], ['PUT', `/users/${id}/permissions`, { grant: [], deny: [] }], ['PUT', `/users/${id}/departments`, { queue_ids: [] }], ['POST', `/users/${id}/deactivate`, leaveBody('unassign')], ['POST', `/users/${id}/remove`, leaveBody('unassign')], ['POST', `/users/${id}/reactivate`], ['POST', `/users/${id}/sessions/revoke`]] as Array<[string, string, unknown?]>) {
+    for (const [m, p, body] of [['GET', `/users/${id}`], ['PATCH', `/users/${id}`, { role: 'client_admin' }], ['PUT', `/users/${id}/permissions`, { grant: [], deny: [] }], ['PUT', `/users/${id}/departments`, { queue_ids: [] }], ['PUT', `/users/${id}/hours`, { days: null }], ['POST', `/users/${id}/deactivate`, leaveBody('unassign')], ['POST', `/users/${id}/remove`, leaveBody('unassign')], ['POST', `/users/${id}/reactivate`], ['POST', `/users/${id}/sessions/revoke`]] as Array<[string, string, unknown?]>) {
       expect((await call(m, p, T.alice, body)).status, `${m} ${p}`).toBe(404);
     }
     expect((await memberRow(IDS.gina, ORG_B)).revoked_at).toBeNull();
@@ -322,6 +324,85 @@ describe('departamentos de la persona', () => {
     expect((await history()).filter((h) => h.kind === 'queues_changed')).toHaveLength(2);
     // vaciar la saca de todos
     expect((await ok<Full>(await call('PUT', `/users/${IDS.carol}/departments`, T.alice, { queue_ids: [] }))).departments).toEqual([]);
+  });
+});
+
+describe('horario laboral por persona', () => {
+  const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+  const weekOf = (a: string, b: string): Week => Object.fromEntries(DAYS.map((d) => [d, [[a, b]]]));
+  const hhmm = (m: number): string => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  /** Una ventana de una hora de la que AHORA (hora de la empresa) queda fuera, sin depender de la hora a la que corra la prueba. */
+  const closedNowWeek = (): Week => {
+    const t = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Guayaquil', hour12: false, hour: '2-digit', minute: '2-digit' }).split(':').map(Number) as [number, number];
+    const start = t[0] * 60 + t[1] >= 600 ? 0 : 1000;
+    return weekOf(hhmm(start), hhmm(start + 60));
+  };
+  const put = (t: string, id: string, days: Week | null) => call('PUT', `/users/${id}/hours`, t, { days });
+  const sequence = async (qid: string): Promise<string[]> => (await ok<{ sequence: Array<{ user_id: string }> }>(await call('POST', `/queues/${qid}/simulate`, T.alice, { count: 4 }))).sequence.map((x) => x.user_id);
+
+  it('guarda el horario, lo muestra en el detalle y se puede cambiar y quitar; queda en la auditoría', async () => {
+    expect((await one(T.alice, IDS.carol)).hours).toBeNull();
+    const week = weekOf('08:00', '17:00');
+    const r = await ok<Full>(await put(T.alice, IDS.carol, week));
+    expect(r.hours).toEqual(week);
+    expect((await one(T.alice, IDS.carol)).hours).toEqual(week);
+    const week2 = { ...week, sat: [['09:00', '12:00']] as Array<[string, string]>, sun: [] };
+    expect((await ok<Full>(await put(T.alice, IDS.carol, week2))).hours).toEqual(week2);
+    expect((await ok<Full>(await put(T.alice, IDS.carol, null))).hours).toBeNull();
+    expect((await ok<Full>(await put(T.alice, IDS.carol, null))).hours).toBeNull(); // quitarlo dos veces no falla
+    const hist = (await admin.query(`SELECT old_value, new_value FROM audit_logs WHERE entity_type = 'user_hours' AND entity_id = $1 ORDER BY id`, [IDS.carol])).rows;
+    expect(hist).toHaveLength(3); // alta, cambio y quitar
+    expect(hist[2]).toMatchObject({ new_value: null });
+    // quitar lo desactiva: la fila sigue (sin DELETE) y se reactiva al guardar otro
+    expect((await admin.query(`SELECT active FROM user_hours WHERE user_id = $1`, [IDS.carol])).rows).toEqual([{ active: false }]);
+    await ok(await put(T.alice, IDS.carol, week));
+    expect((await admin.query(`SELECT active FROM user_hours WHERE user_id = $1`, [IDS.carol])).rows).toEqual([{ active: true }]);
+  });
+
+  it('valida: semana sin ningún día abierto, horas mal escritas, tramos que se cruzan o claves de más dan 400', async () => {
+    for (const days of [{}, { mon: [] }, { mon: [['25:00', '26:00']] }, { mon: [['10:00', '09:00']] }, { mon: [['08:00', '12:00'], ['11:00', '14:00']] }, { lun: [['08:00', '12:00']] }]) {
+      expect((await call('PUT', `/users/${IDS.carol}/hours`, T.alice, { days })).status, JSON.stringify(days)).toBe(400);
+    }
+    expect((await call('PUT', `/users/${IDS.carol}/hours`, T.alice, {})).status).toBe(400);
+    expect((await call('PUT', `/users/${IDS.carol}/hours`, T.alice, { days: null, extra: 1 })).status).toBe(400);
+    expect((await one(T.alice, IDS.carol)).hours).toBeNull();
+  });
+
+  it('a una persona desactivada no se le cambia el horario (409) y no se guarda nada', async () => {
+    await ok(await call('POST', `/users/${IDS.eve}/deactivate`, T.alice, leaveBody('unassign')));
+    const r = await put(T.alice, IDS.eve, weekOf('08:00', '17:00'));
+    expect(r.status).toBe(409);
+    expect(await code(r)).toBe('MEMBER_INACTIVE');
+    expect(Number((await admin.query(`SELECT count(*) FROM user_hours`)).rows[0].count)).toBe(0);
+  });
+
+  it('EFECTO EN EL REPARTO: fuera de su horario la persona no recibe asignaciones nuevas; sin horario o dentro de él, sí', async () => {
+    const q = await queue(T.alice, 'Ventas');
+    await ok(await call('PUT', `/queues/${q}/members`, T.alice, { members: [{ user_id: IDS.carol, active: true, weight: 1 }, { user_id: IDS.eve, active: true, weight: 1 }] }));
+    expect(new Set(await sequence(q))).toEqual(new Set([IDS.carol, IDS.eve]));
+    await ok(await put(T.alice, IDS.carol, closedNowWeek()));
+    expect(new Set(await sequence(q))).toEqual(new Set([IDS.eve])); // carol está fuera de su horario
+    await ok(await put(T.alice, IDS.carol, weekOf('00:00', '23:59')));
+    expect(new Set(await sequence(q))).toEqual(new Set([IDS.carol, IDS.eve])); // dentro de su horario
+    await ok(await put(T.alice, IDS.carol, closedNowWeek()));
+    await ok(await put(T.alice, IDS.carol, null)); // quitar el horario la deja disponible siempre
+    expect(new Set(await sequence(q))).toEqual(new Set([IDS.carol, IDS.eve]));
+  });
+
+  it('un feriado de la empresa también cierra el horario de la persona', async () => {
+    const q = await queue(T.alice, 'Ventas');
+    await ok(await call('PUT', `/queues/${q}/members`, T.alice, { members: [{ user_id: IDS.carol, active: true, weight: 1 }, { user_id: IDS.eve, active: true, weight: 1 }] }));
+    await ok(await put(T.alice, IDS.carol, weekOf('00:00', '23:59')));
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guayaquil' });
+    await ok(await call('POST', '/sla/holidays', T.alice, { date: today, name: 'Feriado de prueba', yearly: false }), 201);
+    expect(new Set(await sequence(q))).toEqual(new Set([IDS.eve]));
+  });
+
+  it('A↔B: el horario de una persona de A no se ve ni cuenta en B', async () => {
+    await ok(await put(T.alice, IDS.carol, weekOf('08:00', '17:00')));
+    expect((await put(T.alice, IDS.gina, weekOf('08:00', '17:00'))).status).toBe(404);
+    expect((await put(T.bob, IDS.carol, weekOf('08:00', '17:00'))).status).toBe(404);
+    expect(Number((await admin.query(`SELECT count(*) FROM user_hours WHERE organization_id = $1`, [ORG_B])).rows[0].count)).toBe(0);
   });
 });
 

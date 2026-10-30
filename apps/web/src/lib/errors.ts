@@ -68,6 +68,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Importar y exportar (ADR-47): el servidor ya redacta el motivo
     case 'IMPORT_DUPLICATE_FILE': return 'Este archivo ya se importó. Si quieres repetirlo, cancela la importación anterior o cambia el archivo.';
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;
+    // Usuarios del equipo (ADR-56): el servidor ya redacta el motivo
+    case 'LAST_ADMIN': case 'SELF_NOT_ALLOWED': case 'MEMBER_EXISTS': case 'INVITE_NOT_ALLOWED': case 'ROLE_UNCHANGED': case 'MEMBER_INACTIVE': return e.message;
     case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;
