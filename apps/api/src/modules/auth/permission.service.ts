@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { Database, permissions, rolePermissions, roles } from '../../db';
-import { accessLevelPermissions, isPermissionKey, type AccessLevel, type PermissionKey } from '../../rbac';
+import { accessLevelPermissions, effectivePermissions, isOverrideRole, isPermissionKey, type AccessLevel, type PermissionKey } from '../../rbac';
 import type { ActingAs } from './session.service';
 
 const TTL_MS = 60_000;
@@ -30,8 +30,14 @@ export class PermissionService {
    *  - con la empresa en pausa (prueba vencida) → solo los de lectura, para ambos.
    * Nunca se incluyen permisos de plataforma ni de la consola de agencia dentro de un cliente.
    */
-  async forContext(c: { role: string; orgKind: string; accessLevel: AccessLevel | null; actingAs: ActingAs | null; trialExpired: boolean }, now = Date.now()): Promise<ReadonlySet<PermissionKey>> {
-    if (!c.actingAs) return this.forRole(c.role, now);
+  async forContext(c: { role: string; orgKind: string; accessLevel: AccessLevel | null; actingAs: ActingAs | null; trialExpired: boolean; overrides?: { grant: readonly string[]; deny: readonly string[] } }, now = Date.now()): Promise<ReadonlySet<PermissionKey>> {
+    if (!c.actingAs) {
+      const base = await this.forRole(c.role, now);
+      // Ajustes por persona (M10.3, ADR-56): solo para los roles de una empresa, y siempre dentro del techo de su rol (un dato indebido no concede nada)
+      const o = c.overrides;
+      if (o && (o.grant.length > 0 || o.deny.length > 0) && isOverrideRole(c.role) && c.orgKind === 'client') return effectivePermissions(c.role, base, { grant: o.grant.filter(isPermissionKey), deny: o.deny.filter(isPermissionKey) });
+      return base;
+    }
     // Falla cerrada: una membresía de agencia en un cliente SIN nivel de acceso (dato corrupto) no puede nada
     if (c.actingAs === 'agency' && c.accessLevel === null) return new Set();
     if (c.actingAs === 'super_admin' && c.orgKind === 'agency') return this.forRole('agency', now);

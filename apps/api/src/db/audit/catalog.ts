@@ -17,7 +17,7 @@ export interface TableCatalog {
 
 export const PRODUCTION_CATALOG: TableCatalog = {
   platform: ['platform_audit', 'provider_credentials', 'provider_selection', 'ai_pricing', 'ai_org_pricing', 'ai_model_prices'],
-  identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config', 'plans', 'invitations', 'organization_ownership_history', 'access_sessions', 'attribution_endpoints', 'ghl_routes', 'form_routes', 'qr_routes', 'channel_routes'],
+  identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config', 'plans', 'invitations', 'organization_ownership_history', 'access_sessions', 'attribution_endpoints', 'ghl_routes', 'form_routes', 'qr_routes', 'member_permissions', 'member_history', 'channel_routes'],
   reference: [],
   tenantRoot: [],
   // ADR-35: limpieza de tablas de identidad sin dar DELETE a app_identity

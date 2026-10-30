@@ -3,7 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
 import type { AppConfig } from '../../../config';
-import { Database, invitations, organizationMembers, organizationOwnershipHistory, organizations, plans, trials, users, type IdentityTx } from '../../../db';
+import { Database, invitations, memberHistory, memberPermissions, organizationMembers, organizationOwnershipHistory, organizations, plans, trials, users, type IdentityTx } from '../../../db';
 import { AppError, ConflictError, type ErrorDetail, ForbiddenError, InvalidInvitationError, InvitationExpiredError, NotFoundError, ServiceUnavailableError, TooManyAttemptsError, ValidationError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
 import type { PasswordHasher } from '../../../security';
@@ -12,6 +12,8 @@ import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
 import { AuditService } from '../../audit';
 import { AgencyAccessService, TrialsService } from '../../organizations';
 import { PlatformAuditService } from '../../platform';
+import { isGrantable, isOverrideRole, isPermissionKey, validateOverrides, type PermissionKey } from '../../../rbac';
+import { memberJoined } from './member-joined';
 import { PASSWORD_HASHER } from '../auth.tokens';
 import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
 import { SignupLimiter } from '../signup/signup-limiter';
@@ -43,6 +45,31 @@ export interface InvitationPreview {
   account_exists: boolean;
 }
 
+/** Lo que el administrador eligió al invitar a alguien a su equipo y se aplica AL ACEPTAR (M10.3): ajustes de permisos y departamentos. `cancelled` marca una invitación cancelada. */
+export interface MemberSetup {
+  grant: string[];
+  deny: string[];
+  queue_ids: string[];
+  cancelled?: boolean;
+}
+const setupOf = (raw: unknown): MemberSetup | null => {
+  if (raw === null || typeof raw !== 'object') return null;
+  const o = raw as Record<string, unknown>;
+  const list = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+  return { grant: list(o['grant']), deny: list(o['deny']), queue_ids: list(o['queue_ids']), ...(o['cancelled'] === true ? { cancelled: true } : {}) };
+};
+
+export interface MemberInvitationView {
+  id: string;
+  email: string;
+  role: 'client_admin' | 'advisor';
+  expires_at: string;
+  expired: boolean;
+  sent_count: number;
+  last_sent_at: string;
+  setup: { grant: string[]; deny: string[]; queue_ids: string[] };
+}
+
 /** Quién crea o reenvía: el Súper Admin (plataforma) o una agencia que registra a un cliente de su cartera (ADR-41). */
 type Origin = { by: 'platform'; actor: string } | { by: 'agency'; actor: string; agencyId: string };
 
@@ -63,6 +90,7 @@ type Loaded = {
   role: string;
   invitedBy: string;
   expiresAt: Date;
+  setup: MemberSetup | null;
 };
 
 /**
@@ -184,6 +212,9 @@ export class InvitationsService {
         .where(and(eq(invitations.organizationId, orgId), isNull(invitations.consumedAt)))
         .for('update', { of: invitations })
         .limit(1);
+      // Una empresa con un administrador activo ya no está «invitada»: lo pendiente son invitaciones de equipo (se reenvían desde «Usuarios»)
+      const [active] = await tx.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.organizationId, orgId), isNull(organizationMembers.revokedAt), eq(organizationMembers.role, 'client_admin'))).limit(1);
+      if (active) throw new ConflictError('INVITATION_ALREADY_ACCEPTED', 'La invitación ya fue aceptada');
       if (!row || row.orgDeleted) {
         // Distingue «no existe» de «ya aceptada» sin filtrar nada más: el Súper Admin ya ve todas las empresas
         const [any] = await tx.select({ id: invitations.id }).from(invitations).where(eq(invitations.organizationId, orgId)).limit(1);
@@ -249,7 +280,7 @@ export class InvitationsService {
       newHash = await this.hasher.hash(input.password);
     }
 
-    type Outcome = { kind: 'ok'; created: boolean; email: string } | { kind: 'bad_password' } | { kind: 'conflict' };
+    type Outcome = { kind: 'ok'; created: boolean; email: string; orgId: string; userId: string; setup: MemberSetup | null } | { kind: 'bad_password' } | { kind: 'conflict' };
     const out = await this.db.withIdentity(async (tx): Promise<Outcome> => {
       const inv = await this.loadValid(tx, parsed.sessionId, parsed.hash, true);
       const now = new Date();
@@ -281,7 +312,22 @@ export class InvitationsService {
         .from(organizationMembers)
         .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.organizationId, inv.organizationId), isNull(organizationMembers.revokedAt)))
         .limit(1);
-      if (!member) await tx.insert(organizationMembers).values({ userId, organizationId: inv.organizationId, role: inv.role, grantedBy: inv.invitedBy });
+      let membershipId = member?.id;
+      if (!member) {
+        const [m] = await tx.insert(organizationMembers).values({ userId, organizationId: inv.organizationId, role: inv.role, grantedBy: inv.invitedBy }).returning({ id: organizationMembers.id });
+        membershipId = m!.id;
+        // Lo que el administrador eligió al invitar (M10.3): los ajustes se aplican dentro del techo del rol; lo que no cabe se descarta (un dato indebido no concede nada)
+        const setup = inv.setup;
+        if (setup && isOverrideRole(inv.role)) {
+          const role = inv.role;
+          const rows = [
+            ...setup.grant.filter((k): k is PermissionKey => isPermissionKey(k) && isGrantable(role, k)).map((k) => ({ membershipId: membershipId!, permissionKey: k, effect: 'grant', grantedBy: inv.invitedBy })),
+            ...setup.deny.filter((k): k is PermissionKey => isPermissionKey(k) && !(k === 'users.manage')).map((k) => ({ membershipId: membershipId!, permissionKey: k, effect: 'deny', grantedBy: inv.invitedBy })),
+          ];
+          if (rows.length > 0) await tx.insert(memberPermissions).values(rows).onConflictDoNothing();
+        }
+        if (inv.role === 'client_admin' || inv.role === 'advisor') await tx.insert(memberHistory).values({ organizationId: inv.organizationId, userId, changedBy: userId, kind: 'invited', before: null, after: { event: 'accepted', role: inv.role } });
+      }
       // Quien entra a una AGENCIA recibe acceso a los clientes que ya estén en su cartera (invariante de ADR-40)
       if (inv.role === 'agency') await this.agencyAccess.reconcileAgency(tx, inv.organizationId, inv.invitedBy, now);
       // Sin plan, la prueba de 7 días empieza AL ACEPTAR (ADR-23 #2 / ADR-39): el dueño ya demostró el control del correo
@@ -296,7 +342,7 @@ export class InvitationsService {
         .where(and(eq(invitations.id, inv.id), isNull(invitations.consumedAt)))
         .returning({ id: invitations.id });
       if (used.length === 0) throw new InvalidInvitationError();
-      return { kind: 'ok', created, email: inv.email };
+      return { kind: 'ok', created, email: inv.email, orgId: inv.organizationId, userId, setup: inv.setup };
     });
 
     if (out.kind === 'bad_password') {
@@ -305,7 +351,109 @@ export class InvitationsService {
     }
     if (out.kind === 'conflict') throw new ConflictError('CONFLICT', 'La cuenta cambió mientras se procesaba la solicitud. Vuelve a intentarlo');
     if (!out.created) await this.throttle.reset(eKey);
+    // Los departamentos elegidos al invitar son de negocio: se aplican ya confirmada la aceptación (si falla, la persona entra igual y el administrador los pone a mano)
+    if (out.setup && out.setup.queue_ids.length > 0) {
+      await memberJoined.emit({ organizationId: out.orgId, userId: out.userId, setup: { grant: out.setup.grant, deny: out.setup.deny, queue_ids: out.setup.queue_ids } }, (err) => this.log.error({ err: err instanceof Error ? err.message : 'desconocido' }, 'no se pudieron aplicar los departamentos de la invitación'));
+    }
     return { status: 'accepted', email: out.email, account_created: out.created };
+  }
+
+  // ── Equipo de una empresa (M10.3, ADR-56 B3): lo hace un administrador con `users.manage` ───────────────────────────────
+
+  /** Invitaciones de equipo pendientes de la empresa del contexto (no aceptadas ni canceladas). */
+  async listMemberInvitations(): Promise<MemberInvitationView[]> {
+    const org = TenantContext.current().organizationId;
+    const rows = await this.db.withIdentity((tx) =>
+      tx.select().from(invitations).where(and(eq(invitations.organizationId, org), isNull(invitations.consumedAt))).orderBy(sql`${invitations.createdAt} DESC`),
+    );
+    const now = Date.now();
+    return rows
+      .filter((r) => (r.role === 'client_admin' || r.role === 'advisor') && !setupOf(r.setup)?.cancelled)
+      .map((r) => {
+        const setup = setupOf(r.setup) ?? { grant: [], deny: [], queue_ids: [] };
+        return { id: r.id, email: r.email, role: r.role as 'client_admin' | 'advisor', expires_at: r.expiresAt.toISOString(), expired: r.expiresAt.getTime() <= now, sent_count: r.sentCount, last_sent_at: r.lastSentAt.toISOString(), setup: { grant: setup.grant, deny: setup.deny, queue_ids: setup.queue_ids } };
+      });
+  }
+
+  /**
+   * Invita a una persona al equipo de la empresa del contexto con el rol y los ajustes elegidos (que quien invita debe poder conceder: `holder` = sus permisos). Mismo token,
+   * caducidad y entrega que ADR-39. Un correo que ya es miembro ACTIVO de la empresa es un 409; uno desactivado o quitado se reactiva al aceptar; el de un Súper Admin
+   * se rechaza (una cuenta de plataforma no es miembro de un cliente). La cuenta existente confirma con su contraseña al aceptar y no se duplica.
+   */
+  async inviteMember(input: { email: string; role: 'client_admin' | 'advisor'; setup: { grant: PermissionKey[]; deny: PermissionKey[]; queue_ids: string[] } }, holder: ReadonlySet<PermissionKey>): Promise<InvitationIssued & { id: string }> {
+    const c = TenantContext.current();
+    if (!c.userId) throw new ForbiddenError();
+    const orgId = c.organizationId;
+    const actor = c.userId;
+    const linkBase = this.linkBase();
+    const issues = validateOverrides(input.role, { grant: input.setup.grant, deny: input.setup.deny }, holder);
+    if (issues.length > 0) throw new ValidationError(issues.map((i) => ({ path: `permissions.${i.key}`, code: i.code.toLowerCase(), message: i.message })));
+    const out = await this.db.withIdentity(async (tx) => {
+      const [org] = await tx.select({ name: organizations.name, kind: organizations.kind, status: organizations.status, deletedAt: organizations.deletedAt }).from(organizations).where(eq(organizations.id, orgId)).limit(1);
+      if (!org || org.kind !== 'client' || org.status !== 'active' || org.deletedAt) throw new NotFoundError();
+      const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.email, input.email)).limit(1);
+      if (u) {
+        const [sa] = await tx.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.userId, u.id), eq(organizationMembers.role, 'super_admin'), isNull(organizationMembers.revokedAt))).limit(1);
+        if (sa) throw new AppError(400, 'INVITE_NOT_ALLOWED', 'No se puede invitar a ese correo');
+        const [member] = await tx.select({ id: organizationMembers.id }).from(organizationMembers).where(and(eq(organizationMembers.userId, u.id), eq(organizationMembers.organizationId, orgId), isNull(organizationMembers.revokedAt))).limit(1);
+        if (member) throw new ConflictError('MEMBER_EXISTS', 'Esa persona ya forma parte de tu equipo');
+      }
+      const issued = await this.issue(tx, { organizationId: orgId, email: input.email, role: input.role, invitedBy: actor, setup: { grant: input.setup.grant, deny: input.setup.deny, queue_ids: input.setup.queue_ids } });
+      await tx.insert(memberHistory).values({ organizationId: orgId, userId: u?.id ?? null, changedBy: actor, kind: 'invited', before: null, after: { event: 'sent', email: input.email, role: input.role } });
+      return { orgName: org.name, issued };
+    });
+    const invitation = await this.deliver(linkBase, input.email, out.orgName, out.issued, 'client');
+    await this.safely('team.invited', () => this.clientAudit.record({ entityType: 'user', entityId: out.issued.id, field: 'invitation', newValue: { event: 'invited', email: input.email, role: input.role, delivery: invitation.delivery } }));
+    return { ...invitation, id: out.issued.id };
+  }
+
+  /** Reenvía una invitación de equipo pendiente: reemplaza el token (el enlace anterior deja de valer) y conserva rol y ajustes. Respeta la espera entre reenvíos. */
+  async resendMemberInvitation(invitationId: string): Promise<InvitationIssued & { id: string }> {
+    const c = TenantContext.current();
+    if (!c.userId) throw new ForbiddenError();
+    const orgId = c.organizationId;
+    const linkBase = this.linkBase();
+    const out = await this.db.withIdentity(async (tx) => {
+      const [row] = await tx
+        .select({ id: invitations.id, email: invitations.email, role: invitations.role, setup: invitations.setup, lastSentAt: invitations.lastSentAt, orgName: organizations.name })
+        .from(invitations)
+        .innerJoin(organizations, eq(organizations.id, invitations.organizationId))
+        .where(and(eq(invitations.id, invitationId), eq(invitations.organizationId, orgId), isNull(invitations.consumedAt)))
+        .for('update', { of: invitations })
+        .limit(1);
+      // 404 uniforme: de otra empresa, ya aceptada, cancelada o inexistente
+      if (!row || (row.role !== 'client_admin' && row.role !== 'advisor') || setupOf(row.setup)?.cancelled) throw new NotFoundError();
+      const wait = this.cfg.invite.resendCooldownMs - (Date.now() - row.lastSentAt.getTime());
+      if (wait > 0) throw new TooManyAttemptsError(Math.ceil(wait / 1000));
+      const issued = await this.issue(tx, { organizationId: orgId, email: row.email, role: row.role, invitedBy: c.userId!, setup: setupOf(row.setup) });
+      await tx.insert(memberHistory).values({ organizationId: orgId, userId: null, changedBy: c.userId, kind: 'invited', before: null, after: { event: 'resent', email: row.email, role: row.role } });
+      return { orgName: row.orgName, email: row.email, issued };
+    });
+    const invitation = await this.deliver(linkBase, out.email, out.orgName, out.issued, 'client');
+    await this.safely('team.invitation_resent', () => this.clientAudit.record({ entityType: 'user', entityId: out.issued.id, field: 'invitation', newValue: { event: 'resent', email: out.email, delivery: invitation.delivery } }));
+    return { ...invitation, id: out.issued.id };
+  }
+
+  /** Cancela una invitación de equipo pendiente: el enlace deja de valer. Cancelar una que no existe, de otra empresa o ya aceptada es un 404. */
+  async cancelMemberInvitation(invitationId: string): Promise<{ id: string; cancelled: true }> {
+    const c = TenantContext.current();
+    if (!c.userId) throw new ForbiddenError();
+    const orgId = c.organizationId;
+    const email = await this.db.withIdentity(async (tx) => {
+      const [row] = await tx
+        .select({ email: invitations.email, role: invitations.role, setup: invitations.setup })
+        .from(invitations)
+        .where(and(eq(invitations.id, invitationId), eq(invitations.organizationId, orgId), isNull(invitations.consumedAt)))
+        .for('update')
+        .limit(1);
+      if (!row || (row.role !== 'client_admin' && row.role !== 'advisor') || setupOf(row.setup)?.cancelled) throw new NotFoundError();
+      const cur = setupOf(row.setup) ?? { grant: [], deny: [], queue_ids: [] };
+      await tx.update(invitations).set({ setup: { ...cur, cancelled: true }, expiresAt: new Date() }).where(eq(invitations.id, invitationId));
+      await tx.insert(memberHistory).values({ organizationId: orgId, userId: null, changedBy: c.userId, kind: 'invitation_cancelled', before: { email: row.email, role: row.role }, after: null });
+      return row.email;
+    });
+    await this.safely('team.invitation_cancelled', () => this.clientAudit.record({ entityType: 'user', entityId: invitationId, field: 'invitation', newValue: { event: 'cancelled', email } }));
+    return { id: invitationId, cancelled: true };
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────
@@ -322,17 +470,17 @@ export class InvitationsService {
   }
 
   /** Crea o reemplaza la invitación de (organización, correo). Devuelve el token en claro SOLO para el correo/enlace. */
-  private async issue(tx: IdentityTx, input: { organizationId: string; email: string; role: string; invitedBy: string }): Promise<{ token: string; expiresAt: Date }> {
+  private async issue(tx: IdentityTx, input: { organizationId: string; email: string; role: string; invitedBy: string; setup?: MemberSetup | null }): Promise<{ token: string; expiresAt: Date; id: string }> {
     const id = uuidv7();
     const secret = randomBytes(32).toString('base64url');
     const now = new Date();
     const expiresAt = new Date(now.getTime() + this.cfg.invite.ttlMs);
-    const values = { id, tokenHash: hashSecret(secret), expiresAt, consumedAt: null, acceptedUserId: null, invitedBy: input.invitedBy, role: input.role, lastSentAt: now };
+    const values = { id, tokenHash: hashSecret(secret), expiresAt, consumedAt: null, acceptedUserId: null, invitedBy: input.invitedBy, role: input.role, lastSentAt: now, ...(input.setup !== undefined ? { setup: input.setup } : {}) };
     await tx
       .insert(invitations)
       .values({ organizationId: input.organizationId, email: input.email, ...values })
       .onConflictDoUpdate({ target: [invitations.organizationId, invitations.email], set: { ...values, sentCount: sql`${invitations.sentCount} + 1` } });
-    return { token: `${id}.${secret}`, expiresAt };
+    return { token: `${id}.${secret}`, expiresAt, id };
   }
 
   /** Lee y valida la invitación. Con `lock`, bloquea su fila (FOR UPDATE). Todo fallo de token es el mismo 400, salvo «vencida» (token auténtico). */
@@ -351,6 +499,7 @@ export class InvitationsService {
         tokenHash: invitations.tokenHash,
         expiresAt: invitations.expiresAt,
         consumedAt: invitations.consumedAt,
+        setup: invitations.setup,
       })
       .from(invitations)
       .innerJoin(organizations, eq(organizations.id, invitations.organizationId))
@@ -359,7 +508,8 @@ export class InvitationsService {
     const [row] = await (lock ? q.for('update', { of: invitations }) : q);
     if (!row || !sameHash(row.tokenHash, hash) || row.consumedAt || row.orgStatus !== 'active' || row.orgDeleted) throw new InvalidInvitationError();
     if (row.expiresAt.getTime() <= Date.now()) throw new InvitationExpiredError();
-    return { id: row.id, organizationId: row.organizationId, orgName: row.orgName, orgPlanId: row.orgPlanId, email: row.email, role: row.role, invitedBy: row.invitedBy, expiresAt: row.expiresAt };
+    if (setupOf(row.setup)?.cancelled) throw new InvalidInvitationError();
+    return { id: row.id, organizationId: row.organizationId, orgName: row.orgName, orgPlanId: row.orgPlanId, email: row.email, role: row.role, invitedBy: row.invitedBy, expiresAt: row.expiresAt, setup: setupOf(row.setup) };
   }
 
   /** Envía el correo (si hay proveedor) DESPUÉS de confirmar la transacción. El enlace solo se devuelve cuando el correo no salió. */

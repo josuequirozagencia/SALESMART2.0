@@ -21,11 +21,12 @@ import { PipelinesModule } from './modules/pipelines';
 import { AnalyticsModule } from './modules/analytics';
 import { AppointmentsModule } from './modules/appointments';
 import { QueuesModule } from './modules/queues';
+import { TeamModule } from './modules/team';
 import { SalesModule } from './modules/sales';
 import { RealtimeModule } from './modules/realtime';
 import { SlaModule } from './modules/sla';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), AiModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), AiModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

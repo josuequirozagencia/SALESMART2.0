@@ -355,10 +355,17 @@ Agentes (galería, 5 pestañas, foto), simulador de prueba, Knowledge Base con R
 `EvolutionProvider`, formularios embebibles (`embed.js`), motor trigger/condición/acción.
 *Avance:* plan por rebanadas en `docs/M9_PLAN.md` (ADR-54; decisiones del plan APROBADAS el 2026-10-27; el QR queda al final y condicionado al spike de ADR-31, que no se ha ejecutado). M9.1 (formularios: constructor y envío público, sin conversación) construida el 2026-10-27. M9.2 (`embed.js` servido por nosotros, página alojada e iframe con política de contenido, y seguimiento automático: tarea y plantilla de WhatsApp) construida el 2026-10-27. M9.3 (automatizaciones: modelo y motor, sin pantallas: bus de hechos, reglas con condiciones y nueve acciones, detección de ciclos y tope por contacto) construida el 2026-10-27; precisiones APROBADAS. M9.4 (pantallas de automatizaciones: lista, editor por pasos, prueba en seco e historial) construida el 2026-10-27; precisiones APROBADAS. M9.5a (esperar, ejecutar otra regla y activar al agente de IA) construida el 2026-10-27; precisiones APROBADAS; M9.5b (llamada HTTP con lista de permitidos y salida segura, regla 10) construida el 2026-10-27; precisiones APROBADAS.
 
-**M10 — Telefonía y comisiones**
-`TwilioProvider`, WebRTC, grabación; comisiones con planes, split y reversión.
+**M10 — Equipo, departamentos y permisos** (ADR-56; plan M10.1–M10.6, ver `docs/ADR.md`)
+Departamentos (asistente), empresas dentro de Contactos, usuarios con permisos por persona (techo por rol; el asesor nunca recibe `*.view_all`), «Ver como», datos de ejemplo y «Primeros pasos».
+*Avance:* M10.1 y M10.2 mergeadas el 2026-10-30; M10.3 (modelo y API de usuarios) construida el 2026-10-30.
 
-**M11 — Voz IA y llamadas masivas (V2)**
+**M11 — Comisiones** (antes «M10 — Telefonía y comisiones»; confirmado por el responsable el 2026-10-30)
+Comisiones con planes, split y reversión. Requiere su propio ADR antes de programar.
+
+**Telefonía (DIFERIDA por decisión del responsable, 2026-10-30)**
+`TwilioProvider`, WebRTC, grabación. Sin hito asignado hasta que se reactive.
+
+**M12 — Voz IA y llamadas masivas (V2)** (antes M11)
 Tras el PoC Retell vs. Vapi.
 
 **Billing y planes:** se inserta antes del primer cliente de pago; depende de decidir la pasarela.
@@ -373,7 +380,7 @@ Tras el PoC Retell vs. Vapi.
 | 2 | ORM y `SET LOCAL` para RLS (spike 1 día) | ABIERTO | M0 |
 | 3 | Proveedor de correo transaccional | **RESUELTO: Resend (ADR-37, 2026-10-11)**; falta validar el envío real y el DNS de `growthconsulting.digital` | Despliegue |
 | 4 | Pasarela de pago | ABIERTO | Billing, recarga de créditos |
-| 5 | PoC Retell vs. Vapi | ABIERTO | M11 |
+| 5 | PoC Retell vs. Vapi | ABIERTO | M12 |
 | 6 | Retención de grabaciones y transcripciones | ABIERTO | Telefonía |
 | 7 | Prueba real en Events Manager: ¿se puede retirar un evento? | ABIERTO | M6 |
 | 8 | Valores de ejemplo: 1000 créditos de bienvenida, $0,01/crédito, margen 100 %, retención 30 días de prueba | PROPUESTA | Billing |

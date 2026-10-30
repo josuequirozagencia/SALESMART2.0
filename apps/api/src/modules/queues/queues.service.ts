@@ -213,6 +213,66 @@ export class QueuesService {
     return this.one(id);
   }
 
+  /** ¿Existen todos estos departamentos (no archivados) en la empresa del contexto? */
+  async allExist(ids: readonly string[]): Promise<boolean> {
+    const want = [...new Set(ids)];
+    if (want.length === 0) return true;
+    const rows = await this.db.withTenant((tx) => tx.select({ id: queues.id }).from(queues).where(and(inArray(queues.id, want), isNull(queues.deletedAt))));
+    return rows.length === want.length;
+  }
+
+  /** Departamentos ACTIVOS de cada persona (para la pantalla de usuarios, M10.3): solo los no archivados donde participa. */
+  async departmentsOf(userIds: readonly string[]): Promise<Map<string, Array<{ id: string; name: string; color: string }>>> {
+    const out = new Map<string, Array<{ id: string; name: string; color: string }>>();
+    if (userIds.length === 0) return out;
+    const rows = await this.db.withTenant((tx) =>
+      tx
+        .select({ userId: queueMembers.userId, id: queues.id, name: queues.name, color: queues.color })
+        .from(queueMembers)
+        .innerJoin(queues, and(eq(queues.organizationId, queueMembers.organizationId), eq(queues.id, queueMembers.queueId)))
+        .where(and(inArray(queueMembers.userId, [...userIds]), eq(queueMembers.active, true), isNull(queues.deletedAt)))
+        .orderBy(asc(queues.name)),
+    );
+    for (const r of rows) out.set(r.userId, [...(out.get(r.userId) ?? []), { id: r.id, name: r.name, color: r.color }]);
+    return out;
+  }
+
+  /**
+   * Reemplaza los departamentos de UNA persona (M10.3, ADR-56 B3): queda activa en los elegidos (conserva su peso si ya estaba) e inactiva en los demás. Un departamento que no
+   * existe o está archivado es un 400. Se audita por departamento. `queueIds` vacío = la saca de todos (al desactivarla o quitarla del equipo). La persona debe ser
+   * miembro de la empresa: quien llama ya lo comprobó en identidad (este servicio no lee la identidad dentro de la transacción de negocio).
+   */
+  async setUserDepartments(userId: string, queueIds: readonly string[]): Promise<{ before: string[]; after: string[] }> {
+    const want = [...new Set(queueIds)];
+    return this.db.withTenant(async (tx) => {
+      if (want.length > 0) {
+        const found = await tx.select({ id: queues.id }).from(queues).where(and(inArray(queues.id, want), isNull(queues.deletedAt)));
+        if (found.length !== want.length) throw new ValidationError([{ path: 'queue_ids', code: 'not_found', message: 'Alguno de los departamentos no existe o está archivado' }]);
+      }
+      const rows = await tx.select().from(queueMembers).where(eq(queueMembers.userId, userId));
+      const byQueue = new Map(rows.map((r) => [r.queueId, r]));
+      const before = rows.filter((r) => r.active).map((r) => r.queueId).sort();
+      const now = new Date();
+      for (const q of want) {
+        const cur = byQueue.get(q);
+        if (cur?.active) continue;
+        await tx
+          .insert(queueMembers)
+          .values({ queueId: q, userId, active: true, weight: cur?.weight ?? 1 })
+          .onConflictDoUpdate({ target: [queueMembers.organizationId, queueMembers.queueId, queueMembers.userId], set: { active: true, updatedAt: now } });
+        await tx.update(queues).set({ updatedAt: now }).where(eq(queues.id, q));
+        await writeAudit(tx, { entityType: AUDIT, entityId: q, field: 'members', oldValue: [{ user_id: userId, active: cur?.active ?? false, weight: cur?.weight ?? 1 }], newValue: [{ user_id: userId, active: true, weight: cur?.weight ?? 1 }] });
+      }
+      for (const r of rows) {
+        if (!r.active || want.includes(r.queueId)) continue;
+        await tx.update(queueMembers).set({ active: false, updatedAt: now }).where(and(eq(queueMembers.queueId, r.queueId), eq(queueMembers.userId, userId)));
+        await tx.update(queues).set({ updatedAt: now }).where(eq(queues.id, r.queueId));
+        await writeAudit(tx, { entityType: AUDIT, entityId: r.queueId, field: 'members', oldValue: [{ user_id: userId, active: true, weight: r.weight }], newValue: [{ user_id: userId, active: false, weight: r.weight }] });
+      }
+      return { before, after: [...want].sort() };
+    });
+  }
+
   /** Archiva la cola (borrado lógico). No se puede mientras una conexión la use como cola por defecto. */
   async archive(id: string): Promise<{ id: string; archived: true }> {
     await this.db.withTenant(async (tx) => {

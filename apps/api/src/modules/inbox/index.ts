@@ -1,5 +1,6 @@
 export { InboxModule } from './inbox.module';
 export { OutboundJob } from './outbound.job';
+export { OwnerReleaseService, type ReleasePlan, type ReleaseResult } from './owner-release.service';
 export { SlaSweepJob } from './sla-sweep.job';
 export { ScheduledMessagesJob } from './scheduled-messages.job';
 export { ScheduledMessagesService, MIN_LEAD_MS, WINDOW_MARGIN_MS, MAX_PENDING_PER_CONVERSATION, type ScheduledView } from './scheduled-messages.service';

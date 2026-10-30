@@ -53,6 +53,6 @@ import { SignupService } from './signup/signup.service';
       inject: [APP_CONFIG],
     },
      IdentityCleanupJob, SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
-  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER],
+  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService],
 })
 export class AuthModule {}
