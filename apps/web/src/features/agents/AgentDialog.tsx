@@ -248,13 +248,13 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
       <section aria-label="Respuestas" className="grid gap-2">
         <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />Dividir las respuestas largas en varios mensajes</label>
         {split ? <Field label="Máximo de mensajes por respuesta">{(f) => <select {...f} className={selectCls} value={blocks} onChange={(e) => setBlocks(e.target.value)}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}</select>}</Field> : null}
-        <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />Responder a toda hora (también fuera del horario de la cola)</label>
+        <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} />Responder a toda hora (también fuera del horario del departamento)</label>
       </section>
       <section aria-label="Pasar con una persona" className="grid gap-2">
         <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={transfer} onChange={(e) => setTransfer(e.target.checked)} />Puede pasar la conversación a una persona del equipo</label>
         {transfer ? (
-          <Field label="Cola a la que pasa" hint="Sin cola, usa la de la conexión.">
-            {(f) => <select {...f} className={selectCls} value={queue} onChange={(e) => setQueue(e.target.value)}><option value="">La cola de la conexión</option>{o.queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}</select>}
+          <Field label="Departamento al que pasa" hint="Sin departamento, usa el de la conexión.">
+            {(f) => <select {...f} className={selectCls} value={queue} onChange={(e) => setQueue(e.target.value)}><option value="">El departamento de la conexión</option>{o.queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}</select>}
           </Field>
         ) : null}
       </section>

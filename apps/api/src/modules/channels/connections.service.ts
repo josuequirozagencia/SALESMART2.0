@@ -260,7 +260,7 @@ export class ConnectionsService {
   /** La cola existe en la empresa y no está archivada (la clave foránea compuesta ya impide una de otra empresa). */
   private async requireQueue(tx: TenantTx, id: string): Promise<void> {
     const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, id), isNull(queues.deletedAt))).limit(1);
-    if (!q) throw new AppError(400, 'CHANNEL_QUEUE_NOT_FOUND', 'Esa cola no existe o está archivada');
+    if (!q) throw new AppError(400, 'CHANNEL_QUEUE_NOT_FOUND', 'Ese departamento no existe o está archivado');
   }
 
   private nameTaken(e: unknown): ConflictError | undefined {

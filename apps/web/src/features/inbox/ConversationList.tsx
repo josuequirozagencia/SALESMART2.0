@@ -103,8 +103,8 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
               </label>
             ) : null}
             {opts && opts.queues.length > 0 ? (
-              <label className="grid gap-1 text-[12px] font-semibold">Cola
-                <select aria-label="Cola" value={filters.queue} onChange={(e) => set({ queue: e.target.value })} className={`${selectCls} font-normal`}>
+              <label className="grid gap-1 text-[12px] font-semibold">Departamento
+                <select aria-label="Departamento" value={filters.queue} onChange={(e) => set({ queue: e.target.value })} className={`${selectCls} font-normal`}>
                   <option value="">Todas</option>
                   {opts.queues.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
                 </select>

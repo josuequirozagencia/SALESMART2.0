@@ -310,7 +310,7 @@ describe('Agentes IA · Comportamiento', () => {
     expect(conns.getByText('Lo atiende Marcos')).toBeInTheDocument();
     await userEvent.click(d.getByLabelText('Dividir las respuestas largas en varios mensajes'));
     await userEvent.selectOptions(d.getByLabelText('Máximo de mensajes por respuesta'), '4');
-    await userEvent.selectOptions(d.getByLabelText('Cola a la que pasa'), 'q1');
+    await userEvent.selectOptions(d.getByLabelText('Departamento al que pasa'), 'q1');
     await userEvent.click(d.getByLabelText(/Responder a toda hora/));
     await userEvent.click(conns.getByRole('checkbox', { name: 'Atender «WhatsApp Norte»' }));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
@@ -356,7 +356,7 @@ describe('Agentes IA · Comportamiento', () => {
     expect(d.getByRole('checkbox', { name: 'Puede llenar «Campo 0»' })).toBeEnabled();
   });
 
-  it('apagar «pasar con una persona» quita la cola; un conflicto de conexión se muestra', async () => {
+  it('apagar «pasar con una persona» quital departamento; un conflicto de conexión se muestra', async () => {
     const w = world({ agents: [agent({ transfer_queue_id: 'q1' })] });
     const routes = server(w);
     routes['PUT /agents/a1/channels'] = () => err(409, 'CHANNEL_HAS_AGENT', 'Una de esas conexiones ya la atiende el agente «Marcos»: quítasela primero');
@@ -365,7 +365,7 @@ describe('Agentes IA · Comportamiento', () => {
     const d = await open();
     await goTab(d, 'Comportamiento');
     await userEvent.click(await d.findByLabelText('Puede pasar la conversación a una persona del equipo'));
-    expect(d.queryByLabelText('Cola a la que pasa')).toBeNull();
+    expect(d.queryByLabelText('Departamento al que pasa')).toBeNull();
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ transfer_enabled: false, transfer_queue_id: null }));
     expect(await d.findByText(/ya la atiende el agente «Marcos»/)).toBeInTheDocument();

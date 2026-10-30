@@ -42,7 +42,7 @@ function ChannelCard({ channel: c, queueName, onEdit, onTemplates, onError }: { 
         <div className="flex gap-1.5"><dt className="text-muted">Phone number ID</dt><dd className="font-mono">{c.phone_number_id}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Token</dt><dd className="font-mono">{c.token_last4 ? `••••${c.token_last4}` : 'sin token'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Última comprobación</dt><dd>{c.last_check_at ? shortDateTime(c.last_check_at) : 'nunca'}</dd></div>
-        <div className="flex gap-1.5"><dt className="text-muted">Cola</dt><dd>{queueName ?? 'sin cola'}</dd></div>
+        <div className="flex gap-1.5"><dt className="text-muted">Departamento</dt><dd>{queueName ?? 'sin departamento'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso de Meta</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
       </dl>
       {confirm ? (

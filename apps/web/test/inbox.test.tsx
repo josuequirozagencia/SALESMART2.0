@@ -173,7 +173,7 @@ describe('Inbox · listado', () => {
     await waitFor(() => expect(api.last('GET /conversations')!.query.get('q')).toBe('ana'));
     await userEvent.click(screen.getByRole('button', { name: /Filtros/ }));
     await userEvent.selectOptions(await screen.findByRole('combobox', { name: 'Responsable' }), 'u2');
-    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Cola' }), 'q2');
+    await userEvent.selectOptions(screen.getByRole('combobox', { name: 'Departamento' }), 'q2');
     await userEvent.click(screen.getByRole('checkbox', { name: 'Solo no leídas' }));
     await waitFor(() => {
       const q = api.last('GET /conversations')!.query;
@@ -192,7 +192,7 @@ describe('Inbox · listado', () => {
     renderApp('/inbox');
     await screen.findByRole('link', { name: 'Ana Torres' });
     await userEvent.click(screen.getByRole('button', { name: /Filtros/ }));
-    expect(await screen.findByRole('combobox', { name: 'Cola' })).toBeInTheDocument();
+    expect(await screen.findByRole('combobox', { name: 'Departamento' })).toBeInTheDocument();
     expect(screen.queryByRole('combobox', { name: 'Responsable' })).not.toBeInTheDocument();
   });
 
@@ -477,7 +477,7 @@ describe('Inbox · acciones', () => {
 });
 
 describe('Inbox · mensajes automáticos', () => {
-  it('un mensaje automático de la cola (saludo, fuera de horario) se ve como «Mensaje automático», sin nombre de persona, y con su estado de envío', async () => {
+  it('un mensaje automático del departamento (saludo, fuera de horario) se ve como «Mensaje automático», sin nombre de persona, y con su estado de envío', async () => {
     const w = world({ messages: { c1: [msg({ id: 'm1' }), msg({ id: 'm2', direction: 'out', sender_type: 'automation', author: null, text: 'Hola, gracias por escribir a Barbería Norte.', status: 'sent', sent_at: ago(4 * MIN) })] } });
     mockApi(server(w));
     renderApp('/inbox/c1');

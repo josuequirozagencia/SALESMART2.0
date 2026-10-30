@@ -67,7 +67,7 @@ export function ProductsSection({ queueId }: { queueId: string }) {
     <section className="grid gap-3 rounded-2xl border border-line p-4" aria-label="Catálogo de productos y servicios">
       <div>
         <span className="text-[13.5px] font-semibold">Catálogo de productos y servicios</span>
-        <p className="text-[12.5px] text-muted">Lo que se puede vender desde esta cola. El precio es el sugerido (en {currency}); al registrar la venta se puede ajustar. Una cola sin productos activos no puede vender.</p>
+        <p className="text-[12.5px] text-muted">Lo que se puede vender desde este departamento. El precio es el sugerido (en {currency}); al registrar la venta se puede ajustar. Un departamento sin productos activos no puede vender.</p>
       </div>
 
       {products.isPending ? <p className="text-[13px] text-muted">Cargando el catálogo…</p> : null}
@@ -75,7 +75,7 @@ export function ProductsSection({ queueId }: { queueId: string }) {
       {data && data.items.length === 0 ? <p className="text-[13px] text-muted">Todavía no hay productos. Agrega el primero abajo.</p> : null}
 
       {data && data.items.length > 0 ? (
-        <ul className="grid gap-2" aria-label="Productos de la cola">
+        <ul className="grid gap-2" aria-label="Productos del departamento">
           {data.items.map((p) => (
             <li key={p.id} className={`grid gap-2 rounded-xl border border-line px-3 py-2 ${p.active ? '' : 'opacity-60'}`}>
               {editing === p.id ? (

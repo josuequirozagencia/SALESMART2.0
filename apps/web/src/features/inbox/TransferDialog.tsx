@@ -21,8 +21,8 @@ function Person({ p, checked, disabled, hint, onPick, name }: { p: PersonOption;
         <span className="truncate text-[13.5px] font-semibold">{p.name}{p.is_self ? ' (tú)' : ''}</span>
         <span className="text-[12px] text-muted">{ROLE_LABEL[p.role] ?? p.role} · {p.open_count === 1 ? '1 conversación abierta' : `${p.open_count} conversaciones abiertas`}</span>
       </span>
-      {p.in_queue === true ? <Pill kind="ok">En la cola</Pill> : null}
-      {p.in_queue === false ? <Pill kind="warn">Fuera de la cola</Pill> : null}
+      {p.in_queue === true ? <Pill kind="ok">En el departamento</Pill> : null}
+      {p.in_queue === false ? <Pill kind="warn">Fuera del departamento</Pill> : null}
       {hint ? <Pill kind="muted">{hint}</Pill> : null}
     </label>
   );
@@ -82,7 +82,7 @@ export function TransferDialog({ c, onClose, onTransferred }: { c: Conversation;
           })}
         </fieldset>
       ) : null}
-      {chosen && chosen.in_queue === false && queueName ? <Alert kind="info">{chosen.name} no está en la cola «{queueName}». Puedes continuar de todos modos.</Alert> : null}
+      {chosen && chosen.in_queue === false && queueName ? <Alert kind="info">{chosen.name} no está en el departamento «{queueName}». Puedes continuar de todos modos.</Alert> : null}
 
       {mode === 'transfer' && c.owner ? (
         <fieldset className="grid gap-1 border-0 p-0">

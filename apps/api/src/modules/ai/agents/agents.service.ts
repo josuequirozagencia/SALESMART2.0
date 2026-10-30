@@ -181,7 +181,7 @@ export class AgentsService {
         if (patch.model !== undefined && patch.model !== cur.model && !models.includes(patch.model)) throw new ValidationError([{ path: 'model', code: 'not_available', message: 'Ese modelo no está disponible' }]);
         if (patch.transfer_queue_id) {
           const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, patch.transfer_queue_id), isNull(queues.deletedAt))).limit(1);
-          if (!q) throw new ValidationError([{ path: 'transfer_queue_id', code: 'not_found', message: 'La cola no existe' }]);
+          if (!q) throw new ValidationError([{ path: 'transfer_queue_id', code: 'not_found', message: 'El departamento no existe' }]);
         }
         if (patch.capture_fields !== undefined) {
           const active = new Set((await this.custom.labels(tx, 'contact')).map((f) => f.key));

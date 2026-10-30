@@ -15,7 +15,7 @@ const queue = (over: Partial<Queue> = {}): Queue => ({
 
 interface Calls { patches: unknown[]; puts: unknown[]; posts: unknown[]; sims: unknown[]; deletes: string[]; distributes: string[]; hours: unknown[] }
 
-/** Servidor de colas con estado. mockApi no admite rutas con parámetros: se enrutan una a una (q1, q2). */
+/** Servidor de departamentos con estado. mockApi no admite rutas con parámetros: se enrutan una a una (q1, q2). */
 function server(initial: Queue[], o: { max?: number; sim?: QueueSimulation; distribute?: { assigned: number; remaining: number }; del?: () => ReturnType<Handler> } = {}) {
   const st = { items: initial, calls: { patches: [], puts: [], posts: [], sims: [], deletes: [], distributes: [], hours: [] } as Calls, clock: 0 };
   const touch = (q: Queue): Queue => ({ ...q, updated_at: new Date(Date.UTC(2026, 9, 19, 12, 0, ++st.clock)).toISOString() });
@@ -62,20 +62,43 @@ const open = async (name: string) => {
   return within(await screen.findByRole('dialog', { name: `Configurar ${name}` }));
 };
 
-describe('Configuración › Colas', () => {
-  it('sin colas explica qué pasa y ofrece crear la primera; la pestaña lleva a /settings/queues', async () => {
+describe('Departamentos', () => {
+  it('sin departamentos explica qué pasa y ofrece crear el primero; el título es «Departamentos» y ya no hay pestaña de Configuración', async () => {
     mockApi(server([]).routes);
-    renderApp('/settings/queues');
-    expect(await screen.findByText(/Aún no hay colas/)).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Colas' })).toHaveAttribute('href', '/settings/queues');
-    expect(screen.getByRole('button', { name: 'Nueva cola' })).toBeEnabled();
+    renderApp('/departments');
+    expect(await screen.findByText(/Aún no hay departamentos/)).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Departamentos' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Nuevo departamento' })).toBeEnabled();
+  });
+
+  it('el menú lateral tiene «Departamentos» en el grupo «Equipo» para quien administra y no lo tiene quien no', async () => {
+    const s = server([queue()]);
+    s.routes['GET /custom-fields'] = () => ({ body: { items: [], access: { manage: true } } });
+    mockApi(s.routes);
+    renderApp('/departments');
+    const nav = within(await screen.findByRole('navigation', { name: 'Secciones' }));
+    expect(await nav.findByRole('link', { name: 'Departamentos' })).toHaveAttribute('href', '/departments');
+    expect(nav.getByText('Equipo')).toBeInTheDocument();
+    expect(nav.queryByRole('link', { name: 'Colas' })).toBeNull();
+  });
+
+  it('las direcciones viejas (/settings/queues y /queues) llevan a /departments', async () => {
+    for (const old of ['/settings/queues', '/queues']) {
+      vi.unstubAllGlobals();
+      resetWorld();
+      mockApi(server([queue()]).routes);
+      const { unmount } = renderApp(old);
+      expect(await screen.findByRole('heading', { name: 'Departamentos' })).toBeInTheDocument();
+      expect(await screen.findByRole('button', { name: 'Configurar Ventas' })).toBeInTheDocument();
+      unmount();
+    }
   });
 
   it('cada cola es una tarjeta: reparto activo o manual, asesores, modo, conexiones y los «sin asignar»', async () => {
     const q1 = queue({ distribution_on: true, mode: 'weighted', members: [member('u1', 'Alicia Torres', { active: true }), member('u2', 'Carolina Vera', { active: true }), member('u3', 'Eva Mora')], channels: [{ id: 'c1', name: 'Ventas WhatsApp' }], unassigned_count: 3 });
     const q2 = queue({ id: 'q2', name: 'Soporte' });
     mockApi(server([q1, q2]).routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const a = within(await screen.findByRole('button', { name: 'Configurar Ventas' }));
     expect(a.getByText('Reparto activo')).toBeInTheDocument();
     expect(a.getByText('2 asesores')).toBeInTheDocument();
@@ -87,47 +110,95 @@ describe('Configuración › Colas', () => {
     expect(b.queryByText(/sin asignar/)).not.toBeInTheDocument();
   });
 
-  it('crea una cola (valida el nombre) y abre su configuración', async () => {
+  const wizard = async () => {
+    await userEvent.click(await screen.findByRole('button', { name: 'Nuevo departamento' }));
+    return within(await screen.findByRole('dialog', { name: 'Nuevo departamento' }));
+  };
+
+  it('el asistente crea el departamento al terminar el primer paso (valida el nombre) y guarda cada paso al avanzar', async () => {
     const s = server([]);
+    s.routes['GET /queues'] = () => ({ body: { items: structuredClone(s.st.items.map((q) => ({ ...q, members: people() }))), limits: { max_queues: 20 } } });
     mockApi(s.routes);
-    renderApp('/settings/queues');
-    await userEvent.click(await screen.findByRole('button', { name: 'Nueva cola' }));
-    const d = within(await screen.findByRole('dialog', { name: 'Nueva cola' }));
-    await userEvent.click(d.getByRole('button', { name: 'Crear cola' }));
-    expect(d.getByText('Escribe el nombre de la cola')).toBeInTheDocument();
+    renderApp('/departments');
+    const d = await wizard();
+    expect(d.getByText(/Paso 1 de 4/)).toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Siguiente' }));
+    expect(d.getByText('Escribe el nombre del departamento')).toBeInTheDocument();
     expect(s.st.calls.posts).toEqual([]);
     await userEvent.type(d.getByLabelText('Nombre'), '  Ventas ');
     await userEvent.click(d.getByRole('radio', { name: 'Color #0b7a6b' }));
-    await userEvent.click(d.getByRole('button', { name: 'Crear cola' }));
-    expect(s.st.calls.posts).toEqual([{ name: 'Ventas', color: '#0b7a6b' }]);
+    await userEvent.click(d.getByRole('button', { name: 'Siguiente' }));
+    await waitFor(() => expect(s.st.calls.posts).toEqual([{ name: 'Ventas', color: '#0b7a6b' }]));
+    // paso 2: el equipo
+    expect(await d.findByText(/Paso 2 de 4/)).toBeInTheDocument();
+    await userEvent.click(await d.findByRole('checkbox', { name: 'Carolina Vera atiende este departamento' }));
+    await userEvent.click(d.getByRole('checkbox', { name: 'Eva Mora atiende este departamento' }));
+    await userEvent.click(d.getByRole('button', { name: 'Siguiente' }));
+    await waitFor(() => expect(s.st.calls.puts).toHaveLength(1));
+    expect((s.st.calls.puts[0] as { members: Array<{ user_id: string; active: boolean }> }).members.filter((m) => m.active).map((m) => m.user_id)).toEqual(['u2', 'u3']);
+    // paso 3: horario propio
+    expect(await d.findByText(/Paso 3 de 4/)).toBeInTheDocument();
+    await userEvent.click(d.getByRole('radio', { name: /Horario propio/ }));
+    await userEvent.click(d.getByRole('button', { name: 'Siguiente' }));
+    await waitFor(() => expect(s.st.calls.hours).toHaveLength(1));
+    expect((s.st.calls.hours[0] as { days: WeekHours | null }).days).not.toBeNull();
+    // paso 4: reparto
+    expect(await d.findByText(/Paso 4 de 4/)).toBeInTheDocument();
+    await userEvent.click(d.getByRole('checkbox', { name: 'Repartir las conversaciones nuevas automáticamente' }));
+    await userEvent.click(d.getByRole('button', { name: 'Terminar' }));
+    await waitFor(() => expect(s.st.calls.patches).toEqual([{ distribution_on: true, mode: 'equal', batch: 1, daily_cap: 0 }]));
+    // al terminar se abre la configuración completa
     expect(await screen.findByRole('dialog', { name: 'Configurar Ventas' })).toBeInTheDocument();
   });
 
-  it('un error al crear (nombre repetido) se muestra y se puede corregir', async () => {
-    const s = server([queue()]);
-    s.routes['POST /queues'] = () => err(409, 'QUEUE_EXISTS', 'Ya existe una cola con ese nombre');
+  it('se puede cerrar a medias: el departamento ya existe (con el reparto apagado) y los pasos 2 a 4 se pueden saltar', async () => {
+    const s = server([]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
-    await userEvent.click(await screen.findByRole('button', { name: 'Nueva cola' }));
-    const d = within(await screen.findByRole('dialog', { name: 'Nueva cola' }));
-    await userEvent.type(d.getByLabelText('Nombre'), 'Ventas');
-    await userEvent.click(d.getByRole('button', { name: 'Crear cola' }));
-    expect(await d.findByRole('alert')).toHaveTextContent('Ya existe una cola con ese nombre');
+    renderApp('/departments');
+    const d = await wizard();
+    await userEvent.type(d.getByLabelText('Nombre'), 'Soporte');
+    await userEvent.click(d.getByRole('button', { name: 'Siguiente' }));
+    await d.findByText(/Paso 2 de 4/);
+    await userEvent.click(d.getByRole('button', { name: 'Saltar este paso' }));
+    await d.findByText(/Paso 3 de 4/);
+    await userEvent.click(d.getByRole('button', { name: 'Saltar este paso' }));
+    await d.findByText(/Paso 4 de 4/);
+    await userEvent.click(d.getByRole('button', { name: 'Atrás' }));
+    expect(await d.findByText(/Paso 3 de 4/)).toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Cerrar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Nuevo departamento' })).toBeNull());
+    expect(s.st.calls.posts).toEqual([{ name: 'Soporte', color: '#7c5cfa' }]);
+    expect(s.st.calls.puts).toEqual([]);
+    expect(s.st.calls.hours).toEqual([]);
+    expect(s.st.calls.patches).toEqual([]);
+    expect(await screen.findByRole('button', { name: 'Configurar Soporte' })).toBeInTheDocument();
   });
 
-  it('el botón «Nueva cola» se desactiva al llegar al máximo de colas', async () => {
+  it('con el reparto encendido y nadie en el equipo avisa; un error al crear (nombre repetido) se muestra y se puede corregir', async () => {
+    const s = server([queue()]);
+    s.routes['POST /queues'] = () => err(409, 'QUEUE_EXISTS', 'Ya existe un departamento con ese nombre');
+    mockApi(s.routes);
+    renderApp('/departments');
+    const d = await wizard();
+    await userEvent.type(d.getByLabelText('Nombre'), 'Ventas');
+    await userEvent.click(d.getByRole('button', { name: 'Siguiente' }));
+    expect(await d.findByRole('alert')).toHaveTextContent('Ya existe un departamento con ese nombre');
+    expect(d.getByText(/Paso 1 de 4/)).toBeInTheDocument();
+  });
+
+  it('el botón «Nuevo departamento» se desactiva al llegar al máximo de departamentos', async () => {
     mockApi(server([queue(), queue({ id: 'q2', name: 'Soporte' })], { max: 2 }).routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     await screen.findByRole('button', { name: 'Configurar Ventas' });
-    expect(screen.getByRole('button', { name: 'Nueva cola' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Nuevo departamento' })).toBeDisabled();
   });
 });
 
-describe('Configurar una cola', () => {
+describe('Configurar un departamento', () => {
   it('enciende el reparto, elige asesores y modo ponderado con pesos y porcentajes, y guarda SOLO lo que cambió (ajustes y asesores por separado)', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.click(d.getByLabelText('Repartir las conversaciones nuevas automáticamente'));
     await userEvent.click(d.getByLabelText('Alicia Torres participa'));
@@ -153,7 +224,7 @@ describe('Configurar una cola', () => {
   it('solo cambiar los asesores no toca los ajustes, y al revés', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.click(d.getByLabelText('Eva Mora participa'));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
@@ -173,9 +244,9 @@ describe('Configurar una cola', () => {
   it('valida en pantalla antes de enviar: nombre, lote, tope y pesos', async () => {
     const s = server([queue({ mode: 'weighted', members: [member('u1', 'Alicia Torres', { active: true }), member('u2', 'Carolina Vera')] })]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
-    await userEvent.clear(d.getByLabelText('Nombre de la cola'));
+    await userEvent.clear(d.getByLabelText('Nombre del departamento'));
     await userEvent.clear(d.getByLabelText('Conversaciones seguidas por asesor'));
     await userEvent.type(d.getByLabelText('Conversaciones seguidas por asesor'), '0');
     await userEvent.clear(d.getByLabelText('Tope diario por asesor'));
@@ -184,7 +255,7 @@ describe('Configurar una cola', () => {
     await userEvent.clear(w);
     await userEvent.type(w, '0');
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    expect(d.getByText('Escribe el nombre de la cola')).toBeInTheDocument();
+    expect(d.getByText('Escribe el nombre del departamento')).toBeInTheDocument();
     expect(d.getByText('Un número entero entre 1 y 50')).toBeInTheDocument();
     expect(d.getByText(/entre 0 y 1000/)).toBeInTheDocument();
     expect(d.getByText(/entre 1 y 100/)).toBeInTheDocument();
@@ -194,7 +265,7 @@ describe('Configurar una cola', () => {
 
   it('en el modo «menos conversaciones abiertas» no hay lote ni pesos; se ve la carga de cada asesor', async () => {
     mockApi(server([queue({ mode: 'load', members: [member('u1', 'Alicia Torres', { active: true, open_count: 4, today_count: 2 }), member('u2', 'Carolina Vera')] })]).routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     expect(d.queryByLabelText('Conversaciones seguidas por asesor')).not.toBeInTheDocument();
     expect(d.queryByLabelText('Peso de Alicia Torres')).not.toBeInTheDocument();
@@ -203,27 +274,27 @@ describe('Configurar una cola', () => {
 
   it('un error del servidor al guardar se muestra y no se pierde lo escrito', async () => {
     const s = server([queue()]);
-    s.routes['PATCH /queues/q1'] = () => err(409, 'QUEUE_EXISTS', 'Ya existe una cola con ese nombre');
+    s.routes['PATCH /queues/q1'] = () => err(409, 'QUEUE_EXISTS', 'Ya existe un departamento con ese nombre');
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
-    const name = d.getByLabelText('Nombre de la cola');
+    const name = d.getByLabelText('Nombre del departamento');
     await userEvent.clear(name);
     await userEvent.type(name, 'Soporte');
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    expect(await d.findByRole('alert')).toHaveTextContent('Ya existe una cola con ese nombre');
+    expect(await d.findByRole('alert')).toHaveTextContent('Ya existe un departamento con ese nombre');
     expect(name).toHaveValue('Soporte');
   });
 
   it('una actualización de las cifras de fondo (sin asignar, carga) NO borra lo que la persona está escribiendo', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    const a = renderApp('/settings/queues');
+    const a = renderApp('/departments');
     const d = await open('Ventas');
-    const name = d.getByLabelText('Nombre de la cola');
+    const name = d.getByLabelText('Nombre del departamento');
     await userEvent.clear(name);
     await userEvent.type(name, 'Escribiendo');
-    s.st.items = s.st.items.map((q) => ({ ...q, unassigned_count: 5 })); // cambia el servidor sin cambiar la cola
+    s.st.items = s.st.items.map((q) => ({ ...q, unassigned_count: 5 })); // cambia el servidor sin cambiar el departamento
     await a.qc.invalidateQueries({ queryKey: ['queues'] });
     await d.findByText('Conversaciones sin asignar: 5');
     expect(name).toHaveValue('Escribiendo');
@@ -232,18 +303,18 @@ describe('Configurar una cola', () => {
 
 const week = (over: Partial<WeekHours> = {}): WeekHours => ({ mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [], ...over });
 
-describe('Horario y reasignación de una cola (M5.5b)', () => {
-  it('muestra los valores por omisión (no respeta el horario, no reasigna, 3 rotaciones, sin horario propio) y la tarjeta avisa si la cola está cerrada', async () => {
+describe('Horario y reasignación de un departamento (M5.5b)', () => {
+  it('muestra los valores por omisión (no respeta el horario, no reasigna, 3 rotaciones, sin horario propio) y la tarjeta avisa si el departamento está cerrado', async () => {
     mockApi(server([queue({ open_now: false })]).routes);
-    renderApp('/settings/queues');
-    expect(within(await screen.findByRole('button', { name: 'Configurar Ventas' })).getByText('Cerrada ahora')).toBeInTheDocument();
+    renderApp('/departments');
+    expect(within(await screen.findByRole('button', { name: 'Configurar Ventas' })).getByText('Cerrado ahora')).toBeInTheDocument();
     const d = await open('Ventas');
     const sec = within(d.getByRole('region', { name: 'Horario y reasignación' }));
-    expect(sec.getByText('Cerrada ahora')).toBeInTheDocument();
+    expect(sec.getByText('Cerrado ahora')).toBeInTheDocument();
     expect(sec.getByLabelText('Respetar el horario al repartir')).not.toBeChecked();
     expect(sec.getByLabelText('Reasignar si nadie responde en (minutos)')).toHaveValue('0');
     expect(sec.getByLabelText('Máximo de reasignaciones')).toHaveValue('3');
-    expect(sec.getByLabelText('Esta cola tiene su propio horario')).not.toBeChecked();
+    expect(sec.getByLabelText('Este departamento tiene su propio horario')).not.toBeChecked();
     expect(sec.getByText(/Usa el horario de la empresa/)).toBeInTheDocument();
     expect(sec.queryByRole('list', { name: 'Horario semanal' })).not.toBeInTheDocument();
   });
@@ -251,7 +322,7 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
   it('guarda SOLO lo que cambió: respetar el horario, minutos para reasignar y máximo de rotaciones (un PATCH, sin tocar asesores ni horario)', async () => {
     const s = server([queue({ distribution_on: true })]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.click(d.getByLabelText('Respetar el horario al repartir'));
     await userEvent.clear(d.getByLabelText('Reasignar si nadie responde en (minutos)'));
@@ -268,7 +339,7 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
   it('valida en pantalla los minutos (0–1440) y las rotaciones (1–10) antes de enviar', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.clear(d.getByLabelText('Reasignar si nadie responde en (minutos)'));
     await userEvent.type(d.getByLabelText('Reasignar si nadie responde en (minutos)'), '1500');
@@ -283,9 +354,9 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
   it('horario propio: al activarlo parte de lunes a viernes 08:30–18:00; se valida y se guarda con su propio PUT, sin tocar los demás ajustes', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
-    await userEvent.click(d.getByLabelText('Esta cola tiene su propio horario'));
+    await userEvent.click(d.getByLabelText('Este departamento tiene su propio horario'));
     expect(d.getByLabelText('Lunes tramo 1 desde')).toHaveValue('08:30');
     expect(d.getByLabelText('Sábado abierto')).not.toBeChecked();
     // una hora imposible no se envía
@@ -308,12 +379,12 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
     const own = week({ mon: [['10:00', '12:00']], tue: [['10:00', '12:00']] });
     const s = server([queue({ hours: own })]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
-    expect(d.getByLabelText('Esta cola tiene su propio horario')).toBeChecked();
+    expect(d.getByLabelText('Este departamento tiene su propio horario')).toBeChecked();
     expect(d.getByLabelText('Lunes tramo 1 desde')).toHaveValue('10:00');
     expect(d.getByLabelText('Miércoles abierto')).not.toBeChecked();
-    await userEvent.click(d.getByLabelText('Esta cola tiene su propio horario'));
+    await userEvent.click(d.getByLabelText('Este departamento tiene su propio horario'));
     expect(d.queryByRole('list', { name: 'Horario semanal' })).not.toBeInTheDocument();
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
@@ -323,7 +394,7 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
   it('sin cambios no envía nada ni toca el horario', async () => {
     const s = server([queue({ hours: week({ mon: [['10:00', '12:00']] }) })]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     expect(await d.findByText('No había cambios que guardar.')).toBeInTheDocument();
@@ -331,20 +402,20 @@ describe('Horario y reasignación de una cola (M5.5b)', () => {
   });
 });
 
-describe('Mensajes automáticos de una cola (M5.5c)', () => {
+describe('Mensajes automáticos de un departamento (M5.5c)', () => {
   const GREETING = 'Hola, gracias por escribir a Barbería Norte. ¿En qué podemos ayudarte?';
   const OOH = 'Estamos fuera de horario. Te respondemos mañana desde las 08:30.';
 
   it('por omisión no hay mensajes (vacíos) ni cierre por inactividad; explica cuándo sale cada uno', async () => {
     mockApi(server([queue()]).routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     const sec = within(d.getByRole('region', { name: 'Mensajes automáticos' }));
     expect(sec.getByLabelText('Saludo')).toHaveValue('');
     expect(sec.getByLabelText('Mensaje fuera de horario')).toHaveValue('');
     expect(sec.getByLabelText('Finalizar por inactividad (horas)')).toHaveValue('0');
-    expect(sec.getByText(/cuando el cliente abre una conversación nueva y la cola está abierta/)).toBeInTheDocument();
-    expect(sec.getByText(/en lugar del saludo, cuando el cliente escribe con la cola cerrada/)).toBeInTheDocument();
+    expect(sec.getByText(/cuando el cliente abre una conversación nueva y el departamento está abierto/)).toBeInTheDocument();
+    expect(sec.getByText(/en lugar del saludo, cuando el cliente escribe con el departamento cerrado/)).toBeInTheDocument();
     expect(sec.getByText(/no detienen el SLA/)).toBeInTheDocument();
     expect(sec.getAllByText(/\/1000/)).toHaveLength(2);
   });
@@ -352,7 +423,7 @@ describe('Mensajes automáticos de una cola (M5.5c)', () => {
   it('guarda SOLO lo que cambió: saludo, fuera de horario y horas de inactividad (un PATCH, con los textos recortados)', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.type(d.getByLabelText('Saludo'), `  ${GREETING}  `);
     await userEvent.type(d.getByLabelText('Mensaje fuera de horario'), OOH);
@@ -368,7 +439,7 @@ describe('Mensajes automáticos de una cola (M5.5c)', () => {
   it('con textos ya guardados se ven; borrarlos los apaga (null) y espacios en blanco equivalen a nada', async () => {
     const s = server([queue({ greeting: GREETING, out_of_hours_message: OOH, auto_close_hours: 12 })]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     expect(d.getByLabelText('Saludo')).toHaveValue(GREETING);
     expect(d.getByLabelText('Mensaje fuera de horario')).toHaveValue(OOH);
@@ -384,7 +455,7 @@ describe('Mensajes automáticos de una cola (M5.5c)', () => {
   it('sin cambios (o solo espacios en vacíos) no envía nada', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.type(d.getByLabelText('Saludo'), '   ');
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
@@ -395,7 +466,7 @@ describe('Mensajes automáticos de una cola (M5.5c)', () => {
   it('valida en pantalla: horas enteras de 0 a 720 y textos de hasta 1000 caracteres', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.clear(d.getByLabelText('Finalizar por inactividad (horas)'));
     await userEvent.type(d.getByLabelText('Finalizar por inactividad (horas)'), '721');
@@ -417,7 +488,7 @@ describe('Simulador y «sin asignar»', () => {
     const sim: QueueSimulation = { sequence: [{ user_id: 'u1', name: 'Alicia Torres' }, { user_id: 'u2', name: 'Carolina Vera' }, { user_id: 'u1', name: 'Alicia Torres' }], counts: [{ user_id: 'u1', name: 'Alicia Torres', count: 2 }, { user_id: 'u2', name: 'Carolina Vera', count: 1 }], stopped_early: true };
     const s = server([queue()], { sim });
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.click(d.getByLabelText('Alicia Torres participa'));
     await userEvent.click(d.getByLabelText('Carolina Vera participa'));
@@ -434,7 +505,7 @@ describe('Simulador y «sin asignar»', () => {
 
   it('sin asesores activos la simulación lo dice', async () => {
     mockApi(server([queue()]).routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     await userEvent.click(d.getByRole('button', { name: 'Simular 20 conversaciones' }));
     expect(await d.findByText('No hay a quién asignar: elige al menos un asesor.')).toBeInTheDocument();
@@ -443,7 +514,7 @@ describe('Simulador y «sin asignar»', () => {
   it('«Repartir ahora» solo se puede con el reparto encendido y guardado y conversaciones esperando; informa el resultado', async () => {
     const s = server([queue({ distribution_on: true, unassigned_count: 4, members: [member('u1', 'Alicia Torres', { active: true })] }), queue({ id: 'q2', name: 'Soporte', distribution_on: false, unassigned_count: 2 })], { distribute: { assigned: 3, remaining: 1 } });
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     let d = await open('Soporte');
     expect(d.getByRole('button', { name: 'Repartir ahora' })).toBeDisabled();
     expect(d.getByText('Enciende y guarda el reparto para poder repartir.')).toBeInTheDocument();
@@ -456,44 +527,44 @@ describe('Simulador y «sin asignar»', () => {
 
   it('sin conversaciones esperando, «Repartir ahora» está desactivado', async () => {
     mockApi(server([queue({ distribution_on: true })]).routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     expect(d.getByRole('button', { name: 'Repartir ahora' })).toBeDisabled();
   });
 });
 
 describe('Archivar y permisos', () => {
-  it('archivar pide confirmación; «No» la cancela; al confirmar la cola desaparece', async () => {
+  it('archivar pide confirmación; «No» la cancela; al confirmar el departamento desaparece', async () => {
     const s = server([queue()]);
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
-    await userEvent.click(d.getByRole('button', { name: 'Archivar cola' }));
+    await userEvent.click(d.getByRole('button', { name: 'Archivar departamento' }));
     expect(d.getByText(/¿Archivar «Ventas»\?/)).toBeInTheDocument();
     await userEvent.click(d.getByRole('button', { name: 'No' }));
     expect(s.st.calls.deletes).toEqual([]);
-    await userEvent.click(d.getByRole('button', { name: 'Archivar cola' }));
+    await userEvent.click(d.getByRole('button', { name: 'Archivar departamento' }));
     await userEvent.click(d.getByRole('button', { name: 'Sí, archivar' }));
-    expect(await screen.findByText(/Aún no hay colas/)).toBeInTheDocument();
+    expect(await screen.findByText(/Aún no hay departamentos/)).toBeInTheDocument();
     expect(s.st.calls.deletes).toEqual(['q1']);
   });
 
-  it('si una conexión la usa, el motivo se explica y la cola sigue ahí', async () => {
-    const s = server([queue({ channels: [{ id: 'c1', name: 'Ventas WhatsApp' }] })], { del: () => err(409, 'QUEUE_IN_USE', 'Hay conexiones que usan esta cola. Cámbialas de cola en «Conexiones» antes de archivarla') });
+  it('si una conexión la usa, el motivo se explica y el departamento sigue ahí', async () => {
+    const s = server([queue({ channels: [{ id: 'c1', name: 'Ventas WhatsApp' }] })], { del: () => err(409, 'QUEUE_IN_USE', 'Hay conexiones que usan este departamento. Cámbialas de cola en «Conexiones» antes de archivarla') });
     mockApi(s.routes);
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const d = await open('Ventas');
     expect(d.getByText('Ventas WhatsApp')).toBeInTheDocument();
-    await userEvent.click(d.getByRole('button', { name: 'Archivar cola' }));
+    await userEvent.click(d.getByRole('button', { name: 'Archivar departamento' }));
     await userEvent.click(d.getByRole('button', { name: 'Sí, archivar' }));
-    expect(await d.findByRole('alert')).toHaveTextContent('Hay conexiones que usan esta cola');
+    expect(await d.findByRole('alert')).toHaveTextContent('Hay conexiones que usan este departamento');
     expect(screen.getByRole('dialog', { name: 'Configurar Ventas' })).toBeInTheDocument();
   });
 
   it('sin permiso (403) se explica y no se ofrece crear nada', async () => {
     mockApi({ ...authed(ME_ADMIN), 'GET /queues': () => err(403, 'FORBIDDEN') });
-    renderApp('/settings/queues');
-    expect(await screen.findByRole('alert')).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar las colas.');
-    expect(screen.queryByRole('button', { name: 'Nueva cola' })).not.toBeInTheDocument();
+    renderApp('/departments');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar los departamentos.');
+    expect(screen.queryByRole('button', { name: 'Nuevo departamento' })).not.toBeInTheDocument();
   });
 });

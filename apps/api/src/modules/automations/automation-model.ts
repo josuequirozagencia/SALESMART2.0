@@ -162,7 +162,7 @@ export type ActionType = (typeof ACTION_TYPES)[number];
 
 export const ACTION_LABEL: Record<ActionType, string> = {
   assign_user: 'Asignar a una persona',
-  assign_queue: 'Asignar con el reparto de una cola',
+  assign_queue: 'Asignar con el reparto de un departamento',
   move_stage: 'Mover la oportunidad de etapa',
   set_field: 'Cambiar un campo del contacto',
   add_tag: 'Poner una etiqueta',

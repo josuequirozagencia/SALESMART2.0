@@ -12,8 +12,8 @@ const asMoney = (v: string): string => v.trim().replace(',', '.');
 const cents = (v: string): number => Math.round(Number(asMoney(v)) * 100);
 
 const BLOCKED: Record<NonNullable<ReturnType<typeof useSaleOptions>['data']>['blocked'] & string, string> = {
-  no_queue: 'Esta conversación no pertenece a ninguna cola: sin cola no hay catálogo para vender. Un administrador debe asignarle una cola.',
-  no_products: 'La cola de esta conversación no tiene productos o servicios activos. Un administrador puede agregarlos en Configuración › Colas.',
+  no_queue: 'Esta conversación no pertenece a ningún departamento: sin departamento no hay catálogo para vender. Un administrador debe asignarle un departamento.',
+  no_products: 'El departamento de esta conversación no tiene productos o servicios activos. Un administrador puede agregarlos en Departamentos.',
   unassigned: 'La conversación aún no tiene asesor: asígnala o tómala antes de registrar la venta.',
   not_owner: 'Solo quien tiene asignada la conversación, o un administrador, puede registrar la venta.',
 };
@@ -91,11 +91,11 @@ export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => voi
   return (
     <Modal title="Registrar venta" onClose={onClose}>
       {options.isPending ? <div className="grid place-items-center py-6 text-muted"><Spinner label="Cargando el catálogo" /></div> : null}
-      {options.isError ? <Alert>{friendlyError(options.error, 'No se pudo cargar el catálogo de la cola')}</Alert> : null}
+      {options.isError ? <Alert>{friendlyError(options.error, 'No se pudo cargar el catálogo del departamento')}</Alert> : null}
       {data?.blocked ? <Alert>{BLOCKED[data.blocked]}</Alert> : null}
       {data && !data.blocked ? (
         <div className="grid gap-3">
-          <p className="text-[12.5px] text-muted">Cliente: <b>{c.contact.name}</b> · Cola: <b>{data.queue?.name}</b> · Moneda: <b>{currency}</b></p>
+          <p className="text-[12.5px] text-muted">Cliente: <b>{c.contact.name}</b> · Departamento: <b>{data.queue?.name}</b> · Moneda: <b>{currency}</b></p>
           <Field label="Producto o servicio" error={errors.product}>
             {(f) => (
               <select {...f} value={productId} onChange={(e) => { setProductId(e.target.value); setTotalEdited(false); }} className={selectCls}>

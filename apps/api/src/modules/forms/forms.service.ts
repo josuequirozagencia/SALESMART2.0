@@ -337,7 +337,7 @@ export class FormsService {
     const issues: ErrorDetail[] = [];
     if (d.queueId) {
       const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, d.queueId), isNull(queues.deletedAt))).limit(1);
-      if (!q) issues.push({ path: 'queue_id', code: 'not_found', message: 'La cola no existe' });
+      if (!q) issues.push({ path: 'queue_id', code: 'not_found', message: 'El departamento no existe' });
     }
     if (d.pipelineGiven && d.pipelineId) {
       const [p] = await tx.select({ id: pipelines.id }).from(pipelines).where(and(eq(pipelines.id, d.pipelineId), isNull(pipelines.deletedAt))).limit(1);

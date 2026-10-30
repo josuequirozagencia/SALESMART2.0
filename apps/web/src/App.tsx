@@ -132,7 +132,10 @@ export function App() {
         <Route path="/automations/:id?" element={<AutomationsPage />} />
         <Route path="/settings/knowledge" element={<KnowledgePage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
-        <Route path="/settings/queues" element={<QueuesPage />} />
+        <Route path="/departments" element={<QueuesPage />} />
+        {/* «Colas» pasó a «Departamentos» (M10.1): las direcciones viejas siguen llevando ahí */}
+        <Route path="/settings/queues" element={<Navigate to="/departments" replace />} />
+        <Route path="/queues" element={<Navigate to="/departments" replace />} />
         <Route path="/settings/sla" element={<SlaPage />} />
         <Route path="/settings/quick-replies" element={<QuickRepliesPage />} />
       </Route>

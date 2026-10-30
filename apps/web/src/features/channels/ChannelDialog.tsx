@@ -75,10 +75,10 @@ export function ChannelDialog({ channel, onClose }: { channel?: Channel; onClose
         <Field label={editing ? 'Token nuevo (opcional)' : 'Token de acceso permanente'} error={errors.token} hint={editing ? 'Déjalo vacío para conservar el actual. Se comprueba con Meta antes de guardarlo.' : 'Se guarda cifrado y no se vuelve a mostrar. Se comprueba con Meta antes de guardarlo.'} required={!editing}>
           {(p) => <PasswordInput {...p} value={token} onChange={(e) => setToken(e.target.value)} autoComplete="off" spellCheck={false} />}
         </Field>
-        <Field label="Cola por defecto" hint="Las conversaciones nuevas de este número van a esta cola, que decide el asesor. Sin cola quedan «sin asignar».">
+        <Field label="Departamento por defecto" hint="Las conversaciones nuevas de este número van a este departamento, que decide el asesor. Sin departamento quedan «sin asignar».">
           {(p) => (
             <select {...p} value={queueId} onChange={(e) => setQueueId(e.target.value)} className="w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg">
-              <option value="">Sin cola</option>
+              <option value="">Sin departamento</option>
               {(queues.data?.items ?? []).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
             </select>
           )}

@@ -114,7 +114,7 @@ export class AutomationActionsService {
     if (!conv) throw new ActionSkipped('No hay una conversación sin asignar');
     if (conv.queueId !== queueId) await tx.update(conversations).set({ queueId, updatedAt: ctx.now }).where(eq(conversations.id, conv.id));
     const r = await this.assignment.assignConversation(tx, conv.id, { now: ctx.now, timeZone: ctx.dir.timeZone, assignable: ctx.dir.assignable });
-    return done(r.assigned ? 'Conversación asignada con el reparto de la cola' : 'Quedó en la cola, sin asesor disponible por ahora');
+    return done(r.assigned ? 'Conversación asignada con el reparto del departamento' : 'Quedó en el departamento, sin asesor disponible por ahora');
   }
 
   private async moveStage(tx: TenantTx, stageId: string, ctx: ActionContext): Promise<StepOutcome> {

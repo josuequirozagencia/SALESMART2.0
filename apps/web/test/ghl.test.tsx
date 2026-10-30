@@ -336,7 +336,7 @@ describe('Configuración › GoHighLevel · etiquetas enviadas', () => {
     expect(panel.getByText(/1 cambio\(s\) de etiqueta no se pudieron enviar/)).toBeInTheDocument();
   });
 
-  it('reintentar un cambio fallido lo manda a la cola y deja de ofrecer el botón', async () => {
+  it('reintentar un cambio fallido lo manda al departamento y deja de ofrecer el botón', async () => {
     const w = world(live(), { outbox: [out({ id: 'o2', status: 'failed', last_error: 'x', can_retry: true })] });
     mockApi(server(w));
     renderApp('/settings/ghl');
@@ -417,27 +417,27 @@ describe('Configuración › GoHighLevel · canal de mensajes (M7.4)', () => {
   }
   const section = async () => within(await screen.findByRole('region', { name: 'Canal de mensajes' }));
 
-  it('conectada, ofrece elegir la cola y el canal por omisión; guardar manda los dos valores', async () => {
+  it('conectada, ofrece elegir el departamento y el canal por omisión; guardar manda los dos valores', async () => {
     const w: ChannelWorld = world(live());
     mockApi(channelServer(w));
     renderApp('/settings/ghl');
     const s = await section();
     expect(s.getByText(/Mensajes de GoHighLevel en el Inbox/)).toBeInTheDocument();
-    await userEvent.selectOptions(await s.findByLabelText('Cola de las conversaciones nuevas'), 'q2');
+    await userEvent.selectOptions(await s.findByLabelText('Departamento de las conversaciones nuevas'), 'q2');
     await userEvent.selectOptions(s.getByLabelText(/Responder por/), 'IG');
     await userEvent.click(s.getByRole('button', { name: 'Guardar canal' }));
     await waitFor(() => expect(w.saves).toEqual([{ queue_id: 'q2', default_type: 'IG' }]));
     expect(await s.findByText('Cambios guardados.')).toBeInTheDocument();
   });
 
-  it('muestra lo guardado y permite quitarlo (sin cola, sin canal por omisión)', async () => {
+  it('muestra lo guardado y permite quitarlo (sin departamento, sin canal por omisión)', async () => {
     const w: ChannelWorld = world(live(), { channel: { configured: true, channel_id: 'ch1', queue: QUEUES[0]!, default_type: 'SMS' } } as Partial<ChannelWorld>);
     mockApi(channelServer(w));
     renderApp('/settings/ghl');
     const s = await section();
-    await waitFor(() => expect(s.getByLabelText('Cola de las conversaciones nuevas')).toHaveValue('q1'));
+    await waitFor(() => expect(s.getByLabelText('Departamento de las conversaciones nuevas')).toHaveValue('q1'));
     expect(s.getByLabelText(/Responder por/)).toHaveValue('SMS');
-    await userEvent.selectOptions(s.getByLabelText('Cola de las conversaciones nuevas'), '');
+    await userEvent.selectOptions(s.getByLabelText('Departamento de las conversaciones nuevas'), '');
     await userEvent.selectOptions(s.getByLabelText(/Responder por/), '');
     await userEvent.click(s.getByRole('button', { name: 'Guardar canal' }));
     await waitFor(() => expect(w.saves).toEqual([{ queue_id: null, default_type: null }]));
@@ -452,13 +452,13 @@ describe('Configuración › GoHighLevel · canal de mensajes (M7.4)', () => {
 
   it('un error al guardar se muestra sin perder lo elegido', async () => {
     const w: ChannelWorld = world(live());
-    mockApi({ ...channelServer(w), 'PUT /ghl/channel': () => err(400, 'VALIDATION_ERROR', 'La cola no existe') });
+    mockApi({ ...channelServer(w), 'PUT /ghl/channel': () => err(400, 'VALIDATION_ERROR', 'El departamento no existe') });
     renderApp('/settings/ghl');
     const s = await section();
-    await userEvent.selectOptions(await s.findByLabelText('Cola de las conversaciones nuevas'), 'q1');
+    await userEvent.selectOptions(await s.findByLabelText('Departamento de las conversaciones nuevas'), 'q1');
     await userEvent.click(s.getByRole('button', { name: 'Guardar canal' }));
     expect(await s.findByRole('alert')).toBeInTheDocument();
-    expect(s.getByLabelText('Cola de las conversaciones nuevas')).toHaveValue('q1');
+    expect(s.getByLabelText('Departamento de las conversaciones nuevas')).toHaveValue('q1');
   });
 
   it('la guía explica cómo traer los mensajes: Workflow aparte, message_type y que se responde por el mismo canal', async () => {

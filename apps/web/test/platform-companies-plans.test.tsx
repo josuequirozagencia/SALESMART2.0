@@ -178,7 +178,7 @@ describe('Planes', () => {
     expect(cards).toHaveLength(2);
     expect(within(cards[0]!).getByText('Pro')).toBeInTheDocument();
     expect(within(cards[0]!).getByText('Para equipos')).toBeInTheDocument();
-    expect(cards[0]).toHaveTextContent('10 usuarios · 5 conexiones · ilimitados colas');
+    expect(cards[0]).toHaveTextContent('10 usuarios · 5 conexiones · ilimitados departamentos');
     expect(within(cards[0]!).getByText('2 empresas')).toBeInTheDocument();
     const mods = within(within(cards[0]!).getByLabelText('Módulos de Pro'));
     expect(mods.getByText('Kanban')).toBeInTheDocument();
@@ -275,7 +275,7 @@ describe('Crear y editar un plan', () => {
     expect(within(dlg).getByLabelText('Nombre')).toHaveValue('Pro');
     expect(within(dlg).getByLabelText('Descripción (opcional)')).toHaveValue('Para equipos');
     expect(within(dlg).getByLabelText('Usuarios')).toHaveValue('10');
-    expect(within(dlg).getByLabelText('Colas')).toHaveValue('');
+    expect(within(dlg).getByLabelText('Departamentos')).toHaveValue('');
     expect(within(dlg).getByLabelText('Kanban')).toBeChecked();
     expect(within(dlg).getByLabelText('Campañas')).not.toBeChecked();
     await u.click(within(dlg).getByLabelText('Campañas'));

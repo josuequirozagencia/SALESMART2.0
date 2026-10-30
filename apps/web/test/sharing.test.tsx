@@ -79,7 +79,7 @@ function server(w: World) {
 }
 
 describe('Inbox · transferir', () => {
-  it('«Transferir» abre el selector con la carga de cada persona, quién es el dueño y una advertencia si está fuera de la cola', async () => {
+  it('«Transferir» abre el selector con la carga de cada persona, quién es el dueño y una advertencia si está fuera del departamento', async () => {
     mockApi(server(world()));
     renderApp('/inbox/c1');
     await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
@@ -89,10 +89,10 @@ describe('Inbox · transferir', () => {
     expect(d.getByText('Quien la tiene')).toBeInTheDocument();
     expect(d.getByText(/· 7 conversaciones abiertas/)).toBeInTheDocument();
     expect(d.getByText(/· 1 conversación abierta/)).toBeInTheDocument();
-    expect(d.getAllByText('Fuera de la cola')).toHaveLength(1);
-    expect(d.queryByText(/no está en la cola/)).not.toBeInTheDocument();
+    expect(d.getAllByText('Fuera del departamento')).toHaveLength(1);
+    expect(d.queryByText(/no está en el departamento/)).not.toBeInTheDocument();
     await userEvent.click(d.getByRole('radio', { name: 'Eva Mora' }));
-    expect(d.getByText(/Eva Mora no está en la cola «Ventas»\. Puedes continuar/)).toBeInTheDocument(); // advertencia, no bloqueo
+    expect(d.getByText(/Eva Mora no está en el departamento «Ventas»\. Puedes continuar/)).toBeInTheDocument(); // advertencia, no bloqueo
     expect(d.getByRole('button', { name: 'Transferir' })).toBeEnabled();
   });
 

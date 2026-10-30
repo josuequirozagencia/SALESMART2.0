@@ -65,7 +65,7 @@ export class ProductsService {
       .withTenant(async (tx) => {
         await this.mustQueue(tx, queueId, true);
         const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(queueProducts).where(eq(queueProducts.queueId, queueId));
-        if ((n?.n ?? 0) >= MAX_PRODUCTS_PER_QUEUE) throw new ConflictError('PRODUCT_LIMIT', `Se alcanzó el máximo de ${MAX_PRODUCTS_PER_QUEUE} productos en esta cola. Desactiva alguno antes de crear otro`);
+        if ((n?.n ?? 0) >= MAX_PRODUCTS_PER_QUEUE) throw new ConflictError('PRODUCT_LIMIT', `Se alcanzó el máximo de ${MAX_PRODUCTS_PER_QUEUE} productos en este departamento. Desactiva alguno antes de crear otro`);
         const [p] = await tx
           .insert(queueProducts)
           .values({ queueId, name: input.name, kind: input.kind ?? 'product', price: input.price, active: input.active ?? true, createdBy: TenantContext.current().userId ?? null })
@@ -122,6 +122,6 @@ export class ProductsService {
 
   private nameTaken(e: unknown): ConflictError | undefined {
     const cause = (e as { cause?: { code?: string; constraint?: string } } | null)?.cause;
-    return cause?.code === '23505' && cause.constraint === 'queue_products_queue_name_uq' ? new ConflictError('PRODUCT_EXISTS', 'Ya hay un producto con ese nombre en esta cola') : undefined;
+    return cause?.code === '23505' && cause.constraint === 'queue_products_queue_name_uq' ? new ConflictError('PRODUCT_EXISTS', 'Ya hay un producto con ese nombre en este departamento') : undefined;
   }
 }

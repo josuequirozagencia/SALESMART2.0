@@ -45,11 +45,11 @@ const open = async () => {
   return within(await within(dialog).findByRole('region', { name: 'Catálogo de productos y servicios' }));
 };
 
-describe('Configuración › Colas › Catálogo', () => {
-  it('una cola sin productos lo explica y deja agregar el primero: tipo, precio con hasta 2 decimales y la moneda de la empresa', async () => {
+describe('Departamentos › Catálogo', () => {
+  it('un departamento sin productos lo explica y deja agregar el primero: tipo, precio con hasta 2 decimales y la moneda de la empresa', async () => {
     const w = world();
     mockApi(server(w));
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const c = await open();
     expect(await c.findByText(/Todavía no hay productos/)).toBeInTheDocument();
     expect(c.getByText('Precio (USD)')).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe('Configuración › Colas › Catálogo', () => {
     await userEvent.type(c.getByLabelText('Precio (USD)'), '12,5'); // coma decimal
     await userEvent.click(c.getByRole('button', { name: 'Agregar' }));
     await waitFor(() => expect(w.posts).toEqual([{ name: 'Corte de cabello', kind: 'service', price: '12.5' }]));
-    const list = await c.findByRole('list', { name: 'Productos de la cola' });
+    const list = await c.findByRole('list', { name: 'Productos del departamento' });
     expect(within(list).getByText('Corte de cabello')).toBeInTheDocument();
     expect(within(list).getByText('Servicio')).toBeInTheDocument();
     expect(within(list).getByText(/12,50/)).toBeInTheDocument();
@@ -68,7 +68,7 @@ describe('Configuración › Colas › Catálogo', () => {
   it('no se envía un nombre vacío ni un precio inválido; el servidor lo vuelve a exigir', async () => {
     const w = world();
     mockApi(server(w));
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const c = await open();
     await userEvent.click(await c.findByRole('button', { name: 'Agregar' }));
     expect(await c.findByText('Escribe el nombre')).toBeInTheDocument();
@@ -81,20 +81,20 @@ describe('Configuración › Colas › Catálogo', () => {
   });
 
   it('un nombre repetido muestra el aviso del servidor', async () => {
-    const w = world({ items: [product()], failCreate: () => err(409, 'PRODUCT_EXISTS', 'Ya hay un producto con ese nombre en esta cola') });
+    const w = world({ items: [product()], failCreate: () => err(409, 'PRODUCT_EXISTS', 'Ya hay un producto con ese nombre en este departamento') });
     mockApi(server(w));
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const c = await open();
     await userEvent.type(await c.findByLabelText('Nombre'), 'corte de cabello');
     await userEvent.type(c.getByLabelText('Precio (USD)'), '10');
     await userEvent.click(c.getByRole('button', { name: 'Agregar' }));
-    expect(await c.findByText('Ya hay un producto con ese nombre en esta cola')).toBeInTheDocument();
+    expect(await c.findByText('Ya hay un producto con ese nombre en este departamento')).toBeInTheDocument();
   });
 
   it('editar cambia nombre, tipo y precio; desactivar y activar se guardan al instante y lo desactivado se marca', async () => {
     const w = world({ items: [product(), product({ id: 'p2', name: 'Gel fijador', kind: 'product', price: '8.00' })] });
     mockApi(server(w));
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const c = await open();
     await userEvent.click(await c.findByRole('button', { name: 'Editar Corte de cabello' }));
     const name = c.getAllByLabelText('Nombre')[0]!;
@@ -114,7 +114,7 @@ describe('Configuración › Colas › Catálogo', () => {
 
   it('con otra moneda de la empresa los precios se muestran en ella', async () => {
     mockApi(server(world({ items: [product({ price: '1500.00' })], currency: 'EUR' })));
-    renderApp('/settings/queues');
+    renderApp('/departments');
     const c = await open();
     expect((await c.findByText(/1\D?500\D00/)).textContent).toMatch(/€|EUR/);
     expect(c.getByText('Precio (EUR)')).toBeInTheDocument();

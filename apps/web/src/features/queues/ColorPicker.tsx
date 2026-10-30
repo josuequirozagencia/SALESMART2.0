@@ -4,7 +4,7 @@ export const DEFAULT_QUEUE_COLOR = '#7c5cfa';
 /** Elige el color de una cola entre unos pocos que se distinguen bien (la cola se reconoce por él en el resto de la aplicación). */
 export function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
   return (
-    <div role="radiogroup" aria-label="Color de la cola" className="flex flex-wrap gap-2">
+    <div role="radiogroup" aria-label="Color del departamento" className="flex flex-wrap gap-2">
       {QUEUE_COLORS.map((c) => (
         <button
           key={c}

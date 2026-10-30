@@ -79,7 +79,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
   function read(): { settings: QueueSettings; members: QueueMemberInput[]; hours: WeekHours | null } | null {
     const next: typeof errors = {};
     const n = name.trim();
-    if (n === '') next.name = 'Escribe el nombre de la cola';
+    if (n === '') next.name = 'Escribe el nombre del departamento';
     else if (n.length > 60) next.name = 'Usa como máximo 60 caracteres';
     const b = intIn(batch, 1, 50);
     if (b === null) next.batch = 'Un número entero entre 1 y 50';
@@ -150,18 +150,18 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
     <Modal title={`Configurar ${queue.name}`} onClose={onClose} wide>
       <div className="grid max-h-[72vh] gap-4 overflow-y-auto pr-1" aria-label={`Configuración de ${queue.name}`}>
         <section className="grid gap-3" aria-label="General">
-          <Field label="Nombre de la cola" error={errors.name}>{(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="off" />}</Field>
+          <Field label="Nombre del departamento" error={errors.name}>{(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={60} autoComplete="off" />}</Field>
           <div className="grid gap-1.5 text-[12.5px] font-semibold">Color<ColorPicker value={color} onChange={setColor} /></div>
         </section>
 
         <section className="grid gap-3 rounded-2xl border border-line p-4" aria-label="Reparto de conversaciones">
           <label className="flex items-start gap-2 text-[13.5px] font-semibold">
             <input type="checkbox" aria-label="Repartir las conversaciones nuevas automáticamente" checked={on} onChange={(e) => setOn(e.target.checked)} className="mt-1" />
-            <span>Repartir las conversaciones nuevas automáticamente<span className="block text-[12px] font-normal text-muted">{on ? 'Cada conversación nueva de las conexiones de esta cola se asigna a un asesor según esta regla.' : 'Con el reparto apagado las conversaciones quedan «sin asignar» hasta que alguien las tome.'}</span></span>
+            <span>Repartir las conversaciones nuevas automáticamente<span className="block text-[12px] font-normal text-muted">{on ? 'Cada conversación nueva de las conexiones de este departamento se asigna a un asesor según esta regla.' : 'Con el reparto apagado las conversaciones quedan «sin asignar» hasta que alguien las tome.'}</span></span>
           </label>
 
-          <div className="grid gap-1" aria-label="Asesores de la cola">
-            <span className="text-[12.5px] font-semibold">Asesores de la cola</span>
+          <div className="grid gap-1" aria-label="Asesores del departamento">
+            <span className="text-[12.5px] font-semibold">Asesores del departamento</span>
             {queue.members.length === 0 ? <p className="text-[12.5px] text-muted">Todavía no hay personas que puedan recibir conversaciones.</p> : null}
             <ul className="grid gap-1.5">
               {queue.members.map((m) => {
@@ -202,7 +202,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
                 {(p) => <Input {...p} inputMode="numeric" value={batch} onChange={(e) => setBatch(e.target.value)} />}
               </Field>
             ) : null}
-            <Field label="Tope diario por asesor" error={errors.cap} hint="Conversaciones nuevas que puede recibir por día de esta cola. 0 = sin tope.">
+            <Field label="Tope diario por asesor" error={errors.cap} hint="Conversaciones nuevas que puede recibir por día de este departamento. 0 = sin tope.">
               {(p) => <Input {...p} inputMode="numeric" value={cap} onChange={(e) => setCap(e.target.value)} />}
             </Field>
           </div>
@@ -232,14 +232,14 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
         <section className="grid gap-3 rounded-2xl border border-line p-4" aria-label="Horario y reasignación">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="text-[13.5px] font-semibold">Horario y reasignación</span>
-            <Pill kind={queue.open_now ? 'ok' : 'muted'}>{queue.open_now ? 'Abierta ahora' : 'Cerrada ahora'}</Pill>
+            <Pill kind={queue.open_now ? 'ok' : 'muted'}>{queue.open_now ? 'Abierto ahora' : 'Cerrado ahora'}</Pill>
           </div>
           <label className="flex items-start gap-2 text-[13.5px]">
             <input type="checkbox" aria-label="Respetar el horario al repartir" checked={respect} onChange={(e) => setRespect(e.target.checked)} className="mt-1" />
-            <span><b>Respetar el horario al repartir</b><span className="block text-[12px] text-muted">Con la cola cerrada no se reparte: la conversación espera «sin asignar» y se reparte sola cuando abre.</span></span>
+            <span><b>Respetar el horario al repartir</b><span className="block text-[12px] text-muted">Con el departamento cerrado no se reparte: la conversación espera «sin asignar» y se reparte sola cuando abre.</span></span>
           </label>
           <div className="grid items-start gap-3 sm:grid-cols-2">
-            <Field label="Reasignar si nadie responde en (minutos)" error={errors.reassign} hint="Minutos de horario abierto. 0 = no reasignar. Pasa a otra persona de la cola que no la haya tenido.">
+            <Field label="Reasignar si nadie responde en (minutos)" error={errors.reassign} hint="Minutos de horario abierto. 0 = no reasignar. Pasa a otra persona del departamento que no la haya tenido.">
               {(p) => <Input {...p} inputMode="numeric" value={reassign} onChange={(e) => setReassign(e.target.value)} />}
             </Field>
             <Field label="Máximo de reasignaciones" error={errors.rotations} hint="Al llegar al máximo deja de reasignar y la conversación sigue vencida a la vista.">
@@ -247,8 +247,8 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
             </Field>
           </div>
           <label className="flex items-start gap-2 text-[13.5px]">
-            <input type="checkbox" aria-label="Esta cola tiene su propio horario" checked={ownHours} onChange={(e) => setOwnHours(e.target.checked)} className="mt-1" />
-            <span><b>Esta cola tiene su propio horario</b><span className="block text-[12px] text-muted">{ownHours ? 'Manda sobre el horario de la empresa para esta cola.' : 'Usa el horario de la empresa (Configuración › SLA y horario).'}{queue.hours ? ` Guardado: ${summarizeWeek(queue.hours)}.` : ''}</span></span>
+            <input type="checkbox" aria-label="Este departamento tiene su propio horario" checked={ownHours} onChange={(e) => setOwnHours(e.target.checked)} className="mt-1" />
+            <span><b>Este departamento tiene su propio horario</b><span className="block text-[12px] text-muted">{ownHours ? 'Manda sobre el horario de la empresa para este departamento.' : 'Usa el horario de la empresa (Configuración › SLA y horario).'}{queue.hours ? ` Guardado: ${summarizeWeek(queue.hours)}.` : ''}</span></span>
           </label>
           {ownHours ? <HoursEditor value={week} onChange={setWeek} /> : null}
           {errors.hours ? <span role="alert" className="text-[12px] font-medium text-crit">{errors.hours}</span> : null}
@@ -259,7 +259,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
             <span className="text-[13.5px] font-semibold">Mensajes automáticos</span>
             <p className="text-[12.5px] text-muted">Salen al cliente por WhatsApp como mensajes automáticos: no cuentan como respuesta de una persona (no detienen el SLA). Déjalos vacíos para no enviarlos.</p>
           </div>
-          <Field label="Saludo" error={errors.greeting} hint="Se envía una vez, cuando el cliente abre una conversación nueva y la cola está abierta.">
+          <Field label="Saludo" error={errors.greeting} hint="Se envía una vez, cuando el cliente abre una conversación nueva y el departamento está abierto.">
             {(p) => (
               <>
                 <textarea {...p} rows={3} maxLength={MAX_AUTO} value={greeting} onChange={(e) => setGreeting(e.target.value)} placeholder="Hola, gracias por escribir. ¿En qué podemos ayudarte?" className={textareaCls} />
@@ -267,7 +267,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
               </>
             )}
           </Field>
-          <Field label="Mensaje fuera de horario" error={errors.outOfHours} hint="Se envía, en lugar del saludo, cuando el cliente escribe con la cola cerrada (horario y feriados de «SLA y horario»). No se repite mientras siga cerrada.">
+          <Field label="Mensaje fuera de horario" error={errors.outOfHours} hint="Se envía, en lugar del saludo, cuando el cliente escribe con el departamento cerrado (horario y feriados de «SLA y horario»). No se repite mientras siga cerrada.">
             {(p) => (
               <>
                 <textarea {...p} rows={3} maxLength={MAX_AUTO} value={outOfHours} onChange={(e) => setOutOfHours(e.target.value)} placeholder="Estamos fuera de horario. Te respondemos mañana desde las 08:30." className={textareaCls} />
@@ -291,8 +291,8 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
           </div>
         </section>
 
-        <section className="grid gap-1" aria-label="Conexiones de la cola">
-          <span className="text-[12.5px] font-semibold">Conexiones que usan esta cola</span>
+        <section className="grid gap-1" aria-label="Conexiones del departamento">
+          <span className="text-[12.5px] font-semibold">Conexiones que usan este departamento</span>
           {queue.channels.length === 0 ? <p className="text-[12.5px] text-muted">Ninguna todavía. Se elige en Configuración › Conexiones.</p> : <p className="text-[13px]">{queue.channels.map((c) => c.name).join(', ')}</p>}
         </section>
       </div>
@@ -302,10 +302,10 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
       <div className="flex flex-wrap items-center justify-between gap-2">
         {confirmArchive ? (
           <span className="flex flex-wrap items-center gap-2 text-[13px]">¿Archivar «{queue.name}»?
-            <Button variant="danger" className="!px-3 !py-1.5 !text-[12.5px]" loading={archive.isPending} onClick={() => archive.mutate(queue.id, { onSuccess: onClose, onError: (e) => { setConfirmArchive(false); setError(friendlyError(e, 'No pudimos archivar la cola.')); } })}>Sí, archivar</Button>
+            <Button variant="danger" className="!px-3 !py-1.5 !text-[12.5px]" loading={archive.isPending} onClick={() => archive.mutate(queue.id, { onSuccess: onClose, onError: (e) => { setConfirmArchive(false); setError(friendlyError(e, 'No pudimos archivar el departamento.')); } })}>Sí, archivar</Button>
             <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setConfirmArchive(false)}>No</Button>
           </span>
-        ) : <Button variant="danger" onClick={() => setConfirmArchive(true)}>Archivar cola</Button>}
+        ) : <Button variant="danger" onClick={() => setConfirmArchive(true)}>Archivar departamento</Button>}
         <span className="flex gap-2">
           <Button onClick={onClose}>Cerrar</Button>
           <Button variant="primary" loading={busy} onClick={() => void save()}>Guardar</Button>
