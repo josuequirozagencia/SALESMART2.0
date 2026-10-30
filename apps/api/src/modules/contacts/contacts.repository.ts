@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { contactListMembers, contactPhones, contactTags, contacts, customFieldValues, metaEvents, type TenantTx } from '../../db';
+import { contactCompanies, contactListMembers, contactPhones, contactTags, contacts, customFieldValues, metaEvents, type TenantTx } from '../../db';
 import { ValidationError } from '../../errors';
 import { likeEscape } from '../organizations';
 import type { ResolvedCf } from './contact-filters';
@@ -53,6 +53,7 @@ export type PageFilter = Pick<ListContactsQuery, 'sort' | 'order' | 'limit'> & {
   owner?: string | undefined;
   source?: string | undefined;
   consent?: string | undefined;
+  company?: string | undefined;
   tag?: readonly string[] | undefined;
 };
 export interface PageExtras {
@@ -100,6 +101,7 @@ export class ContactsRepository {
     }
     if (f.source) where.push(eq(contacts.source, f.source));
     if (f.consent) where.push(eq(contacts.consent, f.consent));
+    if (f.company) where.push(exists(tx.select({ one: sql`1` }).from(contactCompanies).where(and(eq(contactCompanies.contactId, contacts.id), eq(contactCompanies.companyId, f.company)))));
     for (const t of f.tag ?? []) where.push(exists(tx.select({ one: sql`1` }).from(contactTags).where(and(eq(contactTags.contactId, contacts.id), eq(contactTags.tagId, t)))));
     for (const c of x.cf) where.push(cfCondition(tx, c));
     if (x.memberOf) where.push(exists(tx.select({ one: sql`1` }).from(contactListMembers).where(and(eq(contactListMembers.listId, x.memberOf), eq(contactListMembers.contactId, contacts.id)))));

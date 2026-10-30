@@ -106,7 +106,7 @@ describe('Configuración › Campos personalizados', () => {
     const s = fieldsServer([fld('ciudad', 'Ciudad', 'text')], false);
     mockApi({ ...authed(ME_ADVISOR), ...s.routes, 'GET /contacts': () => ({ body: { items: [], next_cursor: null, total: 0, access: { view_all: false, write: true, delete: false, import: false, export: false } } }) });
     settings('/contacts');
-    await screen.findByRole('link', { name: 'Contactos' });
+    await within(await screen.findByRole('navigation', { name: 'Secciones' })).findByRole('link', { name: 'Contactos' });
     expect(screen.queryByRole('link', { name: 'Configuración' })).not.toBeInTheDocument();
     vi.unstubAllGlobals();
     resetWorld();

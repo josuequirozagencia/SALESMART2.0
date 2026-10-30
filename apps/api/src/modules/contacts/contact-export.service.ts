@@ -37,7 +37,7 @@ export class ContactExportService {
           scope: q.scope,
           count: bundle.rows.length,
           columns: used.map((c) => c.key),
-          ...(q.scope === 'view' ? { filters: { q: q.q ?? null, owner: q.owner ?? null, source: q.source ?? null, consent: q.consent ?? null, tag: q.tag ?? [], cf: q.cf ?? [], list: q.list ?? null } } : {}),
+          ...(q.scope === 'view' ? { filters: { q: q.q ?? null, owner: q.owner ?? null, source: q.source ?? null, consent: q.consent ?? null, company: q.company ?? null, tag: q.tag ?? [], cf: q.cf ?? [], list: q.list ?? null } } : {}),
           ...(q.scope === 'selection' ? { selected: q.ids?.length ?? 0 } : {}),
           by: TenantContext.current().userId ?? null,
         },

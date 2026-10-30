@@ -3,6 +3,7 @@ import { friendlyError } from '../../lib/errors';
 import { formatPhone } from '../../lib/phone';
 import type { CrmCompany } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { ContactsTabs } from '../contacts/ContactsTabs';
 import { useOwners } from '../contacts/useContacts';
 import { CompanyDialog } from './CompanyDialog';
 import { useCompanies } from './useCrm';
@@ -28,9 +29,10 @@ export function ClientCompaniesPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Empresas</h1>
+        <h1 className="text-[22px] font-bold">Contactos</h1>
         {access.manage ? <Button variant="primary" onClick={() => setDialog({})}>Nueva empresa</Button> : null}
       </div>
+      <ContactsTabs />
       <label className="grid gap-1 text-[12px] font-semibold min-[640px]:max-w-[320px]">Buscar
         <input type="search" value={text} onChange={(e) => setText(e.target.value)} placeholder="Nombre de la empresa" className="rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-normal" />
       </label>

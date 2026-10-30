@@ -11,6 +11,7 @@ export const FIXED_COLUMNS: readonly ColumnDef[] = [
   { key: 'name', label: 'Nombre' },
   { key: 'phone', label: 'Teléfono' },
   { key: 'email', label: 'Correo' },
+  { key: 'company', label: 'Empresa' },
   { key: 'owner', label: 'Responsable' },
   { key: 'source', label: 'Origen' },
   { key: 'consent', label: 'Consentimiento' },

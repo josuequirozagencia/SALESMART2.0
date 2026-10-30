@@ -17,6 +17,8 @@ function Cell({ c, col, field, onOpen }: { c: Contact; col: string; field: Custo
     }
     case 'email':
       return c.email ? <span className="block max-w-[220px] truncate">{c.email}</span> : <span className="text-muted">—</span>;
+    case 'company':
+      return c.companies.length > 0 ? <span className="block max-w-[220px] truncate" title={c.companies.map((x) => x.name).join(', ')}>{c.companies.map((x) => x.name).join(', ')}</span> : <span className="text-muted">—</span>;
     case 'owner':
       return c.owner ? <span>{c.owner.name}</span> : <span className="text-muted">Sin asignar</span>;
     case 'source':

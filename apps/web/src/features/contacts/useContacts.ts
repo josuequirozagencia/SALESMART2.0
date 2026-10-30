@@ -8,13 +8,16 @@ export interface ContactFilters {
   /** '' = todos · 'me' = míos · 'none' = sin asignar · otro = id de la persona (solo quien ve todos los contactos). */
   owner: string;
   consent: '' | Consent;
+  /** Id de la empresa por la que se filtra ('' = todas) y su nombre (solo para mostrar la etiqueta; no se envía). */
+  company: string;
+  companyName: string;
   /** Ids de etiquetas: el contacto debe tener TODAS. */
   tags: string[];
   /** Filtros de campos personalizados, `variable:operador[:valor]`. */
   cf: string[];
   sort: SortKey;
 }
-export const NO_CONTACT_FILTERS: ContactFilters = { q: '', owner: '', consent: '', tags: [], cf: [], sort: 'recent' };
+export const NO_CONTACT_FILTERS: ContactFilters = { q: '', owner: '', consent: '', company: '', companyName: '', tags: [], cf: [], sort: 'recent' };
 export const SORT_LABEL: Record<SortKey, string> = { recent: 'Más recientes', oldest: 'Más antiguos', az: 'Nombre (A–Z)', za: 'Nombre (Z–A)' };
 export const SORT_PARAMS: Record<SortKey, { sort: 'created_at' | 'updated_at' | 'name'; order: 'asc' | 'desc' }> = {
   recent: { sort: 'created_at', order: 'desc' },
@@ -25,13 +28,14 @@ export const SORT_PARAMS: Record<SortKey, { sort: 'created_at' | 'updated_at' | 
 const PAGE = 25;
 
 /** ¿Hay algún filtro puesto? (el orden no cuenta). */
-export const hasFilters = (f: ContactFilters): boolean => f.q.trim() !== '' || f.owner !== '' || f.consent !== '' || f.tags.length > 0 || f.cf.length > 0;
+export const hasFilters = (f: ContactFilters): boolean => f.q.trim() !== '' || f.owner !== '' || f.consent !== '' || f.company !== '' || f.tags.length > 0 || f.cf.length > 0;
 
 export function contactsQuery(f: ContactFilters, cursor?: string, list?: string): string {
   const p = new URLSearchParams();
   if (f.q.trim()) p.set('q', f.q.trim());
   if (f.owner) p.set('owner', f.owner);
   if (f.consent) p.set('consent', f.consent);
+  if (f.company) p.set('company', f.company);
   for (const t of f.tags) p.append('tag', t);
   for (const c of f.cf) p.append('cf', c);
   if (list) p.set('list', list);

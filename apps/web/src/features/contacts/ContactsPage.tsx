@@ -5,6 +5,7 @@ import { Alert, Button, Spinner } from '../../ui/controls';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { useTags } from '../tags/useTags';
 import { ColumnMenu } from './ColumnMenu';
+import { ContactsTabs } from './ContactsTabs';
 import { catalogOf, loadColumns, normalizeColumns, saveColumns } from './columns';
 import { ContactDialog } from './ContactDialog';
 import { ContactsTable } from './ContactsTable';
@@ -28,13 +29,14 @@ function toSaved(f: ContactFilters): SavedFilters {
     ...(f.q.trim() ? { q: f.q.trim() } : {}),
     ...(f.owner ? { owner: f.owner } : {}),
     ...(f.consent ? { consent: f.consent } : {}),
+    ...(f.company ? { company: f.company } : {}),
     ...(f.tags.length > 0 ? { tag: f.tags } : {}),
     ...(f.cf.length > 0 ? { cf: f.cf } : {}),
   };
 }
 /** Filtros guardados de una lista dinámica → los de la pantalla. */
 function fromSaved(s: SavedFilters, sort: SavedList['sort']): ContactFilters {
-  return { q: s.q ?? '', owner: s.owner ?? '', consent: s.consent ?? '', tags: s.tag ?? [], cf: s.cf ?? [], sort: sortKeyOf(sort) };
+  return { q: s.q ?? '', owner: s.owner ?? '', consent: s.consent ?? '', company: s.company ?? '', companyName: '', tags: s.tag ?? [], cf: s.cf ?? [], sort: sortKeyOf(sort) };
 }
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
 
@@ -151,6 +153,8 @@ export function ContactsPage() {
           {access.write ? <Button variant="primary" onClick={() => setDialog({})}>Nuevo contacto</Button> : null}
         </div>
       </div>
+
+      <ContactsTabs />
 
       <div role="tablist" aria-label="Listas" className="flex flex-wrap items-center gap-1.5">
         <button type="button" role="tab" aria-selected={active === null} onClick={() => openTab(null)} className={`rounded-full border px-3 py-1 text-[13px] font-semibold ${active === null ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>Todos</button>

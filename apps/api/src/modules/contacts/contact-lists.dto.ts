@@ -4,7 +4,7 @@ import { SORTS } from './contacts.dto';
 
 const name = z.string().trim().min(1).max(60).refine((v) => !/\p{Cc}/u.test(v), 'caracteres no permitidos');
 /** Columnas del catálogo (ADR-46 #5): las fijas y `cf:<variable>` para un campo personalizado. */
-const columnKey = z.string().regex(/^(?:name|phone|email|owner|source|consent|tags|created_at|updated_at|campaign|cf:[a-z][a-z0-9_]{0,39})$/);
+const columnKey = z.string().regex(/^(?:name|phone|email|company|owner|source|consent|tags|created_at|updated_at|campaign|cf:[a-z][a-z0-9_]{0,39})$/);
 const columns = z.array(columnKey).min(1).max(40).refine((a) => new Set(a).size === a.length, 'hay columnas repetidas');
 const sort = z.object({ key: z.enum(SORTS), order: z.enum(['asc', 'desc']) }).strict();
 const contactIds = z.array(z.uuid()).min(1).max(500).refine((a) => new Set(a).size === a.length, 'hay contactos repetidos');

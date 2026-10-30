@@ -397,6 +397,7 @@ export class ContactsService {
       ...(q.owner ? { owner: q.owner } : {}),
       ...(q.source ? { source: q.source } : {}),
       ...(q.consent ? { consent: q.consent } : {}),
+      ...(q.company ? { company: q.company } : {}),
       ...(q.tag && q.tag.length > 0 ? { tag: q.tag } : {}),
       ...(q.cf && q.cf.length > 0 ? { cf: q.cf } : {}),
       ...(q.list ? { list: q.list } : {}),
@@ -423,6 +424,7 @@ export class ContactsService {
       ...(q.owner ? { owner: q.owner } : {}),
       ...(q.source ? { source: q.source } : {}),
       ...(q.consent ? { consent: q.consent } : {}),
+      ...(q.company ? { company: q.company } : {}),
       ...(q.tag && q.tag.length > 0 ? { tag: q.tag } : {}),
       ...(q.cf && q.cf.length > 0 ? { cf: q.cf } : {}),
     };
@@ -434,7 +436,7 @@ export class ContactsService {
       else filters = mergeFilters(savedFilters(l), filters);
     }
     const cf = await this.resolveCf(tx, filters.cf ?? []);
-    return this.repo.page(tx, sc, { sort: q.sort, order: q.order, limit: q.limit, cursor: q.cursor, q: filters.q, owner: filters.owner, source: filters.source, consent: filters.consent, tag: filters.tag }, { cf, memberOf });
+    return this.repo.page(tx, sc, { sort: q.sort, order: q.order, limit: q.limit, cursor: q.cursor, q: filters.q, owner: filters.owner, source: filters.source, consent: filters.consent, company: filters.company, tag: filters.tag }, { cf, memberOf });
   }
 
   /** `variable:operador[:valor]` → filtro contra la definición del campo. Un campo que no existe o un operador que no corresponde al tipo es un 400. */

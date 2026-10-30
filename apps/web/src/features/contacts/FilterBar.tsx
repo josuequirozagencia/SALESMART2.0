@@ -2,6 +2,8 @@ import { useState } from 'react';
 import type { Consent, ContactTag, CustomField, CustomFieldType } from '../../lib/types';
 import { Button } from '../../ui/controls';
 import { FIELD_TYPE_LABEL } from '../custom-fields/useCustomFields';
+import { useCompany } from '../crm/useCrm';
+import { CompanyFilter } from './CompanyFilter';
 import type { ContactFilters } from './useContacts';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px] font-normal';
@@ -27,6 +29,12 @@ export function describeCf(raw: string, fields: readonly CustomField[]): string 
   const name = fields.find((f) => f.key === key)?.name ?? key;
   const shown = value === 'true' ? 'Sí' : value === 'false' ? 'No' : value;
   return `${name} ${OP_LABEL[op] ?? op}${shown ? ` ${shown}` : ''}`;
+}
+
+/** Etiqueta del filtro por empresa: usa el nombre guardado o, si solo hay identificador (lista guardada), lo pide al servidor. */
+function CompanyChip({ filters, onRemove }: { filters: ContactFilters; onRemove: () => void }) {
+  const name = useCompany(filters.companyName ? '' : filters.company).data?.name;
+  return <Chip text={`Empresa: ${filters.companyName || name || '…'}`} onRemove={onRemove} />;
 }
 
 function Chip({ text, onRemove }: { text: string; onRemove: () => void }) {
@@ -120,6 +128,7 @@ export function FilterBar({
             {(Object.keys(CONSENT_LABEL) as Consent[]).map((c) => <option key={c} value={c}>{CONSENT_LABEL[c]}</option>)}
           </select>
         </label>
+        <CompanyFilter onPick={(c) => onChange({ ...filters, company: c.id, companyName: c.name })} />
         {free.length > 0 ? (
           <label className="grid gap-1 text-[12px] font-semibold">Etiqueta
             <select aria-label="Etiqueta" value="" onChange={(e) => e.target.value && onChange({ ...filters, tags: [...filters.tags, e.target.value] })} className={selectCls}>
@@ -131,7 +140,12 @@ export function FilterBar({
         {fields.length > 0 ? <Button className="!px-3 !py-2 !text-[13px]" aria-expanded={adding} onClick={() => setAdding((a) => !a)}>Filtrar por campo</Button> : null}
       </div>
       {adding && fields.length > 0 ? <CfForm key={fields.map((f) => f.id).join()} fields={fields} onAdd={(raw) => onChange({ ...filters, cf: [...filters.cf, raw] })} /> : null}
-      {chips.length > 0 ? <ul aria-label="Filtros activos" className="flex flex-wrap gap-1.5">{chips.map((c) => <Chip key={c.key} text={c.text} onRemove={c.remove} />)}</ul> : null}
+      {chips.length > 0 || filters.company ? (
+        <ul aria-label="Filtros activos" className="flex flex-wrap gap-1.5">
+          {filters.company ? <CompanyChip filters={filters} onRemove={() => onChange({ ...filters, company: '', companyName: '' })} /> : null}
+          {chips.map((c) => <Chip key={c.key} text={c.text} onRemove={c.remove} />)}
+        </ul>
+      ) : null}
     </div>
   );
 }

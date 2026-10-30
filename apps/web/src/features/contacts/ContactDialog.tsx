@@ -2,14 +2,15 @@ import { useState, type FormEvent } from 'react';
 import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import { COUNTRIES, normalizePhone } from '../../lib/phone';
-import type { Consent, Contact, CustomValue, OwnerOption } from '../../lib/types';
+import type { CompanyRef, Consent, Contact, CustomValue, OwnerOption } from '../../lib/types';
 import { isEmail, normalizeEmail } from '../../lib/validation';
 import { Alert, Button, Field, Input } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { FieldInput } from '../custom-fields/FieldInput';
 import { AttributionSection, TagBadges } from './AttributionSection';
 import { parseRaw, toRaw, type RawValue } from '../custom-fields/fieldValues';
-import { ContactCompaniesPanel } from '../crm/ContactCompaniesPanel';
+import { CompanyField } from '../crm/CompanyField';
+import { useLinkCompany } from '../crm/useCrm';
 import { NotesPanel } from '../crm/NotesPanel';
 import { Tabs } from '../crm/Tabs';
 import { ContactOpportunitiesPanel } from '../pipelines/ContactOpportunitiesPanel';
@@ -37,8 +38,13 @@ interface Errors {
  * elegido. El primero es el principal. `canAssign` (quien puede ver todos los contactos) habilita elegir el responsable; sin él, el servidor asigna el
  * contacto a quien lo crea. `canDelete` y `readOnly` solo muestran u ocultan botones: el servidor decide qué se permite.
  */
-export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly, onClose }: { contact?: Contact; owners: OwnerOption[]; canAssign: boolean; canDelete: boolean; readOnly: boolean; onClose: () => void }) {
+export function ContactDialog({ contact: contactProp, owners, canAssign, canDelete, readOnly, onClose }: { contact?: Contact; owners: OwnerOption[]; canAssign: boolean; canDelete: boolean; readOnly: boolean; onClose: () => void }) {
+  // Un contacto recién creado cuya empresa no se pudo vincular sigue abierto como contacto existente (ahí la empresa se agrega al instante)
+  const [made, setMade] = useState<Contact | null>(null);
+  const contact = contactProp ?? made ?? undefined;
   const editing = Boolean(contact);
+  const [companies, setCompanies] = useState<CompanyRef[]>([]);
+  const linkCompany = useLinkCompany();
   const [name, setName] = useState(contact?.name ?? '');
   const [email, setEmail] = useState(contact?.email ?? '');
   const [phones, setPhones] = useState<string[]>(contact && contact.phones.length > 0 ? contact.phones.map((p) => p.e164) : ['']);
@@ -55,7 +61,7 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
   const [tagIds, setTagIds] = useState<string[]>(initialTags);
   const [formError, setFormError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [tab, setTab] = useState<'data' | 'notes' | 'tasks' | 'opportunities' | 'companies' | 'ghl'>('data');
+  const [tab, setTab] = useState<'data' | 'notes' | 'tasks' | 'opportunities' | 'ghl'>('data');
   const create = useCreateContact();
   const update = useUpdateContact();
   const remove = useDeleteContact();
@@ -110,7 +116,19 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
     const tagsChanged = [...tagIds].sort().join() !== [...initialTags].sort().join();
     const input: ContactInput = tagsChanged ? { ...withCustom, tag_ids: tagIds } : withCustom;
     const handlers = {
-      onSuccess: onClose,
+      onSuccess: (saved: Contact) => {
+        // Contacto nuevo con empresa elegida: se vincula al crear; si falla, el contacto ya existe y se deja abierto para reintentar
+        if (editing || companies.length === 0) return onClose();
+        void (async () => {
+          try {
+            for (const c of companies) await linkCompany.mutateAsync({ contactId: saved.id, companyId: c.id });
+            onClose();
+          } catch (e) {
+            setMade(saved);
+            setFormError(`El contacto se creó, pero no pudimos vincular la empresa: ${friendlyError(e, 'inténtalo de nuevo')}. Agrégala aquí abajo.`);
+          }
+        })();
+      },
       onError: (err: unknown) => {
         if (err instanceof ApiError && (err.code === 'PHONE_TAKEN' || err.code === 'VALIDATION_ERROR')) {
           const byIndex: Record<number, string> = {};
@@ -132,7 +150,7 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
         setFormError(friendlyError(err, editing ? 'No pudimos guardar los cambios.' : 'No pudimos crear el contacto.'));
       },
     };
-    if (contact) update.mutate({ id: contact.id, input }, handlers);
+    if (contact) update.mutate({ id: contact.id, input }, { ...handlers, onSuccess: () => onClose() });
     else create.mutate(input, handlers);
   }
 
@@ -147,12 +165,11 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
     <Modal title={editing ? 'Contacto' : 'Nuevo contacto'} onClose={onClose} wide>
       {readOnly ? <Alert kind="info">Estás en modo solo lectura: puedes ver este contacto, no cambiarlo.</Alert> : null}
       {contact ? <TagBadges tags={contact.tags} /> : null}
-      {contact ? <Tabs label="Secciones del contacto" active={tab} onChange={setTab} tabs={[['data', 'Datos'], ['notes', 'Notas'], ['tasks', 'Tareas'], ['opportunities', 'Oportunidades'], ['companies', `Empresas${contact.companies.length > 0 ? ` · ${contact.companies.length}` : ''}`], ['ghl', 'GoHighLevel']]} /> : null}
+      {contact ? <Tabs label="Secciones del contacto" active={tab} onChange={setTab} tabs={[['data', 'Datos'], ['notes', 'Notas'], ['tasks', 'Tareas'], ['opportunities', 'Oportunidades'], ['ghl', 'GoHighLevel']]} /> : null}
       {contact && tab === 'notes' ? <NotesPanel target={{ kind: 'contact', id: contact.id }} canWrite={!readOnly} /> : null}
       {contact && tab === 'tasks' ? <TasksPanel link={{ contact: { id: contact.id, name: contact.name } }} canWrite={!readOnly} viewAll={canAssign} owners={owners} /> : null}
       {contact && tab === 'opportunities' ? <ContactOpportunitiesPanel contact={contact} canWrite={!readOnly} viewAll={canAssign} owners={owners} /> : null}
       {contact && tab === 'ghl' ? <GhlFlowsPanel contactId={contact.id} canWrite={!readOnly} /> : null}
-      {contact && tab === 'companies' ? <ContactCompaniesPanel contact={contact} canWrite={!readOnly} /> : null}
       <form onSubmit={submit} noValidate className={`grid gap-3 ${tab === 'data' ? '' : 'hidden'}`} aria-label={editing ? 'Contacto' : 'Nuevo contacto'}>
         <Field label="Nombre" error={errors.name}>
           {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={200} autoComplete="off" disabled={disabled} autoFocus={!editing} />}
@@ -200,6 +217,8 @@ export function ContactDialog({ contact, owners, canAssign, canDelete, readOnly,
             </select>
           )}
         </Field>
+
+        <CompanyField contact={contact} value={companies} onChange={setCompanies} disabled={disabled} />
 
         {customTags.length > 0 ? (
           <fieldset className="grid gap-1.5" disabled={disabled}>

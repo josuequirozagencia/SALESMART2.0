@@ -556,7 +556,7 @@ test('contactos: crea, busca, edita y borra desde la interfaz; un teléfono repe
   const { apiBase } = state();
   const email = await createAccount(request, uniqueEmail('contactos'));
   await uiLogin(page, email);
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   await expect(page).toHaveURL(/\/contacts$/);
   await expect(page.getByText(/Crea el primero con «Nuevo contacto»/)).toBeVisible();
 
@@ -661,7 +661,7 @@ test('campos personalizados: el administrador define campos, el formulario de co
   await expect(list.getByRole('listitem').nth(1)).toContainText('Cédula');
 
   // El formulario de contacto exige el obligatorio y guarda todos los valores
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   await page.getByRole('button', { name: 'Nuevo contacto' }).click();
   const dlg = page.getByRole('dialog', { name: 'Nuevo contacto' });
   await dlg.getByLabel('Nombre', { exact: true }).fill('Marta Salazar');
@@ -730,7 +730,7 @@ test('atribución: el administrador genera el punto de entrada, GoHighLevel avis
   expect((await hook(secret, click)).status()).toBe(200);
   expect((await hook(secret, click)).status()).toBe(200);
 
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   await expect(page.getByText('1 contacto', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Abrir el contacto +593984217730' }).click();
   const dlg = page.getByRole('dialog', { name: 'Contacto' });
@@ -796,7 +796,7 @@ test('listas: etiquetas, filtros, columnas, lista dinámica y lista fija con la 
   await post('/contacts', { name: 'Beto Cuenca', phones: ['+593991112233'], custom_fields: { ciudad: 'Cuenca' } });
   await post('/contacts', { name: 'Carla Quito', phones: ['+34612345678'], custom_fields: { ciudad: 'Quito' } });
 
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   const table = page.getByRole('table', { name: 'Contactos' });
   await expect(table.getByRole('row')).toHaveCount(4); // encabezado + 3
   const open = (name: string) => table.getByRole('button', { name: `Abrir el contacto ${name}` });
@@ -883,7 +883,7 @@ test('importar y exportar: el administrador sube un CSV, revisa, importa y desca
 
   const csv = 'Nombre;Celular;Correo;Ciudad;Notas\r\nAna Torres;098 421 7730;ana@correo.test;Quito;x\r\nBeto;0991112233;;Cuenca;y\r\nSin Teléfono;;;Lima;z\r\n=Evil;0987654321;;Lima;w\r\n';
   await uiLogin(page, email);
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   await page.getByRole('button', { name: 'Importar' }).click();
   const dlg = page.getByRole('dialog', { name: 'Importar contactos' });
   await dlg.getByLabel('Archivo CSV').setInputFiles({ name: 'clientes.csv', mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
@@ -930,7 +930,7 @@ test('importar y exportar: el administrador sube un CSV, revisa, importa y desca
   expect(fileDl.suggestedFilename()).toMatch(/^contactos-\d{4}-\d{2}-\d{2}\.csv$/);
   const raw = await readFile((await fileDl.path())!, 'utf8');
   expect(raw.charCodeAt(0)).toBe(0xfeff);
-  expect(raw).toContain('Nombre,Teléfono,Correo,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad');
+  expect(raw).toContain('Nombre,Teléfono,Correo,Empresa,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad');
   expect(raw).toContain('Ana Torres');
   expect(raw).toContain("'+593984217730");
   await expect(exp.getByText(/se descargó el archivo con 3 contactos/)).toBeVisible();
@@ -948,9 +948,10 @@ test('empresas, notas y tareas: el administrador crea una empresa, le vincula un
   const mine = { authorization: `Bearer ${await apiLogin(request, email)}`, 'content-type': 'application/json' };
   const ana = (await (await request.post(`${apiBase}/v1/contacts`, { headers: mine, data: { name: 'Ana Torres', phones: ['+593984217730'] } })).json()) as { id: string };
 
-  // Empresa creada desde la pantalla «Empresas»
+  // Empresa creada desde «Contactos › Empresas» (M10.2: ya no es un ítem del menú)
   await uiLogin(page, email);
-  await page.getByRole('link', { name: 'Empresas' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Vistas de contactos' }).getByRole('link', { name: 'Empresas' }).click();
   await page.getByRole('button', { name: 'Nueva empresa' }).click();
   const create = page.getByRole('dialog', { name: 'Nueva empresa' });
   await create.getByLabel('Nombre').fill('Acme SA');
@@ -976,11 +977,10 @@ test('empresas, notas y tareas: el administrador crea una empresa, le vincula un
   await co.getByRole('button', { name: 'Cerrar' }).last().click();
 
   // En la ficha del contacto: empresa, nota y tarea
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   await page.getByRole('button', { name: 'Abrir el contacto Ana Torres' }).click();
   const dlg = page.getByRole('dialog', { name: 'Contacto' });
-  await dlg.getByRole('tab', { name: /Empresas/ }).click();
-  await expect(dlg.getByRole('region', { name: 'Empresas' }).getByText('Acme SA')).toBeVisible();
+  await expect(dlg.getByRole('group', { name: 'Empresa' }).getByText('Acme SA')).toBeVisible(); // campo «Empresa» del formulario
   await dlg.getByRole('tab', { name: 'Notas' }).click();
   await dlg.getByLabel('Nueva nota').fill('Prefiere por la tarde');
   await dlg.getByRole('button', { name: 'Agregar nota' }).click();
@@ -1132,7 +1132,7 @@ test('oportunidades: crear desde el tablero y desde la ficha, mover (selector y 
   await dup.getByRole('button', { name: 'Cancelar' }).click();
 
   // Beto se crea desde su ficha (pestaña Oportunidades)
-  await page.getByRole('link', { name: 'Contactos' }).click();
+  await page.getByRole('navigation', { name: 'Secciones' }).getByRole('link', { name: 'Contactos' }).click();
   await page.getByRole('button', { name: 'Abrir el contacto Beto Luna' }).click();
   const ficha = page.getByRole('dialog', { name: 'Contacto' });
   await ficha.getByRole('tab', { name: 'Oportunidades' }).click();

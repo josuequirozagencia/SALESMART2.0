@@ -29,7 +29,6 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         { to: '/agenda', label: 'Agenda', icon: 'calendar' },
         { to: '/sales', label: 'Ventas', icon: 'dollar' },
         { to: '/contacts', label: 'Contactos', icon: 'users' },
-        { to: '/companies', label: 'Empresas', icon: 'building' },
         { to: '/opportunities', label: 'Oportunidades', icon: 'board' },
         { to: '/tasks', label: 'Tareas', icon: 'check' },
       ],
