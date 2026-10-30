@@ -274,7 +274,7 @@ describe('Inbox · columna de datos del contacto', () => {
     });
     await open(w);
     expect(screen.queryByRole('complementary', { name: 'Datos del contacto' })).toBeNull();
-    await userEvent.click(await screen.findByRole('button', { name: 'Datos de Ana Torres' })); // pulsar el nombre
+    await userEvent.click(await screen.findByRole('heading', { name: 'Ana Torres' })); // pulsar el nombre
     const side = within(await screen.findByRole('complementary', { name: 'Datos del contacto' }));
     expect((await side.findAllByText('+593984217730')).length).toBeGreaterThan(0); // en el encabezado de la columna y en sus teléfonos
     expect(side.getByText('ana@correo.test')).toBeInTheDocument();

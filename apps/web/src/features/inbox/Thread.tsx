@@ -53,7 +53,7 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
         <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 lg:hidden">←</Link>
         <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] font-bold"><button type="button" onClick={onToggleContact} aria-expanded={contactOpen} aria-label={`Datos de ${c.contact.name}`} className="max-w-full truncate rounded text-left hover:underline">{c.contact.name}</button></h2>
+          <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
         </div>
       </div>
