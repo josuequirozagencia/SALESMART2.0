@@ -63,7 +63,7 @@ export const PERMISSIONS = {
   // M8.1 (ADR-53): ver el saldo y los movimientos de créditos IA de la empresa (nunca el costo ni el margen).
   'ai.credits.view': 'tenant',
   export: 'tenant',
-  'team.manage': 'tenant',
+  'users.manage': 'tenant',
   'billing.manage': 'tenant',
   // Consola de la agencia (M2.5, ADR-41). Solo el rol `agency` en SU organización; nunca dentro de un cliente.
   'agency.clients.read': 'tenant',

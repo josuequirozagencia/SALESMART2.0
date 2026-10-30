@@ -119,9 +119,12 @@ export const organizationMembers = identityTable(
     accessLevel: text('access_level'),
     grantedBy: uuid('granted_by').references(() => users.id),
     revokedAt: ts('revoked_at'),
+    /** Por qué se revocó (M10.3, ADR-56): `deactivated` se puede reactivar; `removed` solo se vuelve con una invitación nueva. Nulo = vigente o revocada por otra vía (agencia). */
+    revokedReason: text('revoked_reason'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
+    check('organization_members_revoked_reason_valid', sql`${t.revokedReason} IS NULL OR ${t.revokedReason} IN ('deactivated', 'removed')`),
     check('organization_members_role_valid', sql`${t.role} IN ('super_admin', 'agency', 'client_admin', 'advisor')`),
     // Nivel de acceso de una agencia sobre un cliente (ADR-11; «sin acceso» = no hay membresía). NULL en el resto de roles
     check('organization_members_access_level_valid', sql`${t.accessLevel} IS NULL OR ${t.accessLevel} IN ('read', 'advisor', 'admin')`),
@@ -324,6 +327,8 @@ export const invitations = identityTable(
     invitedBy: uuid('invited_by').notNull().references(() => users.id),
     sentCount: integer('sent_count').notNull().default(1),
     lastSentAt: ts('last_sent_at').notNull().defaultNow(),
+    /** Lo que se aplica AL ACEPTAR (M10.3, ADR-56): ajustes de permisos y departamentos que el administrador eligió al invitar. */
+    setup: jsonb('setup'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
@@ -507,5 +512,52 @@ export const qrRoutes = identityTable(
   (t) => [
     check('qr_routes_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
     uniqueIndex('qr_routes_channel_uq').on(t.organizationId, t.channelAccountId),
+  ],
+);
+
+/**
+ * Ajustes de permisos por persona (M10.3, ADR-56 B3): sobre la plantilla de su rol, un permiso concedido (`grant`) o quitado (`deny`). TABLA DE IDENTIDAD junto a la membresía (los
+ * permisos se resuelven en la identidad antes de abrir el contexto de empresa). Estado vigente (se actualiza y se borra); la historia va en `member_history`. El permiso efectivo
+ * siempre se recorta con el techo del rol: un dato indebido aquí no concede nada.
+ */
+export const memberPermissions = identityTable(
+  'member_permissions',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    membershipId: uuid('membership_id').notNull().references(() => organizationMembers.id),
+    permissionKey: text('permission_key').notNull(),
+    effect: text('effect').notNull(),
+    grantedBy: uuid('granted_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    /** Un ajuste reemplazado se marca aquí (app_identity no tiene DELETE, ADR-35); solo cuentan los vigentes. */
+    revokedAt: ts('revoked_at'),
+  },
+  (t) => [
+    check('member_permissions_effect_valid', sql`${t.effect} IN ('grant', 'deny')`),
+    uniqueIndex('member_permissions_member_key_uq').on(t.membershipId, t.permissionKey).where(sql`${t.revokedAt} IS NULL`),
+  ],
+);
+
+/**
+ * Historia del equipo de una empresa (M10.3, ADR-56): quién invitó, cambió el rol o los permisos, desactivó, reactivó, quitó o cerró las sesiones de quién. APPEND-ONLY
+ * (`app_identity` solo INSERT/SELECT). Es la auditoría ATÓMICA con el cambio (en la misma transacción de identidad); `audit_logs` de la empresa se escribe después del commit.
+ */
+export const memberHistory = identityTable(
+  'member_history',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    /** La persona afectada (puede ser un correo aún sin cuenta en una invitación: entonces `userId` es nulo y el correo va en `after`). */
+    userId: uuid('user_id').references(() => users.id),
+    changedBy: uuid('changed_by').references(() => users.id),
+    kind: text('kind').notNull(),
+    before: jsonb('before'),
+    after: jsonb('after'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('member_history_kind_valid', sql`${t.kind} IN ('invited', 'invitation_cancelled', 'role_changed', 'permissions_changed', 'queues_changed', 'deactivated', 'reactivated', 'removed', 'sessions_revoked')`),
+    index('member_history_org_idx').on(t.organizationId, t.createdAt),
+    index('member_history_user_idx').on(t.userId, t.createdAt),
   ],
 );

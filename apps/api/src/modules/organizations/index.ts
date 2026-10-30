@@ -14,3 +14,4 @@ export { GhlRoutesService } from './ghl-routes.service';
 export { QrRoutesService, type QrRoute } from './qr-routes.service';
 export { FormRoutesService } from './form-routes.service';
 export { ChannelRoutesService, type ChannelRoute } from './channel-routes.service';
+export { TeamMembersService, type TeamMember, type TeamMemberDetail, type TeamRole, type TeamStatus } from './team-members.service';

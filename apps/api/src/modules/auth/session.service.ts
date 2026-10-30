@@ -35,6 +35,8 @@ export interface AuthContext {
   actingAs: ActingAs | null;
   /** Organización con la que empezó la sesión: a ella se vuelve y de ella sale `acting_org_id`. */
   home: { id: string; name: string; kind: 'platform' | 'agency' | 'client' };
+  /** Ajustes de permisos de ESTA persona en la organización activa (M10.3, ADR-56): lo concedido y lo quitado sobre la plantilla de su rol. Vacío si no tiene. */
+  overrides: { grant: string[]; deny: string[] };
   /** Prueba gratuita vencida (por la hora, no por el estado materializado): la cuenta está en pausa (ADR-23 #5). */
   trialExpired: boolean;
   /** Quien actúa en una empresa en pausa o con nivel «lectura» solo puede ver (ADR-41). */
@@ -171,6 +173,8 @@ export class SessionService {
         // Membresía VIGENTE en la organización activa: si se revoca, la sesión deja de valer al instante (ADR-40).
         memberRole: sql<string | null>`(SELECT m.role FROM organization_members m WHERE m.user_id = ${sessions.userId} AND m.organization_id = ${sessions.activeOrgId} AND m.revoked_at IS NULL LIMIT 1)`,
         memberLevel: sql<string | null>`(SELECT m.access_level FROM organization_members m WHERE m.user_id = ${sessions.userId} AND m.organization_id = ${sessions.activeOrgId} AND m.revoked_at IS NULL LIMIT 1)`,
+        // Ajustes de permisos por persona (M10.3): se leen en la misma ida a la BD, así que un cambio rige desde la petición siguiente.
+        memberOverrides: sql<Array<{ k: string; e: string }> | null>`(SELECT json_agg(json_build_object('k', p.permission_key, 'e', p.effect)) FROM member_permissions p WHERE p.revoked_at IS NULL AND p.membership_id = (SELECT m.id FROM organization_members m WHERE m.user_id = ${sessions.userId} AND m.organization_id = ${sessions.activeOrgId} AND m.revoked_at IS NULL LIMIT 1))`,
         // Soporte (ADR-41): el Súper Admin entra a otra organización SIN membresía en ella; su derecho es la membresía `super_admin` VIGENTE en la plataforma.
         isSuperAdmin: sql<boolean>`EXISTS (SELECT 1 FROM organization_members m JOIN organizations po ON po.id = m.organization_id WHERE m.user_id = ${sessions.userId} AND m.role = 'super_admin' AND m.revoked_at IS NULL AND po.kind = 'platform' AND po.status = 'active' AND po.deleted_at IS NULL)`,
         homeName: sql<string | null>`(SELECT h.name FROM organizations h WHERE h.id = ${sessions.homeOrgId})`,
@@ -220,6 +224,10 @@ export class SessionService {
       role: r.role,
       accessLevel,
       actingAs,
+      overrides: {
+        grant: (r.memberOverrides ?? []).filter((o) => o.e === 'grant').map((o) => o.k),
+        deny: (r.memberOverrides ?? []).filter((o) => o.e === 'deny').map((o) => o.k),
+      },
       home: { id: r.s.homeOrgId, name: r.homeName ?? '', kind: (r.homeKind ?? 'client') as AuthContext['home']['kind'] },
       trialExpired,
       readOnly,

@@ -1,2 +1,3 @@
 export { PERMISSIONS, PERMISSION_KEYS, ROLES, ROLE_PERMISSIONS, AGENCY_CONSOLE_PERMISSIONS, READ_ONLY_PERMISSIONS, accessLevelPermissions, isAccessLevel, isPermissionKey, type AccessLevel, type PermissionKey, type PermissionScope, type RoleKey } from './catalog';
 export { RequirePermission, PERMISSION_KEY } from './permission.decorator';
+export { PERMISSION_GROUPS, PERMISSION_META, MANAGEABLE_KEYS, PROTECTED_FROM_DENY, NO_OVERRIDES, ceilingOf, effectivePermissions, isGrantable, isManageable, isOverrideRole, validateOverrides, type ManageableKey, type OverrideRole, type PermissionGroupId, type PermissionMeta, type PermissionOverrides } from './permission-groups';

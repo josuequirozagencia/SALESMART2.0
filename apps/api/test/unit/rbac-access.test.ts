@@ -16,7 +16,7 @@ describe('accessLevelPermissions', () => {
     expect(read.size).toBeGreaterThan(0);
     for (const k of read) expect(READ_ONLY_PERMISSIONS.has(k), k).toBe(true);
     expect(read.has('contacts.write')).toBe(false);
-    expect(read.has('team.manage')).toBe(false);
+    expect(read.has('users.manage')).toBe(false);
     expect(read.has('billing.manage')).toBe(false);
   });
 
