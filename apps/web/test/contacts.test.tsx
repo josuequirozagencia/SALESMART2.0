@@ -90,7 +90,7 @@ describe('Contactos · lista', () => {
     const s = server(ME_ADMIN, ALL);
     mockApi(s.routes);
     renderApp('/contacts');
-    expect(await screen.findByRole('link', { name: 'Contactos' })).toHaveAttribute('href', '/contacts');
+    expect(await within(await screen.findByRole('navigation', { name: 'Secciones' })).findByRole('link', { name: 'Contactos' })).toHaveAttribute('href', '/contacts');
     const table = await screen.findByRole('table', { name: 'Contactos' });
     const row = (name: string) => within(within(table).getByRole('button', { name: `Abrir el contacto ${name}` }).closest('tr')!);
     const ana = row('Ana Torres');

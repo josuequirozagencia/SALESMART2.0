@@ -50,6 +50,7 @@ export function ExportDialog({
           ...(filters.q.trim() ? { q: filters.q.trim() } : {}),
           ...(filters.owner ? { owner: filters.owner } : {}),
           ...(filters.consent ? { consent: filters.consent } : {}),
+          ...(filters.company ? { company: filters.company } : {}),
           ...(filters.tags.length > 0 ? { tag: filters.tags } : {}),
           ...(filters.cf.length > 0 ? { cf: filters.cf } : {}),
           ...(listId ? { list: listId } : {}),

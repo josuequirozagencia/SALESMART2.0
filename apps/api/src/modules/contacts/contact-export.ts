@@ -7,7 +7,7 @@ import { SORTS } from './contacts.dto';
 export const MAX_EXPORT_ROWS = 20_000;
 export const MAX_EXPORT_SELECTION = 5_000;
 
-const columnKey = z.string().regex(/^(?:name|phone|email|owner|source|consent|tags|created_at|updated_at|campaign|cf:[a-z][a-z0-9_]{0,39})$/);
+const columnKey = z.string().regex(/^(?:name|phone|email|company|owner|source|consent|tags|created_at|updated_at|campaign|cf:[a-z][a-z0-9_]{0,39})$/);
 
 /** Qué exportar: la selección, la vista actual (filtros, búsqueda y lista abierta) o todo lo que la persona puede ver; y con qué columnas. */
 export const exportSchema = z
@@ -29,6 +29,7 @@ export const FIXED_EXPORT: ReadonlyArray<{ key: string; label: string }> = [
   { key: 'name', label: 'Nombre' },
   { key: 'phone', label: 'Teléfono' },
   { key: 'email', label: 'Correo' },
+  { key: 'company', label: 'Empresa' },
   { key: 'owner', label: 'Responsable' },
   { key: 'source', label: 'Origen' },
   { key: 'consent', label: 'Consentimiento' },
@@ -46,6 +47,7 @@ export function exportCell(c: ContactView, key: string): unknown {
     case 'name': return c.name;
     case 'phone': return c.phones.map((p) => p.e164).join(SEP);
     case 'email': return c.email ?? '';
+    case 'company': return c.companies.map((x) => x.name).join(SEP);
     case 'owner': return c.owner?.name ?? '';
     case 'source': return c.source;
     case 'consent': return CONSENT[c.consent] ?? c.consent;

@@ -279,6 +279,55 @@ describe('vínculos contacto ↔ empresa', () => {
     expect((await call('POST', `/contacts/${ana.id}/companies/${cos[5]!.id}`, T.alice)).status).toBe(200); // la borrada ya no cuenta
   });
 
+  it('filtro por empresa (M10.2): GET /contacts?company= devuelve solo sus contactos, respeta el alcance del asesor, se combina con otros filtros, entra en listas dinámicas y exportación, y una empresa ajena no da nada', async () => {
+    const acme = await mkCompany(T.alice, 'Acme');
+    const otra = await mkCompany(T.alice, 'Otra');
+    const mine = await mkContact(T.carol, 'Ana de Carolina', '+593984217730');
+    const hers = await mkContact(T.erin, 'Beto de Erika', '+593991112233');
+    const free = await mkContact(T.alice, 'Cata sin dueño', '+593987654321');
+    await ok(await call('POST', `/companies/${acme.id}/contacts`, T.alice, { contact_ids: [mine.id, hers.id] }));
+    await ok(await call('POST', `/companies/${otra.id}/contacts`, T.alice, { contact_ids: [free.id] }));
+    const names = async (t: string, qs: string): Promise<string[]> => (await ok<Page<{ name: string }>>(await call('GET', `/contacts?${qs}`, t))).items.map((c) => c.name).sort();
+    expect(await names(T.alice, `company=${acme.id}`)).toEqual(['Ana de Carolina', 'Beto de Erika']);
+    expect(await names(T.alice, `company=${otra.id}`)).toEqual(['Cata sin dueño']);
+    // el total que informa es el del filtro
+    expect((await ok<Page<unknown>>(await call('GET', `/contacts?company=${acme.id}`, T.alice))).total).toBe(2);
+    // el asesor ve solo los suyos aunque la empresa tenga más
+    expect(await names(T.carol, `company=${acme.id}`)).toEqual(['Ana de Carolina']);
+    expect(await names(T.carol, `company=${otra.id}`)).toEqual([]);
+    // combinado con la búsqueda y con el responsable
+    expect(await names(T.alice, `company=${acme.id}&q=beto`)).toEqual(['Beto de Erika']);
+    expect(await names(T.alice, `company=${acme.id}&owner=${IDS.carol}`)).toEqual(['Ana de Carolina']);
+    // una empresa borrada o que no existe no coincide con nadie; un identificador mal formado es un 400
+    expect(await names(T.alice, `company=${NOBODY}`)).toEqual([]);
+    expect((await call('GET', '/contacts?company=no-uuid', T.alice)).status).toBe(400);
+    // desvincular saca al contacto del filtro
+    await ok(await call('DELETE', `/contacts/${hers.id}/companies/${acme.id}`, T.alice));
+    expect(await names(T.alice, `company=${acme.id}`)).toEqual(['Ana de Carolina']);
+    // una lista dinámica guarda el filtro por empresa y se abre con él
+    const list = await ok<{ id: string; filters: Record<string, unknown> }>(await call('POST', '/contact-lists', T.alice, { name: 'De Acme', kind: 'dynamic', filters: { company: acme.id } }), 201);
+    expect(list.filters).toEqual({ company: acme.id });
+    expect(await names(T.alice, `list=${list.id}`)).toEqual(['Ana de Carolina']);
+    // la exportación del listado filtrado (alcance «view») lleva solo esos contactos y deja el filtro en la auditoría
+    const exp = await call('POST', '/contacts/export', T.alice, { scope: 'view', company: acme.id });
+    expect(exp.status).toBe(200);
+    const csv = await exp.text();
+    expect(csv).toContain('Ana de Carolina');
+    expect(csv).not.toContain('Cata sin dueño');
+    const log = (await admin.query("SELECT new_value FROM audit_logs WHERE entity_type = 'contact_export' ORDER BY id DESC LIMIT 1")).rows[0]?.new_value as { filters?: { company?: string | null } } | undefined;
+    expect(log?.filters?.company).toBe(acme.id);
+  });
+
+  it('el filtro por empresa de otra organización no devuelve ni revela nada (A↔B)', async () => {
+    const acme = await mkCompany(T.alice, 'Acme');
+    const ana = await mkContact(T.alice, 'Ana', '+593984217730');
+    await ok(await call('POST', `/companies/${acme.id}/contacts`, T.alice, { contact_ids: [ana.id] }));
+    await mkContact(T.bob, 'Contacto de B', '+593984217731');
+    const r = await ok<Page<unknown>>(await call('GET', `/contacts?company=${acme.id}`, T.bob));
+    expect(r.items).toEqual([]);
+    expect(r.total).toBe(0);
+  });
+
   it('vincular exige que la empresa y el contacto existan; un contacto borrado desaparece de la empresa', async () => {
     const co = await mkCompany(T.alice, 'Acme');
     const ana = await mkContact(T.alice, 'Ana', '+593984217730');

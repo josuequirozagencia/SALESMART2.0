@@ -106,13 +106,24 @@ async function openContact() {
 }
 
 describe('menú', () => {
-  it('la empresa ve las secciones Empresas y Tareas', async () => {
+  it('«Empresas» ya no es un ítem del menú: es una vista dentro de Contactos (pestañas), y la dirección vieja /companies lleva ahí', async () => {
     mockApi(world().routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await screen.findByRole('table', { name: 'Empresas' });
     const nav = screen.getByRole('navigation', { name: 'Secciones' });
-    expect(within(nav).getByRole('link', { name: 'Empresas' })).toHaveAttribute('href', '/companies');
+    expect(within(nav).queryByRole('link', { name: 'Empresas' })).toBeNull();
+    expect(within(nav).getByRole('link', { name: 'Contactos' })).toHaveAttribute('href', '/contacts');
     expect(within(nav).getByRole('link', { name: 'Tareas' })).toHaveAttribute('href', '/tasks');
+    const tabs = screen.getByRole('navigation', { name: 'Vistas de contactos' });
+    expect(within(tabs).getByRole('link', { name: 'Empresas' })).toHaveAttribute('aria-current', 'page');
+    expect(within(tabs).getByRole('link', { name: 'Contactos' })).toHaveAttribute('href', '/contacts');
+  });
+
+  it('/companies redirige a /contacts/companies', async () => {
+    mockApi(world().routes);
+    renderApp('/companies');
+    expect(await screen.findByRole('table', { name: 'Empresas' })).toBeInTheDocument();
+    expect(within(screen.getByRole('navigation', { name: 'Vistas de contactos' })).getByRole('link', { name: 'Empresas' })).toHaveAttribute('aria-current', 'page');
   });
 });
 
@@ -120,7 +131,7 @@ describe('Empresas', () => {
   it('lista las empresas con su número de contactos y busca por nombre', async () => {
     const w = world();
     mockApi(w.routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     const table = await screen.findByRole('table', { name: 'Empresas' });
     expect(within(table).getByRole('button', { name: 'Abrir la empresa Acme SA' })).toBeInTheDocument();
     expect(within(table).getByRole('button', { name: 'Abrir la empresa Estudio Luna' })).toBeInTheDocument();
@@ -132,7 +143,7 @@ describe('Empresas', () => {
   it('crea una empresa; un nombre repetido se marca en el campo', async () => {
     const w = world();
     mockApi(w.routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await userEvent.click(await screen.findByRole('button', { name: 'Nueva empresa' }));
     const dlg = screen.getByRole('dialog', { name: 'Nueva empresa' });
     await userEvent.type(within(dlg).getByLabelText('Nombre'), 'acme sa');
@@ -152,7 +163,7 @@ describe('Empresas', () => {
   it('valida en pantalla antes de enviar (nombre obligatorio, teléfono y correo con forma válida)', async () => {
     const w = world();
     mockApi(w.routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await userEvent.click(await screen.findByRole('button', { name: 'Nueva empresa' }));
     const dlg = screen.getByRole('dialog', { name: 'Nueva empresa' });
     await userEvent.click(within(dlg).getByRole('button', { name: 'Crear empresa' }));
@@ -175,7 +186,7 @@ describe('Empresas', () => {
     w.routes['POST /companies/k1/contacts'] = (call) => { rec(w, 'link', call); return { body: { added: 1, skipped: 0 } }; };
     w.routes['GET /tasks'] = (call) => { rec(w, 'tasks', call); return { body: { items: [], next_cursor: null, total: 0, access: { view_all: true, write: true } } }; };
     mockApi(w.routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await userEvent.click(await screen.findByRole('button', { name: 'Abrir la empresa Acme SA' }));
     const dlg = screen.getByRole('dialog', { name: 'Empresa' });
     await userEvent.click(within(dlg).getByRole('tab', { name: 'Contactos · 1' }));
@@ -203,7 +214,7 @@ describe('Empresas', () => {
   it('borrar la empresa pide confirmación y borra al confirmar', async () => {
     const w = world(ALL);
     mockApi(w.routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await userEvent.click(await screen.findByRole('button', { name: 'Abrir la empresa Acme SA' }));
     const dlg = screen.getByRole('dialog', { name: 'Empresa' });
     await userEvent.click(within(dlg).getByRole('button', { name: 'Borrar empresa' }));
@@ -217,7 +228,7 @@ describe('Empresas', () => {
 
   it('el asesor no crea ni edita empresas: ve los datos bloqueados y escribe notas y tareas', async () => {
     mockApi(world(OWN).routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await screen.findByRole('table', { name: 'Empresas' });
     expect(screen.queryByRole('button', { name: 'Nueva empresa' })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Abrir la empresa Acme SA' }));
@@ -239,7 +250,7 @@ describe('Empresas', () => {
 
   it('en solo lectura se ve pero no se cambia', async () => {
     mockApi(world(READ).routes);
-    renderApp('/companies');
+    renderApp('/contacts/companies');
     await userEvent.click(await screen.findByRole('button', { name: 'Abrir la empresa Acme SA' }));
     const dlg = screen.getByRole('dialog', { name: 'Empresa' });
     expect(within(dlg).getByText(/modo solo lectura/)).toBeInTheDocument();
@@ -326,30 +337,80 @@ describe('Ficha del contacto: notas, tareas y empresas', () => {
     expect(within(td).queryByLabelText('Responsable')).not.toBeInTheDocument();
   });
 
-  it('empresas: muestra las del contacto, agrega por búsqueda y quita', async () => {
+  it('campo «Empresa» del contacto (M10.2): muestra las del contacto, agrega por búsqueda y quita al instante', async () => {
     const w = world();
     mockApi(w.routes);
     const dlg = await openContact();
-    expect(within(dlg).getByRole('tab', { name: 'Empresas · 1' })).toBeInTheDocument();
-    await userEvent.click(within(dlg).getByRole('tab', { name: 'Empresas · 1' }));
-    const section = within(await within(dlg).findByRole('region', { name: 'Empresas' }));
-    expect(section.getByText('Acme SA')).toBeInTheDocument();
-    await userEvent.click(section.getByRole('button', { name: 'Quitar de la empresa Acme SA' }));
+    expect(within(dlg).queryByRole('tab', { name: /Empresas/ })).toBeNull(); // ya no hay pestaña: es un campo del formulario
+    const field = within(within(dlg).getByRole('group', { name: 'Empresa' }));
+    expect(field.getByText('Acme SA')).toBeInTheDocument();
+    await userEvent.click(field.getByRole('button', { name: 'Quitar la empresa Acme SA' }));
     await waitFor(() => expect(w.calls['unlinkCompany']).toHaveLength(1));
-    await userEvent.type(section.getByLabelText('Agregar a una empresa'), 'luna');
-    await userEvent.click(await section.findByRole('button', { name: 'Agregar a la empresa Estudio Luna' }));
+    await userEvent.type(field.getByLabelText('Buscar o crear una empresa'), 'luna');
+    await userEvent.click(await field.findByRole('button', { name: 'Elegir la empresa Estudio Luna' }));
     await waitFor(() => expect(w.calls['linkCompany']).toHaveLength(1));
   });
 
-  it('el asesor ve las empresas del contacto pero no las cambia', async () => {
+  it('quien administra empresas crea una al vuelo desde el campo cuando no existe, y se la vincula', async () => {
+    const w = world();
+    w.routes['POST /contacts/c1/companies/k9'] = (call) => { rec(w, 'linkNew', call); return { body: { linked: true } }; };
+    mockApi(w.routes);
+    const dlg = await openContact();
+    const field = within(within(dlg).getByRole('group', { name: 'Empresa' }));
+    await userEvent.type(field.getByLabelText('Buscar o crear una empresa'), 'Nueva Compañía');
+    await userEvent.click(await field.findByRole('button', { name: 'Crear «Nueva Compañía»' }));
+    await waitFor(() => expect(w.calls['createCompany']).toHaveLength(1));
+    expect(w.calls['createCompany']![0]!.body).toMatchObject({ name: 'Nueva Compañía' });
+    await waitFor(() => expect(w.calls['linkNew']).toHaveLength(1));
+  });
+
+  it('un contacto NUEVO elige su empresa en el formulario y se vincula al crearlo', async () => {
+    const w = world();
+    w.routes['POST /contacts'] = (call) => { rec(w, 'createContact', call); return { status: 201, body: { ...ANA, id: 'c7', name: 'Nuevo Cliente', companies: [] } }; };
+    w.routes['POST /contacts/c7/companies/k2'] = (call) => { rec(w, 'linkOnCreate', call); return { body: { linked: true } }; };
+    mockApi(w.routes);
+    renderApp('/contacts');
+    await userEvent.click(await screen.findByRole('button', { name: 'Nuevo contacto' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Nuevo contacto' }));
+    await userEvent.type(dlg.getByLabelText('Nombre'), 'Nuevo Cliente');
+    await userEvent.type(dlg.getByLabelText('Teléfono 1 (principal)'), '+593984217799');
+    const field = within(dlg.getByRole('group', { name: 'Empresa' }));
+    await userEvent.type(field.getByLabelText('Buscar o crear una empresa'), 'luna');
+    await userEvent.click(await field.findByRole('button', { name: 'Elegir la empresa Estudio Luna' }));
+    expect(w.calls['linkOnCreate']).toBeUndefined(); // todavía no: se vincula al crear
+    await userEvent.click(dlg.getByRole('button', { name: 'Crear contacto' }));
+    await waitFor(() => expect(w.calls['createContact']).toHaveLength(1));
+    await waitFor(() => expect(w.calls['linkOnCreate']).toHaveLength(1));
+    // la empresa no viaja en el cuerpo del contacto: el vínculo es su propia llamada
+    expect(w.calls['createContact']![0]!.body).not.toHaveProperty('company_ids');
+  });
+
+  it('si no se pudo vincular la empresa al crear, el contacto queda abierto para reintentar y lo dice', async () => {
+    const w = world();
+    w.routes['POST /contacts'] = (call) => { rec(w, 'createContact', call); return { status: 201, body: { ...ANA, id: 'c7', name: 'Nuevo Cliente', companies: [] } }; };
+    w.routes['POST /contacts/c7/companies/k2'] = () => err(500, 'INTERNAL', 'x');
+    mockApi(w.routes);
+    renderApp('/contacts');
+    await userEvent.click(await screen.findByRole('button', { name: 'Nuevo contacto' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Nuevo contacto' }));
+    await userEvent.type(dlg.getByLabelText('Nombre'), 'Nuevo Cliente');
+    await userEvent.type(dlg.getByLabelText('Teléfono 1 (principal)'), '+593984217799');
+    const field = within(dlg.getByRole('group', { name: 'Empresa' }));
+    await userEvent.type(field.getByLabelText('Buscar o crear una empresa'), 'luna');
+    await userEvent.click(await field.findByRole('button', { name: 'Elegir la empresa Estudio Luna' }));
+    await userEvent.click(dlg.getByRole('button', { name: 'Crear contacto' }));
+    expect(await screen.findByText(/El contacto se creó, pero no pudimos vincular la empresa/)).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'Contacto' })).toBeInTheDocument();
+  });
+
+  it('el asesor ve las empresas del contacto pero el campo está deshabilitado con la explicación (ADR-48: vincular es del administrador)', async () => {
     mockApi(world(OWN).routes);
     const dlg = await openContact();
-    await userEvent.click(within(dlg).getByRole('tab', { name: /Empresas/ }));
-    const section = within(await within(dlg).findByRole('region', { name: 'Empresas' }));
-    expect(section.getByText('Acme SA')).toBeInTheDocument();
-    expect(await section.findByText('Solo el administrador cambia las empresas de un contacto.')).toBeInTheDocument();
-    expect(section.queryByLabelText('Agregar a una empresa')).not.toBeInTheDocument();
-    expect(section.queryByRole('button', { name: /Quitar de la empresa/ })).not.toBeInTheDocument();
+    const field = within(within(dlg).getByRole('group', { name: 'Empresa' }));
+    expect(field.getByText('Acme SA')).toBeInTheDocument();
+    expect(await field.findByText('Solo un administrador puede vincular empresas a un contacto.')).toBeInTheDocument();
+    expect(field.getByLabelText('Buscar o crear una empresa')).toBeDisabled();
+    expect(field.queryByRole('button', { name: /Quitar la empresa/ })).not.toBeInTheDocument();
   });
 
   it('en solo lectura no se agregan notas, tareas ni empresas', async () => {
@@ -361,9 +422,9 @@ describe('Ficha del contacto: notas, tareas y empresas', () => {
     await userEvent.click(within(dlg).getByRole('tab', { name: 'Tareas' }));
     await within(dlg).findByRole('region', { name: 'Tareas' });
     expect(within(dlg).queryByRole('button', { name: 'Nueva tarea' })).not.toBeInTheDocument();
-    await userEvent.click(within(dlg).getByRole('tab', { name: /Empresas/ }));
-    expect(within(dlg).queryByLabelText('Agregar a una empresa')).not.toBeInTheDocument();
-    expect(within(dlg).queryByRole('button', { name: /Quitar de la empresa/ })).not.toBeInTheDocument();
+    await userEvent.click(within(dlg).getByRole('tab', { name: 'Datos' }));
+    expect(within(dlg).getByLabelText('Buscar o crear una empresa')).toBeDisabled();
+    expect(within(dlg).queryByRole('button', { name: /Quitar la empresa/ })).not.toBeInTheDocument();
   });
 });
 

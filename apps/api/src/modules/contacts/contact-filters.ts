@@ -14,6 +14,8 @@ export const contactFiltersShape = {
   owner: z.union([z.literal('me'), z.literal('none'), z.uuid()]).optional(),
   source: z.string().regex(/^[a-z][a-z0-9_]{1,31}$/).optional(),
   consent: z.enum(CONSENTS).optional(),
+  /** Solo los contactos vinculados a esta empresa (M10.2, ADR-56). Una empresa que no existe o es de otra organización no da resultados. */
+  company: z.uuid().optional(),
   /** El contacto debe tener TODAS estas etiquetas. */
   tag: arrayOf(z.uuid(), 10),
   /** `variable:operador[:valor]`; todas deben cumplirse. */
@@ -71,7 +73,7 @@ export function checkCfValue(type: string, op: CfOp, value: string | null): stri
 /** Mezcla los filtros guardados de una lista con los que pide la petición: lo escalar de la petición manda y las listas (etiquetas, campos) se suman. */
 export function mergeFilters(saved: ContactFilters, asked: ContactFilters): ContactFilters {
   const out: ContactFilters = { ...saved };
-  for (const k of ['q', 'owner', 'source', 'consent'] as const) if (asked[k] !== undefined) (out as Record<string, unknown>)[k] = asked[k];
+  for (const k of ['q', 'owner', 'source', 'consent', 'company'] as const) if (asked[k] !== undefined) (out as Record<string, unknown>)[k] = asked[k];
   const tag = [...new Set([...(saved.tag ?? []), ...(asked.tag ?? [])])];
   const cf = [...(saved.cf ?? []), ...(asked.cf ?? [])];
   if (tag.length > 0) out.tag = tag;

@@ -449,7 +449,7 @@ describe('exportar', () => {
     const csv = await raw(r);
     expect(csv.charCodeAt(0)).toBe(0xfeff);
     const ls = lines(csv);
-    expect(ls[0]).toBe('Nombre,Teléfono,Correo,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad,Vip,Horarios');
+    expect(ls[0]).toBe('Nombre,Teléfono,Correo,Empresa,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad,Vip,Horarios');
     expect(ls).toHaveLength(4);
     const ana = ls.find((l) => l.startsWith('Ana Torres'))!;
     expect(ana).toContain('+593984217730 | +34612345678'.replace('+593984217730', "'+593984217730")); // el texto que empieza por + se neutraliza

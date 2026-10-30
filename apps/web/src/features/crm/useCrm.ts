@@ -1,4 +1,4 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 import type { CrmCompany, CrmCompanyContact, CrmCompanyList, Note, Task, TaskList } from '../../lib/types';
 
@@ -12,6 +12,11 @@ export function useCompanies(q: string) {
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     placeholderData: keepPreviousData,
   });
+}
+
+/** Una empresa por su id (para mostrar su nombre cuando solo se tiene el identificador, p. ej. en una lista guardada). */
+export function useCompany(id: string) {
+  return useQuery({ queryKey: ['companies', 'one', id], enabled: id !== '', retry: false, staleTime: 60_000, queryFn: () => api<CrmCompany>(`/companies/${id}`) });
 }
 
 export function useCompanyContacts(id: string) {

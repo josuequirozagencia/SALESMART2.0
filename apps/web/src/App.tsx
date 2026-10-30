@@ -118,7 +118,9 @@ export function App() {
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
-        <Route path="/companies" element={<ClientCompaniesPage />} />
+        <Route path="/contacts/companies" element={<ClientCompaniesPage />} />
+        {/* «Empresas» pasó a ser una vista dentro de Contactos (M10.2): la dirección vieja sigue llevando ahí */}
+        <Route path="/companies" element={<Navigate to="/contacts/companies" replace />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />
         <Route path="/tasks" element={<TasksPage />} />
         <Route path="/settings/fields" element={<CustomFieldsPage />} />

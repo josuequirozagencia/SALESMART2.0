@@ -399,6 +399,8 @@ export interface SavedFilters {
   owner?: string;
   source?: string;
   consent?: Consent;
+  /** Id de la empresa (M10.2). */
+  company?: string;
   tag?: string[];
   cf?: string[];
 }
