@@ -939,3 +939,67 @@ export interface InboxFilters {
   /** Por el cronómetro de respuesta: `late` vencidas · `risk` en riesgo · `ok` al día; vacío = todas. */
   sla: '' | 'late' | 'risk' | 'ok';
 }
+
+// ── Usuarios del equipo (M10.3–M10.4, ADR-56) ──────────────────────────────────────────────
+export type TeamRole = 'client_admin' | 'advisor';
+export type TeamStatus = 'active' | 'deactivated';
+export interface TeamDepartment { id: string; name: string; color: string }
+export interface TeamMember {
+  user_id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  role: TeamRole;
+  status: TeamStatus;
+  joined_at: string;
+  deactivated_at: string | null;
+  custom_permissions: boolean;
+  last_access_at: string | null;
+  departments: TeamDepartment[];
+}
+export interface PermissionOverrides { grant: string[]; deny: string[] }
+export interface TeamMemberFull extends TeamMember {
+  hours: WeekHours | null;
+  overrides: PermissionOverrides;
+  /** Lo que da la plantilla del rol, sin ajustes. */
+  template: string[];
+  /** Lo que realmente puede hacer hoy. */
+  effective: string[];
+  open_conversations: number;
+}
+export interface TeamInvitation {
+  id: string;
+  email: string;
+  role: TeamRole;
+  expires_at: string;
+  expired: boolean;
+  sent_count: number;
+  last_sent_at: string;
+  setup: { grant: string[]; deny: string[]; queue_ids: string[] };
+}
+export interface TeamList { items: TeamMember[]; invitations: TeamInvitation[] }
+export interface InviteResult { id: string; email: string; delivery: 'sent' | 'unavailable' | 'failed'; invite_url?: string }
+export type PermissionReach = 'own' | 'all' | 'config';
+export interface PermissionItem {
+  key: string;
+  label: string;
+  hint: string;
+  reach: PermissionReach;
+  in_role: { client_admin: boolean; advisor: boolean };
+  grantable_to_advisor: boolean;
+  /** ¿Puede quien consulta concederlo? */
+  holder_can_grant: boolean;
+}
+export interface PermissionGroup { id: string; label: string; items: PermissionItem[] }
+export interface PermissionCatalog {
+  roles: Array<{ id: TeamRole; label: string; description: string }>;
+  groups: PermissionGroup[];
+}
+export interface LeaveInput { conversations: { action: 'transfer' | 'unassign'; to_user_id?: string } }
+export interface LeaveResult {
+  user_id: string;
+  status: 'deactivated' | 'removed';
+  conversations: { action: 'transfer' | 'unassign'; moved: number; to_user_id: string | null };
+  collaborations_removed: number;
+  sessions_revoked: number;
+}

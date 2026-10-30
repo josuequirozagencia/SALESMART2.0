@@ -110,3 +110,25 @@ export const responseTimers = tenantTable(
     index('response_timers_conversation_idx').on(t['organizationId']!, t['conversationId']!, t['startedAt']!),
   ],
 );
+
+/**
+ * Horario laboral de una PERSONA (M10.4, ADR-56 B3 #9): misma forma que `business_hours`. Con horario activo, el reparto automático solo le asigna conversaciones nuevas
+ * dentro de él (con los feriados de la empresa y la zona horaria de la empresa). Sin fila o con `active = false`, la persona está disponible siempre. Quitar el horario lo
+ * desactiva (no hay DELETE en tablas de negocio).
+ */
+export const userHours = tenantTable(
+  'user_hours',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    days: jsonb('days').$type<number[][][]>().notNull(),
+    active: boolean('active').notNull().default(true),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('user_hours_days_shape', sql`jsonb_typeof(${t['days']!}) = 'array' AND jsonb_array_length(${t['days']!}) = 7`),
+    uniqueIndex('user_hours_org_user_uq').on(t['organizationId']!, t['userId']!),
+  ],
+);

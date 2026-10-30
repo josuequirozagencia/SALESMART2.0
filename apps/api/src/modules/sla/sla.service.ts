@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import { businessHours, conversations, holidays, queues, responseTimers, slaPolicies, type TenantTx } from '../../db';
+import { businessHours, conversations, holidays, queues, responseTimers, slaPolicies, userHours, type TenantTx } from '../../db';
 import { addBusinessMinutes, businessSecondsBetween, isOpenAt, OPEN_ALWAYS, weekFromJson, weekHasOpenTime, type Calendar } from './calendar';
 
 /** Valores por omisión de la política de respuesta (F01: SLA de 15 minutos). */
@@ -77,6 +77,23 @@ export class SlaService {
       forQueue: (queueId) => ({ timeZone, week: (queueId ? own.get(queueId) : undefined) ?? orgWeek, holidays: exact, yearly }),
       hasOwn: (queueId) => own.has(queueId),
     };
+  }
+
+  /**
+   * De estas personas, las que tienen un horario propio ACTIVO y ahora están fuera de él (o en un feriado de la empresa): el reparto automático no les asigna (M10.4). Sin horario
+   * propio, la persona está disponible siempre (el horario de la empresa o de la cola lo decide aparte la cola con «respetar el horario»).
+   */
+  async closedUsers(tx: TenantTx, userIds: readonly string[], ctx: TimerContext): Promise<Set<string>> {
+    const closed = new Set<string>();
+    if (userIds.length === 0) return closed;
+    const rows = await tx.select({ userId: userHours.userId, days: userHours.days }).from(userHours).where(and(inArray(userHours.userId, [...userIds]), eq(userHours.active, true)));
+    if (rows.length === 0) return closed;
+    const base = (await this.calendars(tx, ctx.timeZone)).forQueue(null);
+    for (const r of rows) {
+      const week = weekFromJson(r.days);
+      if (weekHasOpenTime(week) && !isOpenAt({ ...base, week }, ctx.now)) closed.add(r.userId);
+    }
+    return closed;
   }
 
   /** ¿La cola está abierta ahora (con su horario propio o el de la empresa)? */

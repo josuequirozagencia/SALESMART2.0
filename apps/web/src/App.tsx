@@ -17,6 +17,7 @@ import { GhlPage } from './features/ghl/GhlPage';
 import { SalesPage } from './features/sales/SalesPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
+import { UsersPage } from './features/team/UsersPage';
 import { QuickRepliesPage } from './features/quick-replies/QuickRepliesPage';
 import { SlaPage } from './features/sla/SlaPage';
 import { ContactsPage } from './features/contacts/ContactsPage';
@@ -135,6 +136,7 @@ export function App() {
         <Route path="/settings/knowledge" element={<KnowledgePage />} />
         <Route path="/settings/connections" element={<ConnectionsPage />} />
         <Route path="/departments" element={<QueuesPage />} />
+        <Route path="/users" element={<UsersPage />} />
         {/* «Colas» pasó a «Departamentos» (M10.1): las direcciones viejas siguen llevando ahí */}
         <Route path="/settings/queues" element={<Navigate to="/departments" replace />} />
         <Route path="/queues" element={<Navigate to="/departments" replace />} />

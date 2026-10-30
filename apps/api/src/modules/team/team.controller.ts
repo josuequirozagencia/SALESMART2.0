@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
+import { hoursSchema, type HoursDto } from '../sla';
 import { departmentsSchema, inviteSchema, leaveSchema, permissionsSchema, roleSchema, type DepartmentsDto, type InviteDto, type LeaveDto, type PermissionsDto, type RoleDto } from './team.dto';
 import { TeamService } from './team.service';
 
@@ -88,6 +89,13 @@ export class TeamController {
   @Header('Cache-Control', 'no-store')
   departments(@Param('userId', idParam) userId: string, @Body(new ZodValidationPipe(departmentsSchema)) b: DepartmentsDto) {
     return this.team.setDepartments(userId, b);
+  }
+
+  /** Horario laboral de la persona (`days: null` lo quita): fuera de él no recibe asignaciones nuevas del reparto automático. */
+  @Put(':userId/hours')
+  @Header('Cache-Control', 'no-store')
+  hours(@Param('userId', idParam) userId: string, @Body(new ZodValidationPipe(hoursSchema)) b: HoursDto) {
+    return this.team.setHours(userId, b);
   }
 
   /** Desactiva a la persona (se puede reactivar). Hay que elegir qué pasa con sus conversaciones abiertas. */
