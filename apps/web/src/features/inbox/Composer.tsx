@@ -5,10 +5,12 @@ import { Alert, Button } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
 import { AttachmentPicker } from './AttachmentPicker';
+import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
+import { EmojiPicker } from './EmojiPicker';
 import { ScheduleDialog } from './ScheduleDialog';
 import { ScheduledList } from './ScheduledList';
 import { TemplatePicker } from './TemplatePicker';
-import { useConversationQuickReplies, useSendMedia, useSendNote, useSendReply } from './useInbox';
+import { useConversationQuickReplies, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
 
 const MAX = 4096;
 const MAX_SUGGESTIONS = 6;
@@ -58,7 +60,14 @@ export function Composer({ c }: { c: Conversation }) {
   const [manage, setManage] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [attaching, setAttaching] = useState(false);
+  const [emojis, setEmojis] = useState(false);
+  const [voiceError, setVoiceError] = useState<string>();
   const [pendingAttachment, setPendingAttachment] = useState<{ id: string; filename: string; kind: string } | null>(null);
+  const upload = useUploadAttachment(c.id);
+  const voice = useVoiceRecorder((file) => {
+    setVoiceError(undefined);
+    upload.mutate(file, { onSuccess: (a) => setPendingAttachment({ id: a.id, filename: a.filename ?? 'nota de voz', kind: a.kind }), onError: (e) => setVoiceError(friendlyError(e, 'No pudimos subir la nota de voz.')) });
+  });
   const [active, setActive] = useState(0);
   const [closedAt, setClosedAt] = useState<number | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -109,6 +118,20 @@ export function Composer({ c }: { c: Conversation }) {
     });
   };
 
+  /** Pone el emoji donde está el cursor (o al final) y deja el cursor justo después. */
+  const addEmoji = (emoji: string): void => {
+    const at = Math.min(ref.current?.selectionStart ?? text.length, text.length);
+    const next = `${text.slice(0, at)}${emoji}${text.slice(at)}`;
+    if (next.length > MAX) return;
+    const after = at + emoji.length;
+    setText(next);
+    setCaret(after);
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      if (ref.current && ref.current.value === next) ref.current.setSelectionRange(after, after);
+    });
+  };
+
   const onChange = (e: ChangeEvent<HTMLTextAreaElement>): void => {
     setText(e.target.value);
     setCaret(e.target.selectionStart);
@@ -117,6 +140,11 @@ export function Composer({ c }: { c: Conversation }) {
     if (send.isError) send.reset();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (emojis && e.key === 'Escape') {
+      e.preventDefault();
+      setEmojis(false);
+      return;
+    }
     if (open && options.length > 0 && !e.nativeEvent.isComposing) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
@@ -166,6 +194,18 @@ export function Composer({ c }: { c: Conversation }) {
         </div>
       ) : null}
       <ScheduledList conversationId={c.id} />
+      {voice.recording ? (
+        <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[13px] font-semibold text-crit">
+          <span aria-hidden="true" className="size-2.5 animate-pulse rounded-full bg-crit" />
+          Grabando {mmss(voice.seconds)}
+          <span className="ml-auto flex gap-2">
+            <IconButton label="Cancelar la grabación" onClick={voice.cancel}><XIcon /></IconButton>
+            <IconButton label="Detener y adjuntar la nota de voz" danger onClick={voice.stop}><StopIcon /></IconButton>
+          </span>
+        </div>
+      ) : null}
+      {upload.isPending ? <p role="status" className="text-[12.5px] text-muted">Subiendo la nota de voz…</p> : null}
+      {voice.error || voiceError ? <Alert>{voice.error ?? voiceError}</Alert> : null}
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : pendingAttachment ? 'No pudimos enviar el archivo.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
       <div className="relative flex items-end gap-2">
@@ -204,7 +244,12 @@ export function Composer({ c }: { c: Conversation }) {
           onKeyDown={onKey}
           className="max-h-40 min-h-[44px] flex-1 resize-none rounded-[14px] border border-line bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted/70 disabled:opacity-60"
         />
-        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <Button aria-label="Adjuntar archivo" disabled={!!block || !!pendingAttachment} onClick={() => setAttaching(true)}>Adjuntar</Button> : null}
+        <div className="relative">
+          <IconButton label="Emojis" pressed={emojis} disabled={!canWrite} onClick={() => setEmojis((v) => !v)}><SmileIcon /></IconButton>
+          {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
+        </div>
+        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
+        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
         {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
         <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
       </div>

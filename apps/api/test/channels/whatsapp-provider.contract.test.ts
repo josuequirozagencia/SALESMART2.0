@@ -240,6 +240,25 @@ function contract(name: string, make: () => Subject): void {
       }
     });
 
+    it('sendReaction devuelve el identificador del proveedor; un emoji vacío (quitar la reacción) también es válido', async () => {
+      const s = make();
+      const sent = await s.provider.sendReaction({ accessToken: s.validToken }, s.knownId, { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '\u{1F44D}' });
+      expect(typeof sent.externalId).toBe('string');
+      const removed = await s.provider.sendReaction({ accessToken: s.validToken }, s.knownId, { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '' });
+      expect(removed.externalId.length).toBeGreaterThan(3);
+    });
+
+    it('sendReaction traduce los fallos y rechaza lo inválido sin llegar al proveedor', async () => {
+      const s = make();
+      const ok = { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '\u{1F44D}' };
+      expect(await code(s.provider.sendReaction({ accessToken: s.badToken }, s.knownId, ok))).toBe('invalid_token');
+      expect(await code(s.provider.sendReaction({ accessToken: s.validToken }, s.unknownId, ok))).toBe('number_not_found');
+      expect(await code(s.provider.sendReaction({ accessToken: s.validToken }, s.unavailableId, ok))).toBe('unavailable');
+      expect(await code(s.provider.sendReaction({ accessToken: s.validToken }, s.knownId, { ...ok, to: '+593984217730' }))).toBe('recipient_invalid');
+      expect(await code(s.provider.sendReaction({ accessToken: s.validToken }, s.knownId, { ...ok, targetExternalId: '' }))).toBe('rejected');
+      expect(await code(s.provider.sendReaction({ accessToken: s.validToken }, s.knownId, { ...ok, emoji: 'x'.repeat(17) }))).toBe('rejected');
+    });
+
     it('sendMedia devuelve el identificador que el proveedor le dio al mensaje', async () => {
       const s = make();
       const sent = await s.provider.sendMedia({ accessToken: s.validToken }, s.knownId, s.media.ok);
@@ -530,6 +549,20 @@ describe('MetaCloudProvider · detalles de la Graph API', () => {
     expect(sent).toEqual({ externalId: 'wamid.HBgMNTkzOTg0MjE3NzMwFQIAERgS' });
     expect(seen).toEqual([{ url: '/v21.0/1090123456789/messages', auth: `Bearer ${VALID}` }]);
     expect(sentBodies).toEqual([{ messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'text', text: { preview_url: false, body: 'Hola Ana, ¿te agendo?' } }]);
+  });
+
+  it('envía una reacción como type reaction con el id del mensaje y el emoji (vacío para quitarla)', async () => {
+    mode = 'normal';
+    seen.length = 0;
+    sentBodies.length = 0;
+    const p = new MetaCloudProvider({ baseUrl: `${origin}/` });
+    await p.sendReaction({ accessToken: VALID }, '1090123456789', { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '\u{1F44D}' });
+    await p.sendReaction({ accessToken: VALID }, '1090123456789', { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '' });
+    expect(seen.map((x) => x.url)).toEqual(['/v21.0/1090123456789/messages', '/v21.0/1090123456789/messages']);
+    expect(sentBodies).toEqual([
+      { messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'reaction', reaction: { message_id: 'wamid.IN1', emoji: '\u{1F44D}' } },
+      { messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'reaction', reaction: { message_id: 'wamid.IN1', emoji: '' } },
+    ]);
   });
 
   it('un id de número que no son solo dígitos, un destino o un texto inválidos no salen a la red', async () => {

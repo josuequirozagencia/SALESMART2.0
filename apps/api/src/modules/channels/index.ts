@@ -1,5 +1,5 @@
 export { ChannelsModule } from './channels.module';
-export { WHATSAPP_PROVIDER, WhatsAppProviderError, isRetryableError, type WhatsAppProvider, type WhatsAppCredentials, type WhatsAppErrorCode, type NumberInfo, type ParsedWebhook, type SendTextInput, type SentMessage, type NormalizedTemplate, type TemplateButton, type TemplateCategory, type TemplateStatus, type TemplateHeaderFormat, type TemplateParameter, type TemplateSendComponent, type SendTemplateInput } from './whatsapp.port';
+export { WHATSAPP_PROVIDER, WhatsAppProviderError, isRetryableError, type WhatsAppProvider, type WhatsAppCredentials, type WhatsAppErrorCode, type NumberInfo, type ParsedWebhook, type SendTextInput, type SendReactionInput, type SentMessage, type NormalizedTemplate, type TemplateButton, type TemplateCategory, type TemplateStatus, type TemplateHeaderFormat, type TemplateParameter, type TemplateSendComponent, type SendTemplateInput } from './whatsapp.port';
 export type { DownloadedMedia, MediaKind, SendMediaInput } from './whatsapp.port';
 export { ChannelVault } from './channel-vault.service';
 export { FakeWhatsAppProvider, FAKE_WHATSAPP_TOKEN, FAKE_UNKNOWN_PREFIX, FAKE_UNAVAILABLE_ID, FAKE_TEMPLATES } from './whatsapp.fake';

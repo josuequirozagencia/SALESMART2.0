@@ -283,6 +283,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/conversations/:id', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'GET /v1/conversations/:id/messages', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/messages', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'PUT /v1/conversations/:id/messages/:messageId/reaction', kind: 'tenant', isolationTest: '../../inbox/reactions.test.ts' },
   { route: 'POST /v1/conversations/:id/notes', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/accept', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/take', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },

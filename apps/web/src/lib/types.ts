@@ -791,6 +791,8 @@ export interface ChatMessage {
   extra: Record<string, unknown> | null;
   /** Reacción del cliente a este mensaje (un emoji), o null. */
   reaction: string | null;
+  /** Reacción NUESTRA a este mensaje del cliente (M5.8). */
+  my_reaction?: string | null;
   status: MessageStatus;
   error: string | null;
   sent_at: string;

@@ -12,11 +12,13 @@ import { AppointmentDialog } from '../appointments/AppointmentDialog';
 import { SaleDialog } from '../sales/SaleDialog';
 import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
+import { ContactSidebar } from './ContactSidebar';
+import { ConversationTags } from './ConversationTags';
 import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
 import { TransferDialog } from './TransferDialog';
-import { useConversation, useConversationAction, useMarkRead, useMessages, useRetryMessage, useRevoke } from './useInbox';
+import { useConversation, useConversationAction, useMarkRead, useMessages, useReact, useRetryMessage, useRevoke } from './useInbox';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 
@@ -29,7 +31,7 @@ function WindowNote({ c }: { c: Conversation }) {
   return <Pill kind={left < 3 * 3_600_000 ? 'warn' : 'muted'}>Puedes escribir libremente: quedan {timeLeft(left)}</Pill>;
 }
 
-function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void }) {
+function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void; contactOpen: boolean; onToggleContact: () => void }) {
   const act = useConversationAction(c.id);
   const leave = useRevoke(c.id);
   const navigate = useNavigate();
@@ -51,7 +53,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
         <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 lg:hidden">←</Link>
         <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
+          <h2 className="truncate text-[15px] font-bold"><button type="button" onClick={onToggleContact} aria-expanded={contactOpen} aria-label={`Datos de ${c.contact.name}`} className="max-w-full truncate rounded text-left hover:underline">{c.contact.name}</button></h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
         </div>
       </div>
@@ -61,7 +63,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
         <SlaPill sla={c.sla} now={now} />
         <span className="text-[12.5px] text-muted">{c.owner ? `Asignada a ${c.owner.name}` : 'Sin asesor'}</span>
         {c.participants.length > 0 ? <span className="text-[12.5px] text-muted" title={c.participants.map((p) => `${p.user.name}: ${p.permission === 'reply' ? 'puede responder' : 'solo ver y dejar notas'}`).join('\n')}>Compartida con {c.participants.map((p) => p.user.name.split(' ')[0]).join(', ')}</span> : null}
-        {c.tags.map((t) => <span key={t.id} className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ backgroundColor: t.color }}>{t.name}</span>)}
+        <ConversationTags c={c} />
         <WindowNote c={c} />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
         {confirm ? (
@@ -79,6 +81,7 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
             {c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setAppointment(true)}>Agendar</Button> : null}
             {c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setSale(true)}>Registrar venta</Button> : null}
             {c.channel.kind === 'ghl' && c.owner && (c.my_access === 'owner' || c.my_access === 'supervisor') ? <Button className={SMALL} onClick={() => setFlows(true)}>Inscribir en un flujo</Button> : null}
+            <Button className={SMALL} aria-pressed={contactOpen} onClick={onToggleContact}>{contactOpen ? 'Ocultar datos' : 'Datos del contacto'}</Button>
             {c.can.close ? <Button className={SMALL} onClick={() => setConfirm(true)}>Finalizar</Button> : null}
           </>
         )}
@@ -96,7 +99,10 @@ function Header({ c, meId, onBackError }: { c: Conversation; meId: string; onBac
 function Messages({ c }: { c: Conversation }) {
   const q = useMessages(c.id);
   const retry = useRetryMessage(c.id);
+  const reactMut = useReact(c.id);
   const [retryError, setRetryError] = useState<string>();
+  // Reaccionar: solo WhatsApp oficial, dentro de la ventana de 24 h y quien puede responder (el servidor lo vuelve a verificar)
+  const canReact = c.can.reply && c.window.open && (c.channel.kind ?? 'whatsapp') === 'whatsapp';
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // Las páginas vienen de la más reciente a la más antigua; cada una, de antigua a reciente
@@ -133,6 +139,7 @@ function Messages({ c }: { c: Conversation }) {
               canRetry={c.can.reply}
               retrying={retry.isPending && retry.variables === m.id}
               onRetry={(id) => { setRetryError(undefined); retry.mutate(id, { onError: (e) => setRetryError(friendlyError(e, 'No pudimos reintentar el envío.')) }); }}
+              onReact={canReact ? (id, emoji) => { setRetryError(undefined); reactMut.mutate({ messageId: id, emoji }, { onError: (e) => setRetryError(friendlyError(e, 'No pudimos enviar la reacción.')) }); } : undefined}
             />
           </Fragment>
         ))}
@@ -150,6 +157,7 @@ export function Thread({ id, meId }: { id: string; meId: string }) {
   const { mutate: markRead } = useMarkRead(id);
   const tried = useRef('');
   const [actionError, setActionError] = useState<string>();
+  const [contactOpen, setContactOpen] = useState(false);
   const c = q.data;
   const unread = c && c.owner?.id === meId ? c.unread_count : 0;
 
@@ -175,12 +183,20 @@ export function Thread({ id, meId }: { id: string; meId: string }) {
     );
   }
   return (
-    <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-col bg-bg">
-      <Header c={c} meId={meId} onBackError={setActionError} />
-      {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
-      <AgentBanner c={c} />
-      <Messages c={c} />
-      <Composer key={c.id} c={c} />
-    </section>
+    <div className="flex min-h-0 min-w-0">
+      <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
+        <Header c={c} meId={meId} onBackError={setActionError} contactOpen={contactOpen} onToggleContact={() => setContactOpen((v) => !v)} />
+        {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
+        <AgentBanner c={c} />
+        <Messages c={c} />
+        <Composer key={c.id} c={c} />
+      </section>
+      {contactOpen ? (
+        // En pantallas de hasta 1180 px la columna se abre como panel sobre el hilo; más anchas, queda al lado
+        <div className="fixed inset-y-0 right-0 z-40 flex w-[min(380px,100%)] shadow-[var(--shadow)] min-[1181px]:static min-[1181px]:z-auto min-[1181px]:w-[340px] min-[1181px]:shrink-0 min-[1181px]:shadow-none">
+          <ContactSidebar c={c} onClose={() => setContactOpen(false)} />
+        </div>
+      ) : null}
+    </div>
   );
 }

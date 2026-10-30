@@ -1,6 +1,6 @@
 import { normalizeMetaTemplate } from './meta-templates';
 import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
-import { WhatsAppProviderError, type DownloadedMedia, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendMediaInput, type SendTemplateInput, type SendTextInput, type SentMessage, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
+import { WhatsAppProviderError, type DownloadedMedia, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendMediaInput, type SendReactionInput, type SendTemplateInput, type SendTextInput, type SentMessage, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
 
 export interface MetaCloudOptions {
   /** Origen de la Graph API (se cambia en las pruebas por un servidor simulado). */
@@ -131,6 +131,25 @@ export class MetaCloudProvider implements WhatsAppProvider {
         method: 'POST',
         headers: { authorization: `Bearer ${credentials.accessToken}`, 'content-type': 'application/json', accept: 'application/json' },
         body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: input.to, type: 'text', text: { preview_url: false, body: input.text } }),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      throw new WhatsAppProviderError('unavailable', 'No pudimos conectar con Meta');
+    }
+    return this.sentOrThrow(res);
+  }
+
+  /** Reacciona a un mensaje del cliente: `type: reaction` con el id del mensaje y el emoji (vacío = quitar la reacción). Sin validar contra Meta real. */
+  async sendReaction(credentials: WhatsAppCredentials, phoneNumberId: string, input: SendReactionInput): Promise<SentMessage> {
+    if (!ID_RE.test(phoneNumberId)) throw new WhatsAppProviderError('number_not_found', 'El identificador del número no es válido');
+    if (!TO_RE.test(input.to)) throw new WhatsAppProviderError('recipient_invalid', 'El número de destino no es válido');
+    if (input.targetExternalId === '' || input.targetExternalId.length > 256 || input.emoji.length > 16) throw new WhatsAppProviderError('rejected', 'La reacción no es válida para WhatsApp');
+    let res: Response;
+    try {
+      res = await this.fetchFn(`${this.base}/${this.version}/${phoneNumberId}/messages`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${credentials.accessToken}`, 'content-type': 'application/json', accept: 'application/json' },
+        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: input.to, type: 'reaction', reaction: { message_id: input.targetExternalId, emoji: input.emoji } }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {

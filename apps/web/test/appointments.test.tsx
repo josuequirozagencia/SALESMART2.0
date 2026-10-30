@@ -197,25 +197,45 @@ describe('Agendar desde el chat', () => {
 });
 
 describe('Agenda', () => {
-  it('la sección está en el menú; lista las citas de la semana por día, en la hora de la empresa', async () => {
+  /** Abre la cita de Ana desde el calendario (siempre está en el mes que se ve, sin importar la hora del día en que corra la prueba). */
+  const openAna = async (): Promise<void> => { await userEvent.click((await screen.findAllByRole('button', { name: /^Abrir la cita de Ana Torres/ }))[0]!); };
+
+  it('la sección está en el menú; muestra SIEMPRE un calendario del mes con la cita y, al elegir su día, la lista con sus datos, en la hora de la empresa', async () => {
     const w = world();
     mockApi(server(w));
     renderApp('/agenda');
     expect(await screen.findByRole('link', { name: 'Agenda' })).toHaveAttribute('href', '/agenda');
+    const grid = await screen.findByRole('grid', { name: /^Calendario de / });
+    expect(screen.getByRole('button', { name: 'Mes' })).toHaveAttribute('aria-pressed', 'true');
+    // el día de la cita queda marcado: lo dice su nombre accesible
+    const day = await within(grid).findByRole('button', { name: /, 1 cita$/ });
+    await userEvent.click(day);
     const item = await screen.findByRole('button', { name: 'Abrir la cita de Ana Torres' });
     expect(item).toHaveTextContent('Corte');
     expect(item).toHaveTextContent('1/2 recordatorios enviados');
     expect(screen.getByText(/Hora de la empresa: America\/Guayaquil/)).toBeInTheDocument();
     const [from, to] = w.agendaQueries.at(-1)!.split('|') as [string, string];
-    expect(Date.parse(to) - Date.parse(from)).toBe(7 * 24 * HOUR);
-    expect(isoToZoned(from, TZ).time).toBe('00:00'); // la semana empieza a las 00:00 de la empresa
+    expect(Date.parse(to) - Date.parse(from)).toBe(42 * 24 * HOUR); // seis semanas completas
+    expect(isoToZoned(from, TZ).time).toBe('00:00'); // empieza a las 00:00 de la empresa
   });
 
-  it('navega por semanas', async () => {
+  it('avisa que no hay calendario conectado y lleva a las conexiones', async () => {
+    mockApi(server(world()));
+    renderApp('/agenda');
+    expect(await screen.findByText('Aún no hay ningún calendario conectado.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Conectar calendario' })).toHaveAttribute('href', '/settings/connections');
+  });
+
+  it('cambia entre mes y semana, y navega por periodos', async () => {
     const w = world();
     mockApi(server(w));
     renderApp('/agenda');
-    await screen.findByRole('button', { name: 'Abrir la cita de Ana Torres' });
+    await screen.findByRole('grid', { name: /^Calendario de / });
+    await userEvent.click(screen.getByRole('button', { name: 'Semana' }));
+    await waitFor(() => {
+      const [f0, t0] = w.agendaQueries.at(-1)!.split('|') as [string, string];
+      expect(Date.parse(t0) - Date.parse(f0)).toBe(7 * 24 * HOUR);
+    });
     const before = w.agendaQueries.at(-1)!;
     await userEvent.click(screen.getByRole('button', { name: 'Semana siguiente' }));
     await waitFor(() => expect(w.agendaQueries.at(-1)).not.toBe(before));
@@ -223,12 +243,14 @@ describe('Agenda', () => {
     const [f1] = w.agendaQueries.at(-1)!.split('|') as [string];
     expect(Date.parse(f1) - Date.parse(f0)).toBe(7 * 24 * HOUR);
     expect(screen.getByRole('button', { name: 'Hoy' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Mes' }));
+    expect(await screen.findByRole('button', { name: 'Mes siguiente' })).toBeInTheDocument();
   });
 
   it('el detalle muestra cada recordatorio con su estado, su entrega y por qué no salió', async () => {
     mockApi(server(world()));
     renderApp('/agenda');
-    await userEvent.click(await screen.findByRole('button', { name: 'Abrir la cita de Ana Torres' }));
+    await openAna();
     const d = within(await screen.findByRole('dialog', { name: 'Cita' }));
     const list = within(await d.findByRole('region', { name: 'Recordatorios' }));
     expect(list.getByText('1 hora antes')).toBeInTheDocument();
@@ -242,7 +264,7 @@ describe('Agenda', () => {
     const w = world();
     mockApi(server(w, ME_ADMIN));
     renderApp('/agenda');
-    await userEvent.click(await screen.findByRole('button', { name: 'Abrir la cita de Ana Torres' }));
+    await openAna();
     const d = within(await screen.findByRole('dialog', { name: 'Cita' }));
     await userEvent.click(await d.findByRole('button', { name: 'Reprogramar' }));
     const day = d.getByLabelText('Día');
@@ -268,7 +290,7 @@ describe('Agenda', () => {
     const w = world();
     mockApi(server(w));
     renderApp('/agenda');
-    await userEvent.click(await screen.findByRole('button', { name: 'Abrir la cita de Ana Torres' }));
+    await openAna();
     const d = within(await screen.findByRole('dialog', { name: 'Cita' }));
     await userEvent.click(await d.findByRole('button', { name: 'Marcar completada' }));
     await waitFor(() => expect(w.posts.at(-1)).toMatchObject({ path: '/appointments/a1/complete' }));

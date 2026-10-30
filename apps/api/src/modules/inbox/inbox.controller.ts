@@ -1,12 +1,13 @@
-import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
-import { createScheduledSchema, listConversationsQuerySchema, messagesQuerySchema, noteSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
+import { createScheduledSchema, listConversationsQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
 import { OutboundService } from './outbound.service';
+import { ReactionsService } from './reactions.service';
 import { ScheduledMessagesService } from './scheduled-messages.service';
 import { shareSchema, transferSchema, type ShareDto, type TransferDto } from './sharing.dto';
 import { SharingService } from './sharing.service';
@@ -33,6 +34,7 @@ export class InboxController {
     @Inject(OutboundService) private readonly outbound: OutboundService,
     @Inject(SharingService) private readonly sharing: SharingService,
     @Inject(ScheduledMessagesService) private readonly scheduledMessages: ScheduledMessagesService,
+    @Inject(ReactionsService) private readonly reactions: ReactionsService,
   ) {}
 
   @RequirePermission('inbox.read')
@@ -106,6 +108,15 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   reply(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(replySchema)) b: ReplyDto) {
     return this.outbound.reply(accessOf(req), id, b);
+  }
+
+  /** Reacciona a un mensaje del cliente con un emoji (o quita la reacción con `null`). Dentro de las 24 h y solo en WhatsApp oficial; no crea un mensaje. */
+  @RequirePermission('inbox.reply')
+  @Put(':id/messages/:messageId/reaction')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  react(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Param('messageId', idParam) messageId: string, @Body(new ZodValidationPipe(reactionSchema)) b: ReactionDto) {
+    return this.reactions.react(accessOf(req), id, messageId, b);
   }
 
   /** Las plantillas que se pueden enviar en esta conversación (las de su conexión; las que no se pueden enviar vienen con el motivo). */

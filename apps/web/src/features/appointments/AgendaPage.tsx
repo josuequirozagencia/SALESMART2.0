@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import { useSession } from '../../lib/session';
 import { useNow } from '../../lib/useNow';
@@ -6,7 +7,8 @@ import { addDays, dateTimeIn, dayLabel, isoToZoned, timeIn, todayIn, zonedToIso 
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
-import { offsetLabel, useAgenda, useAppointment, useCancelAppointment, useCompleteAppointment, useUpdateAppointment, type Appointment, type Reminder } from './useAppointments';
+import { AgendaCalendar, periodLabel, shiftMonth, visibleDays, type AgendaView } from './AgendaCalendar';
+import { offsetLabel, useAgenda, useAppointment, useCancelAppointment, useCompleteAppointment, useUpdateAppointment, type AgendaFilters, type Appointment, type Reminder } from './useAppointments';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 const STATUS: Record<Appointment['status'], { label: string; kind: PillKind }> = { scheduled: { label: 'Agendada', kind: 'info' }, completed: { label: 'Completada', kind: 'ok' }, cancelled: { label: 'Cancelada', kind: 'crit' } };
@@ -146,78 +148,106 @@ function AppointmentDetail({ id, tz, onClose }: { id: string; tz: string; onClos
 }
 
 /**
- * Agenda (M6.3, F13): las citas de la semana, agrupadas por día en la HORA DE LA EMPRESA. El asesor ve las suyas; quien ve todo (administrador), las de la empresa.
- * Navega por semanas; abrir una cita muestra sus recordatorios con el estado de entrega y deja reprogramar, cancelar o completar.
+ * Agenda (M6.3, F13; calendario en M5.8): SIEMPRE un calendario, en vista de mes o de semana, con las citas en la HORA DE LA EMPRESA. El asesor ve las suyas; quien ve todo
+ * (administrador) las de la empresa y puede filtrar por persona. Pulsar un día muestra sus citas debajo; abrir una cita muestra sus recordatorios con el estado de entrega y
+ * deja reprogramar, cancelar o completar. Si la empresa no tiene un calendario externo conectado, un aviso lo dice y lleva a las conexiones.
  */
 export function AgendaPage() {
   const { state } = useSession();
-  const [week, setWeek] = useState(0);
+  const [view, setView] = useState<AgendaView>('month');
+  const [offset, setOffset] = useState(0);
+  const [picked, setPicked] = useState<string>();
+  const [owner, setOwner] = useState('');
   const [open, setOpen] = useState<string>();
   // La zona se conoce con la primera respuesta; antes se usa la del navegador solo para armar el primer rango
   const [tzGuess] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const first = useAgendaRange(tzGuess, week);
-  const q = useAgenda(first);
-  const tz = q.data?.timezone ?? tzGuess;
-  const range = useAgendaRange(tz, week);
+  const first = useAgenda(useAgendaRange(tzGuess, view, offset).range);
+  const tz = first.data?.timezone ?? tzGuess;
+  const { range, anchor, today } = useAgendaRange(tz, view, offset);
   const real = useAgenda(range);
-  const data = real.data ?? q.data;
-  const groups = useMemo(() => {
-    const m = new Map<string, Appointment[]>();
-    for (const a of data?.items ?? []) {
-      const key = isoToZoned(a.starts_at, tz).date;
-      m.set(key, [...(m.get(key) ?? []), a]);
-    }
-    return [...m.entries()];
-  }, [data, tz]);
+  const data = real.data ?? first.data;
   const showOwner = state.status === 'authed' && state.me.role !== 'advisor';
-  const startDate = range.startDate;
+  const people = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const a of data?.items ?? []) if (a.owner) m.set(a.owner.id, a.owner.name);
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [data]);
+  const items = useMemo(() => (data?.items ?? []).filter((a) => !owner || a.owner?.id === owner), [data, owner]);
+  const selected = picked ?? (visibleDays(view, anchor).includes(today) ? today : anchor);
+  const ofDay = items.filter((a) => isoToZoned(a.starts_at, tz).date === selected).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
+  const go = (n: number): void => { setOffset(offset + n); setPicked(undefined); };
+  const changeView = (v: AgendaView): void => { setView(v); setOffset(0); setPicked(undefined); };
 
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[20px] font-bold">Agenda</h1>
-        <div className="flex items-center gap-2">
-          <Button className={SMALL} aria-label="Semana anterior" onClick={() => setWeek(week - 1)}>←</Button>
-          <span className="text-[13px] font-semibold" aria-live="polite">{dayLabel(startDate)} – {dayLabel(addDays(startDate, 6))}</span>
-          <Button className={SMALL} aria-label="Semana siguiente" onClick={() => setWeek(week + 1)}>→</Button>
-          {week !== 0 ? <Button className={SMALL} onClick={() => setWeek(0)}>Hoy</Button> : null}
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="group" aria-label="Vista del calendario" className="flex gap-1">
+            {(['month', 'week'] as const).map((v) => (
+              <button key={v} type="button" aria-pressed={view === v} onClick={() => changeView(v)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${view === v ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>{v === 'month' ? 'Mes' : 'Semana'}</button>
+            ))}
+          </div>
+          <Button className={SMALL} aria-label={view === 'month' ? 'Mes anterior' : 'Semana anterior'} onClick={() => go(-1)}>←</Button>
+          <span className="min-w-[10ch] text-center text-[13px] font-semibold capitalize" aria-live="polite">{periodLabel(view, anchor)}</span>
+          <Button className={SMALL} aria-label={view === 'month' ? 'Mes siguiente' : 'Semana siguiente'} onClick={() => go(1)}>→</Button>
+          {offset !== 0 || picked ? <Button className={SMALL} onClick={() => { setOffset(0); setPicked(undefined); }}>Hoy</Button> : null}
         </div>
       </div>
-      <p className="text-[12px] text-muted">Hora de la empresa: {tz}</p>
-      {(q.isPending && !data) ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando la agenda" /></div> : null}
-      {q.isError ? <Alert>{friendlyError(q.error, 'No se pudo cargar la agenda')}</Alert> : null}
-      {data && groups.length === 0 ? <p className="py-8 text-center text-[13.5px] text-muted">No hay citas esta semana. Se agendan desde una conversación, con «Agendar».</p> : null}
-      {groups.map(([day, items]) => (
-        <section key={day} aria-label={dayLabel(day)} className="grid gap-2">
-          <h2 className="text-[13px] font-semibold capitalize">{dayLabel(day)}</h2>
-          <ul className="grid gap-2">
-            {items.map((a) => (
-              <li key={a.id}>
-                <button type="button" aria-label={`Abrir la cita de ${a.contact.name}`} onClick={() => setOpen(a.id)} className={`grid w-full gap-1 rounded-xl border border-line bg-surface px-4 py-3 text-left hover:bg-surface2 ${a.status === 'cancelled' ? 'opacity-60' : ''}`}>
-                  <span className="flex flex-wrap items-center justify-between gap-2">
-                    <b className="text-[14px]"><span className="font-mono">{timeIn(a.starts_at, tz)}</span> · {a.contact.name}</b>
-                    <Pill kind={STATUS[a.status].kind}>{STATUS[a.status].label}</Pill>
-                  </span>
-                  <span className="text-[12.5px] text-muted">{a.kind} · {a.duration_minutes} min{showOwner && a.owner ? ` · ${a.owner.name}` : ''}{a.reminders.length > 0 ? ` · ${a.reminders.filter((r) => r.status === 'sent').length}/${a.reminders.length} recordatorios enviados` : ''}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+      <Alert kind="info">
+        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          Aún no hay ningún calendario conectado.
+          <Link to="/settings/connections" className="inline-flex items-center rounded-[10px] border border-line px-3 py-1 text-[12.5px] font-semibold hover:bg-surface2">Conectar calendario</Link>
+        </span>
+      </Alert>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-[12px] text-muted">Hora de la empresa: {tz}</p>
+        {showOwner && people.length > 0 ? (
+          <label className="flex items-center gap-2 text-[12.5px] text-muted">
+            Persona
+            <select value={owner} onChange={(e) => setOwner(e.target.value)} className="rounded-[10px] border border-line bg-surface px-2.5 py-1.5 text-[13px] text-fg">
+              <option value="">Todas</option>
+              {people.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          </label>
+        ) : null}
+      </div>
+      {(first.isPending && !data) ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando la agenda" /></div> : null}
+      {first.isError ? <Alert>{friendlyError(first.error, 'No se pudo cargar la agenda')}</Alert> : null}
+      <AgendaCalendar view={view} anchor={anchor} today={today} tz={tz} items={items} selected={selected} onSelect={setPicked} onOpen={setOpen} />
+      <section aria-label={`Citas del ${dayLabel(selected)}`} className="grid gap-2">
+        <h2 className="text-[13px] font-semibold capitalize">{dayLabel(selected)}</h2>
+        {data && ofDay.length === 0 ? <p className="py-4 text-[13.5px] text-muted">No hay citas este día. Se agendan desde una conversación, con «Agendar».</p> : null}
+        <ul className="grid gap-2">
+          {ofDay.map((a) => (
+            <li key={a.id}>
+              <button type="button" aria-label={`Abrir la cita de ${a.contact.name}`} onClick={() => setOpen(a.id)} className={`grid w-full gap-1 rounded-xl border border-line bg-surface px-4 py-3 text-left hover:bg-surface2 ${a.status === 'cancelled' ? 'opacity-60' : ''}`}>
+                <span className="flex flex-wrap items-center justify-between gap-2">
+                  <b className="text-[14px]"><span className="font-mono">{timeIn(a.starts_at, tz)}</span> · {a.contact.name}</b>
+                  <Pill kind={STATUS[a.status].kind}>{STATUS[a.status].label}</Pill>
+                </span>
+                <span className="text-[12.5px] text-muted">{a.kind} · {a.duration_minutes} min{showOwner && a.owner ? ` · ${a.owner.name}` : ''}{a.reminders.length > 0 ? ` · ${a.reminders.filter((r) => r.status === 'sent').length}/${a.reminders.length} recordatorios enviados` : ''}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </section>
       {open ? <AppointmentDetail id={open} tz={tz} onClose={() => setOpen(undefined)} /> : null}
     </div>
   );
 }
 
-/** El rango de la semana `offset` (0 = la actual) en la zona de la empresa: desde las 00:00 del lunes hasta el lunes siguiente. */
-function useAgendaRange(tz: string, offset: number): { from: string; to: string; startDate: string } {
+/**
+ * El periodo que se pinta (mes de 6 semanas o semana) `offset` pasos desde hoy, en la zona de la empresa, y el rango de la consulta: desde las 00:00 del primer día visible
+ * hasta las 00:00 del día siguiente al último (42 días como máximo, dentro del tope de 62 del servidor).
+ */
+function useAgendaRange(tz: string, view: AgendaView, offset: number): { range: AgendaFilters; anchor: string; today: string } {
   return useMemo(() => {
     const today = todayIn(tz);
-    const dow = new Date(`${today}T00:00:00Z`).getUTCDay(); // 0 = domingo
-    const monday = addDays(today, -((dow + 6) % 7) + offset * 7);
-    const from = zonedToIso(monday, '00:00', tz) ?? new Date().toISOString();
-    const to = zonedToIso(addDays(monday, 7), '00:00', tz) ?? new Date(Date.parse(from) + 7 * 86_400_000).toISOString();
-    return { from, to, startDate: monday };
-  }, [tz, offset]);
+    const anchor = view === 'month' ? shiftMonth(today, offset) : addDays(today, offset * 7);
+    const days = visibleDays(view, anchor);
+    const from = zonedToIso(days[0]!, '00:00', tz) ?? new Date().toISOString();
+    const to = zonedToIso(addDays(days[days.length - 1]!, 1), '00:00', tz) ?? new Date(Date.parse(from) + days.length * 86_400_000).toISOString();
+    return { range: { from, to }, anchor, today };
+  }, [tz, view, offset]);
 }
