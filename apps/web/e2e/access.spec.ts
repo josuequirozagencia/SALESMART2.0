@@ -930,7 +930,7 @@ test('importar y exportar: el administrador sube un CSV, revisa, importa y desca
   expect(fileDl.suggestedFilename()).toMatch(/^contactos-\d{4}-\d{2}-\d{2}\.csv$/);
   const raw = await readFile((await fileDl.path())!, 'utf8');
   expect(raw.charCodeAt(0)).toBe(0xfeff);
-  expect(raw).toContain('Nombre,Teléfono,Correo,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad');
+  expect(raw).toContain('Nombre,Teléfono,Correo,Empresa,Responsable,Origen,Consentimiento,Etiquetas,Último anuncio,Creado,Actualizado,Ciudad');
   expect(raw).toContain('Ana Torres');
   expect(raw).toContain("'+593984217730");
   await expect(exp.getByText(/se descargó el archivo con 3 contactos/)).toBeVisible();
