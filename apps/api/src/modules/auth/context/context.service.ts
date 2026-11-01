@@ -1,7 +1,8 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, isNull, ne, sql } from 'drizzle-orm';
-import { accessSessions, Database, organizationMembers, organizations, sessions, type IdentityTx } from '../../../db';
+import { accessSessions, Database, organizationMembers, organizations, sessions, viewAsLog, type IdentityTx } from '../../../db';
 import { NotFoundError, UnauthorizedError } from '../../../errors';
+import type { ViewAsRole } from '../../../rbac';
 import { likeEscape } from '../../organizations';
 import { toMeView, type MeView } from '../me-view';
 import { actingFor, SessionService, type ActingAs } from '../session.service';
@@ -46,7 +47,9 @@ export class ContextService {
           .update(accessSessions)
           .set({ endedAt: now, endReason: toHome ? 'return' : 'switch' })
           .where(and(eq(accessSessions.sessionId, s.id), isNull(accessSessions.endedAt)));
-        await tx.update(sessions).set({ activeOrgId: targetId }).where(eq(sessions.id, s.id));
+        // Cambiar de contexto corta el «ver como» (M10.5): no cruza a otra organización
+        await tx.update(sessions).set({ activeOrgId: targetId, viewAsRole: null }).where(eq(sessions.id, s.id));
+        await tx.update(viewAsLog).set({ endedAt: now, endReason: 'switch' }).where(and(eq(viewAsLog.sessionId, s.id), isNull(viewAsLog.endedAt)));
         if (acting) {
           await tx.insert(accessSessions).values({
             sessionId: s.id,
@@ -64,6 +67,31 @@ export class ContextService {
       return c;
     });
     return toMeView(ctx);
+  }
+
+  /**
+   * «Ver como» (M10.5, ADR-56 B4): mirar la aplicación como otro ROL, solo para comprobar menús, pantallas y botones. No emite tokens ni concede nada: solo REDUCE los permisos
+   * (ver `PermissionService.forContext`) y pone la sesión en solo lectura. El rol pedido debe estar entre los que esta sesión puede elegir AHORA (según quién es y dónde está);
+   * si no, 404 uniforme. `role: null` vuelve a la vista propia. Cada cambio queda en `view_as_log`.
+   */
+  async setViewAs(input: { sessionId: string; userId: string; role: ViewAsRole | null }, now = new Date()): Promise<{ me: MeView; before: ViewAsRole | null; after: ViewAsRole | null; organizationId: string }> {
+    const out = await this.db.withIdentity(async (tx) => {
+      const [s] = await tx.select().from(sessions).where(eq(sessions.id, input.sessionId)).for('update').limit(1);
+      if (!s || s.revokedAt !== null || s.userId !== input.userId) throw new UnauthorizedError();
+      const cur = await this.sessions.contextIn(tx, s.id, now);
+      if (!cur) throw new UnauthorizedError();
+      if (input.role !== null && !cur.viewAsOptions.includes(input.role)) throw new NotFoundError();
+      const before = cur.viewingAs;
+      if (before !== input.role) {
+        await tx.update(viewAsLog).set({ endedAt: now, endReason: input.role === null ? 'cleared' : 'changed' }).where(and(eq(viewAsLog.sessionId, s.id), isNull(viewAsLog.endedAt)));
+        await tx.update(sessions).set({ viewAsRole: input.role }).where(eq(sessions.id, s.id));
+        if (input.role !== null) await tx.insert(viewAsLog).values({ sessionId: s.id, actorUserId: input.userId, organizationId: cur.organizationId, viewedRole: input.role, startedAt: now });
+      }
+      const after = await this.sessions.contextIn(tx, s.id, now);
+      if (!after) throw new UnauthorizedError();
+      return { ctx: after, before, organizationId: cur.organizationId };
+    });
+    return { me: toMeView(out.ctx), before: out.before, after: out.ctx.viewingAs, organizationId: out.organizationId };
   }
 
   /** Otras organizaciones (clientes) a las que la persona puede entrar con una membresía vigente: el selector de «Administrando X». */

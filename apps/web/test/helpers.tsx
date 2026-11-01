@@ -8,7 +8,7 @@ import { tokens } from '../src/lib/api';
 import { pendingSignup } from '../src/lib/pending';
 import { createQueryClient } from '../src/lib/query';
 import { resetBootstrapForTests, SessionProvider } from '../src/lib/session';
-import type { Me, Trial } from '../src/lib/types';
+import type { Me, Trial, ViewAsRole } from '../src/lib/types';
 
 export interface Call { method: string; path: string; query: URLSearchParams; body: unknown; headers: Record<string, string> }
 export interface Reply { status?: number; body?: unknown; /** Cuerpo de texto tal cual (descargas CSV): en vez de `body`, no se serializa como JSON. */ text?: string; headers?: Record<string, string> }
@@ -38,7 +38,7 @@ export function mockApi(routes: Record<string, Handler>): { calls: Call[]; count
 
 export const err = (status: number, code: string, message = 'x', extra: Partial<Reply> = {}): Reply => ({ status, body: { error: { code, message, request_id: 'req_1', details: [] } }, ...extra });
 
-const NOT_ACTING = { acting_as: null, read_only: false, access_level: null } as const;
+const NOT_ACTING = { acting_as: null, read_only: false, access_level: null, viewing_as: null, view_as_options: [] as ViewAsRole[] } as const;
 export const ME_ADMIN: Me = { user: { id: 'u1', email: 'ana@empresa.test', full_name: 'Ana Pérez' }, organization: { id: 'o1', name: 'Mi Empresa SA', kind: 'client' }, role: 'client_admin', home: { id: 'o1', name: 'Mi Empresa SA', kind: 'client' }, ...NOT_ACTING };
 export const ME_ADVISOR: Me = { ...ME_ADMIN, user: { id: 'u2', email: 'luis@empresa.test', full_name: 'Luis Navas' }, role: 'advisor' };
 export const ME_ROOT: Me = { user: { id: 'u0', email: 'root@plataforma.test', full_name: null }, organization: { id: 'p1', name: 'Plataforma', kind: 'platform' }, role: 'super_admin', home: { id: 'p1', name: 'Plataforma', kind: 'platform' }, ...NOT_ACTING };

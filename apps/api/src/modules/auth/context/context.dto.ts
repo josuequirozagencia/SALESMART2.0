@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
 /** `target`: la organización a la que se quiere entrar, o `null` para volver al origen de la sesión («Volver a mi agencia»). */
+/** «Ver como» (M10.5): el rol a mirar, o null para volver a la vista propia. */
+export const viewAsSchema = z.object({ role: z.enum(['agency', 'client_admin', 'advisor']).nullable() }).strict();
+export type ViewAsDto = z.infer<typeof viewAsSchema>;
+
 export const switchContextSchema = z.object({ target: z.uuid().nullable() }).strict();
 export type SwitchContextDto = z.infer<typeof switchContextSchema>;
 

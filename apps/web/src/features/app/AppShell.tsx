@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ContextBanner } from '../context/ContextBanner';
+import { ViewAsBar, ViewAsMenu } from '../context/ViewAs';
 import { useInboxRealtime } from '../inbox/useInboxRealtime';
 import { useInboxUnread } from '../inbox/useInbox';
 import { useCustomFields } from '../custom-fields/useCustomFields';
@@ -42,7 +43,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
     },
   ];
   return (
-    <SidebarShell me={me} groups={groups} navLabel="Secciones" onLogout={onLogout} banner={<ContextBanner me={me} />} wide={inInbox}>
+    <SidebarShell me={me} groups={groups} navLabel="Secciones" onLogout={onLogout} banner={<><ContextBanner me={me} /><ViewAsBar me={me} /></>} extra={<ViewAsMenu me={me} />} wide={inInbox}>
       {trial ? <TrialBanner trial={trial} role={me.role} /> : null}
       <main>{children}</main>
     </SidebarShell>

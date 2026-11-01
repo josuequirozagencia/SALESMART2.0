@@ -56,6 +56,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Cambio de contexto, soporte del Súper Admin y registro de accesos (M2.5, ADR-41). Pruebas: test/platform/context.test.ts
   // (agencia solo entra a su cartera, 404 uniforme, acceso al instante, Súper Admin en soporte, marca acting_as, access_sessions solo para el Súper Admin, A↔B)
   { route: 'POST /v1/context/switch', kind: 'self', test: '../../platform/context.test.ts' },
+  { route: 'POST /v1/context/view-as', kind: 'self', test: '../../platform/view-as.test.ts' },
   { route: 'GET /v1/context/options', kind: 'self', test: '../../platform/context.test.ts' },
   { route: 'GET /v1/platform/access-sessions', kind: 'platform', test: '../../platform/context.test.ts' },
   { route: 'PUT /v1/platform/organizations/:id/agency-access', kind: 'platform', test: '../../platform/context.test.ts' },

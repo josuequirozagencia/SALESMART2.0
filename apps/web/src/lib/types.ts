@@ -6,6 +6,8 @@ export type AccessLevel = 'read' | 'advisor' | 'admin';
 /** Quién actúa dentro de una organización que no es la suya: el Súper Admin (soporte) o una agencia en un cliente. */
 export type ActingAs = 'super_admin' | 'agency';
 export type OrgKind = 'platform' | 'agency' | 'client';
+/** «Ver como» (M10.5, ADR-56 B4): el rol cuya vista se puede mirar. Solo reduce y es de solo lectura. */
+export type ViewAsRole = 'agency' | 'client_admin' | 'advisor';
 
 /**
  * Quién soy y en qué contexto estoy. La web solo lo PINTA (banner, solo lectura): el servidor vuelve a verificar todo en cada petición.
@@ -19,6 +21,10 @@ export interface Me {
   acting_as: ActingAs | null;
   read_only: boolean;
   access_level: AccessLevel | null;
+  /** «Ver como»: el rol cuya vista se está mirando ahora, o null. */
+  viewing_as: ViewAsRole | null;
+  /** Roles que puede elegir ahora para «ver como» (vacío = no hay selector). */
+  view_as_options: ViewAsRole[];
 }
 
 export interface LoginResponse extends Me {

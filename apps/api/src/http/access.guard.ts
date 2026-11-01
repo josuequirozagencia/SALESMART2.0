@@ -5,7 +5,7 @@ import { ForbiddenError, UnauthorizedError } from '../errors';
 import { AccessResolver, type Principal } from './access-resolver';
 import { PERMISSION_KEY } from '../rbac';
 import type { PermissionKey } from '../rbac';
-import { ACCESS_KEY, ALLOW_PAUSED_KEY, type AccessKind } from './public.decorator';
+import { ACCESS_KEY, ALLOW_PAUSED_KEY, ALLOW_VIEW_AS_KEY, type AccessKind } from './public.decorator';
 
 export type AuthedRequest = Request & { requestId?: string; principal?: Principal };
 
@@ -31,6 +31,10 @@ export class AccessGuard implements CanActivate {
     // 'self': cualquier principal verificado; el servicio solo usa principal.userId, nunca ids de la petición
     if (kind === 'platform' && principal.kind !== 'platform') throw new ForbiddenError();
     if (kind === 'tenant' && principal.kind !== 'tenant') throw new ForbiddenError('CONTEXT_REQUIRED', 'Selecciona una organización para continuar');
+    // «Ver como» (M10.5): solo lectura. Lo que no es una lectura se rechaza ANTES de llegar al servicio, con su propio motivo (y ninguna acción queda «hecha como otro»)
+    if (principal.kind === 'tenant' && principal.viewingAs && !['GET', 'HEAD', 'OPTIONS'].includes(req.method.toUpperCase()) && !this.reflector.getAllAndOverride<boolean | undefined>(ALLOW_VIEW_AS_KEY, [ctx.getHandler(), ctx.getClass()])) {
+      throw new ForbiddenError('VIEW_AS_READ_ONLY', 'Estás viendo la aplicación como otro rol: solo puedes mirar. Vuelve a tu vista para hacer cambios');
+    }
     // RBAC central: TODOS los permisos exigidos deben estar en los que el resolvedor cargó para el rol verificado
     const required = this.reflector.getAllAndOverride<readonly PermissionKey[] | undefined>(PERMISSION_KEY, [ctx.getHandler(), ctx.getClass()]);
     if (required && required.length > 0 && !required.every((k) => principal.permissions?.has(k))) throw new ForbiddenError();

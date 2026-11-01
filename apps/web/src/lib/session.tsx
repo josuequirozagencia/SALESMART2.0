@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, CSRF_HEADER, CSRF_VALUE, onSessionLost, refreshSession, tokens } from './api';
-import type { LoginResponse, Me } from './types';
+import type { LoginResponse, Me, ViewAsRole } from './types';
 
 export type AuthState = { status: 'loading' } | { status: 'anon' } | { status: 'authed'; me: Me };
 
@@ -11,6 +11,8 @@ interface SessionApi {
   logout(): Promise<void>;
   /** Entra a otra organización (o vuelve al origen con `null`) sin cerrar sesión. El servidor decide si hay derecho (404 si no). */
   switchContext(target: string | null): Promise<Me>;
+  /** «Ver como» otro rol (solo lectura), o `null` para volver a la vista propia (M10.5). */
+  viewAs(role: ViewAsRole | null): Promise<Me>;
 }
 
 const Ctx = createContext<SessionApi | null>(null);
@@ -59,7 +61,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string): Promise<Me> => {
     const r = await api<LoginResponse>('/auth/login', { method: 'POST', auth: false, body: { email, password } });
     tokens.set(r.access_token);
-    const me: Me = { user: r.user, organization: r.organization, role: r.role, home: r.home, acting_as: r.acting_as, read_only: r.read_only, access_level: r.access_level };
+    const me: Me = { user: r.user, organization: r.organization, role: r.role, home: r.home, acting_as: r.acting_as, read_only: r.read_only, access_level: r.access_level, viewing_as: r.viewing_as, view_as_options: r.view_as_options };
     qc.clear(); // nada de datos de una sesión anterior
     setState({ status: 'authed', me });
     return me;
@@ -84,7 +86,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return me;
   }, [qc]);
 
-  const value = useMemo(() => ({ state, login, logout, switchContext }), [state, login, logout, switchContext]);
+  const viewAs = useCallback(async (role: ViewAsRole | null): Promise<Me> => {
+    const me = await api<Me>('/context/view-as', { method: 'POST', body: { role } });
+    qc.clear(); // los datos cambian con los permisos de la vista: nada de la anterior se queda en pantalla
+    setState({ status: 'authed', me });
+    return me;
+  }, [qc]);
+
+  const value = useMemo(() => ({ state, login, logout, switchContext, viewAs }), [state, login, logout, switchContext, viewAs]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

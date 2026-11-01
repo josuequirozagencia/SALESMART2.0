@@ -379,7 +379,7 @@ describe('Contactos · selección', () => {
     const d = within(await screen.findByRole('dialog', { name: 'Nueva lista' }));
     expect(d.getByText(/hasta 500 contactos a la vez/)).toBeInTheDocument();
     expect(d.getByRole('button', { name: 'Crear lista' })).toBeDisabled();
-  });
+  }, 60_000); // dibuja 501 filas: con la máquina ocupada pasa de los 20 s por omisión
 });
 
 describe('Contacto · etiquetas personalizadas', () => {

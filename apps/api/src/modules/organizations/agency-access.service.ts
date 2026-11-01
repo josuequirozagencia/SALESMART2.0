@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, eq, inArray, isNull, ne, sql } from 'drizzle-orm';
-import { accessSessions, organizationMembers, organizations, sessions, users, type IdentityTx } from '../../db';
+import { accessSessions, organizationMembers, organizations, sessions, users, viewAsLog, type IdentityTx } from '../../db';
 
 /** Nivel con el que el personal de una agencia entra a un cliente de su cartera si el Súper Admin no fijó otro (ADR-40 #3). Se fija por cliente en `organizations.agency_access_level` (ADR-41). */
 export const AGENCY_DEFAULT_ACCESS_LEVEL = 'admin';
@@ -46,8 +46,10 @@ export class AgencyAccessService {
       const revoked = revoke.map((m) => m.userId);
       await tx.update(organizationMembers).set({ revokedAt: now }).where(inArray(organizationMembers.id, revoke.map((m) => m.id)));
       const inClient = and(eq(sessions.activeOrgId, clientId), inArray(sessions.userId, revoked), isNull(sessions.revokedAt));
-      await tx.update(sessions).set({ activeOrgId: sql`${sessions.homeOrgId}` }).where(and(inClient, ne(sessions.homeOrgId, clientId)));
-      await tx.update(sessions).set({ revokedAt: now, revokeReason: 'access_removed' }).where(and(inClient, eq(sessions.homeOrgId, clientId)));
+      // Quitar el acceso corta también el «ver como» de esas sesiones (M10.5): cierra su registro y vuelven a su vista propia
+      await tx.update(viewAsLog).set({ endedAt: now, endReason: 'switch' }).where(and(eq(viewAsLog.organizationId, clientId), inArray(viewAsLog.actorUserId, revoked), isNull(viewAsLog.endedAt)));
+      await tx.update(sessions).set({ activeOrgId: sql`${sessions.homeOrgId}`, viewAsRole: null }).where(and(inClient, ne(sessions.homeOrgId, clientId)));
+      await tx.update(sessions).set({ revokedAt: now, revokeReason: 'access_removed', viewAsRole: null }).where(and(inClient, eq(sessions.homeOrgId, clientId)));
       await tx
         .update(accessSessions)
         .set({ endedAt: now, endReason: 'access_removed' })
