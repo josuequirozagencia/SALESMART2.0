@@ -61,7 +61,8 @@ export const listScheduledQuerySchema = z
   .strict();
 export type ListScheduledQuery = z.infer<typeof listScheduledQuerySchema>;
 
-export const noteSchema = z.object({ text: text(MAX_NOTE_LENGTH) }).strict();
+/** Nota interna. `mentions`: las personas nombradas con «@» (F1, ADR-57); el servidor valida cada una (hasta 10, que ya vean la conversación) y avisa a cada quien. */
+export const noteSchema = z.object({ text: text(MAX_NOTE_LENGTH), mentions: z.array(z.uuid()).max(50).optional() }).strict();
 export type NoteDto = z.infer<typeof noteSchema>;
 
 /**

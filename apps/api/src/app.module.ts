@@ -13,6 +13,7 @@ import { QrModule } from './modules/qr';
 import { GhlModule } from './modules/ghl';
 import { ChannelsModule } from './modules/channels';
 import { InboxModule } from './modules/inbox';
+import { NotificationsModule } from './modules/notifications';
 import { ContactsModule } from './modules/contacts';
 import { CustomFieldsModule } from './modules/custom-fields';
 import { OpportunitiesModule } from './modules/opportunities';
@@ -29,5 +30,5 @@ import { SlaModule } from './modules/sla';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SampleDataModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), AiModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SampleDataModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, NotificationsModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), AiModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

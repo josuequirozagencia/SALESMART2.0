@@ -100,6 +100,8 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   'GET /contact-lists': () => ({ body: { items: [] } }),
   // El Inicio muestra el tablero del periodo (vacío por omisión en las pruebas que solo pasan por ahí)
   'GET /analytics/summary': () => ({ body: EMPTY_SUMMARY }),
+  // La campana de avisos del menú lateral (F1, ADR-57): sin avisos por omisión
+  'GET /notifications': () => ({ body: { items: [], next_cursor: null, unread: 0 } }),
 });
 
 export const EMPTY_SUMMARY = {

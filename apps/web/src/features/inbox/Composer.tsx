@@ -1,15 +1,16 @@
 import { useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
-import type { Conversation, ResolvedQuickReply } from '../../lib/types';
+import type { Conversation, MentionOption, ResolvedQuickReply } from '../../lib/types';
 import { Alert, Button } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
 import { AttachmentPicker } from './AttachmentPicker';
 import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
 import { EmojiPicker } from './EmojiPicker';
+import { mentionAt, mentionIdsIn, suggestMentions, type Picked } from './mentions';
 import { ScheduleDialog } from './ScheduleDialog';
 import { TemplatePicker } from './TemplatePicker';
-import { useConversationQuickReplies, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
+import { useConversationQuickReplies, useMentionOptions, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
 
 const MAX = 4096;
 const MAX_SUGGESTIONS = 6;
@@ -69,6 +70,9 @@ export function Composer({ c }: { c: Conversation }) {
   });
   const [active, setActive] = useState(0);
   const [closedAt, setClosedAt] = useState<number | null>(null);
+  // Menciones «@» (F1, ADR-57): quiénes se eligieron y la «@» cuya lista se cerró con Esc
+  const [picked, setPicked] = useState<Picked[]>([]);
+  const [mentionClosedAt, setMentionClosedAt] = useState<number | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
   const block = replyBlock(c);
@@ -81,6 +85,10 @@ export function Composer({ c }: { c: Conversation }) {
   const options = useMemo(() => (slash && quick.data ? suggest(quick.data.items, slash.query) : []), [slash, quick.data]);
   const open = slash !== null && closedAt !== slash.start && quick.isSuccess;
   const pending = noteMode ? [] : [...new Set(text.match(UNFILLED) ?? [])];
+  const mention = noteMode && c.can.note ? mentionAt(text, caret) : null;
+  const mentionData = useMentionOptions(c.id, noteMode && c.can.note);
+  const people = useMemo(() => (mention && mentionData.data ? suggestMentions(mentionData.data.items, mention.query) : []), [mention, mentionData.data]);
+  const mentionOpen = mention !== null && mentionClosedAt !== mention.start && mentionData.isSuccess;
 
   if (!c.can.reply && !c.can.note) return block ? <p className="border-t border-line bg-surface px-4 py-3 text-[13px] text-muted">{block}</p> : null;
 
@@ -96,8 +104,12 @@ export function Composer({ c }: { c: Conversation }) {
     ref.current?.focus();
     if (attachmentId) {
       (media as ReturnType<typeof useSendMedia>).mutate({ attachment_id: attachmentId, caption }, { onError: () => { setText((cur) => (cur === '' ? savedText : cur)); setPendingAttachment(savedAttachment); } });
+    } else if (noteMode) {
+      const mentions = mentionIdsIn(trimmed, picked);
+      note.mutate({ text: trimmed, ...(mentions.length > 0 ? { mentions } : {}) }, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
+      setPicked([]);
     } else {
-      send.mutate(trimmed, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
+      reply.mutate(trimmed, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
     }
   };
 
@@ -111,6 +123,23 @@ export function Composer({ c }: { c: Conversation }) {
     setActive(0);
     if (send.isError) send.reset();
     // El cursor solo se mueve si el texto sigue siendo el que se acaba de armar (si ya siguió escribiendo, moverlo mezclaría lo escrito)
+    requestAnimationFrame(() => {
+      ref.current?.focus();
+      if (ref.current && ref.current.value === next) ref.current.setSelectionRange(at, at);
+    });
+  };
+
+  /** Pone «@Nombre » en lugar de lo escrito tras la «@» y recuerda a quién se eligió. Quien aún no ve la conversación no se puede elegir (mencionar no da acceso). */
+  const insertMention = (o: MentionOption): void => {
+    if (!mention || !o.can_view) return;
+    const label = `@${o.name} `;
+    const next = `${text.slice(0, mention.start)}${label}${text.slice(caret)}`.slice(0, MAX);
+    const at = Math.min(mention.start + label.length, MAX);
+    setText(next);
+    setCaret(at);
+    setActive(0);
+    setPicked((cur) => (cur.some((p) => p.id === o.id) ? cur : [...cur, { id: o.id, name: o.name }]));
+    if (send.isError) send.reset();
     requestAnimationFrame(() => {
       ref.current?.focus();
       if (ref.current && ref.current.value === next) ref.current.setSelectionRange(at, at);
@@ -136,12 +165,30 @@ export function Composer({ c }: { c: Conversation }) {
     setCaret(e.target.selectionStart);
     setActive(0);
     setClosedAt(null);
+    setMentionClosedAt(null);
     if (send.isError) send.reset();
   };
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (emojis && e.key === 'Escape') {
       e.preventDefault();
       setEmojis(false);
+      return;
+    }
+    if (mentionOpen && people.length > 0 && !e.nativeEvent.isComposing) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setActive((i) => (i + (e.key === 'ArrowDown' ? 1 : people.length - 1)) % people.length);
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        insertMention(people[Math.min(active, people.length - 1)]!);
+        return;
+      }
+    }
+    if (mentionOpen && e.key === 'Escape' && mention) {
+      e.preventDefault();
+      setMentionClosedAt(mention.start);
       return;
     }
     if (open && options.length > 0 && !e.nativeEvent.isComposing) {
@@ -207,6 +254,32 @@ export function Composer({ c }: { c: Conversation }) {
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : pendingAttachment ? 'No pudimos enviar el archivo.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
       <div className="relative flex items-end gap-2">
+        {mentionOpen ? (
+          <div className="absolute inset-x-0 bottom-full z-10 mb-1.5 max-h-64 overflow-y-auto rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow)]">
+            {people.length > 0 ? (
+              <ul id={`${listId}-people`} role="listbox" aria-label="Personas a mencionar" className="grid gap-0.5">
+                {people.map((o, i) => (
+                  <li
+                    key={o.id}
+                    id={`${listId}-p${i}`}
+                    role="option"
+                    aria-selected={i === active}
+                    aria-disabled={!o.can_view}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => insertMention(o)}
+                    onMouseEnter={() => setActive(i)}
+                    className={`grid gap-0.5 rounded-lg px-2.5 py-1.5 text-left ${o.can_view ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'} ${i === active ? 'bg-accent-soft' : o.can_view ? 'hover:bg-surface2' : ''}`}
+                  >
+                    <b className="text-[13px]">@{o.name}</b>
+                    {o.can_view ? null : <span className="text-[12px] text-muted">No ve esta conversación: compártela primero</span>}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p role="status" className="px-2.5 py-2 text-[12.5px] text-muted">{mentionData.data && mentionData.data.items.length === 0 ? 'No hay otras personas en el equipo a quienes mencionar.' : `Nadie del equipo se llama «${mention?.query ?? ''}».`}</p>
+            )}
+          </div>
+        ) : null}
         {open ? (
           <div className="absolute inset-x-0 bottom-full z-10 mb-1.5 max-h-64 overflow-y-auto rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow)]">
             {options.length > 0 ? (
@@ -236,7 +309,8 @@ export function Composer({ c }: { c: Conversation }) {
           disabled={!canWrite}
           aria-label={noteMode ? 'Nota interna' : 'Mensaje'}
           {...(open && options.length > 0 ? { 'aria-controls': listId, 'aria-activedescendant': `${listId}-${Math.min(active, options.length - 1)}`, 'aria-expanded': true } : {})}
-          placeholder={noteMode ? 'Nota interna: solo la ve tu equipo' : pendingAttachment ? 'Pie del archivo (opcional)' : 'Escribe un mensaje o «/» para una respuesta rápida'}
+          {...(mentionOpen && people.length > 0 ? { 'aria-controls': `${listId}-people`, 'aria-activedescendant': `${listId}-p${Math.min(active, people.length - 1)}`, 'aria-expanded': true } : {})}
+          placeholder={noteMode ? 'Nota interna: solo la ve tu equipo. Escribe «@» para mencionar a alguien' : pendingAttachment ? 'Pie del archivo (opcional)' : 'Escribe un mensaje o «/» para una respuesta rápida'}
           onChange={onChange}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={onKey}

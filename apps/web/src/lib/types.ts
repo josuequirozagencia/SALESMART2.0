@@ -809,8 +809,33 @@ export interface ChatMessage {
   delivered_at: string | null;
   read_at: string | null;
   is_note: boolean;
+  /** Personas mencionadas con «@» en una nota (F1, ADR-57). */
+  mentions?: Array<{ user_id: string; name: string }>;
   /** Si es una plantilla (M5.6a): cuál y sus botones; el texto armado va en `text`. */
   template: { name: string; language: string; category: string; buttons: TemplateButton[] } | null;
+}
+/** Una persona a la que se puede mencionar en una nota; `can_view` false = aún no ve la conversación (se muestra desactivada: mencionar no da acceso). */
+export interface MentionOption {
+  id: string;
+  name: string;
+  can_view: boolean;
+}
+/** Un aviso del centro de avisos (F1, ADR-57): por ahora solo menciones en notas. */
+export interface AppNotification {
+  id: string;
+  type: 'mention';
+  created_at: string;
+  read_at: string | null;
+  actor: { id: string; name: string } | null;
+  conversation: { id: string; contact: { id: string; name: string } };
+  message_id: string | null;
+  excerpt: string | null;
+}
+export interface NotificationPage {
+  items: AppNotification[];
+  next_cursor: string | null;
+  /** Solo en la primera página. */
+  unread: number | null;
 }
 export interface ChatMessagePage {
   /** De la más antigua a la más reciente. */

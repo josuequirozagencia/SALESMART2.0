@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
 import { useRealtimeStatus } from '../../lib/realtime';
-import type { AgentStatus, ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, ScheduledPageData, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
+import type { AgentStatus, ChatMessage, MentionOption, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, ScheduledPageData, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /**
  * Cada cuánto se vuelve a mirar el listado y el hilo abierto cuando NO hay conexión en vivo (respaldo). Con la conexión en vivo los cambios llegan solos y
@@ -144,9 +144,15 @@ export function useSendTemplate(id: string) {
   return useMutation({ mutationFn: (input: { template_id: string; params: Record<string, string> }) => api<ChatMessage>(`/conversations/${id}/template`, { method: 'POST', body: input }), onSettled: refresh });
 }
 
+/** Guarda una nota interna; `mentions` son las personas nombradas con «@» (el servidor valida a cada una y les avisa). */
 export function useSendNote(id: string) {
   const refresh = useRefresh(id);
-  return useMutation({ mutationFn: (text: string) => api<ChatMessage>(`/conversations/${id}/notes`, { method: 'POST', body: { text } }), onSettled: refresh });
+  return useMutation({ mutationFn: (input: { text: string; mentions?: string[] }) => api<ChatMessage>(`/conversations/${id}/notes`, { method: 'POST', body: input }), onSettled: refresh });
+}
+
+/** A quién se puede mencionar con «@» en las notas de esta conversación (las que aún no la ven vienen desactivadas). */
+export function useMentionOptions(id: string, enabled: boolean) {
+  return useQuery({ queryKey: ['mention-options', id], enabled, retry: false, staleTime: 30_000, queryFn: () => api<{ items: MentionOption[] }>(`/conversations/${id}/mention-options`) });
 }
 
 export type ConversationAction = 'accept' | 'take' | 'close';

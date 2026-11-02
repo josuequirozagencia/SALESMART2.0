@@ -3,6 +3,7 @@ import type { ChatMessage } from '../../lib/types';
 import { Button } from '../../ui/controls';
 import { QUICK_REACTIONS } from './emoji';
 import { bubbleTime, describeExtra, kindLabel } from './inboxFormat';
+import { splitMentions } from './mentions';
 
 const TICK: Record<string, { text: string; label: string; cls: string }> = {
   queued: { text: '◷', label: 'Enviando', cls: 'opacity-60' },
@@ -29,7 +30,7 @@ function Body({ m }: { m: ChatMessage }) {
           {kindLabel(m.kind)}{m.media?.filename || att?.filename ? ` · ${att?.filename ?? m.media?.filename}` : ''}
         </span>
       ) : null}
-      {m.text ? <span className="block whitespace-pre-wrap break-words">{m.text}</span> : null}
+      {m.text ? <span className="block whitespace-pre-wrap break-words">{m.is_note && m.mentions && m.mentions.length > 0 ? splitMentions(m.text, m.mentions).map((p, i) => (p.mention ? <mark key={i} className="rounded bg-accent-soft px-0.5 font-semibold text-accent">{p.text}</mark> : <span key={i}>{p.text}</span>)) : m.text}</span> : null}
       {extra ? <span className="block text-[12.5px] opacity-80">{extra}</span> : null}
       {att ? (
         att.scan_status === 'infected' ? <span className="mt-0.5 block text-[12px] font-semibold text-crit">El antivirus bloqueó este archivo{att.error ? `: ${att.error}` : ''}</span>

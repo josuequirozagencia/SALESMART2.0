@@ -6,6 +6,7 @@ import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
 import { createScheduledSchema, listConversationsQuerySchema, listScheduledQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type ListScheduledQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
+import { MentionsService } from './mentions.service';
 import { OutboundService } from './outbound.service';
 import { ReactionsService } from './reactions.service';
 import { ScheduledMessagesService } from './scheduled-messages.service';
@@ -35,6 +36,7 @@ export class InboxController {
     @Inject(SharingService) private readonly sharing: SharingService,
     @Inject(ScheduledMessagesService) private readonly scheduledMessages: ScheduledMessagesService,
     @Inject(ReactionsService) private readonly reactions: ReactionsService,
+    @Inject(MentionsService) private readonly mentions: MentionsService,
   ) {}
 
   @RequirePermission('inbox.read')
@@ -176,6 +178,14 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   sendMedia(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(sendMediaSchema)) b: SendMediaDto) {
     return this.outbound.sendMedia(accessOf(req), id, b);
+  }
+
+  /** Personas a las que se puede mencionar en una nota de esta conversación; las que aún no la ven vienen desactivadas (F1, ADR-57). */
+  @RequirePermission('inbox.reply')
+  @Get(':id/mention-options')
+  @Header('Cache-Control', 'no-store')
+  mentionOptions(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.mentions.options(accessOf(req), id);
   }
 
   /** Nota interna: nunca sale al cliente. */

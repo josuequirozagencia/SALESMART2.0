@@ -34,8 +34,11 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
         conversations.add(conversationId);
         timer ??= setTimeout(flush, COALESCE_MS);
       },
+      onNotification: () => {
+        void qc.invalidateQueries({ queryKey: ['notifications'] });
+      },
       onResync: () => {
-        for (const key of ['conversations', 'inbox-unread', 'conversation', 'messages', 'scheduled', 'conversation-ai']) void qc.invalidateQueries({ queryKey: [key] });
+        for (const key of ['conversations', 'inbox-unread', 'conversation', 'messages', 'scheduled', 'conversation-ai', 'notifications']) void qc.invalidateQueries({ queryKey: [key] });
       },
     });
     return () => {

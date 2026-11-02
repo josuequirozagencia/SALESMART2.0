@@ -74,6 +74,8 @@ export interface MessageView {
   delivered_at: string | null;
   read_at: string | null;
   is_note: boolean;
+  /** Personas mencionadas con «@» en una nota (F1, ADR-57); vacío en lo demás. */
+  mentions: Array<{ user_id: string; name: string }>;
   /** Si es una plantilla (M5.6a): cuál y sus botones. El texto armado va en `text`. */
   template: { name: string; language: string; category: string; buttons: Array<{ type: string; text: string; url: string | null; phone: string | null }> } | null;
 }
@@ -180,7 +182,7 @@ function templateOf(meta: Record<string, unknown>): MessageView['template'] {
   };
 }
 
-export function messageView(m: MessageRow, author: { id: string; name: string } | null, attachment: MessageView['attachment'] = null): MessageView {
+export function messageView(m: MessageRow, author: { id: string; name: string } | null, attachment: MessageView['attachment'] = null, mentions: MessageView['mentions'] = []): MessageView {
   const media = m.media as { mime_type?: unknown; filename?: unknown } | null;
   const extra = Object.fromEntries(Object.entries(m.meta).filter(([k]) => !HIDDEN_META.has(k)));
   return {
@@ -201,6 +203,7 @@ export function messageView(m: MessageRow, author: { id: string; name: string } 
     delivered_at: iso(m.deliveredAt),
     read_at: iso(m.readAt),
     is_note: m.kind === 'note',
+    mentions,
     template: m.kind === 'template' ? templateOf(m.meta) : null,
   };
 }

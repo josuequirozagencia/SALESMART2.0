@@ -2482,3 +2482,98 @@ test('«ver como» (M10.5): el administrador mira su empresa como Asesor (barra 
   await page.goto('/');
   await expect(side.getByRole('link', { name: 'Usuarios' })).toBeVisible();
 });
+
+test('menciones: el asesor menciona al administrador en una nota (quien no ve la conversación sale desactivado), al administrador le llega el aviso en la campana, lo abre y va a la conversación; otra empresa no ve nada', async ({ page, request, browser }) => {
+  test.setTimeout(180_000);
+  const s = state();
+  const { apiBase } = s;
+  const APP_SECRET = 'app-secret-e2e-menciones-0123456789abcdef';
+  const PHONE_ID = '1090123450077';
+  const FROM = '593984217744';
+  const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-menciones-0123456789abcdef' } } })).status()).toBe(200);
+  expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/active`, { headers: root, data: { provider: 'meta_cloud' } })).status()).toBe(200);
+
+  const adminEmail = await createAccount(request, uniqueEmail('menciones'));
+  const carlosEmail = uniqueEmail('carlos-menciones');
+  const elenaEmail = uniqueEmail('elena-menciones');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const mk = async (email: string, name: string): Promise<string> => {
+      const id = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), $3 FROM users WHERE email = $2 RETURNING id`, [email, adminEmail, name])).rows[0].id as string;
+      await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [id, orgId]);
+      return id;
+    };
+    const carlosId = await mk(carlosEmail, 'Carlos E2E');
+    const elenaId = await mk(elenaEmail, 'Elena E2E');
+
+    // Cola con Carlos como único asesor, número conectado y un cliente que escribe
+    const adm = { authorization: `Bearer ${await apiLogin(request, adminEmail)}`, 'content-type': 'application/json' };
+    const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
+    expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: adm, data: { distribution_on: true } })).status()).toBe(200);
+    expect((await request.put(`${apiBase}/v1/queues/${queue.id}/members`, { headers: adm, data: { members: [{ user_id: carlosId, active: true, weight: 1 }] } })).status()).toBe(200);
+    expect((await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea menciones', waba_id: '1234567890123', phone_number_id: PHONE_ID, access_token: 'fake-valid-token', queue_id: queue.id } })).status()).toBe(201);
+    const payload = JSON.stringify({ object: 'whatsapp_business_account', entry: [{ id: '1234567890123', changes: [{ field: 'messages', value: { messaging_product: 'whatsapp', metadata: { display_phone_number: '15550006789', phone_number_id: PHONE_ID }, contacts: [{ profile: { name: 'Cliente Menciones' }, wa_id: FROM }], messages: [{ from: FROM, id: 'wamid.SHARE1', timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: 'Necesito ayuda con un paquete' } }] } }] }] });
+    const sig = `sha256=${createHmac('sha256', APP_SECRET).update(payload).digest('hex')}`;
+    expect((await request.post(`${apiBase}/v1/channels/meta/webhook`, { headers: { 'content-type': 'application/json', 'x-hub-signature-256': sig }, data: payload })).status()).toBe(200);
+    let conv: { id: string; contact_id: string } | undefined;
+    for (let i = 0; i < 60 && !conv; i++) {
+      conv = (await db.query(`SELECT id, contact_id FROM conversations WHERE organization_id = $1 AND owner_id = $2`, [orgId, carlosId])).rows[0] as typeof conv;
+      if (!conv) await new Promise((r) => setTimeout(r, 500));
+    }
+    expect(conv).toBeDefined();
+
+    // 1) Carlos la acepta y escribe una nota con «@»: Elena (que no ve la conversación) sale desactivada; elige al administrador y la guarda
+    await uiLogin(page, carlosEmail);
+    await page.getByRole('link', { name: 'Inbox' }).click();
+    await page.getByRole('tab', { name: /Pendientes/ }).click();
+    await page.getByRole('link', { name: /^Cliente Menciones/ }).click();
+    const carlos = page.getByRole('region', { name: 'Conversación con Cliente Menciones' });
+    await carlos.getByRole('button', { name: 'Aceptar' }).click();
+    await expect(carlos.getByText('Trabajando')).toBeVisible();
+    await carlos.getByRole('button', { name: 'Nota interna' }).click();
+    const box = carlos.getByRole('textbox', { name: 'Nota interna' });
+    await box.pressSequentially('@');
+    const people = page.getByRole('listbox', { name: 'Personas a mencionar' });
+    await expect(people.getByRole('option', { name: /Elena E2E/ })).toHaveAttribute('aria-disabled', 'true');
+    await expect(people.getByText('No ve esta conversación: compártela primero')).toBeVisible();
+    await people.getByRole('option').first().click(); // el administrador (ve todo): la lista pone primero a quien ya la ve
+    await box.pressSequentially('revisa el descuento de este cliente');
+    await box.press('Enter');
+    await expect(carlos.getByRole('log', { name: 'Mensajes' }).locator('mark')).toBeVisible();
+    expect((await db.query(`SELECT count(*)::int AS n FROM message_mentions WHERE organization_id = $1`, [orgId])).rows[0].n).toBe(1);
+    const notice = (await db.query(`SELECT id, user_id, read_at FROM notifications WHERE organization_id = $1`, [orgId])).rows as Array<{ id: string; user_id: string; read_at: Date | null }>;
+    expect(notice).toHaveLength(1);
+    expect(notice[0]!.user_id).not.toBe(carlosId);
+    expect(notice[0]!.user_id).not.toBe(elenaId);
+
+    // 2) El administrador ve la campana con 1 aviso, lo abre y llega a la conversación con la mención resaltada; el contador baja a 0
+    const adminCtx = await browser.newContext();
+    contexts.push(adminCtx);
+    const adminPage = await adminCtx.newPage();
+    await uiLogin(adminPage, adminEmail);
+    await expect(adminPage.getByRole('button', { name: 'Avisos (1 sin leer)' })).toBeVisible({ timeout: 30_000 });
+    await adminPage.getByRole('button', { name: 'Avisos (1 sin leer)' }).click();
+    const panel = adminPage.getByRole('dialog', { name: 'Avisos' });
+    await expect(panel.getByText(/te mencionó en una nota de la conversación con Cliente Menciones/)).toBeVisible();
+    await expect(panel.getByText('revisa el descuento de este cliente')).toBeVisible();
+    await panel.getByRole('link', { name: /te mencionó/ }).click();
+    await expect(adminPage.getByRole('region', { name: 'Conversación con Cliente Menciones' }).locator('mark')).toBeVisible();
+    await expect(adminPage.getByRole('button', { name: 'Avisos', exact: true })).toBeVisible({ timeout: 30_000 });
+    expect((await db.query(`SELECT read_at FROM notifications WHERE id = $1`, [notice[0]!.id])).rows[0].read_at).not.toBeNull();
+
+    // 3) Elena no recibió nada, y otra empresa no ve ni marca el aviso del administrador
+    const elenaToken = await apiLogin(request, elenaEmail);
+    expect(((await (await request.get(`${apiBase}/v1/notifications`, { headers: { authorization: `Bearer ${elenaToken}` } })).json()) as { items: unknown[] }).items).toEqual([]);
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('menciones-otra')))}`, 'content-type': 'application/json' };
+    expect(((await (await request.get(`${apiBase}/v1/notifications`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    expect((await request.post(`${apiBase}/v1/notifications/${notice[0]!.id}/read`, { headers: other })).status()).toBe(404);
+    expect((await request.get(`${apiBase}/v1/conversations/${conv!.id}/mention-options`, { headers: other })).status()).toBe(404);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});

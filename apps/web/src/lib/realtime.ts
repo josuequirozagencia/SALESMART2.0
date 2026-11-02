@@ -39,6 +39,8 @@ interface Handlers {
   onChange(change: RealtimeChange): void;
   /** Se recuperó la conexión después de una caída: pudo perderse algún aviso, hay que volver a pedir todo lo abierto. */
   onResync(): void;
+  /** A la persona le llegó un aviso nuevo (F1, ADR-57): solo el id; la lista se vuelve a pedir a la API. */
+  onNotification?(): void;
 }
 
 /**
@@ -86,6 +88,7 @@ export function startRealtime(h: Handlers): () => void {
       setStatus('down');
     }
   });
+  socket.on('notification.created', () => h.onNotification?.());
   for (const event of EVENTS) {
     socket.on(event, (body: { data?: { conversation_id?: string; message_id?: string } } | undefined) => {
       const conversationId = body?.data?.conversation_id;
