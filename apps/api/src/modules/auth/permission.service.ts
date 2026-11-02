@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { Database, permissions, rolePermissions, roles } from '../../db';
-import { accessLevelPermissions, effectivePermissions, isOverrideRole, isPermissionKey, type AccessLevel, type PermissionKey } from '../../rbac';
+import { accessLevelPermissions, effectivePermissions, isOverrideRole, isPermissionKey, narrowToViewAs, type AccessLevel, type PermissionKey, type ViewAsRole } from '../../rbac';
 import type { ActingAs } from './session.service';
 
 const TTL_MS = 60_000;
@@ -30,7 +30,14 @@ export class PermissionService {
    *  - con la empresa en pausa (prueba vencida) → solo los de lectura, para ambos.
    * Nunca se incluyen permisos de plataforma ni de la consola de agencia dentro de un cliente.
    */
-  async forContext(c: { role: string; orgKind: string; accessLevel: AccessLevel | null; actingAs: ActingAs | null; trialExpired: boolean; overrides?: { grant: readonly string[]; deny: readonly string[] } }, now = Date.now()): Promise<ReadonlySet<PermissionKey>> {
+  async forContext(c: { role: string; orgKind: string; accessLevel: AccessLevel | null; actingAs: ActingAs | null; trialExpired: boolean; overrides?: { grant: readonly string[]; deny: readonly string[] }; viewingAs?: ViewAsRole | null }, now = Date.now()): Promise<ReadonlySet<PermissionKey>> {
+    const own = await this.ownPermissions(c, now);
+    // «Ver como» (M10.5, ADR-56 B4): solo REDUCE. Lo que tiene quien mira ∩ la plantilla BASE del rol visto (sin ajustes personales de nadie) ∩ solo lectura
+    if (c.viewingAs) return narrowToViewAs(own, await this.forRole(c.viewingAs, now), c.viewingAs);
+    return own;
+  }
+
+  private async ownPermissions(c: { role: string; orgKind: string; accessLevel: AccessLevel | null; actingAs: ActingAs | null; trialExpired: boolean; overrides?: { grant: readonly string[]; deny: readonly string[] } }, now: number): Promise<ReadonlySet<PermissionKey>> {
     if (!c.actingAs) {
       const base = await this.forRole(c.role, now);
       // Ajustes por persona (M10.3, ADR-56): solo para los roles de una empresa, y siempre dentro del techo de su rol (un dato indebido no concede nada)

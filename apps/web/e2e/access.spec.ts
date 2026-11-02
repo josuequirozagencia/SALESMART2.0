@@ -2436,3 +2436,30 @@ test.describe('móvil (390 px)', () => {
     expect(await overflow()).toBeLessThanOrEqual(0);
   });
 });
+
+test('«ver como» (M10.5): el administrador mira su empresa como Asesor (barra permanente, solo lectura, sobrevive a recargar, sin menús de administrador) y vuelve a su vista', async ({ page, request }) => {
+  const email = await createAccount(request);
+  await uiLogin(page, email);
+  const side = page.getByRole('complementary', { name: 'Menú principal' });
+  await expect(side.getByRole('link', { name: 'Usuarios' })).toBeVisible();
+
+  await side.getByRole('button', { name: 'Ver como Asesor' }).click();
+  const bar = page.getByRole('region', { name: 'Viendo como otro rol' });
+  await expect(bar).toContainText('Viendo como Asesor · Solo lectura');
+  // Lo que solo ve un administrador desaparece del menú, y el selector ya no está
+  await expect(side.getByRole('link', { name: 'Usuarios' })).toHaveCount(0);
+  await expect(side.getByRole('link', { name: 'Configuración' })).toHaveCount(0);
+  await expect(side.getByRole('region', { name: 'Ver como' })).toHaveCount(0);
+
+  // La vista vive en la sesión: recargar no la pierde
+  await page.reload();
+  await expect(bar).toContainText('Viendo como Asesor');
+  // Una pantalla de administrador, abierta a mano, no deja ver nada (el servidor responde 403)
+  await page.goto('/users');
+  await expect(page.getByText(/Solo el administrador/)).toBeVisible();
+
+  await bar.getByRole('button', { name: 'Volver a mi vista' }).click();
+  await expect(bar).toHaveCount(0);
+  await page.goto('/');
+  await expect(side.getByRole('link', { name: 'Usuarios' })).toBeVisible();
+});

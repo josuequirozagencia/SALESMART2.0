@@ -1,4 +1,4 @@
-import type { AccessLevel } from '../../rbac';
+import { viewAsOptions, type AccessLevel, type ViewAsRole } from '../../rbac';
 import type { ActingAs, AuthContext } from './session.service';
 
 type OrgKind = 'platform' | 'agency' | 'client';
@@ -16,6 +16,10 @@ export interface MeView {
   acting_as: ActingAs | null;
   read_only: boolean;
   access_level: AccessLevel | null;
+  /** «Ver como» (M10.5): el rol cuya vista se está mirando, o null. La interfaz muestra la barra permanente y se pone en solo lectura. */
+  viewing_as: ViewAsRole | null;
+  /** Roles que puede elegir ahora para «ver como» (vacío = no hay selector). */
+  view_as_options: ViewAsRole[];
 }
 
 export function toMeView(c: AuthContext): MeView {
@@ -27,10 +31,12 @@ export function toMeView(c: AuthContext): MeView {
     acting_as: c.actingAs,
     read_only: c.readOnly,
     access_level: c.accessLevel,
+    viewing_as: c.viewingAs,
+    view_as_options: [...c.viewAsOptions],
   };
 }
 
 /** Vista de una sesión recién creada: nace en su organización de origen y no actúa en ninguna otra. */
 export function homeView(u: { id: string; email: string; fullName: string | null }, org: { id: string; name: string; kind: OrgKind | string }, role: string): MeView {
-  return { user: { id: u.id, email: u.email, full_name: u.fullName }, organization: { ...org }, role, home: { ...org }, acting_as: null, read_only: false, access_level: null };
+  return { user: { id: u.id, email: u.email, full_name: u.fullName }, organization: { ...org }, role, home: { ...org }, acting_as: null, read_only: false, access_level: null, viewing_as: null, view_as_options: viewAsOptions({ role, orgKind: org.kind, actingAs: null, accessLevel: null }) };
 }

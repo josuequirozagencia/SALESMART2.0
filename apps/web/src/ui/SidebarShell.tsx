@@ -63,7 +63,7 @@ const link = ({ isActive }: { isActive: boolean }): string =>
  * angostas el menú se abre desde una barra superior (☰) como panel lateral y se cierra al elegir una sección, con Esc o tocando fuera. Es solo navegación: lo que cada persona puede
  * hacer lo decide el servidor; los grupos que se pasan ya vienen filtrados por quien los arma.
  */
-export function SidebarShell({ me, groups, navLabel, onLogout, banner, wide = false, children }: { me: Me; groups: NavGroup[]; navLabel: string; onLogout: () => void; banner?: ReactNode; wide?: boolean; children: ReactNode }) {
+export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, children }: { me: Me; groups: NavGroup[]; navLabel: string; onLogout: () => void; banner?: ReactNode; extra?: ReactNode; wide?: boolean; children: ReactNode }) {
   const { pathname } = useLocation();
   // El panel queda abierto solo en la ruta donde se abrió: al elegir una sección (cambia la ruta) se cierra solo; también con Esc o tocando fuera
   const [openAt, setOpenAt] = useState<string | null>(null);
@@ -87,6 +87,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, wide = fa
         <div className="sticky top-0 z-30 flex items-center gap-3 border-b border-line bg-surface px-3 py-2 lg:hidden">
           <button type="button" aria-label="Abrir el menú" aria-expanded={open} aria-controls="side-menu" onClick={() => setOpen(true)} className="grid size-11 place-items-center rounded-xl text-fg hover:bg-surface2"><Icon name="menu" /></button>
           <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{current?.label ?? 'Sales Smart'}</span>
+          {me.viewing_as ? <span className="shrink-0 rounded-full border border-warn bg-warn-soft px-2.5 py-1 text-[11.5px] font-bold text-warn">Viendo como {ROLE_LABEL[me.viewing_as] ?? me.viewing_as}</span> : null}
         </div>
         {open ? <div aria-hidden="true" onClick={() => setOpen(false)} className="fixed inset-0 z-40 bg-black/55 lg:hidden" /> : null}
         <aside
@@ -120,6 +121,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, wide = fa
               </div>
             ))}
           </nav>
+          {extra}
           <div className="flex items-center gap-2.5 border-t border-white/10 p-3">
             <span aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-full text-[12px] font-bold text-[color:var(--on-grad)] [background:var(--grad)]">{initials(name)}</span>
             <span className="min-w-0 flex-1 text-[12.5px] leading-tight">

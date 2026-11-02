@@ -30,6 +30,6 @@ export class LocalAccessResolver extends AccessResolver {
     // Actuando en otra organización (ADR-41): queda marcado para la auditoría del cliente y la cuenta en pausa NO la bloquea (permisos de solo lectura).
     // En su propia organización, con la prueba vencida, la cuenta queda en pausa (ADR-23 #5).
     const context = ctx.actingAs ? { actingAs: ctx.actingAs, actingOrgId: ctx.home.id } : ctx.trialExpired ? { paused: true as const } : {};
-    return { kind: 'tenant', userId: ctx.userId, organizationId: ctx.organizationId, role: ctx.role, permissions, sessionId: ctx.sessionId, ...context };
+    return { kind: 'tenant', userId: ctx.userId, organizationId: ctx.organizationId, role: ctx.role, permissions, sessionId: ctx.sessionId, ...context, ...(ctx.viewingAs ? { viewingAs: ctx.viewingAs } : {}) };
   }
 }

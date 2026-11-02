@@ -218,12 +218,41 @@ export const sessions = identityTable(
     revokedAt: ts('revoked_at'),
     revokeReason: text('revoke_reason'),
     userAgent: text('user_agent'),
+    /** «Ver como» (M10.5, ADR-56 B4): el rol cuya vista se está mirando; nulo = ninguno. Solo reduce (ver `rbac/view-as.ts`) y se valida de nuevo en cada petición. */
+    viewAsRole: text('view_as_role'),
   },
   (t) => [
+    check('sessions_view_as_role_valid', sql`${t.viewAsRole} IS NULL OR ${t.viewAsRole} IN ('agency', 'client_admin', 'advisor')`),
     check('sessions_hashes_hex', sql`${t.accessHash} ~ '^[0-9a-f]{64}$' AND ${t.refreshHash} ~ '^[0-9a-f]{64}$'`),
     check('sessions_revoked_consistent', sql`(${t.revokedAt} IS NULL) = (${t.revokeReason} IS NULL)`),
     check('sessions_user_agent_len', sql`${t.userAgent} IS NULL OR length(${t.userAgent}) <= 200`),
     index('sessions_user_idx').on(t.userId),
+  ],
+);
+
+/**
+ * Historial de «Ver como» (M10.5, ADR-56 B4 #6): quién miró la aplicación como qué rol, en qué organización y cuándo. Solo se agrega: la fila se CIERRA con `ended_at` y `end_reason`
+ * (el UPDATE de `app_identity` se limita a esas dos columnas). Si la sesión pierde el derecho sin que nadie lo cierre (acceso retirado), la fila queda abierta con la sesión revocada
+ * o con otra organización activa: el motivo se deduce de ahí. Lo consulta el Súper Admin; el cliente lo verá con la futura pantalla de auditoría.
+ */
+export const viewAsLog = identityTable(
+  'view_as_log',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    sessionId: uuid('session_id').notNull(),
+    actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    viewedRole: text('viewed_role').notNull(),
+    startedAt: ts('started_at').notNull().defaultNow(),
+    endedAt: ts('ended_at'),
+    endReason: text('end_reason'),
+  },
+  (t) => [
+    check('view_as_log_role_valid', sql`${t.viewedRole} IN ('agency', 'client_admin', 'advisor')`),
+    check('view_as_log_end_reason_valid', sql`${t.endReason} IS NULL OR ${t.endReason} IN ('changed', 'cleared', 'switch', 'logout')`),
+    check('view_as_log_end_consistent', sql`(${t.endedAt} IS NULL) = (${t.endReason} IS NULL) AND (${t.endedAt} IS NULL OR ${t.endedAt} >= ${t.startedAt})`),
+    index('view_as_log_org_idx').on(t.organizationId, t.startedAt),
+    index('view_as_log_open_idx').on(t.sessionId).where(sql`${t.endedAt} IS NULL`),
   ],
 );
 

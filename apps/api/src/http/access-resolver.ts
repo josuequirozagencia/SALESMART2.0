@@ -20,6 +20,8 @@ export type Principal =
       /** Soporte: super admin / agencia actuando dentro de la organización (queda auditado). */
       actingAs?: 'super_admin' | 'agency';
       actingOrgId?: string;
+      /** «Ver como» (M10.5): mirando la aplicación como este rol. Todo lo que cambia datos responde 403 `VIEW_AS_READ_ONLY` (salvo las rutas @AllowWhileViewingAs). */
+      viewingAs?: string;
     }
   | { kind: 'platform'; userId: string; role?: string; permissions?: ReadonlySet<PermissionKey>; sessionId?: string };
 

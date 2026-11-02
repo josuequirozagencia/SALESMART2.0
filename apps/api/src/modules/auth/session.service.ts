@@ -1,9 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
-import { Database, type IdentityTx, organizations, sessions, trials, users } from '../../db';
+import { Database, type IdentityTx, organizations, sessions, trials, users, viewAsLog } from '../../db';
 import type { AppConfig } from '../../config';
-import { isAccessLevel, type AccessLevel } from '../../rbac';
+import { isAccessLevel, isViewAsRole, viewAsOptions, type AccessLevel, type ViewAsRole } from '../../rbac';
 import { APP_CONFIG } from '../../tokens';
 import { isTrialExpired } from '../organizations';
 import { newToken, parseToken, sameHash } from './tokens';
@@ -39,8 +39,12 @@ export interface AuthContext {
   overrides: { grant: string[]; deny: string[] };
   /** Prueba gratuita vencida (por la hora, no por el estado materializado): la cuenta está en pausa (ADR-23 #5). */
   trialExpired: boolean;
-  /** Quien actúa en una empresa en pausa o con nivel «lectura» solo puede ver (ADR-41). */
+  /** Quien actúa en una empresa en pausa o con nivel «lectura» solo puede ver (ADR-41); también mientras se «ve como» otro rol (M10.5). */
   readOnly: boolean;
+  /** «Ver como» (M10.5, ADR-56 B4): el rol cuya vista se mira AHORA (solo si la sesión sigue teniendo derecho a ella); null = ninguno. */
+  viewingAs: ViewAsRole | null;
+  /** Los roles que esta sesión puede elegir ahora para «ver como» (según quién es y dónde está). */
+  viewAsOptions: ViewAsRole[];
 }
 export interface IssuedTokens {
   accessToken: string;
@@ -137,6 +141,7 @@ export class SessionService {
       if (!s || s.revokedAt) return;
       if (!sameHash(s.accessHash, t.hash) && !sameHash(s.refreshHash, t.hash)) return;
       await tx.update(sessions).set({ revokedAt: now, revokeReason: 'logout' }).where(eq(sessions.id, s.id));
+      await tx.update(viewAsLog).set({ endedAt: now, endReason: 'logout' }).where(and(eq(viewAsLog.sessionId, s.id), isNull(viewAsLog.endedAt)));
     });
   }
 
@@ -213,7 +218,11 @@ export class SessionService {
     const actingAs = actingFor(r.role, r.orgKind);
     const accessLevel = isAccessLevel(r.memberLevel) ? r.memberLevel : null;
     // Quien actúa solo lee si su nivel es «lectura» (un nivel desconocido se trata como lectura: falla hacia lo seguro) o si la empresa está en pausa
-    const readOnly = actingAs === 'agency' ? accessLevel === null || accessLevel === 'read' || trialExpired : actingAs === 'super_admin' ? r.orgKind === 'client' && trialExpired : false;
+    const baseReadOnly = actingAs === 'agency' ? accessLevel === null || accessLevel === 'read' || trialExpired : actingAs === 'super_admin' ? r.orgKind === 'client' && trialExpired : false;
+    // «Ver como»: solo vale si el rol sigue entre los que esta sesión puede elegir AHORA (si se retiró el acceso o bajó el nivel, se corta en esta misma petición)
+    const options = viewAsOptions({ role: r.role, orgKind: r.orgKind, actingAs, accessLevel });
+    const viewingAs = isViewAsRole(r.s.viewAsRole) && options.includes(r.s.viewAsRole) ? r.s.viewAsRole : null;
+    const readOnly = baseReadOnly || viewingAs !== null;
     return {
       sessionId: r.s.id,
       userId: r.s.userId,
@@ -231,6 +240,8 @@ export class SessionService {
       home: { id: r.s.homeOrgId, name: r.homeName ?? '', kind: (r.homeKind ?? 'client') as AuthContext['home']['kind'] },
       trialExpired,
       readOnly,
+      viewingAs,
+      viewAsOptions: options,
     };
   }
 }

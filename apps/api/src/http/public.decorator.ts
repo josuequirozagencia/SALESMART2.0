@@ -18,4 +18,10 @@ export const PlatformOnly = () => SetMetadata(ACCESS_KEY, 'platform' satisfies A
  */
 export const ALLOW_PAUSED_KEY = 'ss:allow_paused';
 export const AllowWhenPaused = () => SetMetadata(ALLOW_PAUSED_KEY, true);
+/**
+ * Mientras se «ve como» otro rol (M10.5, ADR-56 B4) toda petición que cambia datos (todo lo que no sea GET/HEAD/OPTIONS) responde 403 `VIEW_AS_READ_ONLY`. Solo las rutas marcadas
+ * con @AllowWhileViewingAs() siguen abiertas: cambiar o dejar de «ver como» y cambiar de contexto.
+ */
+export const ALLOW_VIEW_AS_KEY = 'ss:allow_view_as';
+export const AllowWhileViewingAs = () => SetMetadata(ALLOW_VIEW_AS_KEY, true);
 export const SelfService = () => SetMetadata(ACCESS_KEY, 'self' satisfies AccessKind);
