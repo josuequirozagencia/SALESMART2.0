@@ -194,6 +194,7 @@ export class FormSubmitService {
         userAgent: meta.userAgent ? oneLine(meta.userAgent, 300) : null,
         sourceUrl: cleanUrl(body.source_url),
         formName: form.name,
+        utm: cleanUtm(body.utm),
       },
       now,
     );

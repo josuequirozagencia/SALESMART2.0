@@ -8,7 +8,7 @@ import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { csvFile } from '../contacts';
 import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
-import { MAX_RANGE_DAYS, MAX_REPORT_ROWS, type ExportDto, type ExportsQuery, type RangeQuery, type ReportName, type SettingsDto } from './analytics.dto';
+import { MAX_RANGE_DAYS, MAX_REPORT_ROWS, type WinningMode, type ExportDto, type ExportsQuery, type RangeQuery, type ReportName, type SettingsDto } from './analytics.dto';
 
 /** Quién consulta: con `analytics.view_all` ve a toda la empresa; sin él, solo lo suyo (lo que es de la persona como responsable o vendedora). */
 export interface AnalyticsScope {
@@ -170,7 +170,7 @@ export class AnalyticsService {
   async report(scope: AnalyticsScope, name: ReportName, q: RangeQuery): Promise<ReportView> {
     const p = this.period(q);
     const [dir, currency] = [await this.directory.current(), await this.directory.currency()];
-    const view = await this.db.withTenant((tx) => this.build(tx, scope, name, p, dir.timeZone, currency));
+    const view = await this.db.withTenant((tx) => this.build(tx, scope, name, p, dir.timeZone, currency, q.mode ?? 'cohort'));
     return this.members.hydrate(view);
   }
 
@@ -180,7 +180,7 @@ export class AnalyticsService {
     const [dir, currency] = [await this.directory.current(), await this.directory.currency()];
     const view = await this.db.withTenant(async (tx) => {
       if (!(await this.canExport(tx, scope))) throw new ForbiddenError('EXPORT_DISABLED', 'La descarga de reportes no está habilitada para tu usuario. Pídele al administrador que la active');
-      const v = await this.build(tx, scope, q.report, p, dir.timeZone, currency);
+      const v = await this.build(tx, scope, q.report, p, dir.timeZone, currency, q.mode ?? 'cohort');
       const id = uuidv7();
       const sc = scope.viewAll ? 'all' : 'own';
       await tx.insert(analyticsExports).values({ id, userId: scope.userId, report: q.report, fromAt: p.from, toAt: p.to, rowCount: v.rows.length, scope: sc });
@@ -264,12 +264,68 @@ export class AnalyticsService {
     return { at, id };
   }
 
-  private async build(tx: TenantTx, scope: AnalyticsScope, name: ReportName, p: Period, tz: string, currency: string): Promise<ReportView> {
+  private async build(tx: TenantTx, scope: AnalyticsScope, name: ReportName, p: Period, tz: string, currency: string, mode: WinningMode = 'cohort'): Promise<ReportView> {
     const base = { report: name, period: { from: p.from.toISOString(), to: p.to.toISOString() }, timezone: tz, currency };
     const from = p.from.toISOString();
     const to = p.to.toISOString();
     const cap = MAX_REPORT_ROWS + 1;
     switch (name) {
+      case 'winning_ads': {
+        // Por anuncio (la clave es el id del anuncio de Meta; sin id, su nombre; sin nada, la campaña). El alcance por persona es el del RESPONSABLE del contacto
+        const key = sql`COALESCE(c.first_touch_ad_id, 'n:' || c.first_touch_ad, 'c:' || c.first_touch_campaign, 'sin-anuncio')`;
+        const inPeriod = sql`b.first_touch_at >= ${from}::timestamptz AND b.first_touch_at < ${to}::timestamptz`;
+        const cohortOnly = mode === 'cohort' ? inPeriod : sql`TRUE`;
+        const apptTime = mode === 'conversion' ? sql`a.created_at >= ${from}::timestamptz AND a.created_at < ${to}::timestamptz` : sql`TRUE`;
+        const saleTime = mode === 'conversion' ? sql`s.created_at >= ${from}::timestamptz AND s.created_at < ${to}::timestamptz` : sql`TRUE`;
+        const res = await tx.execute<{ k: string; ad: string | null; campaign: string | null; ad_id: string | null; headline: string | null; thumbnail_url: string | null; chats: number; appts: number; sales: number; revenue: string }>(sql`
+          WITH b AS (
+            SELECT c.organization_id, c.id, c.first_touch_at, ${key} AS k, c.first_touch_ad AS ad, c.first_touch_campaign AS campaign, c.first_touch_ad_id AS ad_id
+              FROM contacts c
+             WHERE c.deleted_at IS NULL AND c.first_touch_at IS NOT NULL AND ${own(scope, sql`c.owner_id`)}
+          ),
+          ch AS (SELECT k, max(ad) AS ad, max(campaign) AS campaign, max(ad_id) AS ad_id, (count(*) FILTER (WHERE ${inPeriod}))::int AS chats FROM b GROUP BY k),
+          ap AS (SELECT b.k, count(DISTINCT a.contact_id)::int AS appts FROM b JOIN appointments a ON a.organization_id = b.organization_id AND a.contact_id = b.id
+                  WHERE a.status <> 'cancelled' AND ${cohortOnly} AND ${apptTime} GROUP BY b.k),
+          sl AS (SELECT b.k, count(*)::int AS sales, COALESCE(sum(s.amount), 0)::text AS revenue FROM b JOIN sales s ON s.organization_id = b.organization_id AND s.contact_id = b.id
+                  WHERE s.status = 'active' AND ${cohortOnly} AND ${saleTime} GROUP BY b.k)
+          SELECT ch.k, ch.ad, ch.campaign, ch.ad_id, ch.chats, COALESCE(ap.appts, 0) AS appts, COALESCE(sl.sales, 0) AS sales, COALESCE(sl.revenue, '0') AS revenue,
+                 pic.headline, pic.thumbnail_url
+            FROM ch
+            LEFT JOIN ap ON ap.k = ch.k
+            LEFT JOIN sl ON sl.k = ch.k
+            LEFT JOIN LATERAL (SELECT e.headline, e.thumbnail_url FROM contact_touch_events e JOIN b b2 ON b2.organization_id = e.organization_id AND b2.id = e.contact_id AND b2.k = ch.k
+                                WHERE e.kind = 'ad_click' AND (e.headline IS NOT NULL OR e.thumbnail_url IS NOT NULL) ORDER BY e.occurred_at DESC, e.id DESC LIMIT 1) pic ON TRUE
+           WHERE ch.chats > 0 OR COALESCE(sl.sales, 0) > 0 OR COALESCE(ap.appts, 0) > 0
+           ORDER BY (CASE WHEN ch.chats > 0 THEN COALESCE(sl.sales, 0)::numeric / ch.chats ELSE 0 END) DESC, COALESCE(sl.sales, 0) DESC, ch.chats DESC, ch.k
+           LIMIT ${cap}`);
+        const truncated = res.rows.length > MAX_REPORT_ROWS;
+        const list = res.rows.slice(0, MAX_REPORT_ROWS);
+        const pct = (sales: number, chats: number): string => (chats > 0 ? `${((sales / chats) * 100).toFixed(1)} %` : '—');
+        const rows = list.map((r) => ({
+          ad: r.k === 'sin-anuncio' ? 'Sin datos del anuncio' : (r.ad ?? r.headline ?? 'Anuncio sin nombre'),
+          campaign: r.campaign ?? '',
+          chats: r.chats,
+          appointments: r.appts,
+          sales: r.sales,
+          revenue: money(r.revenue),
+          close_rate: pct(r.sales, r.chats),
+          ad_id: r.ad_id,
+          headline: r.headline,
+          thumbnail_url: r.thumbnail_url,
+        }));
+        const sum = (f: (r: (typeof list)[number]) => number): number => list.reduce((a, r) => a + f(r), 0);
+        return {
+          ...base,
+          title: mode === 'conversion' ? 'Anuncio ganador (por fecha de conversión)' : 'Anuncio ganador (por fecha de llegada)',
+          columns: [
+            { key: 'ad', label: 'Anuncio', type: 'text' }, { key: 'campaign', label: 'Campaña', type: 'text' }, { key: 'chats', label: 'Chats nuevos', type: 'number' }, { key: 'appointments', label: 'Citas', type: 'number' },
+            { key: 'sales', label: 'Ventas', type: 'number' }, { key: 'revenue', label: 'Ingresos', type: 'money' }, { key: 'close_rate', label: 'Cierre', type: 'text' },
+          ],
+          rows,
+          totals: { chats: sum((r) => r.chats), appointments: sum((r) => r.appts), sales: sum((r) => r.sales), revenue: money(list.reduce((a, r) => a + num(r.revenue), 0)) },
+          truncated,
+        };
+      }
       case 'sales': {
         const res = await tx.execute<{ created: string; contact: string; seller_id: string; product: string; quantity: number; amount: string; paid: string; status: string }>(sql`
           SELECT to_char(s.created_at AT TIME ZONE ${tz}, 'YYYY-MM-DD HH24:MI') AS created, c.name AS contact, s.seller_id, s.product_name AS product, s.quantity, s.amount::text AS amount,

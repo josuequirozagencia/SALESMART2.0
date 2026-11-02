@@ -14,6 +14,22 @@ export interface NormalizedMedia {
   readonly filename: string | null;
 }
 
+/**
+ * De dónde llegó el mensaje, cuando fue un clic a un anuncio (Click-to-WhatsApp, M6.6): lo informa Meta en el PRIMER mensaje tras el clic. Todo es opcional; sin `ctwaClid` no se puede
+ * atribuir (ni informar a Meta) y se trata como un mensaje normal.
+ */
+export interface NormalizedReferral {
+  /** Id del anuncio (o de la publicación) de Meta. */
+  readonly sourceId: string | null;
+  /** `ad` o `post`. */
+  readonly sourceType: string | null;
+  readonly sourceUrl: string | null;
+  readonly headline: string | null;
+  readonly body: string | null;
+  readonly thumbnailUrl: string | null;
+  readonly ctwaClid: string | null;
+}
+
 /** Mensaje que ENTRA: lo escribió un contacto. Un mismo `externalId` por canal identifica un mensaje (idempotencia). */
 export interface NormalizedMessage {
   readonly externalId: string;
@@ -31,6 +47,8 @@ export interface NormalizedMessage {
   readonly extra: Readonly<Record<string, unknown>>;
   /** Cuándo lo envió el contacto (la hora que informa el proveedor). */
   readonly sentAt: Date;
+  /** Si el mensaje llegó por un clic a un anuncio (M6.6). */
+  readonly referral?: NormalizedReferral | null;
 }
 
 /** Estado de un mensaje que SALIÓ, según el proveedor. */

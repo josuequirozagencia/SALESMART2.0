@@ -3,7 +3,8 @@ import { and, eq, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit, type AuditSource } from '../audit';
 import { DomainEventBus } from '../events';
-import { ContactsService } from '../contacts';
+import { AttributionService } from '../attribution';
+import { ContactsService, ContactTouchesService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
@@ -53,6 +54,8 @@ const RANK: Readonly<Record<string, number>> = { queued: 0, sent: 1, delivered: 
 export class ConversationsService {
   constructor(
     @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(ContactTouchesService) private readonly touches: ContactTouchesService,
+    @Inject(AttributionService) private readonly attribution: AttributionService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(SlaService) private readonly sla: SlaService,
@@ -73,6 +76,13 @@ export class ConversationsService {
     const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
     // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
     if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
+    // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial) y el Lead hacia Meta; un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
+    const clid = m.referral?.ctwaClid ?? null;
+    if (clid) {
+      await this.attribution.recordIn(tx, { phone: m.from, ctwa_cl_id: clid, source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() }, m.sentAt, contact);
+    } else if (contact.created) {
+      await this.touches.record(tx, contact.id, { kind: 'message_in', at: m.sentAt, source: 'whatsapp', originRef: m.externalId });
+    }
     const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw, opts?.audit ?? 'meta');
     const inserted = await tx
       .insert(messages)

@@ -32,11 +32,14 @@ export const contacts = tenantTable(
     firstTouchCampaign: text('first_touch_campaign'),
     firstTouchAdset: text('first_touch_adset'),
     firstTouchAd: text('first_touch_ad'),
+    /** Id del anuncio de Meta del primer/último toque (M6.6): el nombre puede repetirse o cambiar, el id no. */
+    firstTouchAdId: text('first_touch_ad_id'),
     lastTouchAt: ts('last_touch_at'),
     lastTouchSource: text('last_touch_source'),
     lastTouchCampaign: text('last_touch_campaign'),
     lastTouchAdset: text('last_touch_adset'),
     lastTouchAd: text('last_touch_ad'),
+    lastTouchAdId: text('last_touch_ad_id'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -368,5 +371,45 @@ export const tasks = tenantTable(
     index('tasks_assignee_idx').on(t['organizationId']!, t['assigneeId']!, t['status']!, t['dueAt']!).where(sql`${t['deletedAt']!} IS NULL`),
     index('tasks_contact_idx').on(t['organizationId']!, t['contactId']!).where(sql`${t['deletedAt']!} IS NULL AND ${t['contactId']!} IS NOT NULL`),
     index('tasks_company_idx').on(t['organizationId']!, t['companyId']!).where(sql`${t['deletedAt']!} IS NULL AND ${t['companyId']!} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Historial de toques de un contacto (M6.6, ADR-55 fase A): cada clic de anuncio, envío de formulario y primer mensaje que lo trajo, en orden. SOLO inserción (`app_rw` sin UPDATE ni
+ * DELETE: el pasado no se reescribe). `contacts.first_touch_*`/`last_touch_*` siguen siendo el resumen. El nombre de un anuncio puede repetirse o cambiar; **`ad_id` no**: es la clave del
+ * «Anuncio ganador». `origin_ref` identifica el origen (el `ctwa_clid`, el id del envío del formulario o el del mensaje) y hace idempotente la inserción. Retención provisional: 24 meses.
+ */
+export const contactTouchEvents = tenantTable(
+  'contact_touch_events',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    contactId: uuid('contact_id').notNull(),
+    occurredAt: ts('occurred_at').notNull(),
+    /** `ad_click` (clic a un anuncio), `form_submit` (formulario) o `message_in` (primer mensaje). `page_visit` queda reservado. */
+    kind: text('kind').notNull(),
+    /** `meta_ctwa`, `form`, `whatsapp`… (mismo formato que `contacts.source`). */
+    source: text('source').notNull(),
+    campaign: text('campaign'),
+    adset: text('adset'),
+    ad: text('ad'),
+    adId: text('ad_id'),
+    ctwaClid: text('ctwa_clid'),
+    /** Titular, miniatura y página de origen del anuncio, solo si Meta los entregó con el clic. */
+    headline: text('headline'),
+    thumbnailUrl: text('thumbnail_url'),
+    sourceUrl: text('source_url'),
+    utm: jsonb('utm').$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    originRef: text('origin_ref'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'contact_touch_events_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('contact_touch_events_kind_valid', sql`${t['kind']!} IN ('ad_click', 'form_submit', 'message_in', 'page_visit')`),
+    check('contact_touch_events_source_shape', sql`${t['source']!} ~ '^[a-z][a-z0-9_]{1,31}$'`),
+    check('contact_touch_events_texts_len', sql`length(coalesce(${t['campaign']!}, '')) <= 200 AND length(coalesce(${t['adset']!}, '')) <= 200 AND length(coalesce(${t['ad']!}, '')) <= 200 AND length(coalesce(${t['adId']!}, '')) <= 100 AND length(coalesce(${t['ctwaClid']!}, '')) <= 500 AND length(coalesce(${t['headline']!}, '')) <= 300 AND length(coalesce(${t['originRef']!}, '')) <= 200`),
+    check('contact_touch_events_urls_https', sql`(${t['thumbnailUrl']!} IS NULL OR (${t['thumbnailUrl']!} ~ '^https://[^\\s]+$' AND length(${t['thumbnailUrl']!}) <= 1000)) AND (${t['sourceUrl']!} IS NULL OR (${t['sourceUrl']!} ~ '^https://[^\\s]+$' AND length(${t['sourceUrl']!}) <= 1000))`),
+    check('contact_touch_events_utm_shape', sql`jsonb_typeof(${t['utm']!}) = 'object' AND length(${t['utm']!}::text) <= 2000`),
+    uniqueIndex('contact_touch_events_origin_uq').on(t['organizationId']!, t['contactId']!, t['kind']!, t['originRef']!).where(sql`${t['originRef']!} IS NOT NULL`),
+    index('contact_touch_events_contact_idx').on(t['organizationId']!, t['contactId']!, t['occurredAt']!, t['id']!),
   ],
 );

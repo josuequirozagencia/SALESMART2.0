@@ -174,3 +174,50 @@ describe('Ficha del contacto · Origen del lead', () => {
     expect(await d.findByText('Copiado')).toBeInTheDocument();
   });
 });
+
+describe('Ficha del contacto · Actividad', () => {
+  const touch = (over: Record<string, unknown> = {}) => ({ id: 't1', at: '2026-10-12T09:00:00.000Z', kind: 'ad_click', source: 'meta_ctwa', campaign: 'Barbería', adset: 'Conjunto B', ad: 'Anuncio 2', ad_id: '120002', headline: 'Corte 2x1', source_url: 'https://fb.me/abc', utm: {}, ...over });
+
+  it('lista el historial (clic a un anuncio, formulario y primer mensaje) del más reciente al más antiguo, con enlace https que abre en otra pestaña', async () => {
+    const s = contactsServer(contact());
+    const items = [
+      touch(),
+      touch({ id: 't2', at: '2026-10-11T09:00:00.000Z', kind: 'form_submit', source: 'form', headline: null, ad: null, adset: null, campaign: 'verano', source_url: 'javascript:alert(1)', utm: { utm_source: 'google' } }),
+      touch({ id: 't3', at: '2026-10-10T09:00:00.000Z', kind: 'message_in', source: 'whatsapp', headline: null, campaign: null, adset: null, ad: null, source_url: null }),
+    ];
+    mockApi({ ...s.routes, 'GET /contacts/c1/touches': () => ({ body: { items } }) });
+    renderApp('/contacts');
+    const d = await openContact();
+    await userEvent.click(d.getByRole('tab', { name: 'Actividad' }));
+    const list = within(await d.findByRole('list', { name: 'Actividad de origen' }));
+    const rows = list.getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    expect(within(rows[0]!).getByText('Clic a un anuncio')).toBeInTheDocument();
+    expect(within(rows[0]!).getByText('Corte 2x1')).toBeInTheDocument();
+    expect(within(rows[0]!).getByRole('link', { name: 'Ver la publicación' })).toHaveAttribute('href', 'https://fb.me/abc');
+    expect(within(rows[0]!).getByRole('link', { name: 'Ver la publicación' })).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(within(rows[1]!).getByText('Envió un formulario')).toBeInTheDocument();
+    expect(within(rows[1]!).getByText('utm_source=google')).toBeInTheDocument();
+    expect(within(rows[1]!).queryByRole('link')).not.toBeInTheDocument(); // una dirección que no es https no se vuelve enlace
+    expect(within(rows[2]!).getByText('Primer mensaje')).toBeInTheDocument();
+  });
+
+  it('sin actividad lo dice; si el servidor falla muestra el error', async () => {
+    const s = contactsServer(contact());
+    mockApi({ ...s.routes, 'GET /contacts/c1/touches': () => ({ body: { items: [] } }) });
+    renderApp('/contacts');
+    const d = await openContact();
+    await userEvent.click(d.getByRole('tab', { name: 'Actividad' }));
+    expect(await d.findByText(/Todavía no hay actividad de origen/)).toBeInTheDocument();
+  });
+
+  it('si el servidor falla, muestra el error y no una lista', async () => {
+    const s = contactsServer(contact());
+    mockApi({ ...s.routes, 'GET /contacts/c1/touches': () => err(500, 'INTERNAL_ERROR', 'Error interno') });
+    renderApp('/contacts');
+    const d = await openContact();
+    await userEvent.click(d.getByRole('tab', { name: 'Actividad' }));
+    expect(await d.findByRole('alert')).toBeInTheDocument();
+    expect(d.queryByRole('list', { name: 'Actividad de origen' })).not.toBeInTheDocument();
+  });
+});
