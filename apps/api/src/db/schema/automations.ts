@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { contacts } from './crm';
 import { tenantTable } from './helpers';
@@ -44,6 +44,10 @@ export const automations = tenantTable(
     conditions: jsonb('conditions').$type<Array<Record<string, unknown>>>().notNull().default(sql`'[]'::jsonb`),
     actions: jsonb('actions').$type<Array<Record<string, unknown>>>().notNull().default(sql`'[]'::jsonb`),
     version: integer('version').notNull().default(1),
+    /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
+    isSample: boolean('is_sample').notNull().default(false),
+    /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
+    sampleKey: text('sample_key'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -55,6 +59,7 @@ export const automations = tenantTable(
     check('automations_status_valid', sql`${t['status']!} IN ('draft', 'active', 'paused')`),
     check('automations_trigger_valid', sql`${t['triggerType']!} IN ('contact_created', 'message_received', 'opportunity_created', 'stage_changed', 'field_changed', 'sale_created')`),
     check('automations_shape', sql`jsonb_typeof(${t['triggerFilter']!}) = 'object' AND jsonb_typeof(${t['conditions']!}) = 'array' AND jsonb_typeof(${t['actions']!}) = 'array' AND jsonb_array_length(${t['conditions']!}) <= 10 AND jsonb_array_length(${t['actions']!}) <= 10`),
+    uniqueIndex('automations_sample_key_uq').on(t['organizationId']!, t['sampleKey']!).where(sql`${t['sampleKey']!} IS NOT NULL`),
     uniqueIndex('automations_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
     index('automations_trigger_idx').on(t['organizationId']!, t['triggerType']!).where(sql`${t['status']!} = 'active' AND ${t['deletedAt']!} IS NULL`),
   ],

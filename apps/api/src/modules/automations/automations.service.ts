@@ -25,6 +25,8 @@ export interface AutomationView {
   version: number;
   /** Ejecuciones de los últimos 7 días por resultado. */
   recent: { done: number; skipped: number; failed: number; queued: number; waiting: number };
+  /** Dato de ejemplo creado por el sistema (M10.6): la interfaz lo marca «Ejemplo». */
+  is_sample: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -375,6 +377,7 @@ export class AutomationsService {
       ...shape(r),
       version: r.version,
       recent: recent ?? { done: 0, skipped: 0, failed: 0, queued: 0, waiting: 0 },
+      is_sample: r.isSample,
       created_at: r.createdAt.toISOString(),
       updated_at: r.updatedAt.toISOString(),
     };

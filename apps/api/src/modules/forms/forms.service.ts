@@ -35,6 +35,8 @@ export interface FormCard {
   last_submission_at: string | null;
   /** El identificador público (solo permite enviar). */
   public_token: string;
+  /** Dato de ejemplo creado por el sistema (M10.6): la interfaz lo marca «Ejemplo». */
+  is_sample: boolean;
   created_at: string;
 }
 export interface FormDetail extends FormCard {
@@ -273,7 +275,7 @@ export class FormsService {
   // ------------------------------------------------------------------ interno
 
   private card(r: FormRow, fieldCount: number, submissions: number, last: Date | null, token: string): FormCard {
-    return { id: r.id, name: r.name, description: r.description, status: r.status as FormCard['status'], field_count: fieldCount, submissions, last_submission_at: last ? new Date(last).toISOString() : null, public_token: token, created_at: r.createdAt.toISOString() };
+    return { id: r.id, name: r.name, description: r.description, status: r.status as FormCard['status'], is_sample: r.isSample, field_count: fieldCount, submissions, last_submission_at: last ? new Date(last).toISOString() : null, public_token: token, created_at: r.createdAt.toISOString() };
   }
 
   /** Los tokens de los formularios; el que falte (creado sin llegar a emitirlo) se emite ahora. */

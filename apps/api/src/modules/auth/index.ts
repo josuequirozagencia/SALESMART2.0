@@ -7,3 +7,4 @@ export { bootstrapSuperAdmin, BootstrapError, generateInitialPassword } from './
 export type { BootstrapInput, BootstrapResult } from './bootstrap-super-admin';
 export { InvitationsService, type InvitationIssued, type MemberInvitationView, type MemberSetup } from './invitations/invitations.service';
 export { memberJoined, type MemberJoined } from './invitations/member-joined';
+export { orgReady, type OrgReady } from './org-ready';

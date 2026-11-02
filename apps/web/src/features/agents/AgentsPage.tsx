@@ -3,6 +3,7 @@ import { friendlyError } from '../../lib/errors';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { SamplePill } from '../../ui/SamplePill';
 import { AgentDialog } from './AgentDialog';
 import { Avatar, COVER_CLASS } from './agentUi';
 import { useAgentMutations, useAgents, type AgentCard } from './useAgents';
@@ -14,7 +15,7 @@ function Card({ a, onOpen }: { a: AgentCard; onOpen: () => void }) {
         <span className={`h-14 ${COVER_CLASS[a.cover]}`} />
         <span className="-mt-7 grid gap-2 px-4 pb-4">
           <Avatar name={a.name} url={a.photo_url} />
-          <span className="flex flex-wrap items-center gap-2"><b className="text-[15px]">{a.name}</b><Pill kind={a.active ? 'ok' : 'muted'}>{a.active ? 'Activo' : 'Apagado'}</Pill></span>
+          <span className="flex flex-wrap items-center gap-2"><b className="text-[15px]">{a.name}</b><SamplePill show={a.is_sample} /><Pill kind={a.active ? 'ok' : 'muted'}>{a.active ? 'Activo' : 'Apagado'}</Pill></span>
           {a.role ? <span className="text-[12.5px] text-muted">{a.role}</span> : null}
           <span className="flex flex-wrap gap-1.5">
             {a.channels.length === 0 ? <Pill kind="warn">Sin conexión</Pill> : a.channels.map((c) => <Pill key={c.id} kind="info">{c.name}</Pill>)}

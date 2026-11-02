@@ -37,6 +37,8 @@ export interface AgentCard {
   documents: number;
   /** Fragmentos que suman sus documentos (el tope es el de un agente). */
   chunks: number;
+  /** Dato de ejemplo creado por el sistema (M10.6): la interfaz lo marca «Ejemplo». */
+  is_sample: boolean;
   created_at: string;
 }
 
@@ -408,7 +410,7 @@ export class AgentsService {
   }
 
   private async card(r: Row, rel: { channels: Array<{ id: string; name: string }>; documentIds: string[]; chunks: number }): Promise<AgentCard> {
-    return { id: r.id, name: r.name, role: r.role, photo_url: await this.photoUrl(r.photoKey), cover: r.cover as Cover, active: r.active, model: r.model, channels: rel.channels, documents: rel.documentIds.length, chunks: rel.chunks, created_at: r.createdAt.toISOString() };
+    return { id: r.id, name: r.name, role: r.role, photo_url: await this.photoUrl(r.photoKey), cover: r.cover as Cover, active: r.active, model: r.model, is_sample: r.isSample, channels: rel.channels, documents: rel.documentIds.length, chunks: rel.chunks, created_at: r.createdAt.toISOString() };
   }
 
   private async detail(r: Row, rel: { channels: Array<{ id: string; name: string }>; documentIds: string[]; chunks: number }): Promise<AgentDetail> {

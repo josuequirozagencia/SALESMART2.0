@@ -8,6 +8,8 @@ export type FormStatus = 'draft' | 'published' | 'paused';
 export interface FormCard {
   id: string;
   name: string;
+  /** Dato de ejemplo creado por el sistema (M10.6): se marca «Ejemplo». */
+  is_sample?: boolean | undefined;
   description: string | null;
   status: FormStatus;
   field_count: number;

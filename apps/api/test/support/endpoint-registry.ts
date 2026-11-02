@@ -330,6 +330,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/users/:userId/permissions', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'PUT /v1/users/:userId/departments', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'PUT /v1/users/:userId/hours', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
+  // Datos de ejemplo y «Primeros pasos» (M10.6, ADR-56 B5). Pruebas: test/sample-data/sample-data.test.ts
+  { route: 'GET /v1/onboarding', kind: 'tenant', isolationTest: '../../sample-data/sample-data.test.ts' },
   { route: 'POST /v1/users/:userId/deactivate', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/remove', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/reactivate', kind: 'tenant', isolationTest: '../../team/team.test.ts' },

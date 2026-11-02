@@ -18,6 +18,7 @@ import { PlatformAgenciesController } from './platform-agencies.controller';
 import { PlatformCompaniesController, PlatformPlansController } from './platform-companies.controller';
 import { PlatformTrialsController } from './platform-trials.controller';
 import { PlansService } from './plans.service';
+import { SampleMarkService } from './sample-mark.service';
 import { TeamMembersService } from './team-members.service';
 import { TrialExpiryJob } from './trial-expiry.job';
 import { TrialsController } from './trials.controller';
@@ -27,7 +28,7 @@ import { TrialsService } from './trials.service';
 @Module({
   imports: [AuditModule, PlatformModule, MailModule],
   controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController, AgencyClientsController],
-  providers: [TeamMembersService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
-  exports: [TeamMembersService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
+  providers: [SampleMarkService, TeamMembersService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
+  exports: [SampleMarkService, TeamMembersService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
 })
 export class OrganizationsModule {}

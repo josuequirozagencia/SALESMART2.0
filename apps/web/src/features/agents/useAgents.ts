@@ -6,6 +6,8 @@ export type Cover = 'violet' | 'blue' | 'teal' | 'green' | 'amber' | 'orange' | 
 export interface AgentCard {
   id: string;
   name: string;
+  /** Dato de ejemplo creado por el sistema (M10.6): se marca «Ejemplo». */
+  is_sample?: boolean | undefined;
   role: string | null;
   /** URL firmada de la foto (vale unos minutos); null si no tiene. */
   photo_url: string | null;

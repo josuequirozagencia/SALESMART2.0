@@ -39,6 +39,10 @@ export const forms = tenantTable(
     followUpTemplateId: uuid('follow_up_template_id'),
     /** Valores de las variables de la plantilla: texto con `{{nombre}}`, `{{primer_nombre}}` o `{{formulario}}`. */
     followUpParams: jsonb('follow_up_params').$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
+    /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
+    isSample: boolean('is_sample').notNull().default(false),
+    /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
+    sampleKey: text('sample_key'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -62,6 +66,7 @@ export const forms = tenantTable(
     check('forms_redirect_https', sql`${t['redirectUrl']!} IS NULL OR (${t['redirectUrl']!} ~ '^https://[^\\s]+$' AND length(${t['redirectUrl']!}) <= 500)`),
     check('forms_domains_valid', sql`cardinality(${t['allowedDomains']!}) <= 20`),
     check('forms_prefix_shape', sql`${t['phonePrefix']!} ~ '^\\+[1-9][0-9]{0,3}$'`),
+    uniqueIndex('forms_sample_key_uq').on(t['organizationId']!, t['sampleKey']!).where(sql`${t['sampleKey']!} IS NOT NULL`),
     uniqueIndex('forms_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
     index('forms_list_idx').on(t['organizationId']!, t['createdAt']!, t['id']!).where(sql`${t['deletedAt']!} IS NULL`),
   ],
