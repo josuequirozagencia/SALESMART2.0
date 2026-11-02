@@ -3,6 +3,7 @@ import { RealtimeModule } from '../realtime';
 import { AttachmentsModule } from '../attachments';
 import { ChannelsModule } from '../channels';
 import { ContactsModule } from '../contacts';
+import { NotificationsModule } from '../notifications';
 import { OpportunitiesModule } from '../opportunities';
 import { OrganizationsModule } from '../organizations';
 import { QrModule } from '../qr';
@@ -16,6 +17,7 @@ import { AttachmentsController, ConversationAttachmentsController } from './conv
 import { ConversationAttachmentsService } from './conversation-attachments.service';
 import { InboxController, MessagesController, ScheduledController } from './inbox.controller';
 import { InboxService } from './inbox.service';
+import { MentionsService } from './mentions.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundJob } from './outbound.job';
 import { OutboundService } from './outbound.service';
@@ -32,9 +34,9 @@ import { SlaSweepJob } from './sla-sweep.job';
  * entra por los canales) porque envía por el proveedor de `channels`, que a su vez usa `conversations`: así no hay dependencias en círculo.
  */
 @Module({
-  imports: [AttachmentsModule, QrModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
+  imports: [AttachmentsModule, QrModule, ChannelsModule, ContactsModule, NotificationsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, MessagesController, ScheduledController, ConversationAttachmentsController, AttachmentsController],
-  providers: [ConversationAttachmentsService, OwnerReleaseService, ReactionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
+  providers: [ConversationAttachmentsService, OwnerReleaseService, ReactionsService, MentionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OwnerReleaseService, OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
 })
 export class InboxModule {}

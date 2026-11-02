@@ -320,6 +320,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Vista global (M5.10). Pruebas: test/scheduled/scheduled-global.test.ts (A↔B, alcance por persona, pestañas, cursor, filtro «mías», contactos borrados)
   { route: 'GET /v1/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled-global.test.ts' },
+  // Menciones «@» y centro de avisos (F1, ADR-57). Pruebas: test/notifications/mentions.test.ts (A↔B, solo el destinatario, validación de menciones, visibilidad, leído, cursor)
+  { route: 'GET /v1/notifications', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
+  { route: 'POST /v1/notifications/read-all', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
+  { route: 'POST /v1/notifications/:id/read', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
+  { route: 'GET /v1/conversations/:id/mention-options', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
   { route: 'POST /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   { route: 'DELETE /v1/conversations/:id/scheduled/:scheduledId', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Usuarios del equipo (M10.3, ADR-56). Pruebas: test/team/team.test.ts (401/403, A↔B, roles, último administrador, permisos por persona, invitar, desactivar y quitar con traspaso)

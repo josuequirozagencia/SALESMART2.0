@@ -193,6 +193,23 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
     if (organizationId) this.touch(organizationId, conversationId, opts);
   }
 
+  /**
+   * Avisa a cada persona que le llegó un aviso nuevo (F1, ADR-57): solo el id de SU aviso, por su propia sala; el cliente vuelve a pedir la lista por la API (que aplica la visibilidad de siempre).
+   * Se llama DESPUÉS de confirmar la transacción que lo creó. Nunca lanza.
+   */
+  notify(organizationId: string, items: ReadonlyArray<{ userId: string; notificationId: string }>): void {
+    const io = this.io;
+    if (!io) return;
+    try {
+      for (const it of items) {
+        const body: RealtimeEnvelope = { organization_id: organizationId, request_id: crypto.randomUUID(), at: new Date().toISOString(), data: { notification_id: it.notificationId } };
+        io.to(personRoom(organizationId, it.userId)).emit('notification.created', body);
+      }
+    } catch (e) {
+      this.log.warn({ err: e instanceof Error ? e.message : String(e) }, 'tiempo real: no se pudo avisar de un aviso nuevo');
+    }
+  }
+
   private async flushDue(): Promise<void> {
     if (!this.io || this.pending.size === 0) return;
     const now = Date.now();

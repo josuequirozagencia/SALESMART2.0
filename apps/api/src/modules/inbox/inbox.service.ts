@@ -5,6 +5,7 @@ import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
 import { ContactsService } from '../contacts';
+import { NotificationsService } from '../notifications';
 import { likeEscape, OrgDirectoryService, OrgMembersService } from '../organizations';
 import { SlaService, type TimerContext } from '../sla';
 import { SystemTagsService, type TagView } from '../tags';
@@ -89,6 +90,7 @@ export class InboxService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(ContactsService) private readonly contacts: ContactsService,
     @Inject(SlaService) private readonly sla: SlaService,
@@ -160,7 +162,8 @@ export class InboxService {
       }
     }));
     const attMap = new Map(attachments.map((x) => [x.id, x.attachment]));
-    return { items: data.page.map((m) => messageView(m, m.createdBy ? (authors.get(m.createdBy) ?? { id: m.createdBy, name: 'Persona desconocida' }) : null, attMap.get(m.id) ?? null)), next_cursor: data.next };
+    const mentioned = await this.notifications.mentionsOf(data.page.filter((m) => m.kind === 'note').map((m) => m.id));
+    return { items: data.page.map((m) => messageView(m, m.createdBy ? (authors.get(m.createdBy) ?? { id: m.createdBy, name: 'Persona desconocida' }) : null, attMap.get(m.id) ?? null, mentioned.get(m.id) ?? [])), next_cursor: data.next };
   }
 
   /** Lo que la pantalla necesita para sus filtros. */

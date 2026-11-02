@@ -1,7 +1,8 @@
-import { and, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, isNull, sql, type SQL } from 'drizzle-orm';
 import { channelAccounts, contacts, conversationParticipants, conversations, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { TenantContext } from '../../tenant';
+import { conversationVisibleTo } from '../conversations';
 
 /**
  * Quién consulta y qué puede hacer (M5.4/M5.5, ADR-14/16/50). Lo arma el controlador con los permisos VERIFICADOS del principal; la persona sale de TenantContext.
@@ -39,13 +40,7 @@ export const collabColumn = (scope: InboxScope): SQL<Collab> => collabOf(scope.u
 /**
  * Condición de visibilidad de la conversación para esta persona (ninguna si lo ve todo): es su dueña o tiene un acceso vigente como colaboradora.
  */
-export const visibleTo = (scope: InboxScope): SQL | undefined =>
-  scope.viewAll
-    ? undefined
-    : or(
-        eq(conversations.ownerId, scope.userId),
-        sql`EXISTS (SELECT 1 FROM ${conversationParticipants} p WHERE p.organization_id = ${conversations.organizationId} AND p.conversation_id = ${conversations.id} AND p.user_id = ${scope.userId} AND p.revoked_at IS NULL)`,
-      );
+export const visibleTo = (scope: InboxScope): SQL | undefined => conversationVisibleTo(scope.userId, scope.viewAll);
 
 export type ConversationRow = typeof conversations.$inferSelect;
 

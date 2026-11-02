@@ -1,17 +1,21 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { contactPhones, conversations, Database, messageAttachments, messages, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
+import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
+import { NotificationsService } from '../notifications';
 import { OrgDirectoryService, OrgMembersService } from '../organizations';
 import { QuickRepliesService, type ResolvedQuickReplyView } from '../quick-replies';
+import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
 import { renderedText, TemplatesService, type TemplateList } from '../templates';
 import { assertCanReply, assertWindowOpen, hasWindow, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
 import type { NoteDto, ReplyDto, SendMediaDto, SendTemplateDto } from './inbox.dto';
 import { messageView, type MessageView } from './inbox.views';
+import { MentionsService } from './mentions.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 
 /** Lo que un envío humano pone en el mensaje: texto o plantilla ya armada. */
@@ -46,6 +50,9 @@ export class OutboundService {
     @Inject(TemplatesService) private readonly templates: TemplatesService,
     @Inject(QuickRepliesService) private readonly quickReplies: QuickRepliesService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Inject(MentionsService) private readonly mentions: MentionsService,
+    @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   async reply(access: InboxAccess, conversationId: string, dto: ReplyDto): Promise<MessageView> {
@@ -177,15 +184,23 @@ export class OutboundService {
   async note(access: InboxAccess, conversationId: string, dto: NoteDto): Promise<MessageView> {
     const scope = scopeOf(access);
     if (!scope.canReply) throw new ForbiddenError();
-    const id = await this.db.withTenant(async (tx) => {
+    // Quién es de la empresa y quién ve qué son datos de identidad: se leen ANTES de la transacción (solo si la nota nombra a alguien)
+    const dir = dto.mentions && dto.mentions.length > 0 ? await this.mentions.directory() : null;
+    const out = await this.db.withTenant(async (tx) => {
       const { c } = await loadConversation(tx, scope, conversationId); // 404 si no puede verla
+      const mentioned = dir ? await this.mentions.validate(tx, c, dto.mentions!, dir) : []; // 400 y no se guarda la nota si alguien no puede verla
       const [m] = await tx
         .insert(messages)
         .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: 'note', body: dto.text, status: 'internal', sentAt: new Date(), createdBy: scope.userId })
         .returning({ id: messages.id });
-      return m!.id;
+      // Las menciones y sus avisos se guardan en la MISMA transacción: si la nota falla, no hay aviso
+      const notices = await this.notifications.recordMentions(tx, { messageId: m!.id, conversationId, actorId: scope.userId, mentioned });
+      return { id: m!.id, mentioned: mentioned.length, notices };
     });
-    return this.view(id);
+    if (out.mentioned > 0) this.log.info({ conversation_id: conversationId, mentions: out.mentioned, notified: out.notices.length }, 'nota con menciones');
+    // El aviso en vivo sale DESPUÉS de confirmar y solo lleva el id del aviso de cada persona
+    this.realtime?.notify(TenantContext.current().organizationId, out.notices);
+    return this.view(out.id);
   }
 
   /** Vuelve a poner en cola un mensaje fallido (a mano, p. ej. tras reconectar el número o cuando el cliente volvió a escribir). Repetirlo sobre uno ya en cola no hace nada. */
@@ -226,6 +241,7 @@ export class OutboundService {
     const author = row.createdBy ? ((await this.members.labels([row.createdBy])).get(row.createdBy) ?? { id: row.createdBy, name: 'Persona desconocida' }) : null;
     const att = await this.db.withTenant(async (tx) => (await tx.select().from(messageAttachments).where(eq(messageAttachments.messageId, messageId)).limit(1))[0] ?? null);
     const attachment: MessageView['attachment'] = att ? { id: att.id, kind: att.kind, mime_type: att.mimeType, filename: att.filename, size_bytes: att.sizeBytes, scan_status: att.scanStatus, error: att.error, url: null, expires_at: null } : null;
-    return messageView(row, author, attachment);
+    const mentions = row.kind === 'note' ? ((await this.notifications.mentionsOf([row.id])).get(row.id) ?? []) : [];
+    return messageView(row, author, attachment, mentions);
   }
 }
