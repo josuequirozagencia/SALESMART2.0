@@ -72,6 +72,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/contacts', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'GET /v1/contacts/owners', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'GET /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
+  { route: 'GET /v1/contacts/:id/touches', kind: 'tenant', isolationTest: '../../attribution/touches.test.ts' },
   { route: 'POST /v1/contacts', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'PATCH /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'DELETE /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
@@ -181,6 +182,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Tablero y analítica (M6.5, ADR-51). Pruebas: test/analytics/analytics.test.ts (A↔B, alcance propio, cifras, CSV auditado)
   { route: 'GET /v1/analytics/summary', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/reports/:name', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
+  { route: 'GET /v1/analytics/winning-ads', kind: 'tenant', isolationTest: '../../attribution/touches.test.ts' },
   { route: 'POST /v1/analytics/export', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/exports', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/settings', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },

@@ -19,7 +19,9 @@ export interface Summary {
 }
 /** Lo que el servidor deja hacer a la persona: descargar CSV y administrar (ver las descargas y decidir si el asesor puede). */
 export interface Access { export: boolean; manage: boolean }
-export type ReportName = 'sales' | 'appointments' | 'funnel' | 'advisors';
+export type ReportName = 'sales' | 'appointments' | 'funnel' | 'advisors' | 'winning_ads';
+/** «Anuncio ganador»: por fecha de llegada del contacto (cohorte) o por la fecha en que ocurrió la cita o la venta (conversión). */
+export type WinningMode = 'cohort' | 'conversion';
 export interface ReportColumn { key: string; label: string; type: 'text' | 'number' | 'money' | 'date' | 'person' | 'status' }
 export interface Report {
   report: ReportName;
@@ -54,17 +56,20 @@ export function usePeriod(days: number): Period {
   }, [hour, days]);
 }
 
-const range = (p: Period): string => `from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`;
+const range = (p: Period, mode?: WinningMode): string => `from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}${mode ? `&mode=${mode}` : ''}`;
 
 export function useSummary(p: Period) {
   return useQuery({ queryKey: ['analytics-summary', p], retry: false, queryFn: () => api<Summary>(`/analytics/summary?${range(p)}`) });
 }
 
-export function useReport(name: ReportName, p: Period) {
-  return useQuery({ queryKey: ['analytics-report', name, p], retry: false, queryFn: () => api<Report>(`/analytics/reports/${name}?${range(p)}`) });
+/** `mode` solo cuenta para «Anuncio ganador»; los demás reportes no lo mandan. */
+export function useReport(name: ReportName, p: Period, mode?: WinningMode) {
+  const m = name === 'winning_ads' ? mode ?? 'cohort' : undefined;
+  return useQuery({ queryKey: ['analytics-report', name, p, m], retry: false, queryFn: () => api<Report>(`/analytics/reports/${name}?${range(p, m)}`) });
 }
 
-export const exportReport = (name: ReportName, p: Period): Promise<Download> => apiDownload('/analytics/export', { method: 'POST', body: { report: name, from: p.from, to: p.to }, fallbackName: `${name}.csv` });
+export const exportReport = (name: ReportName, p: Period, mode?: WinningMode): Promise<Download> =>
+  apiDownload('/analytics/export', { method: 'POST', body: { report: name, from: p.from, to: p.to, ...(name === 'winning_ads' ? { mode: mode ?? 'cohort' } : {}) }, fallbackName: `${name}.csv` });
 
 export interface ExportRecord {
   id: string;

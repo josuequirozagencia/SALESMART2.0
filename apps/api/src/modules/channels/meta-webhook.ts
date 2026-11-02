@@ -1,6 +1,15 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import type { InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedStatus } from '../conversations';
+import type { InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedReferral, NormalizedStatus } from '../conversations';
 import type { ParsedWebhook } from './whatsapp.port';
+
+/** El `referral` que Meta agrega al primer mensaje tras un clic a un anuncio (M6.6). Solo se toma lo conocido y acotado; sin `ctwa_clid` igual se conserva lo demás. */
+export function referralOf(v: unknown): NormalizedReferral | null {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null;
+  const r = v as Record<string, unknown>;
+  const s = (k: string, n: number): string | null => (typeof r[k] === 'string' && r[k] !== '' ? (r[k]).replace(/\p{Cc}/gu, ' ').trim().slice(0, n) || null : null);
+  const out: NormalizedReferral = { sourceId: s('source_id', 100), sourceType: s('source_type', 20), sourceUrl: s('source_url', 1000), headline: s('headline', 300), body: s('body', 500), thumbnailUrl: s('thumbnail_url', 1000), ctwaClid: s('ctwa_clid', 500) };
+  return Object.values(out).some((x) => x !== null) ? out : null;
+}
 
 /**
  * Formato del webhook de WhatsApp Cloud API de Meta (M5.2, ADR-50). Funciones PURAS: sin red ni base de datos. El adaptador de Meta y el fake las comparten, y
@@ -95,7 +104,7 @@ function parseMessage(m: Record<string, unknown>, names: ReadonlyMap<string, str
 
   return {
     skipped: false,
-    message: { externalId: id, from: phone, fromRaw: from, profileName: names.get(from) ?? null, kind, text, media, extra, sentAt: toDate(m['timestamp'], now) },
+    message: { externalId: id, from: phone, fromRaw: from, profileName: names.get(from) ?? null, kind, text, media, extra, sentAt: toDate(m['timestamp'], now), referral: referralOf(m['referral']) },
   };
 }
 

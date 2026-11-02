@@ -40,7 +40,7 @@ export const analyticsExports = tenantTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
-    check('analytics_exports_report_valid', sql`${t['report']!} IN ('sales', 'appointments', 'funnel', 'advisors')`),
+    check('analytics_exports_report_valid', sql`${t['report']!} IN ('sales', 'appointments', 'funnel', 'advisors', 'winning_ads')`),
     check('analytics_exports_scope_valid', sql`${t['scope']!} IN ('all', 'own')`),
     check('analytics_exports_count_valid', sql`${t['rowCount']!} >= 0`),
     check('analytics_exports_period_valid', sql`${t['toAt']!} > ${t['fromAt']!}`),

@@ -31,6 +31,15 @@ export class AnalyticsController {
     return { ...(await this.analytics.summary(scope, q)), access: await this.analytics.access(scope) };
   }
 
+  /** «Anuncio ganador» (M6.6, ADR-55): por anuncio, chats nuevos, citas, ventas, ingresos y cierre; `mode=cohort` (por omisión) o `conversion`. Mismo alcance por persona que el resto. */
+  @RequirePermission('analytics.view')
+  @Get('winning-ads')
+  @Header('Cache-Control', 'no-store')
+  async winningAds(@Req() req: AuthedRequest, @Query(new ZodValidationPipe(rangeQuerySchema)) q: RangeQuery) {
+    const scope = scopeOf(req);
+    return { ...(await this.analytics.report(scope, 'winning_ads', q)), access: await this.analytics.access(scope) };
+  }
+
   @RequirePermission('analytics.view')
   @Get('reports/:name')
   @Header('Cache-Control', 'no-store')

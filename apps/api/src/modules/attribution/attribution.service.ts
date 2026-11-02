@@ -5,7 +5,7 @@ import { Database, metaEvents, type TenantTx } from '../../db';
 import { NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
-import { ContactsService } from '../contacts';
+import { ContactsService, ContactTouchesService } from '../contacts';
 import { AttributionEndpointsService } from '../organizations';
 import { SystemTagsService } from '../tags';
 import type { CtwaWebhookDto } from './attribution.dto';
@@ -35,6 +35,7 @@ export class AttributionService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(ContactTouchesService) private readonly touches: ContactTouchesService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(AttributionEndpointsService) private readonly endpoints: AttributionEndpointsService,
     @Inject(MetaSettingsService) private readonly settings: MetaSettingsService,
@@ -52,17 +53,28 @@ export class AttributionService {
 
   /** Registra un clic dentro del TenantContext de la empresa (lo establece quien llama). Idempotente por `ctwa_cl_id`. */
   async record(input: CtwaWebhookDto, now = new Date()): Promise<RecordResult> {
+    return this.db.withTenant((tx) => this.recordIn(tx, input, now));
+  }
+
+  /**
+   * Registra un clic de anuncio DENTRO de la transacción de quien llama: el punto de entrada externo (`record`) o el aviso de Meta del primer mensaje (`referral`, M6.6). Graba el primer
+   * y el último toque del contacto, el historial (`contact_touch_events`) y deja el Lead hacia Meta. `contactId` evita buscar de nuevo al contacto cuando ya se tiene.
+   */
+  async recordIn(tx: TenantTx, input: CtwaWebhookDto, now = new Date(), known?: { id: string; created: boolean }): Promise<RecordResult> {
     const at = input.occurred_at ? new Date(input.occurred_at) : now;
-    return this.db.withTenant(async (tx) => {
-      const { id, created } = await this.contacts.findOrCreateByPhone(tx, input.phone, input.source);
+    {
+      const { id, created } = known ?? (await this.contacts.findOrCreateByPhone(tx, input.phone, input.source));
       const touch = await this.contacts.applyTouch(tx, id, {
         ctwaClId: input.ctwa_cl_id,
         source: input.source,
         campaign: input.campaign_name ?? null,
         adset: input.adset_name ?? null,
         ad: input.ad_name ?? null,
+        adId: input.ad_id ?? null,
         at,
       });
+      // El historial lleva TODOS los clics (aunque uno viejo no cambie el último toque); es idempotente por el clic
+      await this.touches.record(tx, id, { kind: 'ad_click', at, source: input.source, campaign: input.campaign_name, adset: input.adset_name, ad: input.ad_name, adId: input.ad_id, ctwaClid: input.ctwa_cl_id, headline: input.headline, thumbnailUrl: input.thumbnail_url, sourceUrl: input.source_url, originRef: input.ctwa_cl_id });
       if (touch.duplicate) return { contactCreated: created, duplicate: true };
       // Una fila por clic (el id incluye la huella del clic): repetir la llamada no duplica nada aunque el último toque ya sea otro
       const eventId = `lead:${id}:${sha256(input.ctwa_cl_id).slice(0, 24)}`;
@@ -86,7 +98,7 @@ export class AttributionService {
         .onConflictDoNothing();
       await this.tags.apply(tx, id, 'lead');
       return { contactCreated: created, duplicate: false };
-    });
+    }
   }
 
   /**
@@ -94,7 +106,7 @@ export class AttributionService {
    * Pixel de la página usa para deduplicar (lo manda el visitante; si no, uno propio). Los datos del usuario van con huella SHA-256 (teléfono, correo); `fbc`, `fbp`, la IP y el navegador van
    * como los pide Meta (sin huella) y solo si el visitante los trajo. Se envía sin ventana de gracia; sin credenciales de Meta el evento espera pendiente. Idempotente por `event_id`.
    */
-  async onFormLead(tx: TenantTx, lead: { contactId: string; eventId: string; phone: string; email: string | null; fbc: string | null; fbp: string | null; ip: string | null; userAgent: string | null; sourceUrl: string | null; formName: string }, now = new Date()): Promise<void> {
+  async onFormLead(tx: TenantTx, lead: { contactId: string; eventId: string; phone: string; email: string | null; fbc: string | null; fbp: string | null; ip: string | null; userAgent: string | null; sourceUrl: string | null; formName: string; utm?: Record<string, string> }, now = new Date()): Promise<void> {
     const userData: Record<string, unknown> = { ph: [phoneHash(lead.phone)] };
     if (lead.email) userData['em'] = [sha256(lead.email.trim().toLowerCase())];
     if (lead.fbc) userData['fbc'] = lead.fbc;
@@ -120,6 +132,9 @@ export class AttributionService {
       })
       .onConflictDoNothing();
     await this.tags.apply(tx, lead.contactId, 'lead');
+    // Historial (M6.6): el envío del formulario es un toque; sus utm dicen de qué campaña vino
+    const utm = lead.utm ?? {};
+    await this.touches.record(tx, lead.contactId, { kind: 'form_submit', at: now, source: 'form', campaign: utm['utm_campaign'], adset: utm['utm_content'], ad: utm['utm_term'], utm, sourceUrl: lead.sourceUrl, originRef: lead.eventId });
   }
 
   /**

@@ -43,6 +43,8 @@ export interface Touch {
   campaign: string | null;
   adset: string | null;
   ad: string | null;
+  /** Id del anuncio de Meta (el nombre puede repetirse o cambiar; el id no). */
+  ad_id: string | null;
 }
 export interface ContactAttribution {
   ctwa_cl_id: string | null;
@@ -58,6 +60,7 @@ export interface TouchInput {
   campaign: string | null;
   adset: string | null;
   ad: string | null;
+  adId?: string | null;
   at: Date;
 }
 interface Extras {
@@ -86,14 +89,14 @@ export interface ContactScope {
 }
 
 const iso = (d: Date): string => d.toISOString();
-const touchOf = (at: Date | null, source: string | null, campaign: string | null, adset: string | null, ad: string | null): Touch | null => (at ? { at: at.toISOString(), source, campaign, adset, ad } : null);
+const touchOf = (at: Date | null, source: string | null, campaign: string | null, adset: string | null, ad: string | null, adId: string | null): Touch | null => (at ? { at: at.toISOString(), source, campaign, adset, ad, ad_id: adId } : null);
 const attributionOf = (r: ContactRow, capi: { status: string; sentAt: Date | null } | undefined): ContactAttribution | null =>
   r.ctwaClId === null && r.firstTouchAt === null
     ? null
     : {
         ctwa_cl_id: r.ctwaClId,
-        first_touch: touchOf(r.firstTouchAt, r.firstTouchSource, r.firstTouchCampaign, r.firstTouchAdset, r.firstTouchAd),
-        last_touch: touchOf(r.lastTouchAt, r.lastTouchSource, r.lastTouchCampaign, r.lastTouchAdset, r.lastTouchAd),
+        first_touch: touchOf(r.firstTouchAt, r.firstTouchSource, r.firstTouchCampaign, r.firstTouchAdset, r.firstTouchAd, r.firstTouchAdId),
+        last_touch: touchOf(r.lastTouchAt, r.lastTouchSource, r.lastTouchCampaign, r.lastTouchAdset, r.lastTouchAd, r.lastTouchAdId),
         capi: capi ? { status: capi.status, sent_at: capi.sentAt ? capi.sentAt.toISOString() : null } : null,
       };
 const asConsent = (v: string): ContactView['consent'] => (v === 'granted' || v === 'revoked' ? v : 'unknown');
@@ -343,9 +346,9 @@ export class ContactsService {
     if (row.ctwaClId === t.ctwaClId) return { duplicate: true, firstSet: false, lastUpdated: false };
     const set: Partial<typeof contacts.$inferInsert> = {};
     const firstSet = row.firstTouchAt === null;
-    if (firstSet) Object.assign(set, { firstTouchAt: t.at, firstTouchSource: t.source, firstTouchCampaign: t.campaign, firstTouchAdset: t.adset, firstTouchAd: t.ad });
+    if (firstSet) Object.assign(set, { firstTouchAt: t.at, firstTouchSource: t.source, firstTouchCampaign: t.campaign, firstTouchAdset: t.adset, firstTouchAd: t.ad, firstTouchAdId: t.adId ?? null });
     const lastUpdated = row.lastTouchAt === null || t.at.getTime() >= row.lastTouchAt.getTime();
-    if (lastUpdated) Object.assign(set, { ctwaClId: t.ctwaClId, lastTouchAt: t.at, lastTouchSource: t.source, lastTouchCampaign: t.campaign, lastTouchAdset: t.adset, lastTouchAd: t.ad });
+    if (lastUpdated) Object.assign(set, { ctwaClId: t.ctwaClId, lastTouchAt: t.at, lastTouchSource: t.source, lastTouchCampaign: t.campaign, lastTouchAdset: t.adset, lastTouchAd: t.ad, lastTouchAdId: t.adId ?? null });
     if (Object.keys(set).length > 0) {
       set.updatedAt = new Date();
       await tx.update(contacts).set(set).where(eq(contacts.id, id));

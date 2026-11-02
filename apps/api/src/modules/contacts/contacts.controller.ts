@@ -4,6 +4,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { createContactSchema, listContactsQuerySchema, updateContactSchema, type CreateContactDto, type ListContactsQuery, type UpdateContactDto } from './contacts.dto';
+import { ContactTouchesService } from './contact-touches';
 import { ContactsService, type ContactScope } from './contacts.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -26,7 +27,10 @@ const accessOf = (req: AuthedRequest): { view_all: boolean; write: boolean; dele
  */
 @Controller('contacts')
 export class ContactsController {
-  constructor(@Inject(ContactsService) private readonly contacts: ContactsService) {}
+  constructor(
+    @Inject(ContactsService) private readonly contacts: ContactsService,
+    @Inject(ContactTouchesService) private readonly touchEvents: ContactTouchesService,
+  ) {}
 
   @RequirePermission('contacts.read')
   @Get()
@@ -41,6 +45,14 @@ export class ContactsController {
   @Header('Cache-Control', 'no-store')
   owners() {
     return this.contacts.owners();
+  }
+
+  /** Historial de toques (clics de anuncio, formularios y primer mensaje) del contacto, del más reciente al más antiguo (M6.6, ADR-55). */
+  @RequirePermission('contacts.read')
+  @Get(':id/touches')
+  @Header('Cache-Control', 'no-store')
+  touches(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.touchEvents.list(scopeOf(req), id);
   }
 
   @RequirePermission('contacts.read')

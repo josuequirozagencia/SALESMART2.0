@@ -13,6 +13,11 @@ export const ctwaWebhookSchema = z
     campaign_name: clean(200).optional(),
     adset_name: clean(200).optional(),
     ad_name: clean(200).optional(),
+    /** Id del anuncio de Meta (M6.6): el nombre puede repetirse o cambiar; el id no. */
+    ad_id: clean(100).optional(),
+    headline: clean(300).optional(),
+    thumbnail_url: z.string().trim().max(1000).optional(),
+    source_url: z.string().trim().max(1000).optional(),
     source: z.string().regex(/^[a-z][a-z0-9_]{1,31}$/).default('meta_ctwa'),
     occurred_at: z.iso.datetime({ offset: true }).optional(),
   })

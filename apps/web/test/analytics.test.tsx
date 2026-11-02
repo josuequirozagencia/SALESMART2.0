@@ -34,6 +34,12 @@ const REPORT: Report = {
 };
 
 const REC = (over: Partial<ExportRecord> = {}): ExportRecord => ({ id: 'x1', by: { id: 'u2', name: 'Luis Navas' }, report: 'sales', from: '2026-09-24T05:00:00.000Z', to: '2026-10-24T05:00:00.000Z', rows: 7, scope: 'own', at: '2026-10-24T15:30:00.000Z', ...over });
+const WINNING = (conversion: boolean): Report => ({
+  report: 'winning_ads', title: conversion ? 'Anuncio ganador (por fecha de conversión)' : 'Anuncio ganador (por fecha de llegada)', period: SUMMARY.period, timezone: 'America/Guayaquil', currency: 'USD', truncated: false, access: { export: true, manage: true },
+  columns: [{ key: 'ad', label: 'Anuncio', type: 'text' }, { key: 'chats', label: 'Chats nuevos', type: 'number' }, { key: 'sales', label: 'Ventas', type: 'number' }, { key: 'revenue', label: 'Ingresos', type: 'money' }, { key: 'close_rate', label: 'Cierre', type: 'text' }],
+  rows: [{ ad: 'Corte promo', chats: 3, sales: conversion ? 2 : 1, revenue: conversion ? '100.00' : '30.00', close_rate: '33.3 %' }, { ad: 'Sin datos del anuncio', chats: 2, sales: 0, revenue: '0.00', close_rate: '0.0 %' }],
+  totals: { chats: 5, sales: conversion ? 2 : 1, revenue: conversion ? '100.00' : '30.00' },
+});
 interface World { summaryCalls: Call[]; reportCalls: Call[]; exports: Call[]; summary: Summary; report: Report; log: ExportRecord[]; advisorExport: boolean; puts: unknown[] }
 const world = (over: Partial<World> = {}): World => ({ summaryCalls: [], reportCalls: [], exports: [], summary: SUMMARY, report: REPORT, log: [], advisorExport: true, puts: [], ...over });
 function server(w: World, me = ME_ADMIN): Record<string, Handler> {
@@ -41,6 +47,7 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
     ...authed(me),
     'GET /analytics/summary': (c) => { w.summaryCalls.push(c); return { body: w.summary }; },
     'GET /analytics/reports/sales': (c) => { w.reportCalls.push(c); return { body: w.report }; },
+    'GET /analytics/reports/winning_ads': (c) => { w.reportCalls.push(c); return { body: WINNING(c.query.get('mode') === 'conversion') }; },
     'GET /analytics/reports/funnel': (c) => { w.reportCalls.push(c); return { body: { ...w.report, report: 'funnel', title: 'Embudo', rows: [], totals: null } }; },
     'GET /analytics/exports': () => ({ body: { items: w.log, next_cursor: null } }),
     'GET /analytics/settings': () => ({ body: { advisor_export: w.advisorExport } }),
@@ -157,6 +164,41 @@ describe('Analítica', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Descargar CSV' }));
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(downloads).toEqual([]);
+  });
+});
+
+describe('Analítica · Anuncio ganador', () => {
+  it('muestra los anuncios con chats, ventas y cierre; por omisión cuenta por llegada y cambiar a «Por conversión» vuelve a pedir ese modo', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/analytics');
+    await screen.findByRole('table', { name: 'Ventas' });
+    await userEvent.click(screen.getByRole('tab', { name: 'Anuncio ganador' }));
+    const table = await screen.findByRole('table', { name: /fecha de llegada/ });
+    expect(within(table).getByText('Corte promo')).toBeInTheDocument();
+    expect(within(table).getByText('Sin datos del anuncio')).toBeInTheDocument();
+    expect(within(table).getByText('33.3 %')).toBeInTheDocument();
+    expect(screen.getByLabelText('Por llegada')).toBeChecked();
+    expect(w.reportCalls.at(-1)!.query.get('mode')).toBe('cohort');
+    await userEvent.click(screen.getByLabelText('Por conversión'));
+    expect(await screen.findByRole('table', { name: /fecha de conversión/ })).toBeInTheDocument();
+    expect(w.reportCalls.at(-1)!.query.get('mode')).toBe('conversion');
+    expect(screen.getByText(/sin importar cuándo llegó el contacto/)).toBeInTheDocument();
+  });
+
+  it('los demás reportes no mandan el modo y el CSV de este lleva el modo que se ve', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/analytics');
+    await screen.findByRole('table', { name: 'Ventas' });
+    expect(w.reportCalls[0]!.query.has('mode')).toBe(false);
+    await userEvent.click(screen.getByRole('tab', { name: 'Anuncio ganador' }));
+    await screen.findByRole('table', { name: /fecha de llegada/ });
+    await userEvent.click(screen.getByLabelText('Por conversión'));
+    await screen.findByRole('table', { name: /fecha de conversión/ });
+    await userEvent.click(screen.getByRole('button', { name: 'Descargar CSV' }));
+    await waitFor(() => expect(w.exports).toHaveLength(1));
+    expect(w.exports[0]!.body).toMatchObject({ report: 'winning_ads', mode: 'conversion' });
   });
 });
 

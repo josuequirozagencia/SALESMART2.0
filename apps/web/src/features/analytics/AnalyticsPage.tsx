@@ -3,7 +3,7 @@ import { saveBlob } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import { money, shortDate, shortDateTime } from '../../lib/format';
 import { Alert, Button, Spinner } from '../../ui/controls';
-import { exportReport, PERIODS, useAdvisorExport, useExportsLog, usePeriod, useRefreshExports, useReport, useSetAdvisorExport, type Report, type ReportColumn, type ReportName } from './useAnalytics';
+import { exportReport, PERIODS, useAdvisorExport, useExportsLog, usePeriod, useRefreshExports, useReport, useSetAdvisorExport, type Report, type ReportColumn, type ReportName, type WinningMode } from './useAnalytics';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
 type TabName = ReportName | 'downloads';
@@ -12,8 +12,13 @@ const TABS: ReadonlyArray<{ name: ReportName; label: string }> = [
   { name: 'appointments', label: 'Citas' },
   { name: 'funnel', label: 'Embudo' },
   { name: 'advisors', label: 'Asesores' },
+  { name: 'winning_ads', label: 'Anuncio ganador' },
 ];
-const REPORT_LABEL: Record<ReportName, string> = { sales: 'Ventas', appointments: 'Citas', funnel: 'Embudo', advisors: 'Asesores' };
+const REPORT_LABEL: Record<ReportName, string> = { sales: 'Ventas', appointments: 'Citas', funnel: 'Embudo', advisors: 'Asesores', winning_ads: 'Anuncio ganador' };
+const MODES: ReadonlyArray<{ value: WinningMode; label: string; hint: string }> = [
+  { value: 'cohort', label: 'Por llegada', hint: 'Cuenta a quienes llegaron en el periodo y cuántos de ellos ya compraron (aunque la venta sea después).' },
+  { value: 'conversion', label: 'Por conversión', hint: 'Cuenta las citas y ventas que ocurrieron en el periodo, sin importar cuándo llegó el contacto.' },
+];
 
 /** El texto de una celda según el tipo de su columna (dinero con la moneda de la empresa, personas por su nombre). */
 function cell(col: ReportColumn, value: unknown, currency: string): string {
@@ -118,9 +123,10 @@ function Downloads() {
 export function AnalyticsPage() {
   const [tab, setTab] = useState<TabName>('sales');
   const [days, setDays] = useState(30);
+  const [mode, setMode] = useState<WinningMode>('cohort');
   const period = usePeriod(days);
   const report: ReportName = tab === 'downloads' ? 'sales' : tab;
-  const q = useReport(report, period);
+  const q = useReport(report, period, mode);
   const canExport = q.data?.access.export === true;
   const canManage = q.data?.access.manage === true;
   const refreshLog = useRefreshExports();
@@ -130,7 +136,7 @@ export function AnalyticsPage() {
   const download = (): void => {
     setError(undefined);
     setExporting(true);
-    exportReport(report, period)
+    exportReport(report, period, mode)
       .then((d) => { saveBlob(d); void refreshLog(); })
       .catch((e: unknown) => setError(friendlyError(e, 'No se pudo descargar el reporte')))
       .finally(() => setExporting(false));
@@ -164,6 +170,20 @@ export function AnalyticsPage() {
           {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando el reporte" /></div> : null}
           {q.isError ? <Alert>{friendlyError(q.error, 'No se pudo cargar el reporte')}</Alert> : null}
           {error ? <Alert>{error}</Alert> : null}
+          {tab === 'winning_ads' ? (
+            <fieldset className="grid gap-1">
+              <legend className="sr-only">Cómo contar</legend>
+              <div className="flex flex-wrap gap-4">
+                {MODES.map((m) => (
+                  <label key={m.value} className="flex items-center gap-2 text-[13.5px]">
+                    <input type="radio" name="winning-mode" value={m.value} checked={mode === m.value} onChange={() => setMode(m.value)} />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[12px] text-muted">{MODES.find((m) => m.value === mode)!.hint}</p>
+            </fieldset>
+          ) : null}
           {q.data ? (
             <>
               <p className="text-[12.5px] text-muted">{q.data.rows.length} fila(s) · hora de {q.data.timezone}</p>
