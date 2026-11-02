@@ -812,6 +812,7 @@ describe('Inbox · canal de GoHighLevel (M7.4)', () => {
       },
     });
     const open = async (): Promise<ReturnType<typeof within>> => {
+      await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
       await userEvent.click(await screen.findByRole('button', { name: 'Inscribir en un flujo' }));
       return within(await screen.findByRole('dialog', { name: 'Inscribir a Ana Torres en un flujo' }));
     };
@@ -838,7 +839,8 @@ describe('Inbox · canal de GoHighLevel (M7.4)', () => {
     it('en una conversación de WhatsApp no aparece el botón', async () => {
       mockApi(withFlows(world({ convs: [conv()] }), flows()));
       renderApp('/inbox/c1');
-      await screen.findByRole('textbox', { name: 'Mensaje' });
+      await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+      await screen.findByRole('complementary', { name: 'Datos del contacto' });
       expect(screen.queryByRole('button', { name: 'Inscribir en un flujo' })).not.toBeInTheDocument();
     });
 

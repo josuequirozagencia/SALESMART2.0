@@ -226,7 +226,7 @@ export function ActionCard({ a, index, count, selfId, onChange, onRemove, onMove
         </Select>
       ) : null}
       {a.type === 'assign_queue' ? (
-        <Select aria-label={aria('cola')} value={a.queue_id ?? ''} onChange={(v) => set({ queue_id: v })}>
+        <Select aria-label={aria('departamento')} value={a.queue_id ?? ''} onChange={(v) => set({ queue_id: v })}>
           <option value="">Elige un departamento</option>
           {o.queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
         </Select>

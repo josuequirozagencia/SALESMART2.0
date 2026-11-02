@@ -115,7 +115,7 @@ export type GhlReplyType = 'SMS' | 'WhatsApp' | 'IG' | 'FB' | 'Live_Chat';
 export interface GhlChannel {
   configured: boolean;
   channel_id: string | null;
-  /** Cola a la que van las conversaciones nuevas de GoHighLevel; sin cola quedan «sin asignar». */
+  /** Departamento al que van las conversaciones nuevas de GoHighLevel; sin departamento quedan «sin asignar». */
   queue: { id: string; name: string } | null;
   /** Canal de GHL por el que se responde cuando el aviso no dice por cuál llegó el mensaje. */
   default_type: GhlReplyType | null;
