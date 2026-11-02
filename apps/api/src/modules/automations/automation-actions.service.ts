@@ -12,6 +12,7 @@ import type { OrgDirectory } from '../organizations';
 import { OutreachService } from '../outreach';
 import { AssignmentService } from '../queues';
 import { ContactTaggingService } from '../tags';
+import { TaskNoticesService } from '../task-notices';
 import { hostAllowed, parseDestination } from './address-guard';
 import { AutomationEnqueueService } from './automation-enqueue.service';
 import { httpVariablesUsed, renderHttpBody, renderParam, renderText, type ActionDef } from './automation-model';
@@ -53,6 +54,7 @@ export class AutomationActionsService {
     @Inject(ContactTaggingService) private readonly tagging: ContactTaggingService,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
     @Inject(OutreachService) private readonly outreach: OutreachService,
+    @Inject(TaskNoticesService) private readonly taskNotices: TaskNoticesService,
     @Inject(AutomationEnqueueService) private readonly enqueue: AutomationEnqueueService,
     @Inject(AgentRuntimeService) private readonly agents: AgentRuntimeService,
     @Inject(OUTBOUND_HTTP) private readonly outbound: OutboundHttp,
@@ -152,6 +154,7 @@ export class AutomationActionsService {
     const dueAt = a.due_in_hours === undefined ? null : new Date(ctx.now.getTime() + a.due_in_hours * 3_600_000);
     const [t] = await tx.insert(tasks).values({ title, dueAt, assigneeId: assignee, contactId: ctx.contactId, createdBy: assignee }).returning({ id: tasks.id });
     await writeAudit(tx, { entityType: 'task', entityId: t!.id, newValue: { title, due_at: dueAt?.toISOString() ?? null, assignee_id: assignee, contact_id: ctx.contactId }, source: 'automation' });
+    await this.taskNotices.assignedBySystem(tx, { taskId: t!.id, assigneeId: assignee });
     return done('Tarea creada');
   }
 

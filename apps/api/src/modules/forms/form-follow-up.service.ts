@@ -3,6 +3,7 @@ import { and, eq, gt, isNull } from 'drizzle-orm';
 import { forms, tasks, type TenantTx } from '../../db';
 import { writeAudit } from '../audit';
 import { OutreachService } from '../outreach';
+import { TaskNoticesService } from '../task-notices';
 
 type FormRow = typeof forms.$inferSelect;
 export type FollowUpResult = 'none' | 'task' | 'template' | 'template_task';
@@ -43,7 +44,10 @@ export const FOLLOW_UP_TASK_DUE_MS = 60 * 60_000;
  */
 @Injectable()
 export class FormFollowUpService {
-  constructor(@Inject(OutreachService) private readonly outreach: OutreachService) {}
+  constructor(
+    @Inject(OutreachService) private readonly outreach: OutreachService,
+    @Inject(TaskNoticesService) private readonly taskNotices: TaskNoticesService,
+  ) {}
 
   async run(tx: TenantTx, i: FollowUpInput): Promise<FollowUpResult> {
     const sent = i.form.followUpChannelId && i.form.followUpTemplateId ? await this.sendTemplate(tx, i, i.form.followUpChannelId, i.form.followUpTemplateId) : false;
@@ -71,6 +75,7 @@ export class FormFollowUpService {
       .values({ title, description: `Llegó por el formulario «${i.form.name}». Escríbele o llámalo cuanto antes.`, dueAt, assigneeId: i.ownerId, contactId: i.contactId, createdBy: i.ownerId })
       .returning({ id: tasks.id });
     await writeAudit(tx, { entityType: 'task', entityId: t!.id, newValue: { title, due_at: dueAt.toISOString(), assignee_id: i.ownerId, contact_id: i.contactId, has_description: true }, source: 'api' });
+    await this.taskNotices.assignedBySystem(tx, { taskId: t!.id, assigneeId: i.ownerId });
     return true;
   }
 }

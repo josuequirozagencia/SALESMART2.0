@@ -636,6 +636,8 @@ describe('seguimiento: lo que pasa con un envío', () => {
     const t = await tasksOf();
     expect(t).toHaveLength(1);
     expect(t[0]).toMatchObject({ assignee_id: IDS.carol, contact_id: contact!['id'], status: 'open' });
+    // F2 (ADR-58): el responsable recibe el aviso «te asignaron», sin actor (la creó el seguimiento del formulario)
+    expect((await admin.query('SELECT user_id, type, actor_id FROM notifications WHERE task_id = $1', [t[0]!['id']])).rows).toEqual([{ user_id: IDS.carol, type: 'task_assigned', actor_id: null }]);
     expect(String(t[0]!['title'])).toBe('Contactar a Lucía Paredes (formulario «Landing de cursos»)');
     expect(new Date(t[0]!['due_at'] as string).getTime() - Date.now()).toBeGreaterThan(50 * 60_000);
     expect((await subs())[0]).toMatchObject({ follow_up: 'template_task' });

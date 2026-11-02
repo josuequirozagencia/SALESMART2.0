@@ -356,6 +356,8 @@ describe('crear tareas', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ title: 'Enviar cotización del curso', assignee_id: IDS.carol, created_by: IDS.carol, contact_id: c.contact, status: 'open' });
     expect(String(rows[0]!['description'])).toContain('Creada por el agente de IA Sofía.');
+    // F2 (ADR-58): el responsable recibe el aviso «te asignaron», sin actor (la creó el sistema)
+    expect((await admin.query('SELECT user_id, type, actor_id FROM notifications WHERE task_id = $1', [rows[0]!['id']])).rows).toEqual([{ user_id: IDS.carol, type: 'task_assigned', actor_id: null }]);
     const due = new Date(rows[0]!['due_at'] as string).getTime() - Date.now();
     expect(due).toBeGreaterThan(1.9 * 86_400_000);
     expect(due).toBeLessThan(2.1 * 86_400_000);
