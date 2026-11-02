@@ -2488,7 +2488,7 @@ test('menciones: el asesor menciona al administrador en una nota (quien no ve la
   const s = state();
   const { apiBase } = s;
   const APP_SECRET = 'app-secret-e2e-menciones-0123456789abcdef';
-  const PHONE_ID = '1090123450077';
+  const PHONE_ID = '1090123450099';
   const FROM = '593984217744';
   const root = { authorization: `Bearer ${await adminToken(request)}`, 'content-type': 'application/json' };
   expect((await request.put(`${apiBase}/v1/platform/providers/whatsapp_official/meta_cloud/credentials`, { headers: root, data: { values: { app_id: '1234567890', app_secret: APP_SECRET, verify_token: 'verify-e2e-menciones-0123456789abcdef' } } })).status()).toBe(200);
