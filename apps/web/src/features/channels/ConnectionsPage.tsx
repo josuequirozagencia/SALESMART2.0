@@ -2,13 +2,18 @@ import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { shortDateTime } from '../../lib/format';
 import type { Channel } from '../../lib/types';
-import { Alert, Button, Spinner } from '../../ui/controls';
+import { Alert, Button, Input, Spinner } from '../../ui/controls';
+import { Link } from 'react-router-dom';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
+import { useGhlConnection } from '../ghl/useGhl';
+import { useMetaSettings } from '../meta/useMeta';
 import { useQueues } from '../queues/useQueues';
 import { ChannelDialog } from './ChannelDialog';
+import { ConnectionCard, type ConnectionStatus } from './ConnectionCard';
 import { QrSection } from './QrSection';
 import { TemplatesDialog } from './TemplatesDialog';
+import { useQrChannels } from './useQrChannels';
 import { useCheckChannel, useChannels, useDisconnectChannel, useUpdateChannel } from './useChannels';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
@@ -64,29 +69,60 @@ function ChannelCard({ channel: c, queueName, onEdit, onTemplates, onError }: { 
   );
 }
 
+/** El aviso del canal NO OFICIAL que va SIEMPRE en su tarjeta (no se puede quitar ni acortar). */
+export const QR_CARD_WARNING = 'No es la API oficial de WhatsApp. WhatsApp puede bloquear o suspender el número, la sesión puede desconectarse y no hay plantillas aprobadas. No lo uses con tu número principal.';
+
+const linkBtn = 'inline-flex items-center justify-center rounded-[10px] border border-line px-3 py-1.5 text-[12.5px] font-semibold hover:bg-surface2';
+
 /**
- * Configuración › Conexiones (M5.1, ADR-50). El administrador conecta cada número de WhatsApp oficial con los datos de Meta (WABA ID, Phone number ID y un token
- * permanente). El servidor comprueba el token antes de guardarlo, lo cifra y no lo devuelve jamás (solo los últimos 4 caracteres). Recibir y enviar mensajes
- * llega en las rebanadas siguientes de M5: esta pantalla solo deja listo el número.
+ * Configuración › Conexiones (M5.1 → M5.9, ADR-50). Galería de tarjetas en dos grupos: CANALES (por dónde hablan tus clientes: cada número de WhatsApp oficial es una tarjeta,
+ * WhatsApp por QR —no oficial, con su aviso siempre a la vista—, y Messenger, Instagram y TikTok como «Próximamente») e INTEGRACIONES (GoHighLevel, API de Conversiones de Meta y
+ * Calendario de Google «Próximamente»). Cada tarjeta dice si está Conectada, Requiere atención, No conectada o Próximamente; el buscador filtra por nombre. El administrador conecta
+ * cada número con los datos de Meta; el servidor comprueba el token antes de guardarlo, lo cifra y no lo devuelve jamás (solo los últimos 4 caracteres).
  */
 export function ConnectionsPage() {
   const q = useChannels();
   const queues = useQueues();
+  const qr = useQrChannels();
+  const ghl = useGhlConnection();
+  const meta = useMetaSettings();
   const queueName = (id: string | null): string | null => (id ? (queues.data?.items.find((x) => x.id === id)?.name ?? null) : null);
   const [dialog, setDialog] = useState<{ channel?: Channel } | null>(null);
   const [templatesOf, setTemplatesOf] = useState<Channel | null>(null);
   const [error, setError] = useState<string>();
+  const [search, setSearch] = useState('');
   const items = q.data?.items ?? [];
   const vaultOk = q.data?.vault.available !== false;
+  const term = search.trim().toLowerCase();
+  const match = (...words: Array<string | null | undefined>): boolean => term === '' || words.some((w) => (w ?? '').toLowerCase().includes(term));
+
+  const qrItems = qr.data?.items ?? [];
+  const qrStatus: ConnectionStatus = qrItems.some((c) => c.state === 'closed' || c.state === 'logged_out' || c.last_error) ? 'attention' : qrItems.some((c) => c.state === 'open') ? 'connected' : 'disconnected';
+  const ghlStatus: ConnectionStatus = ghl.data?.status === 'needs_reconnect' || ghl.data?.last_error ? 'attention' : ghl.data?.configured && ghl.data.status === 'active' ? 'connected' : 'disconnected';
+  const metaStatus: ConnectionStatus = meta.data?.last_error ? 'attention' : meta.data?.configured && meta.data.enabled ? 'connected' : 'disconnected';
+
+  const shownNumbers = items.filter((c) => match(c.name, c.display_phone, c.verified_name, 'whatsapp oficial'));
+  const showOfficialCard = match('whatsapp oficial', 'whatsapp', 'meta');
+  const showQr = match('whatsapp por qr', 'whatsapp', 'qr', 'no oficial');
+  const soonChannels = [
+    ['Messenger', 'Conversaciones de tu página de Facebook en el Inbox.'],
+    ['Instagram', 'Mensajes directos de tu cuenta de Instagram en el Inbox.'],
+    ['TikTok', 'Mensajes y leads de TikTok.'],
+  ].filter(([n]) => match(n));
+  const showGhl = match('gohighlevel', 'ghl', 'highlevel');
+  const showMeta = match('api de conversiones de meta', 'meta', 'conversiones', 'capi', 'pixel');
+  const showCalendar = match('calendario de google', 'google', 'calendario', 'agenda');
+  const noChannels = shownNumbers.length === 0 && !showOfficialCard && !showQr && soonChannels.length === 0;
+  const noIntegrations = !showGhl && !showMeta && !showCalendar;
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-5">
       <SettingsNav />
-      <div className="flex flex-wrap items-start justify-between gap-3">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <p className="max-w-[680px] text-[13.5px] text-muted">
-          Conecta aquí cada número de WhatsApp oficial de tu empresa. Necesitas el ID de la cuenta, el ID del número y un token permanente que se generan en Meta (Meta Business › Usuarios del sistema).
+          Conecta los canales por donde te escriben tus clientes y las integraciones con otras plataformas. Para WhatsApp oficial necesitas el ID de la cuenta, el ID del número y un token permanente que se generan en Meta (Meta Business › Usuarios del sistema).
         </p>
-        {q.isSuccess ? <Button variant="primary" disabled={!vaultOk} onClick={() => setDialog({})}>Conectar un número</Button> : null}
+        <div className="w-full sm:w-[260px]"><Input aria-label="Buscar conexiones" type="search" placeholder="Buscar canal o integración" value={search} onChange={(e) => setSearch(e.target.value)} /></div>
       </div>
 
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando conexiones" /></div> : null}
@@ -95,16 +131,49 @@ export function ConnectionsPage() {
       {error ? <Alert>{error}</Alert> : null}
 
       {q.isSuccess ? (
-        items.length === 0 ? (
-          <p className="rounded-2xl border border-dashed border-line p-6 text-center text-[13.5px] text-muted">Aún no hay números conectados.{vaultOk ? ' Conecta el primero con «Conectar un número».' : ''}</p>
-        ) : (
-          <ul aria-label="Conexiones" className="grid gap-3">
-            {items.map((c) => <ChannelCard key={c.id} channel={c} queueName={queueName(c.queue_id)} onEdit={() => setDialog({ channel: c })} onTemplates={() => setTemplatesOf(c)} onError={setError} />)}
-          </ul>
-        )
-      ) : null}
+        <>
+          <section aria-label="Canales" className="grid gap-3">
+            <h2 className="text-[13px] font-bold uppercase tracking-wide text-muted">Canales</h2>
+            {noChannels ? <p className="text-[13.5px] text-muted">Ningún canal coincide con «{search.trim()}».</p> : (
+              <ul aria-label="Conexiones" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {shownNumbers.map((c) => <ChannelCard key={c.id} channel={c} queueName={queueName(c.queue_id)} onEdit={() => setDialog({ channel: c })} onTemplates={() => setTemplatesOf(c)} onError={setError} />)}
+                {showOfficialCard ? (
+                  <ConnectionCard name="WhatsApp oficial" description="API oficial de Meta: plantillas aprobadas y sin riesgo de bloqueo." status={items.length > 0 ? 'connected' : 'disconnected'} note={items.length === 0 ? <span className="text-muted">Aún no hay números conectados.{vaultOk ? ' Conecta el primero con «Conectar un número».' : ''}</span> : <span className="text-muted">{items.length} {items.length === 1 ? 'número conectado' : 'números conectados'}.</span>}>
+                    <Button variant="primary" className={SMALL} disabled={!vaultOk} onClick={() => setDialog({})}>Conectar un número</Button>
+                  </ConnectionCard>
+                ) : null}
+                {showQr ? (
+                  <ConnectionCard name="WhatsApp por QR" badge="No oficial" description="Vincula un número escaneando un QR, sin la API de Meta." status={qr.isSuccess ? qrStatus : 'disconnected'} note={<span className="font-medium text-warn">{QR_CARD_WARNING}</span>}>
+                    <Button className={SMALL} aria-label="Administrar WhatsApp por QR" onClick={() => document.getElementById('whatsapp-qr')?.scrollIntoView?.({ behavior: 'smooth' })}>Administrar</Button>
+                  </ConnectionCard>
+                ) : null}
+                {soonChannels.map(([n, d]) => <ConnectionCard key={n} name={n!} description={d!} status="soon" />)}
+              </ul>
+            )}
+          </section>
 
-      <QrSection />
+          <section aria-label="Integraciones" className="grid gap-3">
+            <h2 className="text-[13px] font-bold uppercase tracking-wide text-muted">Integraciones</h2>
+            {noIntegrations ? <p className="text-[13.5px] text-muted">Ninguna integración coincide con «{search.trim()}».</p> : (
+              <ul aria-label="Lista de integraciones" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {showGhl ? (
+                  <ConnectionCard name="GoHighLevel" description="Contactos, etiquetas, mensajes e inscripción a flujos." status={ghl.isSuccess ? ghlStatus : 'disconnected'} note={ghl.data?.last_error ? <span className="text-crit">{ghl.data.last_error}</span> : undefined}>
+                    <Link to="/settings/ghl" aria-label="Configurar GoHighLevel" className={linkBtn}>Configurar</Link>
+                  </ConnectionCard>
+                ) : null}
+                {showMeta ? (
+                  <ConnectionCard name="API de Conversiones de Meta" description="Envía a Meta los eventos Lead, Schedule y Purchase de tus anuncios." status={meta.isSuccess ? metaStatus : 'disconnected'} note={meta.data?.last_error ? <span className="text-crit">{meta.data.last_error}</span> : undefined}>
+                    <Link to="/settings/meta" aria-label="Configurar la API de Conversiones" className={linkBtn}>Configurar</Link>
+                  </ConnectionCard>
+                ) : null}
+                {showCalendar ? <ConnectionCard name="Calendario de Google" description="Sincroniza tus citas con Google Calendar." status="soon" /> : null}
+              </ul>
+            )}
+          </section>
+
+          {showQr ? <div id="whatsapp-qr"><QrSection /></div> : null}
+        </>
+      ) : null}
 
       {templatesOf ? <TemplatesDialog channel={templatesOf} onClose={() => setTemplatesOf(null)} /> : null}
       {dialog ? <ChannelDialog {...(dialog.channel ? { channel: dialog.channel } : {})} onClose={() => setDialog(null)} /> : null}

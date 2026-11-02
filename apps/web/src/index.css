@@ -39,8 +39,59 @@
 }
 
 html, body, #root { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-ui); font-size: 13.5px; line-height: 1.45; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-ui); font-size: max(var(--fs-min), calc(13.5px - var(--fs-delta))); line-height: 1.45; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+
+/*
+ * ESCALA TIPOGRÁFICA (M5.9, D4): un solo lugar para el tamaño de la letra. Las pantallas usan clases `text-[Npx]` de Tailwind; aquí cada una se reescribe como «N menos
+ * --fs-delta, sin bajar de --fs-min». Cambiar --fs-delta (o --fs-min) cambia TODA la interfaz; poner --fs-delta en 0 devuelve los tamaños originales. Va DENTRO de la capa
+ * `utilities` y con un selector más específico, para ganarle a la utilidad original (también a la variante con `!`).
+ */
+:root { --fs-delta: 2pt; --fs-min: 11px; }
+@layer utilities {
+  html .text-\[10px\] { font-size: max(var(--fs-min), calc(10px - var(--fs-delta))); }
+  html .\!text-\[10px\] { font-size: max(var(--fs-min), calc(10px - var(--fs-delta))) !important; }
+  html .text-\[10\.5px\] { font-size: max(var(--fs-min), calc(10.5px - var(--fs-delta))); }
+  html .\!text-\[10\.5px\] { font-size: max(var(--fs-min), calc(10.5px - var(--fs-delta))) !important; }
+  html .text-\[11px\] { font-size: max(var(--fs-min), calc(11px - var(--fs-delta))); }
+  html .\!text-\[11px\] { font-size: max(var(--fs-min), calc(11px - var(--fs-delta))) !important; }
+  html .text-\[11\.5px\] { font-size: max(var(--fs-min), calc(11.5px - var(--fs-delta))); }
+  html .\!text-\[11\.5px\] { font-size: max(var(--fs-min), calc(11.5px - var(--fs-delta))) !important; }
+  html .text-\[12px\] { font-size: max(var(--fs-min), calc(12px - var(--fs-delta))); }
+  html .\!text-\[12px\] { font-size: max(var(--fs-min), calc(12px - var(--fs-delta))) !important; }
+  html .text-\[12\.5px\] { font-size: max(var(--fs-min), calc(12.5px - var(--fs-delta))); }
+  html .\!text-\[12\.5px\] { font-size: max(var(--fs-min), calc(12.5px - var(--fs-delta))) !important; }
+  html .text-\[13px\] { font-size: max(var(--fs-min), calc(13px - var(--fs-delta))); }
+  html .\!text-\[13px\] { font-size: max(var(--fs-min), calc(13px - var(--fs-delta))) !important; }
+  html .text-\[13\.5px\] { font-size: max(var(--fs-min), calc(13.5px - var(--fs-delta))); }
+  html .\!text-\[13\.5px\] { font-size: max(var(--fs-min), calc(13.5px - var(--fs-delta))) !important; }
+  html .text-\[14px\] { font-size: max(var(--fs-min), calc(14px - var(--fs-delta))); }
+  html .\!text-\[14px\] { font-size: max(var(--fs-min), calc(14px - var(--fs-delta))) !important; }
+  html .text-\[15px\] { font-size: max(var(--fs-min), calc(15px - var(--fs-delta))); }
+  html .\!text-\[15px\] { font-size: max(var(--fs-min), calc(15px - var(--fs-delta))) !important; }
+  html .text-\[16px\] { font-size: max(var(--fs-min), calc(16px - var(--fs-delta))); }
+  html .\!text-\[16px\] { font-size: max(var(--fs-min), calc(16px - var(--fs-delta))) !important; }
+  html .text-\[17px\] { font-size: max(var(--fs-min), calc(17px - var(--fs-delta))); }
+  html .\!text-\[17px\] { font-size: max(var(--fs-min), calc(17px - var(--fs-delta))) !important; }
+  html .text-\[18px\] { font-size: max(var(--fs-min), calc(18px - var(--fs-delta))); }
+  html .\!text-\[18px\] { font-size: max(var(--fs-min), calc(18px - var(--fs-delta))) !important; }
+  html .text-\[19px\] { font-size: max(var(--fs-min), calc(19px - var(--fs-delta))); }
+  html .\!text-\[19px\] { font-size: max(var(--fs-min), calc(19px - var(--fs-delta))) !important; }
+  html .text-\[20px\] { font-size: max(var(--fs-min), calc(20px - var(--fs-delta))); }
+  html .\!text-\[20px\] { font-size: max(var(--fs-min), calc(20px - var(--fs-delta))) !important; }
+  html .text-\[22px\] { font-size: max(var(--fs-min), calc(22px - var(--fs-delta))); }
+  html .\!text-\[22px\] { font-size: max(var(--fs-min), calc(22px - var(--fs-delta))) !important; }
+  html .text-\[25px\] { font-size: max(var(--fs-min), calc(25px - var(--fs-delta))); }
+  html .\!text-\[25px\] { font-size: max(var(--fs-min), calc(25px - var(--fs-delta))) !important; }
+  html .text-\[26px\] { font-size: max(var(--fs-min), calc(26px - var(--fs-delta))); }
+  html .\!text-\[26px\] { font-size: max(var(--fs-min), calc(26px - var(--fs-delta))) !important; }
+  html .text-\[30px\] { font-size: max(var(--fs-min), calc(30px - var(--fs-delta))); }
+  html .\!text-\[30px\] { font-size: max(var(--fs-min), calc(30px - var(--fs-delta))) !important; }
+}
+/* Campos de formulario en móvil: 16 px como mínimo para que iOS no haga zoom al enfocarlos (no se escalan con la regla anterior). */
+@media (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
+}

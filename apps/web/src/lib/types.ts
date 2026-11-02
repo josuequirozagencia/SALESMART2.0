@@ -569,7 +569,7 @@ export interface Channel {
   is_official: boolean;
   name: string;
   status: 'active' | 'disabled';
-  /** Cola por defecto: a dónde van las conversaciones nuevas de este número. */
+  /** Departamento por defecto: a dónde van las conversaciones nuevas de este número. */
   queue_id: string | null;
   waba_id: string;
   phone_number_id: string;
@@ -594,7 +594,7 @@ export interface ChannelInput {
   waba_id: string;
   phone_number_id: string;
   access_token: string;
-  /** Cola por defecto (opcional). */
+  /** Departamento por defecto (opcional). */
   queue_id?: string | null;
 }
 

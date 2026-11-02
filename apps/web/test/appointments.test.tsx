@@ -71,6 +71,8 @@ function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
 
 const tomorrow = (): string => addDays(todayIn(TZ), 1);
 const openDialog = async () => {
+  await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+  await screen.findByRole('complementary', { name: 'Datos del contacto' });
   await userEvent.click(await screen.findByRole('button', { name: 'Agendar' }));
   return within(await screen.findByRole('dialog', { name: 'Agendar cita' }));
 };
@@ -191,7 +193,8 @@ describe('Agendar desde el chat', () => {
     routes['GET /conversations/c1'] = () => ({ body: conv({ my_access: 'collaborator_view' }) });
     mockApi(routes);
     renderApp('/inbox/c1');
-    await screen.findByRole('heading', { name: 'Ana Torres' });
+    await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+    await screen.findByRole('complementary', { name: 'Datos del contacto' });
     expect(screen.queryByRole('button', { name: 'Agendar' })).toBeNull();
   });
 });
