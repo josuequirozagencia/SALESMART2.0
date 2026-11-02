@@ -6,6 +6,7 @@ import { initials, timeLeft } from '../../lib/format';
 import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Menu, type MenuItem } from '../../ui/Menu';
 import { Pill } from '../../ui/Pill';
 import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
@@ -38,6 +39,11 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
   const now = useNow(30_000);
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
+  // «⋯ Más» (M5.10): lo que no se usa a cada rato —transferir, dejar de participar, finalizar— sale de la cabecera y se junta en un menú; Aceptar y Asignarme siguen a la vista
+  const more: MenuItem[] = [];
+  if (c.can.transfer || c.can.share) more.push({ label: 'Transferir', onSelect: () => setDialog(true) });
+  if (collaborator) more.push({ label: 'Dejar de participar', onSelect: () => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); } });
+  if (c.can.close) more.push({ label: 'Finalizar', danger: true, onSelect: () => setConfirm(true) });
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
     onBackError(undefined);
     act.mutate(a, { onSettled: () => setConfirm(false), onError: (e) => onBackError(friendlyError(e, fallback)) });
@@ -84,9 +90,7 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
           <>
             {c.can.accept ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('accept', 'No pudimos aceptar la conversación.')}>Aceptar</Button> : null}
             {c.can.take ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('take', 'No pudimos asignarte la conversación.')}>Asignarme</Button> : null}
-            {c.can.transfer || c.can.share ? <Button className={SMALL} onClick={() => setDialog(true)}>Transferir</Button> : null}
-            {collaborator ? <Button className={SMALL} loading={leave.isPending} onClick={() => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</Button> : null}
-            {c.can.close ? <Button className={SMALL} onClick={() => setConfirm(true)}>Finalizar</Button> : null}
+            <Menu label="Más acciones" items={more}>Más <span aria-hidden="true">⋯</span></Menu>
           </>
         )}
         </div>

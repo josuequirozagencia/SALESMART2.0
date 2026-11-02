@@ -4,7 +4,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
-import { createScheduledSchema, listConversationsQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
+import { createScheduledSchema, listConversationsQuerySchema, listScheduledQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type ListScheduledQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
 import { OutboundService } from './outbound.service';
 import { ReactionsService } from './reactions.service';
@@ -218,6 +218,22 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   read(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
     return this.inbox.markRead(accessOf(req), id);
+  }
+}
+
+/**
+ * Mensajes programados de TODAS las conversaciones que la persona ve (M5.10). Cancelar sigue siendo `DELETE /conversations/:id/scheduled/:scheduledId`. Ver exige `inbox.read`; el
+ * alcance es el de la bandeja (sin `inbox.view_all`, solo lo asignado o compartido). `no-store`: lleva textos y nombres de clientes.
+ */
+@Controller('scheduled')
+export class ScheduledController {
+  constructor(@Inject(ScheduledMessagesService) private readonly scheduledMessages: ScheduledMessagesService) {}
+
+  @RequirePermission('inbox.read')
+  @Get()
+  @Header('Cache-Control', 'no-store')
+  list(@Req() req: AuthedRequest, @Query(new ZodValidationPipe(listScheduledQuerySchema)) q: ListScheduledQuery) {
+    return this.scheduledMessages.listAll(accessOf(req), q);
   }
 }
 

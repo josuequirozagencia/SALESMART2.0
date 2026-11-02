@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
 import { useRealtimeStatus } from '../../lib/realtime';
-import type { AgentStatus, ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
+import type { AgentStatus, ChatMessage, ChatMessagePage, Conversation, ConversationList, InboxFilters, InboxOptions, ResolvedQuickReply, RevokeResult, ScheduledMessage, ScheduledPageData, TemplateList, TransferOptions, TransferResult } from '../../lib/types';
 
 /**
  * Cada cuánto se vuelve a mirar el listado y el hilo abierto cuando NO hay conexión en vivo (respaldo). Con la conexión en vivo los cambios llegan solos y
@@ -104,6 +104,27 @@ export function useConversationQuickReplies(id: string, enabled: boolean) {
 export function useScheduledMessages(id: string) {
   const poll = usePolling();
   return useQuery({ queryKey: ['scheduled', id], staleTime: 5_000, retry: false, refetchInterval: poll.thread, queryFn: () => api<{ items: ScheduledMessage[] }>(`/conversations/${id}/scheduled`) });
+}
+
+/** Todo lo programado que la persona ve, de todas sus conversaciones (M5.10): `not_sent` trae lo que no salió en las últimas 24 h. */
+export function useAllScheduled(status: 'scheduled' | 'not_sent', mine: boolean) {
+  const poll = usePolling();
+  return useInfiniteQuery({
+    queryKey: ['scheduled', 'all', status, mine],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api<ScheduledPageData>(`/scheduled?status=${status}${mine ? '&mine=1' : ''}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    refetchInterval: poll.list,
+  });
+}
+
+/** Cancela un programado desde la vista global (la conversación va en la llamada: la ruta es la de siempre). */
+export function useCancelScheduledAny() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { conversationId: string; id: string }) => api<ScheduledMessage>(`/conversations/${input.conversationId}/scheduled/${input.id}`, { method: 'DELETE' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['scheduled'] }),
+  });
 }
 
 /** Programa un texto para que salga solo a la hora indicada (instante ISO con zona). */

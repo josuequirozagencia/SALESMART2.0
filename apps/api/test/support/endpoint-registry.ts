@@ -318,6 +318,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/conversations/:id/quick-replies', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
   // Mensajes programados (M5.6c, ADR-50). Pruebas: test/scheduled/scheduled.test.ts (A↔B, permisos, ventana de 24 h, límites, cancelar, envío a su hora, cancelación automática, concurrencia)
   { route: 'GET /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
+  // Vista global (M5.10). Pruebas: test/scheduled/scheduled-global.test.ts (A↔B, alcance por persona, pestañas, cursor, filtro «mías», contactos borrados)
+  { route: 'GET /v1/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled-global.test.ts' },
   { route: 'POST /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   { route: 'DELETE /v1/conversations/:id/scheduled/:scheduledId', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Usuarios del equipo (M10.3, ADR-56). Pruebas: test/team/team.test.ts (401/403, A↔B, roles, último administrador, permisos por persona, invitar, desactivar y quitar con traspaso)

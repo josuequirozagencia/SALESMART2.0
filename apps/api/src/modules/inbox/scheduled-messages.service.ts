@@ -1,14 +1,15 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { and, asc, count, eq, gt, or, sql } from 'drizzle-orm';
-import { conversations, Database, messages, scheduledMessages, type TenantTx } from '../../db';
+import { and, asc, count, desc, eq, gt, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { channelAccounts, contacts, conversations, Database, messages, scheduledMessages, type TenantTx } from '../../db';
 import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
 import { OrgDirectoryService, OrgMembersService, type OrgDirectory } from '../organizations';
 import { RealtimeService } from '../realtime';
-import { assertCanReply, assertWindowOpen, hasWindow, loadConversation, scopeOf, WINDOW_MS, type InboxAccess, type InboxScope } from './inbox.access';
-import type { CreateScheduledDto } from './inbox.dto';
+import { assertCanReply, assertWindowOpen, hasWindow, loadConversation, scopeOf, visibleTo, WINDOW_MS, type InboxAccess, type InboxScope } from './inbox.access';
+import { decode, encode } from './inbox.cursor';
+import type { CreateScheduledDto, ListScheduledQuery } from './inbox.dto';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundService } from './outbound.service';
 
@@ -38,6 +39,17 @@ export interface ScheduledView {
   mine: boolean;
   /** ¿Puedo cancelarlo? Quien lo programó, o quien ve todas las conversaciones. */
   can_cancel: boolean;
+}
+
+/** Un mensaje programado con la conversación a la que pertenece (vista global, M5.10). */
+export interface ScheduledListItem extends ScheduledView {
+  conversation: { id: string; channel_name: string; contact: { id: string; name: string } };
+}
+export interface ScheduledPage {
+  items: ScheduledListItem[];
+  next_cursor: string | null;
+  /** Solo en la primera página: cuántos hay en cada pestaña con el filtro puesto. */
+  counts: { scheduled: number; not_sent: number } | null;
 }
 
 /** Códigos de error de responder → qué le pasó al mensaje programado. */
@@ -83,6 +95,58 @@ export class ScheduledMessagesService {
         .orderBy(asc(scheduledMessages.sendAt), asc(scheduledMessages.id));
     });
     return { items: await this.views(rows, scope) };
+  }
+
+  /**
+   * Todo lo programado que esta persona ve, de todas sus conversaciones (M5.10). El alcance es el de la bandeja: con `inbox.view_all`, toda la empresa; sin él, las conversaciones que
+   * tiene asignadas o le compartieron (lo demás no aparece, igual que en la conversación). Los de contactos borrados no se muestran. Los pendientes van por hora de envío; los
+   * que no salieron (24 h), por la hora en que se resolvieron. Los conteos de ambas pestañas vienen en la primera página.
+   */
+  async listAll(access: InboxAccess, q: ListScheduledQuery): Promise<ScheduledPage> {
+    const scope = scopeOf(access);
+    const cursor = q.cursor ? decode(q.cursor) : null;
+    const since = new Date(Date.now() - RESOLVED_VISIBLE_MS);
+    const pendingSql = eq(scheduledMessages.status, 'scheduled');
+    const notSentSql = and(sql`${scheduledMessages.status} IN ('cancelled', 'failed')`, gt(scheduledMessages.resolvedAt, since));
+    const common = (): (SQL | undefined)[] => [visibleTo(scope), isNull(contacts.deletedAt), q.mine ? eq(scheduledMessages.createdBy, scope.userId) : undefined];
+    const pending = q.status === 'scheduled';
+    const orderKey = pending ? scheduledMessages.sendAt : scheduledMessages.resolvedAt;
+    const key = sql<string>`to_char(${orderKey} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
+    const total = async (tx: TenantTx, extra: SQL | undefined): Promise<number> => {
+      const [r] = await tx
+        .select({ n: count() })
+        .from(scheduledMessages)
+        .innerJoin(conversations, and(eq(conversations.organizationId, scheduledMessages.organizationId), eq(conversations.id, scheduledMessages.conversationId)))
+        .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
+        .where(and(...common(), extra));
+      return r?.n ?? 0;
+    };
+    const data = await this.db.withTenant(async (tx) => {
+      const where: (SQL | undefined)[] = [...common(), pending ? pendingSql : notSentSql];
+      if (cursor) where.push(pending ? sql`(${scheduledMessages.sendAt}, ${scheduledMessages.id}) > (${cursor.k}::timestamptz, ${cursor.id}::uuid)` : sql`(${scheduledMessages.resolvedAt}, ${scheduledMessages.id}) < (${cursor.k}::timestamptz, ${cursor.id}::uuid)`);
+      const rows = await tx
+        .select({ s: scheduledMessages, key, conversationId: conversations.id, contactId: contacts.id, contactName: contacts.name, channelName: channelAccounts.name })
+        .from(scheduledMessages)
+        .innerJoin(conversations, and(eq(conversations.organizationId, scheduledMessages.organizationId), eq(conversations.id, scheduledMessages.conversationId)))
+        .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
+        .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
+        .where(and(...where))
+        .orderBy(pending ? asc(scheduledMessages.sendAt) : desc(scheduledMessages.resolvedAt), pending ? asc(scheduledMessages.id) : desc(scheduledMessages.id))
+        .limit(q.limit + 1);
+      let counts: ScheduledPage['counts'] = null;
+      if (!cursor) {
+        counts = { scheduled: await total(tx, pendingSql), not_sent: await total(tx, notSentSql) };
+      }
+      return { rows, counts };
+    });
+    const page = data.rows.slice(0, q.limit);
+    const views = await this.views(page.map((r) => r.s), scope);
+    const last = page[page.length - 1];
+    return {
+      items: page.map((r, i) => ({ ...views[i]!, conversation: { id: r.conversationId, channel_name: r.channelName, contact: { id: r.contactId, name: r.contactName } } })),
+      next_cursor: data.rows.length > q.limit && last ? encode({ k: last.key, id: last.s.id }) : null,
+      counts: data.counts,
+    };
   }
 
   async create(access: InboxAccess, conversationId: string, dto: CreateScheduledDto): Promise<ScheduledView> {

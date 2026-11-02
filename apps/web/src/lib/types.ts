@@ -895,6 +895,17 @@ export interface ScheduledMessage {
   can_cancel: boolean;
 }
 
+/** Un mensaje programado en la vista global (M5.10), con la conversación a la que pertenece. */
+export interface ScheduledListItem extends ScheduledMessage {
+  conversation: { id: string; channel_name: string; contact: { id: string; name: string } };
+}
+export interface ScheduledPageData {
+  items: ScheduledListItem[];
+  next_cursor: string | null;
+  /** Solo en la primera página. */
+  counts: { scheduled: number; not_sent: number } | null;
+}
+
 /** Respuesta rápida (M5.6b, ADR-50): texto guardado que se inserta con `/atajo`. El texto trae las variables sin resolver. */
 export interface QuickReply {
   id: string;

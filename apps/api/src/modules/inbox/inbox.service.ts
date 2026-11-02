@@ -1,13 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queues, responseTimers, type TenantTx } from '../../db';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
+import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
 import { ContactsService } from '../contacts';
 import { likeEscape, OrgDirectoryService, OrgMembersService } from '../organizations';
 import { SlaService, type TimerContext } from '../sla';
 import { SystemTagsService, type TagView } from '../tags';
+import { decode, encode } from './inbox.cursor';
 import { abilities, channelState, collabColumn, loadConversation, scopeOf, visibleTo, type Collab, type InboxAccess, type InboxScope } from './inbox.access';
 import type { InboxTab, ListConversationsQuery, MessagesQuery } from './inbox.dto';
 import { conversationView, messageView, type ConversationParts, type ConversationView, type MessageView, type ParticipantView } from './inbox.views';
@@ -39,25 +40,6 @@ const ACTIVITY = sql`coalesce(${conversations.lastMessageAt}, ${conversations.cr
 /** Esa hora como texto con microsegundos: el cursor la devuelve EXACTA (un `Date` de JavaScript solo llega a milisegundos). */
 const KEY = sql<string>`to_char(${ACTIVITY} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 const MSG_KEY = sql<string>`to_char(${messages.sentAt} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
-
-const KEY_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-interface Cursor {
-  k: string;
-  id: string;
-}
-const encode = (c: Cursor): string => Buffer.from(JSON.stringify(c)).toString('base64url');
-function decode(raw: string): Cursor {
-  let c: Partial<Cursor>;
-  try {
-    c = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as Partial<Cursor>;
-  } catch {
-    c = {};
-  }
-  if (typeof c.k !== 'string' || !KEY_RE.test(c.k) || typeof c.id !== 'string' || !UUID_RE.test(c.id)) throw new ValidationError([{ path: 'cursor', code: 'invalid', message: 'Cursor inválido' }]);
-  return { k: c.k, id: c.id };
-}
 
 /** Conversaciones con un cronómetro de respuesta ABIERTO que cumple `extra` (la RLS acota por empresa). */
 const openTimer = (extra: SQL): SQL =>

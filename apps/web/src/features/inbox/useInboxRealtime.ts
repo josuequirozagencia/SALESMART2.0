@@ -25,6 +25,8 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
         void qc.invalidateQueries({ queryKey: ['scheduled', id] });
         void qc.invalidateQueries({ queryKey: ['conversation-ai', id] });
       }
+      // La vista global de programados (M5.10) cuelga de ['scheduled', 'all', …]: cualquier cambio de una conversación puede moverla
+      if (conversations.size > 0) void qc.invalidateQueries({ queryKey: ['scheduled', 'all'] });
       conversations.clear();
     };
     const stop = startRealtime({

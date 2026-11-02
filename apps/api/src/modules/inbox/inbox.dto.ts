@@ -46,6 +46,21 @@ export type SendTemplateDto = z.infer<typeof sendTemplateSchema>;
 export const createScheduledSchema = z.object({ text: text(MAX_MESSAGE_LENGTH), send_at: z.iso.datetime({ offset: true }) }).strict();
 export type CreateScheduledDto = z.infer<typeof createScheduledSchema>;
 
+/**
+ * Vista global de mensajes programados (M5.10): `scheduled` = los pendientes, de la hora más próxima a la más lejana · `not_sent` = los que no salieron en las últimas 24 h
+ * (cancelados o fallidos), los más recientes primero. `mine` deja solo los que programó la persona (útil para quien ve todas las conversaciones).
+ */
+export const SCHEDULED_VIEWS = ['scheduled', 'not_sent'] as const;
+export const listScheduledQuerySchema = z
+  .object({
+    status: z.enum(SCHEDULED_VIEWS).default('scheduled'),
+    mine: z.enum(['1', 'true']).transform(() => true).optional(),
+    cursor: z.string().min(1).max(300).optional(),
+    limit: z.coerce.number().int().min(1).max(50).default(25),
+  })
+  .strict();
+export type ListScheduledQuery = z.infer<typeof listScheduledQuerySchema>;
+
 export const noteSchema = z.object({ text: text(MAX_NOTE_LENGTH) }).strict();
 export type NoteDto = z.infer<typeof noteSchema>;
 
