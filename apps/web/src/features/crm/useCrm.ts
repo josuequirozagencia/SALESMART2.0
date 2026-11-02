@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { CrmCompany, CrmCompanyContact, CrmCompanyList, Note, Task, TaskList } from '../../lib/types';
+import type { CrmCompany, CrmCompanyContact, CrmCompanyList, Note, Task, TaskList, TaskRecurrenceEnds } from '../../lib/types';
 
 // ── Empresas ────────────────────────────────────────────────────────────────
 
@@ -130,6 +130,14 @@ export function useTasks(f: TaskFilters, enabled = true) {
   });
 }
 
+/** Lo que se manda para repetir una tarea (F2, ADR-58). La semanal sin días usa el del vencimiento. */
+export interface RecurrenceInput {
+  freq: 'daily' | 'weekly' | 'monthly';
+  interval: number;
+  weekdays?: number[];
+  ends: TaskRecurrenceEnds;
+}
+
 export interface TaskInput {
   title: string;
   description: string | null;
@@ -137,6 +145,10 @@ export interface TaskInput {
   assignee_id?: string;
   contact_id?: string | null;
   company_id?: string | null;
+  /** 15, 60 o 1440 minutos antes; null = al vencer. */
+  remind_before_minutes?: number | null;
+  /** Un objeto crea o cambia la repetición; null la detiene. */
+  recurrence?: RecurrenceInput | null;
 }
 
 function useRefreshTasks() {
@@ -154,6 +166,10 @@ export function useUpdateTask() {
 export function useSetTaskDone() {
   const done = useRefreshTasks();
   return useMutation({ mutationFn: ({ id, done: d }: { id: string; done: boolean }) => api<Task>(`/tasks/${id}/${d ? 'complete' : 'reopen'}`, { method: 'POST' }), onSettled: done });
+}
+/** Una tarea por su id (para abrirla desde un aviso). */
+export function useTask(id: string | null) {
+  return useQuery({ queryKey: ['tasks', 'one', id], enabled: id !== null, retry: false, queryFn: () => api<Task>(`/tasks/${id}`) });
 }
 export function useDeleteTask() {
   const done = useRefreshTasks();

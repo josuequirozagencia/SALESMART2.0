@@ -54,6 +54,27 @@ export type ListNotesQuery = z.infer<typeof listNotesQuerySchema>;
 const dueAt = z.iso.datetime({ offset: true }).transform((v) => new Date(v));
 const description = longText(1, 2000);
 
+/** Cómo se repite una tarea (F2, ADR-58). Días de la semana: 0 = domingo … 6 = sábado. La semanal sin días usa el del vencimiento; la mensual, su día del mes. */
+export const recurrenceSchema = z
+  .object({
+    freq: z.enum(['daily', 'weekly', 'monthly']),
+    interval: z.number().int().min(1).max(30).default(1),
+    weekdays: z.array(z.number().int().min(0).max(6)).min(1).max(7).optional(),
+    ends: z
+      .discriminatedUnion('kind', [
+        z.object({ kind: z.literal('never') }).strict(),
+        z.object({ kind: z.literal('on'), date: z.iso.date() }).strict(),
+        z.object({ kind: z.literal('after'), count: z.number().int().min(2).max(365) }).strict(),
+      ])
+      .default({ kind: 'never' }),
+  })
+  .strict()
+  .refine((r) => r.freq === 'weekly' || r.weekdays === undefined, { path: ['weekdays'], message: 'solo la repetición semanal lleva días de la semana' });
+export type RecurrenceDto = z.infer<typeof recurrenceSchema>;
+
+/** Aviso anticipado del vencimiento: 15 minutos, 1 hora o 1 día antes; `null` = al vencer. */
+const remindBefore = z.union([z.literal(15), z.literal(60), z.literal(1440)]).nullable();
+
 export const createTaskSchema = z
   .object({
     title: text(200),
@@ -62,9 +83,12 @@ export const createTaskSchema = z
     assignee_id: z.uuid().optional(),
     contact_id: z.uuid().nullable().optional(),
     company_id: z.uuid().nullable().optional(),
+    remind_before_minutes: remindBefore.optional(),
+    recurrence: recurrenceSchema.nullable().optional(),
   })
   .strict()
-  .refine((b) => !(b.contact_id && b.company_id), { path: ['company_id'], message: 'una tarea se vincula a un contacto o a una empresa, no a ambos' });
+  .refine((b) => !(b.contact_id && b.company_id), { path: ['company_id'], message: 'una tarea se vincula a un contacto o a una empresa, no a ambos' })
+  .refine((b) => !b.recurrence || !!b.due_at, { path: ['recurrence'], message: 'una tarea que se repite necesita fecha de vencimiento' });
 export type CreateTaskDto = z.infer<typeof createTaskSchema>;
 
 export const updateTaskSchema = z
@@ -75,6 +99,8 @@ export const updateTaskSchema = z
     assignee_id: z.uuid().optional(),
     contact_id: z.uuid().nullable().optional(),
     company_id: z.uuid().nullable().optional(),
+    remind_before_minutes: remindBefore.optional(),
+    recurrence: recurrenceSchema.nullable().optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' })

@@ -8,6 +8,7 @@ import { AutomationsJob, AutomationsModule } from '../modules/automations';
 import { ChannelsModule, WebhookEventsJob } from '../modules/channels';
 import { GhlEventsJob, GhlModule, GhlOutboxJob } from '../modules/ghl';
 import { QrHeartbeatJob, QrModule } from '../modules/qr';
+import { TaskDueNoticesJob, TaskNoticesModule } from '../modules/task-notices';
 import { InboxModule, OutboundJob, ScheduledMessagesJob, SlaSweepJob } from '../modules/inbox';
 import { OrganizationsModule, TrialExpiryJob } from '../modules/organizations';
 import { TemplatesModule, TemplatesSyncJob } from '../modules/templates';
@@ -16,8 +17,8 @@ import { SCHEDULED_JOBS, type ScheduledJob } from './scheduled-job';
 
 /** Registro de tareas periódicas. Cada módulo aporta las suyas aquí. */
 @Module({
-  imports: [OrganizationsModule, AuthModule, AttributionModule.register(), GhlModule.register(), ChannelsModule, InboxModule, TemplatesModule, AttachmentsModule, AppointmentsModule, AiModule, AutomationsModule, QrModule],
-  providers: [{ provide: SCHEDULED_JOBS, useFactory: (expiry: TrialExpiryJob, cleanup: IdentityCleanupJob, capi: CapiSenderJob, webhooks: WebhookEventsJob, outbound: OutboundJob, slaSweep: SlaSweepJob, templatesSync: TemplatesSyncJob, scheduledMessages: ScheduledMessagesJob, attachments: AttachmentsJob, reminders: AppointmentRemindersJob, ghlEvents: GhlEventsJob, ghlOutbox: GhlOutboxJob, knowledge: KnowledgeJob, agentReplies: AgentRuntimeJob, automationRuns: AutomationsJob, qrHeartbeat: QrHeartbeatJob): ScheduledJob[] => [expiry, cleanup, capi, webhooks, outbound, slaSweep, templatesSync, scheduledMessages, attachments, reminders, ghlEvents, ghlOutbox, knowledge, agentReplies, automationRuns, qrHeartbeat], inject: [TrialExpiryJob, IdentityCleanupJob, CapiSenderJob, WebhookEventsJob, OutboundJob, SlaSweepJob, TemplatesSyncJob, ScheduledMessagesJob, AttachmentsJob, AppointmentRemindersJob, GhlEventsJob, GhlOutboxJob, KnowledgeJob, AgentRuntimeJob, AutomationsJob, QrHeartbeatJob] }, JobRunner],
+  imports: [OrganizationsModule, AuthModule, AttributionModule.register(), GhlModule.register(), ChannelsModule, InboxModule, TemplatesModule, AttachmentsModule, AppointmentsModule, AiModule, AutomationsModule, QrModule, TaskNoticesModule],
+  providers: [{ provide: SCHEDULED_JOBS, useFactory: (expiry: TrialExpiryJob, cleanup: IdentityCleanupJob, capi: CapiSenderJob, webhooks: WebhookEventsJob, outbound: OutboundJob, slaSweep: SlaSweepJob, templatesSync: TemplatesSyncJob, scheduledMessages: ScheduledMessagesJob, attachments: AttachmentsJob, reminders: AppointmentRemindersJob, ghlEvents: GhlEventsJob, ghlOutbox: GhlOutboxJob, knowledge: KnowledgeJob, agentReplies: AgentRuntimeJob, automationRuns: AutomationsJob, qrHeartbeat: QrHeartbeatJob, taskDue: TaskDueNoticesJob): ScheduledJob[] => [expiry, cleanup, capi, webhooks, outbound, slaSweep, templatesSync, scheduledMessages, attachments, reminders, ghlEvents, ghlOutbox, knowledge, agentReplies, automationRuns, qrHeartbeat, taskDue], inject: [TrialExpiryJob, IdentityCleanupJob, CapiSenderJob, WebhookEventsJob, OutboundJob, SlaSweepJob, TemplatesSyncJob, ScheduledMessagesJob, AttachmentsJob, AppointmentRemindersJob, GhlEventsJob, GhlOutboxJob, KnowledgeJob, AgentRuntimeJob, AutomationsJob, QrHeartbeatJob, TaskDueNoticesJob] }, JobRunner],
   exports: [JobRunner],
 })
 export class JobsModule {}

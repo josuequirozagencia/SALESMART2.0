@@ -5,6 +5,7 @@ import type { AppLogger } from '../../../logger';
 import { APP_LOGGER } from '../../../tokens';
 import { writeAudit } from '../../audit';
 import { CustomValuesService } from '../../custom-fields';
+import { TaskNoticesService } from '../../task-notices';
 import { AgentsService } from '../agents/agents.service';
 import type { ToolCall } from '../ai.ports';
 import { MAX_AI_TASKS_PER_DAY, MAX_TASK_DAYS, MAX_TASK_NOTES, MAX_TASK_TITLE, parseArgs, TOOL_CREATE_TASK, TOOL_NAMES, TOOL_TRANSFER, TOOL_UPDATE_FIELDS, type ToolConfig, type ToolName } from './tool-defs';
@@ -63,6 +64,7 @@ export class AgentToolsService {
     @Inject(Database) private readonly db: Database,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
     @Inject(AgentsService) private readonly agents: AgentsService,
+    @Inject(TaskNoticesService) private readonly taskNotices: TaskNoticesService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -170,6 +172,7 @@ export class AgentToolsService {
             const description = `${notes ? `${notes}\n\n` : ''}Creada por el agente de IA ${ctx.agentName}.`;
             const [row] = await tx.insert(tasks).values({ title, description, dueAt, assigneeId: assignee, contactId, createdBy: assignee }).returning({ id: tasks.id });
             taskId = row!.id;
+            await this.taskNotices.assignedBySystem(tx, { taskId, assigneeId: assignee });
             await writeAudit(tx, { entityType: 'task', entityId: taskId, newValue: { title, due_at: dueAt?.toISOString() ?? null, assignee_id: assignee, contact_id: contactId, has_description: true }, source: 'ai' });
             r = result(TOOL_CREATE_TASK, 'done', 'tarea creada para el responsable de la conversación', { args: saved, summary: `creó la tarea «${title}»` });
           }

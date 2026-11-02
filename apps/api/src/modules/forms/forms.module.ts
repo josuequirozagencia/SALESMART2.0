@@ -5,6 +5,7 @@ import { ContactsModule } from '../contacts';
 import { CustomFieldsModule } from '../custom-fields';
 import { OpportunitiesModule } from '../opportunities';
 import { OrganizationsModule } from '../organizations';
+import { TaskNoticesModule } from '../task-notices';
 import { OutreachModule } from '../outreach';
 import { QueuesModule } from '../queues';
 import { TagsModule } from '../tags';
@@ -18,7 +19,7 @@ import { FormsService } from './forms.service';
 
 /** Formularios embebibles (M9.1, ADR-09/54; F07): administración de la empresa y recepción pública de lo que llena el visitante. */
 @Module({
-  imports: [AttributionModule.register(), AuthModule, ContactsModule, CustomFieldsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TemplatesModule],
+  imports: [AttributionModule.register(), AuthModule, ContactsModule, CustomFieldsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TaskNoticesModule, TemplatesModule],
   controllers: [FormsController, FormsPublicController, FormsEmbedController],
   providers: [FormsService, FormSubmitService, FormFollowUpService],
   exports: [FormsService],

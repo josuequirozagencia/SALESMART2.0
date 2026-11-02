@@ -2577,3 +2577,73 @@ test('menciones: el asesor menciona al administrador en una nota (quien no ve la
     await db.end();
   }
 });
+
+test('tareas que se repiten: el administrador crea una semanal para Carlos, a Carlos le llega «te asignó», la abre, la completa y nace la siguiente; al vencer recibe el aviso de vencimiento; otra empresa no ve nada', async ({ page, request, browser }) => {
+  test.setTimeout(240_000);
+  const s = state();
+  const { apiBase } = s;
+  const adminEmail = await createAccount(request, uniqueEmail('tareas'));
+  const carlosEmail = uniqueEmail('carlos-tareas');
+  const db = new pg.Client({ connectionString: s.adminDbUrl });
+  await db.connect();
+  const contexts: Array<{ close: () => Promise<void> }> = [];
+  try {
+    const orgId = (await db.query(`SELECT m.organization_id FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [adminEmail])).rows[0].organization_id as string;
+    const carlosId = (await db.query(`INSERT INTO users(id, email, password_hash, status, email_verified_at, full_name) SELECT gen_random_uuid(), $1, password_hash, 'active', now(), 'Carlos E2E' FROM users WHERE email = $2 RETURNING id`, [carlosEmail, adminEmail])).rows[0].id as string;
+    await db.query(`INSERT INTO organization_members(id, user_id, organization_id, role) VALUES (gen_random_uuid(), $1, $2, 'advisor')`, [carlosId, orgId]);
+
+    // 1) El administrador crea una tarea semanal para Carlos desde el diálogo
+    const tomorrow = new Date(Date.now() + 86_400_000);
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    const dueLocal = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}T${pad(tomorrow.getHours())}:${pad(tomorrow.getMinutes())}`;
+    await uiLogin(page, adminEmail);
+    await page.getByRole('link', { name: 'Tareas' }).click();
+    await page.getByRole('button', { name: 'Nueva tarea' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Nueva tarea' });
+    await dlg.getByLabel('Título').fill('Reporte semanal E2E');
+    await dlg.getByLabel('Vence').fill(dueLocal);
+    await dlg.getByLabel('Repetir').selectOption('weekly');
+    await dlg.getByLabel('Responsable').selectOption({ label: 'Carlos E2E' });
+    await dlg.getByRole('button', { name: 'Crear tarea' }).click();
+    await expect(dlg).toBeHidden();
+    const first = (await db.query(`SELECT id, recurrence_id, occurrence_no, assignee_id FROM tasks WHERE organization_id = $1`, [orgId])).rows as Array<{ id: string; recurrence_id: string | null; occurrence_no: number | null; assignee_id: string }>;
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({ occurrence_no: 1, assignee_id: carlosId });
+    expect(first[0]!.recurrence_id).not.toBeNull();
+
+    // 2) Carlos ve el aviso «te asignó», lo abre (lleva a la tarea, que ve en lectura con su repetición) y la completa: nace la siguiente
+    const carlosCtx = await browser.newContext();
+    contexts.push(carlosCtx);
+    const carlos = await carlosCtx.newPage();
+    await uiLogin(carlos, carlosEmail);
+    await expect(carlos.getByRole('button', { name: 'Avisos (1 sin leer)' })).toBeVisible({ timeout: 30_000 });
+    await carlos.getByRole('button', { name: 'Avisos (1 sin leer)' }).click();
+    const panel = carlos.getByRole('dialog', { name: 'Avisos' });
+    await expect(panel.getByText('Ana E2E te asignó la tarea «Reporte semanal E2E»')).toBeVisible();
+    await panel.getByRole('link', { name: /te asignó la tarea/ }).click();
+    const view = carlos.getByRole('dialog', { name: 'Tarea' });
+    await expect(view.getByText('Se repite:')).toBeVisible();
+    await expect(view.getByText(/Cada semana/)).toBeVisible();
+    await view.getByRole('button', { name: 'Cerrar' }).click();
+    await carlos.getByRole('checkbox', { name: 'Marcar «Reporte semanal E2E» como hecha' }).click();
+    await expect(carlos.getByRole('status')).toContainText('Hecha. Siguiente:');
+    const after = (await db.query(`SELECT status, occurrence_no FROM tasks WHERE organization_id = $1 ORDER BY occurrence_no`, [orgId])).rows as Array<{ status: string; occurrence_no: number }>;
+    expect(after).toEqual([{ status: 'done', occurrence_no: 1 }, { status: 'open', occurrence_no: 2 }]);
+
+    // 3) Llega la hora de la siguiente: la tarea periódica crea el aviso de vencimiento y Carlos lo ve en la campana
+    await db.query(`UPDATE tasks SET notice_at = now() - interval '1 minute' WHERE organization_id = $1 AND status = 'open'`, [orgId]);
+    await expect.poll(async () => (await db.query(`SELECT count(*)::int n FROM notifications WHERE organization_id = $1 AND type = 'task_due'`, [orgId])).rows[0].n, { timeout: 120_000, intervals: [3_000] }).toBe(1);
+    await carlos.reload();
+    await expect(carlos.getByRole('button', { name: 'Avisos (1 sin leer)' })).toBeVisible({ timeout: 30_000 });
+    await carlos.getByRole('button', { name: 'Avisos (1 sin leer)' }).click();
+    await expect(carlos.getByRole('dialog', { name: 'Avisos' }).getByText(/^La tarea «Reporte semanal E2E» vence/)).toBeVisible();
+
+    // 4) Otra empresa no ve la tarea ni los avisos
+    const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('tareas-otra')))}` };
+    expect(((await (await request.get(`${apiBase}/v1/notifications`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    expect((await request.get(`${apiBase}/v1/tasks/${first[0]!.id}`, { headers: other })).status()).toBe(404);
+  } finally {
+    for (const c of contexts) await c.close();
+    await db.end();
+  }
+});

@@ -161,7 +161,7 @@ describe('Inbox · notas con menciones', () => {
 });
 
 const notice = (over: Partial<AppNotification> = {}): AppNotification => ({
-  id: 'a1', type: 'mention', created_at: ago(5 * MIN), read_at: null, actor: { id: 'u3', name: 'Carolina Vera' }, conversation: { id: 'c1', contact: { id: 'k1', name: 'Ana Torres' } }, message_id: 'm1', excerpt: 'Alicia, ¿puedes aprobar el descuento?', ...over,
+  id: 'a1', type: 'mention', created_at: ago(5 * MIN), read_at: null, actor: { id: 'u3', name: 'Carolina Vera' }, conversation: { id: 'c1', contact: { id: 'k1', name: 'Ana Torres' } }, message_id: 'm1', excerpt: 'Alicia, ¿puedes aprobar el descuento?', task: null, ...over,
 });
 
 describe('campana de avisos', () => {

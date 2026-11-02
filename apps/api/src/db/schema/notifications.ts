@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { conversations, messages } from './conversations';
+import { tasks } from './crm';
 import { tenantTable } from './helpers';
 import { users } from './identity';
 
@@ -42,15 +43,22 @@ export const notifications = tenantTable(
     actorId: uuid('actor_id').references(() => users.id),
     conversationId: uuid('conversation_id'),
     messageId: uuid('message_id'),
+    /** Avisos de tareas (F2, ADR-58). */
+    taskId: uuid('task_id'),
     createdAt: ts('created_at').notNull().defaultNow(),
     readAt: ts('read_at'),
   },
   (t) => [
     foreignKey({ name: 'notifications_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'notifications_message_fk', columns: [t['organizationId']!, t['messageId']!], foreignColumns: [messages.organizationId, messages.id] }),
-    check('notifications_type_valid', sql`${t['type']!} IN ('mention')`),
+    foreignKey({ name: 'notifications_task_fk', columns: [t['organizationId']!, t['taskId']!], foreignColumns: [tasks.organizationId, tasks.id] }),
+    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due')`),
     // Una mención lleva su conversación y su nota
     check('notifications_mention_shape', sql`${t['type']!} <> 'mention' OR (${t['conversationId']!} IS NOT NULL AND ${t['messageId']!} IS NOT NULL AND ${t['actorId']!} IS NOT NULL)`),
+    // Un aviso de tarea lleva su tarea (y ninguna conversación)
+    check('notifications_task_shape', sql`${t['type']!} NOT IN ('task_assigned', 'task_due') OR (${t['taskId']!} IS NOT NULL AND ${t['conversationId']!} IS NULL AND ${t['messageId']!} IS NULL)`),
+    // Un solo aviso por persona, tarea y tipo (repetir la tarea periódica no duplica)
+    uniqueIndex('notifications_task_uq').on(t['organizationId']!, t['userId']!, t['taskId']!, t['type']!).where(sql`${t['taskId']!} IS NOT NULL`),
     // Un solo aviso por persona y nota
     uniqueIndex('notifications_mention_uq').on(t['organizationId']!, t['userId']!, t['messageId']!).where(sql`${t['type']!} = 'mention'`),
     // La lista de una persona, lo más reciente primero, y el contador de no leídos

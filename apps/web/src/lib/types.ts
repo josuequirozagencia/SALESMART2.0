@@ -461,6 +461,18 @@ export interface Note {
   can_edit: boolean;
   can_delete: boolean;
 }
+/** Cómo se repite una tarea (F2, ADR-58). Días de la semana: 0 = domingo … 6 = sábado. */
+export type TaskRecurrenceEnds = { kind: 'never' } | { kind: 'on'; date: string } | { kind: 'after'; count: number };
+export interface TaskRecurrence {
+  freq: 'daily' | 'weekly' | 'monthly';
+  interval: number;
+  weekdays: number[] | null;
+  day_of_month: number | null;
+  ends: TaskRecurrenceEnds;
+  /** Qué ocurrencia de la serie es esta tarea (la primera es la 1). */
+  occurrence_no: number;
+  occurrences_created: number;
+}
 export interface Task {
   id: string;
   title: string;
@@ -472,6 +484,12 @@ export interface Task {
   contact: { id: string; name: string } | null;
   company: { id: string; name: string } | null;
   created_by: string;
+  /** Aviso anticipado del vencimiento (15, 60 o 1440 minutos antes); null = al vencer. */
+  remind_before_minutes: number | null;
+  /** La regla, si la tarea pertenece a una serie que sigue activa. */
+  recurrence: TaskRecurrence | null;
+  /** Solo al completar una tarea que se repite: la siguiente (null si la serie terminó). */
+  next_task?: Task | null;
   overdue: boolean;
   can_edit: boolean;
   can_complete: boolean;
@@ -820,16 +838,20 @@ export interface MentionOption {
   name: string;
   can_view: boolean;
 }
-/** Un aviso del centro de avisos (F1, ADR-57): por ahora solo menciones en notas. */
+/** Un aviso del centro de avisos: menciones en notas (F1, ADR-57) y avisos de tareas (F2, ADR-58). */
 export interface AppNotification {
   id: string;
-  type: 'mention';
+  type: 'mention' | 'task_assigned' | 'task_due';
   created_at: string;
   read_at: string | null;
+  /** Null en un aviso de vencimiento o de una tarea que creó el sistema. */
   actor: { id: string; name: string } | null;
-  conversation: { id: string; contact: { id: string; name: string } };
+  /** Solo en las menciones. */
+  conversation: { id: string; contact: { id: string; name: string } } | null;
   message_id: string | null;
   excerpt: string | null;
+  /** Solo en los avisos de tareas. */
+  task: { id: string; title: string; due_at: string | null; status: 'open' | 'done'; contact_id: string | null } | null;
 }
 export interface NotificationPage {
   items: AppNotification[];

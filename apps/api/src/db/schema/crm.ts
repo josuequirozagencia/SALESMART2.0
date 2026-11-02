@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, foreignKey, index, integer, jsonb, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, date, foreignKey, index, integer, jsonb, primaryKey, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { tenantTable } from './helpers';
 import { users } from './identity';
@@ -342,6 +342,40 @@ export const notes = tenantTable(
  * Tarea (M3.6, ADR-48): pendiente de una persona, con vencimiento opcional y vinculada a lo sumo a un contacto o a una empresa. `done` ⇔ `completed_at`.
  * Borrado LÓGICO. Sin recordatorios ni repetición (llegan con la Agenda y las automatizaciones).
  */
+/**
+ * Serie de una tarea que se repite (F2, ADR-58). TABLA DE NEGOCIO (tenant): RLS FORZADA; SIN DELETE (la serie termina con `ended_at` y un motivo: `completed` = llegó a su fin, `stopped` = alguien la
+ * detuvo, `deleted` = se borró la tarea abierta). Solo guarda la REGLA y un contador; lo demás (título, responsable, contacto…) se copia de la ocurrencia que se completa. Una sola tarea abierta por serie.
+ * `weekdays`: 0 = domingo … 6 = sábado (semanal); `day_of_month`: 1–31 (mensual; si el mes no lo tiene, el último día). `ends_on` es una fecha de la zona horaria de la empresa.
+ */
+export const taskRecurrences = tenantTable(
+  'task_recurrences',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    freq: text('freq').notNull(),
+    intervalN: smallint('interval_n').notNull().default(1),
+    weekdays: integer('weekdays').array(),
+    dayOfMonth: smallint('day_of_month'),
+    endsKind: text('ends_kind').notNull().default('never'),
+    endsOn: date('ends_on', { mode: 'string' }),
+    endsAfter: smallint('ends_after'),
+    /** Cuántas ocurrencias se han creado (la primera cuenta). */
+    occurrencesCreated: integer('occurrences_created').notNull().default(1),
+    endedAt: ts('ended_at'),
+    endedReason: text('ended_reason'),
+    createdBy: uuid('created_by').notNull().references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('task_recurrences_freq_valid', sql`${t['freq']!} IN ('daily', 'weekly', 'monthly')`),
+    check('task_recurrences_interval_valid', sql`${t['intervalN']!} BETWEEN 1 AND 30`),
+    check('task_recurrences_weekdays_valid', sql`(${t['freq']!} = 'weekly') = (${t['weekdays']!} IS NOT NULL) AND (${t['weekdays']!} IS NULL OR (cardinality(${t['weekdays']!}) BETWEEN 1 AND 7 AND ${t['weekdays']!} <@ ARRAY[0,1,2,3,4,5,6]))`),
+    check('task_recurrences_month_day_valid', sql`(${t['freq']!} = 'monthly') = (${t['dayOfMonth']!} IS NOT NULL) AND (${t['dayOfMonth']!} IS NULL OR ${t['dayOfMonth']!} BETWEEN 1 AND 31)`),
+    check('task_recurrences_ends_valid', sql`(${t['endsKind']!} = 'never' AND ${t['endsOn']!} IS NULL AND ${t['endsAfter']!} IS NULL) OR (${t['endsKind']!} = 'on' AND ${t['endsOn']!} IS NOT NULL AND ${t['endsAfter']!} IS NULL) OR (${t['endsKind']!} = 'after' AND ${t['endsAfter']!} BETWEEN 2 AND 365 AND ${t['endsOn']!} IS NULL)`),
+    check('task_recurrences_ended_valid', sql`(${t['endedAt']!} IS NULL) = (${t['endedReason']!} IS NULL) AND (${t['endedReason']!} IS NULL OR ${t['endedReason']!} IN ('completed', 'stopped', 'deleted'))`),
+  ],
+);
+
 export const tasks = tenantTable(
   'tasks',
   {
@@ -356,11 +390,24 @@ export const tasks = tenantTable(
     contactId: uuid('contact_id'),
     companyId: uuid('company_id'),
     createdBy: uuid('created_by').notNull().references(() => users.id),
+    // Repetición y avisos (F2, ADR-58): la serie a la que pertenece y su número, el aviso anticipado y CUÁNDO toca avisar (null = nada pendiente; se arma al crear o editar si ese momento está en el futuro)
+    recurrenceId: uuid('recurrence_id'),
+    occurrenceNo: integer('occurrence_no'),
+    remindBeforeMinutes: smallint('remind_before_minutes'),
+    noticeAt: ts('notice_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     deletedAt: ts('deleted_at'),
   },
   (t) => [
+    foreignKey({ name: 'tasks_recurrence_fk', columns: [t['organizationId']!, t['recurrenceId']!], foreignColumns: [taskRecurrences.organizationId, taskRecurrences.id] }),
+    check('tasks_recurrence_consistent', sql`(${t['recurrenceId']!} IS NULL) = (${t['occurrenceNo']!} IS NULL)`),
+    check('tasks_remind_valid', sql`${t['remindBeforeMinutes']!} IS NULL OR ${t['remindBeforeMinutes']!} IN (15, 60, 1440)`),
+    // Una ocurrencia por número y UNA sola abierta por serie: el respaldo de la BD contra completar dos veces a la vez
+    uniqueIndex('tasks_recurrence_occurrence_uq').on(t['organizationId']!, t['recurrenceId']!, t['occurrenceNo']!).where(sql`${t['recurrenceId']!} IS NOT NULL`),
+    uniqueIndex('tasks_recurrence_open_uq').on(t['organizationId']!, t['recurrenceId']!).where(sql`${t['recurrenceId']!} IS NOT NULL AND ${t['status']!} = 'open' AND ${t['deletedAt']!} IS NULL`),
+    // Lo que la tarea de avisos recorre
+    index('tasks_notice_idx').on(t['organizationId']!, t['noticeAt']!).where(sql`${t['noticeAt']!} IS NOT NULL AND ${t['status']!} = 'open' AND ${t['deletedAt']!} IS NULL`),
     foreignKey({ name: 'tasks_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
     foreignKey({ name: 'tasks_company_fk', columns: [t['organizationId']!, t['companyId']!], foreignColumns: [companies.organizationId, companies.id] }),
     check('tasks_title_len', sql`length(btrim(${t['title']!})) BETWEEN 1 AND 200`),

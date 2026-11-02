@@ -352,6 +352,8 @@ describe('motor: disparadores, condiciones y acciones', () => {
     expect(await tagNames(c)).toEqual([]);
     const [task] = await tasksOf();
     expect(task).toMatchObject({ title: 'Llamar a Lucía', assignee_id: IDS.carol, contact_id: c, status: 'open' });
+    // F2 (ADR-58): el responsable recibe el aviso «te asignaron», sin actor (la creó una automatización)
+    expect((await admin.query('SELECT user_id, type, actor_id FROM notifications WHERE task_id = $1', [task!['id']])).rows).toEqual([{ user_id: IDS.carol, type: 'task_assigned', actor_id: null }]);
     expect(new Date(task!['due_at'] as string).getTime() - Date.now()).toBeGreaterThan(110 * 60_000);
     const got = await json<{ custom_fields: Record<string, unknown> }>(await call('GET', `/contacts/${c}`, T.alice));
     expect(got.custom_fields['servicio']).toBe('corte');

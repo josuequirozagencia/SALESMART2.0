@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, count, desc, eq, gt, inArray, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
-import { contacts, conversations, Database, messageMentions, messages, notifications, type TenantTx } from '../../db';
+import { and, count, desc, eq, exists, gt, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
+import { contacts, conversations, Database, messageMentions, messages, notifications, tasks, type TenantTx } from '../../db';
 import { NotFoundError } from '../../errors';
 import { decodeTimeCursor, encodeTimeCursor } from '../../http';
 import { TenantContext } from '../../tenant';
@@ -17,16 +17,22 @@ export interface NotificationsAccess {
   readonly viewAll: boolean;
 }
 
+export type NotificationType = 'mention' | 'task_assigned' | 'task_due';
+
 export interface NotificationView {
   id: string;
-  type: 'mention';
+  type: NotificationType;
   created_at: string;
   read_at: string | null;
+  /** Quien lo provocó (null en un aviso de vencimiento o de una tarea que creó el sistema). */
   actor: { id: string; name: string } | null;
-  conversation: { id: string; contact: { id: string; name: string } };
+  /** Solo en las menciones. */
+  conversation: { id: string; contact: { id: string; name: string } } | null;
   message_id: string | null;
   /** Primeras palabras de la nota (se lee del mensaje al pedir la lista: el aviso no guarda el texto). */
   excerpt: string | null;
+  /** Solo en los avisos de tareas (F2, ADR-58): el título y el vencimiento se leen de la tarea al pedir la lista. */
+  task: { id: string; title: string; due_at: string | null; status: 'open' | 'done'; contact_id: string | null } | null;
 }
 
 export interface NotificationPage {
@@ -85,9 +91,31 @@ export class NotificationsService {
     return out;
   }
 
-  /** Condiciones comunes de «mis avisos visibles»: míos, de los últimos 90 días y de una conversación que puedo abrir con su contacto vigente. */
-  private mine(me: string, viewAll: boolean, since: Date, extra?: SQL): (SQL | undefined)[] {
-    return [eq(notifications.userId, me), gt(notifications.createdAt, since), isNull(contacts.deletedAt), conversationVisibleTo(me, viewAll), extra];
+  /**
+   * Condiciones comunes de «mis avisos visibles»: míos y de los últimos 90 días, y además: una mención solo si la conversación todavía se puede abrir y su contacto sigue vigente; un aviso de tarea solo
+   * mientras la tarea existe, no está borrada y sigue siendo mía (y el de vencimiento, mientras siga pendiente). Con subconsultas `EXISTS` (la unión por la izquierda tipa mal en este Drizzle).
+   */
+  private mine(me: string, viewAll: boolean, tx: TenantTx, since: Date, extra?: SQL): (SQL | undefined)[] {
+    const mention = and(
+      eq(notifications.type, 'mention'),
+      exists(
+        tx
+          .select({ one: sql`1` })
+          .from(conversations)
+          .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
+          .where(and(eq(conversations.organizationId, notifications.organizationId), eq(conversations.id, notifications.conversationId), isNull(contacts.deletedAt), conversationVisibleTo(me, viewAll))),
+      ),
+    );
+    const task = and(
+      inArray(notifications.type, ['task_assigned', 'task_due']),
+      exists(
+        tx
+          .select({ one: sql`1` })
+          .from(tasks)
+          .where(and(eq(tasks.organizationId, notifications.organizationId), eq(tasks.id, notifications.taskId), isNull(tasks.deletedAt), eq(tasks.assigneeId, me), or(ne(notifications.type, 'task_due'), eq(tasks.status, 'open')))),
+      ),
+    );
+    return [eq(notifications.userId, me), gt(notifications.createdAt, since), or(mention, task), extra];
   }
 
   async list(access: NotificationsAccess, q: ListNotificationsQuery): Promise<NotificationPage> {
@@ -96,13 +124,11 @@ export class NotificationsService {
     const since = new Date(Date.now() - VISIBLE_DAYS * 24 * 60 * 60 * 1000);
     const cursor = q.cursor ? decodeTimeCursor(q.cursor) : null;
     const data = await this.db.withTenant(async (tx) => {
-      const where: (SQL | undefined)[] = this.mine(me, access.viewAll, since, q.unread ? isNull(notifications.readAt) : undefined);
+      const where: (SQL | undefined)[] = this.mine(me, access.viewAll, tx, since, q.unread ? isNull(notifications.readAt) : undefined);
       if (cursor) where.push(or(lt(notifications.createdAt, sql`${cursor.k}::timestamptz`), and(eq(notifications.createdAt, sql`${cursor.k}::timestamptz`), lt(notifications.id, cursor.id))));
       const rows = await tx
-        .select({ n: notifications, key: KEY, contactId: contacts.id, contactName: contacts.name })
+        .select({ n: notifications, key: KEY })
         .from(notifications)
-        .innerJoin(conversations, and(eq(conversations.organizationId, notifications.organizationId), eq(conversations.id, notifications.conversationId)))
-        .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
         .where(and(...where))
         .orderBy(desc(notifications.createdAt), desc(notifications.id))
         .limit(q.limit + 1);
@@ -111,30 +137,45 @@ export class NotificationsService {
         const [r] = await tx
           .select({ n: count() })
           .from(notifications)
-          .innerJoin(conversations, and(eq(conversations.organizationId, notifications.organizationId), eq(conversations.id, notifications.conversationId)))
-          .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
-          .where(and(...this.mine(me, access.viewAll, since, isNull(notifications.readAt))));
+          .where(and(...this.mine(me, access.viewAll, tx, since, isNull(notifications.readAt))));
         unread = r?.n ?? 0;
       }
-      // El extracto sale del mensaje (el aviso no guarda el texto)
-      const ids = rows.map((r) => r.n.messageId).filter((x): x is string => x !== null);
-      const bodies = new Map<string, string | null>(ids.length === 0 ? [] : (await tx.select({ id: messages.id, body: messages.body }).from(messages).where(inArray(messages.id, ids))).map((m) => [m.id, m.body]));
-      return { rows, unread, bodies };
+      const page = rows.slice(0, q.limit);
+      // El extracto sale del mensaje (el aviso no guarda el texto); el contacto y la tarea, de sus tablas
+      const messageIds = page.map((r) => r.n.messageId).filter((x): x is string => x !== null);
+      const bodies = new Map<string, string | null>(messageIds.length === 0 ? [] : (await tx.select({ id: messages.id, body: messages.body }).from(messages).where(inArray(messages.id, messageIds))).map((m) => [m.id, m.body]));
+      const conversationIds = page.map((r) => r.n.conversationId).filter((x): x is string => x !== null);
+      const contactsByConversation = new Map<string, { id: string; name: string }>(
+        conversationIds.length === 0
+          ? []
+          : (await tx.select({ conversationId: conversations.id, contactId: contacts.id, name: contacts.name }).from(conversations).innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId))).where(inArray(conversations.id, conversationIds))).map(
+              (c) => [c.conversationId, { id: c.contactId, name: c.name }],
+            ),
+      );
+      const taskIds = page.map((r) => r.n.taskId).filter((x): x is string => x !== null);
+      const tasksById = new Map<string, { id: string; title: string; dueAt: Date | null; status: string; contactId: string | null }>(
+        taskIds.length === 0 ? [] : (await tx.select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, status: tasks.status, contactId: tasks.contactId }).from(tasks).where(inArray(tasks.id, taskIds))).map((t) => [t.id, t]),
+      );
+      return { rows, page, unread, bodies, contactsByConversation, tasksById };
     });
-    const page = data.rows.slice(0, q.limit);
-    const names = await this.members.labels([...new Set(page.map((r) => r.n.actorId).filter((x): x is string => x !== null))]);
-    const last = page[page.length - 1];
+    const names = await this.members.labels([...new Set(data.page.map((r) => r.n.actorId).filter((x): x is string => x !== null))]);
+    const last = data.page[data.page.length - 1];
     return {
-      items: page.map((r) => ({
-        id: r.n.id,
-        type: 'mention' as const,
-        created_at: r.n.createdAt.toISOString(),
-        read_at: r.n.readAt?.toISOString() ?? null,
-        actor: r.n.actorId ? (names.get(r.n.actorId) ?? { id: r.n.actorId, name: 'Persona desconocida' }) : null,
-        conversation: { id: r.n.conversationId!, contact: { id: r.contactId, name: r.contactName } },
-        message_id: r.n.messageId,
-        excerpt: r.n.messageId && data.bodies.get(r.n.messageId) ? excerpt(data.bodies.get(r.n.messageId)!) : null,
-      })),
+      items: data.page.map((r) => {
+        const contact = r.n.conversationId ? data.contactsByConversation.get(r.n.conversationId) : undefined;
+        const task = r.n.taskId ? data.tasksById.get(r.n.taskId) : undefined;
+        return {
+          id: r.n.id,
+          type: r.n.type as NotificationType,
+          created_at: r.n.createdAt.toISOString(),
+          read_at: r.n.readAt?.toISOString() ?? null,
+          actor: r.n.actorId ? (names.get(r.n.actorId) ?? { id: r.n.actorId, name: 'Persona desconocida' }) : null,
+          conversation: r.n.conversationId && contact ? { id: r.n.conversationId, contact: { id: contact.id, name: contact.name } } : null,
+          message_id: r.n.messageId,
+          excerpt: r.n.messageId && data.bodies.get(r.n.messageId) ? excerpt(data.bodies.get(r.n.messageId)!) : null,
+          task: task ? { id: task.id, title: task.title, due_at: task.dueAt ? task.dueAt.toISOString() : null, status: task.status as 'open' | 'done', contact_id: task.contactId } : null,
+        };
+      }),
       next_cursor: data.rows.length > q.limit && last ? encodeTimeCursor({ k: last.key, id: last.n.id }) : null,
       unread: data.unread,
     };

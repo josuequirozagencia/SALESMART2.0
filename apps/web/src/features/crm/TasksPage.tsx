@@ -1,22 +1,27 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import type { Task } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { useOwners } from '../contacts/useContacts';
 import { TaskDialog } from './TaskDialog';
-import { TaskRow } from './TasksPanel';
-import { DEFAULT_TASK_FILTERS, useTasks, type TaskFilters, type TaskStatusFilter } from './useCrm';
+import { completionNotice, TaskRow } from './TasksPanel';
+import { DEFAULT_TASK_FILTERS, useTask, useTasks, type TaskFilters, type TaskStatusFilter } from './useCrm';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 const STATUS_LABEL: Record<TaskStatusFilter, string> = { open: 'Pendientes', done: 'Hechas', all: 'Todas' };
 
 /**
  * Tareas (M3.6, ADR-48). Por defecto, las pendientes asignadas a la persona. Quien ve todos los contactos puede ver las de toda la empresa o las de otra
- * persona; el resto solo ve las suyas (el servidor lo impone). Sin recordatorios por ahora: llegan con la Agenda.
+ * persona; el resto solo ve las suyas (el servidor lo impone). Las tareas se pueden repetir y avisan a su responsable (F2, ADR-58); `?task=<id>` abre una tarea (los avisos de la campana enlazan así).
  */
 export function TasksPage() {
   const [filters, setFilters] = useState<TaskFilters>(DEFAULT_TASK_FILTERS);
   const [dialog, setDialog] = useState<{ task?: Task } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [params, setParams] = useSearchParams();
+  const wanted = params.get('task');
+  const one = useTask(wanted);
   const q = useTasks(filters);
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const first = q.data?.pages[0];
@@ -25,6 +30,11 @@ export function TasksPage() {
   const total = first?.total ?? null;
   const owners = useOwners(viewAll);
   const set = (patch: Partial<TaskFilters>) => setFilters((f) => ({ ...f, ...patch }));
+  const shown = dialog ?? (one.data ? { task: one.data } : null);
+  const closeDialog = () => {
+    setDialog(null);
+    if (wanted) setParams({}, { replace: true });
+  };
 
   return (
     <div className="grid gap-4">
@@ -52,6 +62,8 @@ export function TasksPage() {
           Solo vencidas
         </label>
       </div>
+      {wanted && one.isError ? <Alert>No encontramos esa tarea: quizá ya no es tuya o se borró. <Button variant="link" onClick={() => setParams({}, { replace: true })}>Cerrar aviso</Button></Alert> : null}
+      {notice ? <p role="status" className="rounded-xl bg-accent-soft px-3 py-2 text-[13px]">{notice}</p> : null}
       {total !== null ? <p className="text-[12.5px] text-muted" aria-live="polite">{total === 1 ? '1 tarea' : `${total} tareas`}</p> : null}
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando tareas" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar las tareas.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
@@ -60,9 +72,9 @@ export function TasksPage() {
           {filters.overdue ? 'No tienes tareas vencidas.' : filters.status === 'done' ? 'Todavía no hay tareas hechas.' : canWrite ? 'No hay tareas pendientes. Crea una con «Nueva tarea».' : 'No hay tareas pendientes.'}
         </p>
       ) : null}
-      <ul className="grid gap-2">{items.map((t) => <TaskRow key={t.id} task={t} onOpen={(task) => setDialog({ task })} />)}</ul>
+      <ul className="grid gap-2">{items.map((t) => <TaskRow key={t.id} task={t} onOpen={(task) => setDialog({ task })} onCompleted={(done) => setNotice(completionNotice(done))} />)}</ul>
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
-      {dialog ? <TaskDialog {...(dialog.task ? { task: dialog.task } : {})} owners={owners.data ?? []} canAssign={viewAll} onClose={() => setDialog(null)} /> : null}
+      {shown ? <TaskDialog key={shown.task?.id ?? 'new'} {...(shown.task ? { task: shown.task } : {})} owners={owners.data ?? []} canAssign={viewAll} onClose={closeDialog} /> : null}
     </div>
   );
 }

@@ -19,7 +19,7 @@ const ANA: Contact = {
 };
 const note = (id: string, body: string, over: Partial<Note> = {}): Note => ({ id, body, author: { id: 'u1', name: 'Ana Pérez' }, edited_at: null, created_at: '2026-10-10T15:00:00.000Z', can_edit: true, can_delete: true, ...over });
 const task = (id: string, title: string, over: Partial<Task> = {}): Task => ({
-  id, title, description: null, due_at: null, status: 'open', completed_at: null, assignee: { id: 'u1', name: 'Ana Pérez' }, contact: null, company: null, created_by: 'u1', overdue: false, can_edit: true, can_complete: true,
+  id, title, description: null, due_at: null, status: 'open', completed_at: null, assignee: { id: 'u1', name: 'Ana Pérez' }, contact: null, company: null, created_by: 'u1', remind_before_minutes: null, recurrence: null, overdue: false, can_edit: true, can_complete: true,
   created_at: '2026-10-10T15:00:00.000Z', updated_at: '2026-10-10T15:00:00.000Z', ...over,
 });
 

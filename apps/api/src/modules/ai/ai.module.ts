@@ -5,6 +5,7 @@ import { AttachmentsModule } from '../attachments';
 import { ContactsModule } from '../contacts';
 import { CustomFieldsModule } from '../custom-fields';
 import { RealtimeModule } from '../realtime';
+import { TaskNoticesModule } from '../task-notices';
 import { QueuesModule } from '../queues';
 import { SlaModule } from '../sla';
 import { OrganizationsModule } from '../organizations';
@@ -37,7 +38,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
 
 /** IA (M8, ADR-53): créditos (M8.1), conocimiento (M8.2), agentes (M8.3), simulador de prueba (M8.4) y agente en vivo en el Inbox (M8.5). */
 @Module({
-  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule, RealtimeModule, SlaModule, QueuesModule],
+  imports: [OrganizationsModule, PlatformModule, AttachmentsModule, ContactsModule, CustomFieldsModule, RealtimeModule, SlaModule, QueuesModule, TaskNoticesModule],
   controllers: [AiCreditsController, AiAdminController, KnowledgeController, AgentsController, ConversationAiController],
   providers: [
     AiCreditsService,
