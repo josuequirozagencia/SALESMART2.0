@@ -9,6 +9,7 @@ import type { PasswordHasher } from '../../../security';
 import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
 import { TrialsService } from '../../organizations';
 import { PASSWORD_HASHER } from '../auth.tokens';
+import { orgReady } from '../org-ready';
 import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
 import { CAPTCHA_VERIFIER, type CaptchaVerifier } from './ports';
 import { requireCaptcha } from './captcha-check';
@@ -110,7 +111,7 @@ export class SignupService {
     if (!ipLimit.allowed) throw new TooManyAttemptsError(ipLimit.retryAfterSeconds);
 
     const maxAttempts = this.cfg.signup.codeMaxAttempts;
-    const ok = await this.db.withIdentity(async (tx) => {
+    const ok = await this.db.withIdentity(async (tx): Promise<{ organizationId: string; userId: string } | false> => {
       const [row] = await tx
         .select({ id: emailVerifications.id, userId: emailVerifications.userId, codeHmac: emailVerifications.codeHmac, expiresAt: emailVerifications.expiresAt, attempts: emailVerifications.attempts, orgName: emailVerifications.pendingOrgName, tz: emailVerifications.pendingTimezone })
         .from(emailVerifications)
@@ -141,9 +142,11 @@ export class SignupService {
       // La prueba de 7 días empieza AQUÍ, al verificar el correo (ADR-23 #2), en la misma transacción que la organización
       await this.trials.startFor(tx, { organizationId: org!.id, ownerUserId: row.userId }, now);
       await tx.update(users).set({ status: 'active', emailVerifiedAt: now, updatedAt: now }).where(eq(users.id, row.userId));
-      return true;
+      return { organizationId: org!.id, userId: row.userId };
     });
     if (!ok) throw new InvalidVerificationCodeError();
+    // Registro propio: la empresa ya tiene su primer administrador, hora de los datos de ejemplo (M10.6). Sin esperar: no frena la respuesta
+    void orgReady.emit({ organizationId: ok.organizationId, ownerUserId: ok.userId }, (err) => this.log.error({ err: err instanceof Error ? err.message : 'desconocido' }, 'no se pudieron crear los datos de ejemplo de la empresa'));
   }
 
   // ── helpers ──────────────────────────────────────────────────────────────

@@ -1362,7 +1362,8 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     await uiLogin(page, email);
     await page.getByRole('link', { name: 'Configuración' }).click();
     await page.getByRole('link', { name: 'Departamentos' }).click();
-    await expect(page.getByText(/Aún no hay departamentos/)).toBeVisible();
+    // Desde M10.6 la empresa nace con el departamento de ejemplo «General» (con reparto apagado)
+    await expect(page.getByRole('button', { name: 'Configurar General' })).toBeVisible();
     await page.getByRole('button', { name: 'Nuevo departamento' }).click();
     const nuevo = page.getByRole('dialog', { name: 'Nuevo departamento' });
     // Asistente (M10.1): nombre → equipo → horario (el de la empresa) → reparto
@@ -1430,7 +1431,8 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
 
     // 6) Otra empresa no ve la cola ni puede tocarla
     const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('colas-otra')))}` };
-    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    // Otra empresa solo ve su propio departamento de ejemplo (M10.6), nunca los de esta
+    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: Array<{ is_sample: boolean }> }).items.filter((q) => !q.is_sample)).toEqual([]);
     const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
     const qid = ((await (await request.get(`${apiBase}/v1/queues`, { headers: mine })).json()) as { items: Array<{ id: string }> }).items[0]!.id;
     expect((await request.patch(`${apiBase}/v1/queues/${qid}`, { headers: { ...other, 'content-type': 'application/json' }, data: { name: 'Robada' } })).status()).toBe(404);
@@ -1970,7 +1972,8 @@ test('mensajes automáticos de la cola: el administrador escribe el saludo, el a
 
     // 7) Otra empresa no ve ni toca la cola ni sus mensajes
     const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('auto-otra')))}`, 'content-type': 'application/json' };
-    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: unknown[] }).items).toEqual([]);
+    // Otra empresa solo ve su propio departamento de ejemplo (M10.6), nunca los de esta
+    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: Array<{ is_sample: boolean }> }).items.filter((q) => !q.is_sample)).toEqual([]);
     expect((await request.patch(`${apiBase}/v1/queues/${queue.id}`, { headers: other, data: { greeting: 'robado' } })).status()).toBe(404);
     expect((await db.query(`SELECT greeting_text FROM queues WHERE id = $1`, [queue.id])).rows[0].greeting_text).toBe(GREETING);
   } finally {

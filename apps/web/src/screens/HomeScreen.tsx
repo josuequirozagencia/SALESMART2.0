@@ -1,4 +1,5 @@
 import { Dashboard } from '../features/analytics/Dashboard';
+import { OnboardingCard } from '../features/onboarding/OnboardingCard';
 import type { Me } from '../lib/types';
 
 /**
@@ -8,6 +9,7 @@ export function HomeScreen({ me }: { me: Me }) {
   return (
     <div className="grid gap-5">
       <h1 className="text-[22px] font-bold">Hola, {me.organization.name}</h1>
+      <OnboardingCard me={me} />
       <Dashboard />
     </div>
   );

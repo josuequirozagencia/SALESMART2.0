@@ -56,6 +56,8 @@ export interface QueueView {
   channels: Array<{ id: string; name: string }>;
   /** Conversaciones sin asignar que le corresponden. */
   unassigned_count: number;
+  /** Dato de ejemplo creado por el sistema (M10.6): la interfaz lo marca «Ejemplo». */
+  is_sample: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +98,7 @@ const view = (q: QueueRow, members: QueueMemberView[], channels: QueueView['chan
   members,
   channels,
   unassigned_count: unassigned,
+  is_sample: q.isSample,
   created_at: q.createdAt.toISOString(),
   updated_at: q.updatedAt.toISOString(),
 });

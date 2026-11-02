@@ -48,6 +48,8 @@ export interface Action {
 export interface Automation {
   id: string;
   name: string;
+  /** Dato de ejemplo creado por el sistema (M10.6): se marca «Ejemplo». */
+  is_sample?: boolean | undefined;
   description: string | null;
   status: AutomationStatus;
   trigger: Trigger;

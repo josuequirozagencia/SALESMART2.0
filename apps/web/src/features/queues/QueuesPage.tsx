@@ -4,6 +4,7 @@ import { initials } from '../../lib/format';
 import type { Queue } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
+import { SamplePill } from '../../ui/SamplePill';
 import { DepartmentWizard } from './DepartmentWizard';
 import { MODE_SHORT, QueueDialog } from './QueueDialog';
 import { useQueues } from './useQueues';
@@ -15,7 +16,7 @@ function QueueCard({ q, onOpen }: { q: Queue; onOpen: () => void }) {
       <span aria-hidden="true" className="block h-2" style={{ backgroundColor: q.color }} />
       <span className="grid gap-2.5 p-4">
         <span className="flex flex-wrap items-center justify-between gap-2">
-          <b className="text-[15px]">{q.name}</b>
+          <b className="text-[15px]">{q.name}<SamplePill show={q.is_sample} /></b>
           <Pill kind={q.distribution_on ? 'ok' : 'muted'}>{q.distribution_on ? 'Reparto activo' : 'Reparto manual'}</Pill>
         </span>
         {!q.open_now ? <span><Pill kind="muted">Cerrado ahora</Pill></span> : null}

@@ -630,6 +630,8 @@ export interface QueueProductList {
 export interface Queue {
   id: string;
   name: string;
+  /** Dato de ejemplo creado por el sistema (M10.6): se marca «Ejemplo». */
+  is_sample?: boolean | undefined;
   color: string;
   distribution_on: boolean;
   mode: QueueMode;

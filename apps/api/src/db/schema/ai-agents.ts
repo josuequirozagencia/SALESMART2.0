@@ -47,6 +47,10 @@ export const agents = tenantTable(
     captureFields: text('capture_fields').array().notNull().default(sql`'{}'::text[]`),
     /** El agente puede crear tareas de seguimiento para el responsable de la conversación (M8.5b). */
     tasksEnabled: boolean('tasks_enabled').notNull().default(false),
+    /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
+    isSample: boolean('is_sample').notNull().default(false),
+    /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
+    sampleKey: text('sample_key'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -64,6 +68,7 @@ export const agents = tenantTable(
     check('agents_capture_fields_valid', sql`cardinality(${t['captureFields']!}) <= 10`),
     check('agents_blocks_valid', sql`${t['splitBlocks']!} BETWEEN 1 AND 5`),
     check('agents_texts_len', sql`length(${t['personality']!}) <= 4000 AND length(${t['objective']!}) <= 4000 AND length(${t['extraInfo']!}) <= 8000`),
+    uniqueIndex('agents_sample_key_uq').on(t['organizationId']!, t['sampleKey']!).where(sql`${t['sampleKey']!} IS NOT NULL`),
     uniqueIndex('agents_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
     index('agents_list_idx').on(t['organizationId']!, t['createdAt']!, t['id']!).where(sql`${t['deletedAt']!} IS NULL`),
   ],

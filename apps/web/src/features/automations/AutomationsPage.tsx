@@ -5,6 +5,7 @@ import { reason } from './reason';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { SamplePill } from '../../ui/SamplePill';
 import { AutomationEditor } from './AutomationEditor';
 import { STATUS_KIND, STATUS_LABEL, TRIGGER_LABEL } from './labels';
 import { useAutomationMutations, useAutomations, useAutomationSettings, useSaveAutomationSettings, type Automation } from './useAutomations';
@@ -34,6 +35,7 @@ function Row({ a }: { a: Automation }) {
     <li className="grid gap-2 rounded-2xl border border-line bg-surface px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <Link to={`/automations/${a.id}`} aria-label={`Abrir la automatización ${a.name}`} className="text-[15px] font-bold hover:text-accent">{a.name}</Link>
+        <SamplePill show={a.is_sample} />
         <Pill kind={STATUS_KIND[a.status]}>{STATUS_LABEL[a.status]}</Pill>
         <Button className="ml-auto !px-3 !py-1.5 !text-[12.5px]" loading={m.activate.isPending || m.pause.isPending} aria-label={`${live ? 'Pausar' : a.status === 'paused' ? 'Reactivar' : 'Activar'} ${a.name}`} onClick={toggle}>{live ? 'Pausar' : a.status === 'paused' ? 'Reactivar' : 'Activar'}</Button>
       </div>

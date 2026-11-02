@@ -3,6 +3,7 @@ import { friendlyError } from '../../lib/errors';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { SamplePill } from '../../ui/SamplePill';
 import { FormDialog, STATUS_KIND, STATUS_LABEL } from './FormDialog';
 import { useFormMutations, useForms, type FormCard } from './useForms';
 
@@ -31,7 +32,7 @@ function Row({ f, onOpen }: { f: FormCard; onOpen: () => void }) {
   return (
     <li>
       <button type="button" onClick={onOpen} aria-label={`Abrir el formulario ${f.name}`} className="grid w-full gap-1 rounded-2xl border border-line bg-surface px-4 py-3 text-left transition hover:border-accent">
-        <span className="flex flex-wrap items-center gap-2"><b className="text-[15px]">{f.name}</b><Pill kind={STATUS_KIND[f.status]}>{STATUS_LABEL[f.status]}</Pill></span>
+        <span className="flex flex-wrap items-center gap-2"><b className="text-[15px]">{f.name}</b><SamplePill show={f.is_sample} /><Pill kind={STATUS_KIND[f.status]}>{STATUS_LABEL[f.status]}</Pill></span>
         <span className="text-[12.5px] text-muted">{f.field_count} {f.field_count === 1 ? 'campo' : 'campos'} · {f.submissions} {f.submissions === 1 ? 'envío' : 'envíos'}{f.last_submission_at ? ` · el último, ${new Date(f.last_submission_at).toLocaleDateString('es-EC')}` : ''}</span>
       </button>
     </li>

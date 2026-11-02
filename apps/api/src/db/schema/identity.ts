@@ -88,6 +88,8 @@ export const organizations = identityTable(
     country: text('country'),
     /** Moneda de la empresa (ISO 4217): en ella se muestran los precios del catálogo y las ventas (M6, ADR-51). */
     currency: text('currency').notNull().default('USD'),
+    /** Cuándo se crearon los datos de ejemplo de la empresa (M10.6, ADR-56 B5); nulo = aún no. Evita recrear lo que el cliente borró. */
+    sampleSeededAt: ts('sample_seeded_at'),
     /** Nivel con el que el personal de la agencia entra a ESTE cliente (M2.5, ADR-41): read | advisor | admin. Solo tiene efecto si hay `parent_agency_id`. */
     agencyAccessLevel: text('agency_access_level').notNull().default('admin'),
     createdAt: ts('created_at').notNull().defaultNow(),

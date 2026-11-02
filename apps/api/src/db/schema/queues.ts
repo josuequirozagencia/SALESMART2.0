@@ -40,6 +40,10 @@ export const queues = tenantTable(
     outOfHoursText: text('out_of_hours_text'),
     /** M5.5c: horas sin mensajes tras la última respuesta después de las cuales se finaliza sola una conversación «esperando al cliente» (0 = no finalizar). */
     autoCloseHours: integer('auto_close_hours').notNull().default(0),
+    /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
+    isSample: boolean('is_sample').notNull().default(false),
+    /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
+    sampleKey: text('sample_key'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
@@ -56,6 +60,7 @@ export const queues = tenantTable(
     check('queues_greeting_shape', sql`${t['greetingText']!} IS NULL OR length(btrim(${t['greetingText']!})) BETWEEN 1 AND 1000`),
     check('queues_out_of_hours_shape', sql`${t['outOfHoursText']!} IS NULL OR length(btrim(${t['outOfHoursText']!})) BETWEEN 1 AND 1000`),
     check('queues_auto_close_valid', sql`${t['autoCloseHours']!} BETWEEN 0 AND 720`),
+    uniqueIndex('queues_sample_key_uq').on(t['organizationId']!, t['sampleKey']!).where(sql`${t['sampleKey']!} IS NOT NULL`),
     uniqueIndex('queues_org_name_uq').on(t['organizationId']!, sql`lower(${t['name']!})`).where(sql`${t['deletedAt']!} IS NULL`),
   ],
 );

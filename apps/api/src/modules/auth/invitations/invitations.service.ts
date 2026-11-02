@@ -3,6 +3,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { uuidv7 } from '@sales-smart/shared';
 import type { AppConfig } from '../../../config';
+import { orgReady } from '../org-ready';
 import { Database, invitations, memberHistory, memberPermissions, organizationMembers, organizationOwnershipHistory, organizations, plans, trials, users, type IdentityTx } from '../../../db';
 import { AppError, ConflictError, type ErrorDetail, ForbiddenError, InvalidInvitationError, InvitationExpiredError, NotFoundError, ServiceUnavailableError, TooManyAttemptsError, ValidationError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
@@ -278,7 +279,7 @@ export class InvitationsService {
       newHash = await this.hasher.hash(input.password);
     }
 
-    type Outcome = { kind: 'ok'; created: boolean; email: string; orgId: string; userId: string; setup: MemberSetup | null } | { kind: 'bad_password' } | { kind: 'conflict' };
+    type Outcome = { kind: 'ok'; created: boolean; email: string; orgId: string; userId: string; setup: MemberSetup | null; role: string } | { kind: 'bad_password' } | { kind: 'conflict' };
     const out = await this.db.withIdentity(async (tx): Promise<Outcome> => {
       const inv = await this.loadValid(tx, parsed.sessionId, parsed.hash, true);
       const now = new Date();
@@ -340,7 +341,7 @@ export class InvitationsService {
         .where(and(eq(invitations.id, inv.id), isNull(invitations.consumedAt)))
         .returning({ id: invitations.id });
       if (used.length === 0) throw new InvalidInvitationError();
-      return { kind: 'ok', created, email: inv.email, orgId: inv.organizationId, userId, setup: inv.setup };
+      return { kind: 'ok', created, email: inv.email, orgId: inv.organizationId, userId, setup: inv.setup, role: inv.role };
     });
 
     if (out.kind === 'bad_password') {
@@ -353,6 +354,8 @@ export class InvitationsService {
     if (out.setup && out.setup.queue_ids.length > 0) {
       await memberJoined.emit({ organizationId: out.orgId, userId: out.userId, setup: { grant: out.setup.grant, deny: out.setup.deny, queue_ids: out.setup.queue_ids } }, (err) => this.log.error({ err: err instanceof Error ? err.message : 'desconocido' }, 'no se pudieron aplicar los departamentos de la invitación'));
     }
+    // La invitación del DUEÑO de una empresa (sin ajustes de equipo): ya tiene su primer administrador, hora de los datos de ejemplo (M10.6). Sin esperar: no frena la respuesta
+    if (out.role === 'client_admin' && out.setup === null) void orgReady.emit({ organizationId: out.orgId, ownerUserId: out.userId }, (err) => this.log.error({ err: err instanceof Error ? err.message : 'desconocido' }, 'no se pudieron crear los datos de ejemplo de la empresa'));
     return { status: 'accepted', email: out.email, account_created: out.created };
   }
 
