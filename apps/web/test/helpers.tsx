@@ -1,5 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { StrictMode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { vi } from 'vitest';
@@ -106,3 +107,9 @@ export const EMPTY_SUMMARY = {
   leads: 0, appointments: { total: 0, scheduled: 0, completed: 0, cancelled: 0 }, sales: { count: 0, cancelled: 0, revenue: '0.00', paid: '0.00', balance: '0.00' },
   funnel: [], response: { count: 0, avg_seconds: 0, median_seconds: 0 }, series: [], access: { export: false, manage: false },
 };
+
+/** Abre el menú «⋯ Más» de la cabecera de una conversación y elige una acción (M5.10: Transferir, Dejar de participar y Finalizar viven ahí). */
+export async function pickMore(item: string): Promise<void> {
+  await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
+  await userEvent.click(await screen.findByRole('menuitem', { name: item }));
+}

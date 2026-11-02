@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, Conversation, ConversationList, InboxOptions, Template, TemplateList } from '../src/lib/types';
-import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
+import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, pickMore, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
@@ -440,15 +440,15 @@ describe('Inbox · acciones', () => {
     const w = world();
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Finalizar' }));
+    await pickMore('Finalizar');
     expect(screen.getByText(/Si el cliente escribe de nuevo se abrirá otra conversación/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'No' }));
     expect(w.posts).toEqual([]);
-    await userEvent.click(screen.getByRole('button', { name: 'Finalizar' }));
+    await pickMore('Finalizar');
     await userEvent.click(screen.getByRole('button', { name: 'Sí, finalizar' }));
     await waitFor(() => expect(w.posts.map((p) => p.path)).toContain('/conversations/c1/close'));
     expect(await screen.findByText(/está finalizada/)).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Finalizar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Más acciones' })).not.toBeInTheDocument();
   });
 
   it('si el servidor rechaza una acción (409), muestra su motivo', async () => {

@@ -5,6 +5,7 @@ import { AppShell } from './features/app/AppShell';
 import { AnalyticsPage } from './features/analytics/AnalyticsPage';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
+import { ScheduledOverviewPage } from './features/inbox/ScheduledOverviewPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
 import { MetaPage } from './features/meta/MetaPage';
 import { AgentsPage } from './features/agents/AgentsPage';
@@ -114,6 +115,7 @@ export function App() {
       <Route path="/accept-invite" element={<AcceptInviteScreen />} />
       <Route element={<AppGate />}>
         <Route path="/" element={<Home />} />
+        <Route path="/inbox/scheduled" element={<ScheduledOverviewPage />} />
         <Route path="/inbox/:id?" element={<InboxPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />

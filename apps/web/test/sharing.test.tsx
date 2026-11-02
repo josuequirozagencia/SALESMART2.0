@@ -2,7 +2,7 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, Conversation, ConversationList, PersonOption, TransferOptions } from '../src/lib/types';
-import { authed, err, ME_ADVISOR, mockApi, renderApp, resetWorld, type Handler } from './helpers';
+import { authed, err, ME_ADVISOR, mockApi, pickMore, renderApp, resetWorld, type Handler } from './helpers';
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
@@ -82,7 +82,7 @@ describe('Inbox · transferir', () => {
   it('«Transferir» abre el selector con la carga de cada persona, quién es el dueño y una advertencia si está fuera del departamento', async () => {
     mockApi(server(world()));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     expect(await d.findByRole('radio', { name: 'Carolina Vera' })).toBeEnabled();
     expect(d.getByRole('radio', { name: 'Luis Navas' })).toBeDisabled(); // quien la tiene
@@ -100,7 +100,7 @@ describe('Inbox · transferir', () => {
     const w = world();
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     expect(d.getByRole('button', { name: 'Transferir' })).toBeDisabled(); // sin elegir a nadie
     await userEvent.click(await d.findByRole('radio', { name: 'Carolina Vera' }));
@@ -116,7 +116,7 @@ describe('Inbox · transferir', () => {
     const w = world({ onTransfer: () => err(409, 'ALREADY_OWNER', 'Esa persona ya es quien tiene asignada la conversación') });
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     await userEvent.click(await d.findByRole('radio', { name: 'Ana Pérez' }));
     await userEvent.click(d.getByRole('button', { name: 'Transferir' }));
@@ -129,7 +129,7 @@ describe('Inbox · transferir', () => {
     const w = world({ onTransfer: () => ({ body: { id: 'c1', status: 'pending', owner: { id: 'u3', name: 'Carolina Vera' }, still_visible: true } }) });
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     await userEvent.click(await d.findByRole('radio', { name: 'Carolina Vera' }));
     await userEvent.click(d.getByRole('button', { name: 'Transferir' }));
@@ -141,7 +141,10 @@ describe('Inbox · transferir', () => {
     mockApi(server(world({ conv: conv({ can: { ...FULL, transfer: false, share: false } }) })));
     renderApp('/inbox/c1');
     await screen.findByRole('heading', { name: 'Ana Torres' });
-    expect(screen.queryByRole('button', { name: 'Transferir' })).not.toBeInTheDocument();
+    // el menú «⋯ Más» queda con lo que sí puede (finalizar), sin «Transferir»
+    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
+    expect(await screen.findByRole('menuitem', { name: 'Finalizar' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: 'Transferir' })).not.toBeInTheDocument();
   });
 });
 
@@ -150,7 +153,7 @@ describe('Inbox · compartir', () => {
     const w = world();
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     await userEvent.click(d.getByRole('tab', { name: 'Compartir' }));
     expect(d.queryByRole('radio', { name: 'Seguir como colaborador: puede responder' })).not.toBeInTheDocument();
@@ -162,7 +165,7 @@ describe('Inbox · compartir', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(await screen.findByText('Compartida con Carolina')).toBeInTheDocument();
     // quitar el acceso desde el mismo selector
-    await userEvent.click(screen.getByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d2 = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     await userEvent.click(await d2.findByRole('button', { name: 'Quitar el acceso de Carolina Vera' }));
     await waitFor(() => expect(w.posts.at(-1)).toEqual({ method: 'DELETE', path: '/conversations/c1/participants/u3', body: undefined }));
@@ -177,7 +180,7 @@ describe('Inbox · compartir', () => {
     });
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Transferir' }));
+    await pickMore('Transferir');
     const d = within(await screen.findByRole('dialog', { name: 'Transferir o compartir' }));
     await userEvent.click(d.getByRole('tab', { name: 'Compartir' }));
     expect(await d.findByText('Ya participa (responde)')).toBeInTheDocument();
@@ -199,8 +202,9 @@ describe('Inbox · como colaborador', () => {
     expect(await screen.findByText('Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente.')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Mensaje' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Nota interna' })).toBeEnabled();
-    expect(screen.queryByRole('button', { name: 'Transferir' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Finalizar' })).not.toBeInTheDocument();
+    // el menú «⋯ Más» solo le deja salirse: ni transferir ni finalizar
+    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
+    expect((await screen.findAllByRole('menuitem')).map((i) => i.textContent)).toEqual(['Dejar de participar']);
   });
 
   it('con permiso de responder escribe, salvo mientras el dueño no acepta (lo explica)', async () => {
@@ -219,7 +223,7 @@ describe('Inbox · como colaborador', () => {
     const w = world({ conv: asCollaborator('collaborator_view', { participants: [{ user: { id: 'u2', name: 'Luis Navas' }, permission: 'view', added_by: { id: 'u9', name: 'Marta Sol' }, added_at: ago(HOUR) }] }) });
     mockApi(server(w));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Dejar de participar' }));
+    await pickMore('Dejar de participar');
     await waitFor(() => expect(w.posts).toEqual([{ method: 'DELETE', path: '/conversations/c1/participants/u2', body: undefined }]));
     expect(await screen.findByText('Elige una conversación')).toBeInTheDocument();
   });

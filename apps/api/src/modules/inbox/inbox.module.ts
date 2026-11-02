@@ -14,7 +14,7 @@ import { TemplatesModule } from '../templates';
 import { AutoCloseService } from './auto-close.service';
 import { AttachmentsController, ConversationAttachmentsController } from './conversation-attachments.controller';
 import { ConversationAttachmentsService } from './conversation-attachments.service';
-import { InboxController, MessagesController } from './inbox.controller';
+import { InboxController, MessagesController, ScheduledController } from './inbox.controller';
 import { InboxService } from './inbox.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundJob } from './outbound.job';
@@ -33,7 +33,7 @@ import { SlaSweepJob } from './sla-sweep.job';
  */
 @Module({
   imports: [AttachmentsModule, QrModule, ChannelsModule, ContactsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
-  controllers: [InboxController, MessagesController, ConversationAttachmentsController, AttachmentsController],
+  controllers: [InboxController, MessagesController, ScheduledController, ConversationAttachmentsController, AttachmentsController],
   providers: [ConversationAttachmentsService, OwnerReleaseService, ReactionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OwnerReleaseService, OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
 })

@@ -1531,7 +1531,9 @@ test('inbox: un cliente escribe, el asesor acepta, responde (sale por el proveed
     expect((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1`, [conv!.id])).rows[0].n).toBe(4); // la reacción no es un mensaje
 
     // 6) La finaliza (con confirmación) y la encuentra en «Finalizadas»
-    await thread.getByRole('button', { name: 'Finalizar' }).click();
+    // «Finalizar» vive en el menú «⋯ Más» de la cabecera (M5.10)
+    await thread.getByRole('button', { name: 'Más acciones' }).click();
+    await page.getByRole('menuitem', { name: 'Finalizar' }).click();
     await thread.getByRole('button', { name: 'Sí, finalizar' }).click();
     await expect(thread.getByText(/está finalizada/)).toBeVisible();
     await page.getByRole('tab', { name: /Finalizadas/ }).click();
@@ -1604,7 +1606,8 @@ test('inbox: compartir (solo ver) y transferir una conversación entre dos aseso
     const carlos = page.getByRole('region', { name: 'Conversación con Cliente Compartido' });
     await carlos.getByRole('button', { name: 'Aceptar' }).click();
     await expect(carlos.getByText('Trabajando')).toBeVisible();
-    await carlos.getByRole('button', { name: 'Transferir' }).click();
+    await carlos.getByRole('button', { name: 'Más acciones' }).click();
+    await page.getByRole('menuitem', { name: 'Transferir' }).click();
     const dlg = page.getByRole('dialog', { name: 'Transferir o compartir' });
     await dlg.getByRole('tab', { name: 'Compartir' }).click();
     await dlg.getByRole('radio', { name: 'Elena E2E' }).check();
@@ -1631,7 +1634,8 @@ test('inbox: compartir (solo ver) y transferir una conversación entre dos aseso
     await expect(elena.getByRole('log', { name: 'Mensajes' }).getByText('Yo me encargo del envío')).toBeVisible();
 
     // 3) Carlos se la transfiere a Elena y sigue como colaborador con permiso de responder
-    await carlos.getByRole('button', { name: 'Transferir' }).click();
+    await carlos.getByRole('button', { name: 'Más acciones' }).click();
+    await page.getByRole('menuitem', { name: 'Transferir' }).click();
     const dlg2 = page.getByRole('dialog', { name: 'Transferir o compartir' });
     await dlg2.getByRole('tab', { name: 'Transferir' }).click();
     await dlg2.getByRole('radio', { name: 'Elena E2E' }).check();
@@ -2299,6 +2303,18 @@ test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, canc
     await pending.getByRole('listitem').filter({ hasText: 'Este no debe salir' }).getByRole('button', { name: /Cancelar el mensaje programado/ }).click();
     await expect(pending.getByText('Se canceló.')).toBeVisible();
     await closePending();
+
+    // 2b) La vista global (M5.10): lo pendiente de todas las conversaciones y, en «No salieron», lo cancelado, cada uno con su contacto
+    const glob = await ctx.newPage();
+    await glob.goto('/inbox/scheduled');
+    await expect(glob.getByRole('heading', { name: 'Mensajes programados' })).toBeVisible();
+    const globalList = glob.getByRole('list', { name: 'Mensajes programados' });
+    await expect(globalList.getByText('Hola Ana, te recuerdo tu cita de hoy')).toBeVisible();
+    await expect(globalList.getByRole('link', { name: 'Abrir la conversación con Ana Programados' })).toBeVisible();
+    await expect(globalList.getByText('Este no debe salir')).toHaveCount(0);
+    await glob.getByRole('tab', { name: /No salieron/ }).click();
+    await expect(glob.getByRole('list', { name: 'Mensajes que no salieron' }).getByText('Este no debe salir')).toBeVisible();
+    await glob.close();
 
     // 3) Llega su hora (se adelanta en la base): la tarea lo envía por el proveedor, en nombre de Carlos, y aparece en el hilo sin recargar
     await db.query(`UPDATE scheduled_messages SET send_at = now() - interval '5 seconds', created_at = (SELECT max(created_at) FROM messages WHERE conversation_id = $2 AND direction = 'in') + interval '1 second' WHERE id = $1`, [first[0]!.id, conv!.id]); // programado después del último mensaje del cliente
