@@ -12,7 +12,7 @@ const DAY = 86_400_000;
 const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, users: 2, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', agency: null, agency_access_level: null, invitation: null, deletion: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
 const clist = (items: Company[]): CompanyList => ({ items, next_cursor: null });
 const ACTIVA = company({ id: 'act', name: 'Café Origen' });
-const ELIMINADA = company({ id: 'elim', name: 'Taller Pérez', state: 'deleted', deletion: { requested_at: new Date().toISOString(), purge_after: new Date(Date.now() + 5 * DAY).toISOString(), reason: 'La empresa pidió cerrar su cuenta' } });
+const ELIMINADA = company({ id: 'elim', name: 'Taller Pérez', state: 'deleted', deletion: { requested_at: new Date().toISOString(), purge_after: new Date(Date.now() + 5 * DAY).toISOString(), reason: 'La empresa pidió cerrar su cuenta', state: 'scheduled', purge_error: null, purged_at: null } });
 
 const exportOf = (over: Partial<CompanyExport> = {}): CompanyExport => ({ id: 'e1', state: 'queued', requested_via: 'platform', requested_at: new Date().toISOString(), finished_at: null, expires_at: null, parts: [], total_bytes: 0, error: null, ...over });
 const READY = exportOf({ state: 'ready', finished_at: new Date().toISOString(), expires_at: new Date(Date.now() + 47 * 3_600_000).toISOString(), parts: [{ n: 1, filename: 'salesmart-taller-perez-parte-1.zip', bytes: 5_242_880 }, { n: 2, filename: 'salesmart-taller-perez-parte-2.zip', bytes: 1_048_576 }], total_bytes: 6_291_456 });

@@ -59,6 +59,14 @@ export class StorageGateway implements StorageAdapter {
     return this.adapter().then((a) => a.putFile(key, path, contentType));
   }
 
+  deleteByPrefix(prefix: string): Promise<number> {
+    return this.adapter().then((a) => a.deleteByPrefix(prefix));
+  }
+
+  countByPrefix(prefix: string, limit?: number): Promise<number> {
+    return this.adapter().then((a) => a.countByPrefix(prefix, limit));
+  }
+
   get(key: string): Promise<Buffer> {
     return this.adapter().then((a) => a.get(key));
   }

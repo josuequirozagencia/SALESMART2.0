@@ -20,6 +20,6 @@ export const PRODUCTION_CATALOG: TableCatalog = {
   identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config', 'plans', 'invitations', 'organization_ownership_history', 'organization_deletions', 'company_exports', 'access_sessions', 'view_as_log', 'attribution_endpoints', 'ghl_routes', 'form_routes', 'qr_routes', 'member_permissions', 'member_history', 'channel_routes'],
   reference: [],
   tenantRoot: [],
-  // ADR-35: limpieza de tablas de identidad sin dar DELETE a app_identity
-  securityDefiner: ['purge_expired_identity_rows'],
+  // ADR-35: limpieza de tablas de identidad sin dar DELETE a app_identity · ADR-59 (F3c): borrado definitivo de UNA empresa eliminada (negocio e identidad)
+  securityDefiner: ['purge_expired_identity_rows', 'purge_company_step', 'purge_company_identity'],
 };

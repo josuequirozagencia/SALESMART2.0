@@ -24,7 +24,8 @@
     "e2e": "pnpm build && pnpm --filter @sales-smart/api e2e",
     "e2e:web": "pnpm build && pnpm --filter @sales-smart/web e2e",
     "audit": "pnpm audit --audit-level moderate",
-    "db:load-disposable-domains": "pnpm --filter @sales-smart/api db:load-disposable-domains"
+    "db:load-disposable-domains": "pnpm --filter @sales-smart/api db:load-disposable-domains",
+    "db:reapply-purges": "pnpm --filter @sales-smart/api db:reapply-purges"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

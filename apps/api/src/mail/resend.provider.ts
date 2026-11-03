@@ -1,5 +1,5 @@
-import { companyDeletedMail, companyExportReadyMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail, type MailContent } from './templates';
-import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import { companyDeletedMail, companyExportReadyMail, companyPurgeNoticeMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail, type MailContent } from './templates';
+import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface ResendOptions {
   apiKey: string;
@@ -47,6 +47,10 @@ export class ResendMailProvider implements MailProvider {
 
   sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void> {
     return this.send(mail.to, () => companyDeletedMail(mail));
+  }
+
+  sendCompanyPurgeNotice(mail: CompanyPurgeNoticeMail): Promise<void> {
+    return this.send(mail.to, () => companyPurgeNoticeMail(mail));
   }
 
   sendCompanyExportReady(mail: CompanyExportReadyMail): Promise<void> {

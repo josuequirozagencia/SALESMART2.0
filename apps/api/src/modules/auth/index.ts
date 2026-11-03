@@ -7,6 +7,7 @@ export { bootstrapSuperAdmin, BootstrapError, generateInitialPassword } from './
 export type { BootstrapInput, BootstrapResult } from './bootstrap-super-admin';
 export { CompanyLifecycleService, DELETION_WINDOW_DAYS } from './company-lifecycle/company-lifecycle.service';
 export { CompanyExportStore, EXPORT_MAX_ATTEMPTS, hashExportToken, type ExportPart, type ExportRow, type ExportState, type ExportOwner, type LiveDeletion } from './company-lifecycle/company-export.store';
+export { CompanyPurgeStore, type PurgeJob, type PurgeNotice, type StepRow } from './company-lifecycle/company-purge.store';
 export { PasswordConfirmationService } from './company-lifecycle/password-confirmation.service';
 export { InvitationsService, type InvitationIssued, type MemberInvitationView, type MemberSetup } from './invitations/invitations.service';
 export { memberJoined, type MemberJoined } from './invitations/member-joined';

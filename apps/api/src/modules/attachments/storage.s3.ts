@@ -1,8 +1,8 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { DeleteObjectCommand, DeleteObjectsCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
+import { assertDeletablePrefix, StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
 
 export interface S3StorageConfig {
   readonly endpoint: string;
@@ -85,6 +85,41 @@ export class S3Storage implements StorageAdapter {
   async delete(key: string): Promise<void> {
     try {
       await this.client.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }), { abortSignal: AbortSignal.timeout(TIMEOUT_MS) });
+    } catch (e) {
+      throw this.fail(e);
+    }
+  }
+
+  async deleteByPrefix(prefix: string): Promise<number> {
+    assertDeletablePrefix(prefix);
+    let deleted = 0;
+    try {
+      // Se lista y se borra por páginas de hasta 1000 (el máximo de S3/R2 por petición). Sin cursor guardado: tras borrar una página, la siguiente lista ya no la trae.
+      for (let guard = 0; guard < 100_000; guard++) {
+        const page = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, MaxKeys: 1000 }), { abortSignal: AbortSignal.timeout(TIMEOUT_MS) });
+        const keys = (page.Contents ?? []).flatMap((o) => (o.Key ? [{ Key: o.Key }] : []));
+        if (keys.length === 0) return deleted;
+        const out = await this.client.send(new DeleteObjectsCommand({ Bucket: this.bucket, Delete: { Objects: keys, Quiet: true } }), { abortSignal: AbortSignal.timeout(TIMEOUT_MS) });
+        if ((out.Errors ?? []).length > 0) throw new StorageError('unavailable', 'El almacenamiento no pudo borrar algunos archivos');
+        deleted += keys.length;
+      }
+      throw new StorageError('unavailable', 'Demasiadas páginas al borrar un prefijo');
+    } catch (e) {
+      throw this.fail(e);
+    }
+  }
+
+  async countByPrefix(prefix: string, limit = 1_000_000): Promise<number> {
+    assertDeletablePrefix(prefix);
+    try {
+      let n = 0;
+      let token: string | undefined;
+      do {
+        const page = await this.client.send(new ListObjectsV2Command({ Bucket: this.bucket, Prefix: prefix, MaxKeys: 1000, ...(token ? { ContinuationToken: token } : {}) }), { abortSignal: AbortSignal.timeout(TIMEOUT_MS) });
+        n += (page.Contents ?? []).length;
+        token = page.IsTruncated ? page.NextContinuationToken : undefined;
+      } while (token && n < limit);
+      return n;
     } catch (e) {
       throw this.fail(e);
     }

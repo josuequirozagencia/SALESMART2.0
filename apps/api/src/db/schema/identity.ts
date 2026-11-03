@@ -166,8 +166,19 @@ export const organizationDeletions = identityTable(
     noticeSentAt: ts('notice_sent_at'),
     /** SHA-256 (hex) del token del enlace «Descargar todo» que recibe el dueño en el correo de eliminación (F3b). El token NO se guarda: solo su huella. */
     exportTokenHash: text('export_token_hash'),
+    /** Borrado definitivo (F3c, ADR-59 #10–12): cuándo empezó, cuándo terminó, cuántos intentos van, hasta cuándo es suyo el trabajo, cuándo se reintenta y por qué falló (código genérico, sin datos). */
+    purgeStartedAt: ts('purge_started_at'),
+    purgedAt: ts('purged_at'),
+    purgeAttempts: integer('purge_attempts').notNull().default(0),
+    purgeLeaseUntil: ts('purge_lease_until'),
+    purgeNextAttemptAt: ts('purge_next_attempt_at'),
+    purgeError: text('purge_error'),
+    /** Filas borradas por tabla (la evidencia del borrado). Sin datos personales. */
+    purgeCounts: jsonb('purge_counts').notNull().default(sql`'{}'::jsonb`),
   },
   (t) => [
+    check('organization_deletions_purged_consistent', sql`(${t.state} = 'purged') = (${t.purgedAt} IS NOT NULL)`),
+    check('organization_deletions_purge_counts_object', sql`jsonb_typeof(${t.purgeCounts}) = 'object'`),
     check('organization_deletions_export_token_hex', sql`${t.exportTokenHash} IS NULL OR ${t.exportTokenHash} ~ '^[0-9a-f]{64}$'`),
     uniqueIndex('organization_deletions_export_token_uq').on(t.exportTokenHash).where(sql`${t.exportTokenHash} IS NOT NULL`),
     check('organization_deletions_state_valid', sql`${t.state} IN ('scheduled', 'recovered', 'purging', 'purge_failed', 'purged')`),

@@ -89,6 +89,21 @@ Pasos: (1) crear el bucket (privado) y una llave de acceso solo a ese bucket; (2
 
 **A validar la primera vez (no probado fuera de fakes):** subir y ver una imagen desde el Inbox (URL firmada con CSP), recibir una imagen, un audio y un documento reales por WhatsApp y verlos, enviar un documento y una nota de voz a un número real, EICAR con ClamAV activo (debe quedar «infectado» y no abrirse) y que un archivo subido y no enviado se retire a las 24 h.
 
+### 4c-1. Paso a paso con Cloudflare R2 (2026-11-03)
+
+R2 es el almacenamiento S3-compatible recomendado para el piloto: sin costo por descargar (egress), 10 GB gratis al mes y, a diferencia de S3 con versionado, **no conserva copias de lo que se borra** (útil para el borrado definitivo de ADR-59). Se usa para los adjuntos y el audio del Inbox, la biblioteca de conocimiento de la IA y los paquetes de «Descargar todo».
+
+1. **Activar R2 en la cuenta de Cloudflare** (una sola vez). Panel de Cloudflare › **R2 Object Storage** › «Purchase R2 Plan» (pide una tarjeta, pero el uso del piloto cabe en el plan gratis). *Hoy la cuenta responde «Please enable R2 through the Cloudflare Dashboard» (error 10042): este paso está pendiente.*
+2. **Crear el bucket.** R2 › «Create bucket». Nombre sugerido: `salesmart-staging` (y `salesmart-prod` para producción: un bucket por entorno). Ubicación: «Automatic». Déjalo **privado** (no actives el acceso público ni el dominio `r2.dev`): los archivos solo salen con URL firmada de vida corta.
+3. **Crear la llave de acceso, solo para ese bucket.** R2 › «Manage API Tokens» › «Create API token» (token de **cuenta o de usuario de R2**, no el de la API general de Cloudflare). Permiso: **Object Read & Write**. Alcance: «Apply to specific buckets only» y elige el bucket. Sin vencimiento (o con uno largo y anotado). Al crearlo, Cloudflare muestra **una sola vez**: «Access Key ID», «Secret Access Key» y la **URL del endpoint** (`https://<ID-de-cuenta>.r2.cloudflarestorage.com`). Cópialos ahora: el secreto no se puede volver a ver.
+4. **Cargarlos en la plataforma.** Inicia sesión como Súper Admin › **Proveedores › Almacenamiento** › «S3 compatible» y escribe: **Endpoint** = la URL del paso anterior (sin el nombre del bucket al final) · **Región** = `auto` · **Bucket** = el nombre del bucket · **ID de la clave de acceso** y **Clave de acceso secreta** = las del paso 3. Márcalo «En uso». Se guardan cifrados y nunca se vuelven a mostrar (solo los últimos 4).
+5. **Variable del servicio «app».** `STORAGE_PROVIDER=s3` (es el valor por omisión; no hace falta tocar nada). No se necesita CORS: los archivos se bajan por navegación directa y las imágenes y el audio se muestran con etiquetas normales.
+6. **Probar** (en este orden): (a) en el Inbox, subir una imagen y verla; (b) grabar una nota de voz; (c) subir un documento a Configuración › Conocimiento; (d) con una empresa **de prueba** (nunca una real): eliminarla, «Descargar todo» desde Consola › Empresas y bajar el ZIP; (e) esperar el plazo (o adelantarlo en la base de datos de staging) y comprobar en el panel de R2 que `org/<id>/` quedó vacío.
+
+**Seguridad:** el token solo toca ese bucket; si se filtra, créalo de nuevo en Cloudflare, cámbialo en Proveedores y revoca el anterior. Guarda el secreto en tu gestor de contraseñas, no en chats ni en el repositorio.
+
+**Qué falta validar contra R2 real** (hasta hoy solo se probó con un servidor simulado): la subida por transmisión de los paquetes grandes (`putFile`), `DeleteObjects` por lotes (borrado definitivo) y que la URL firmada de descarga funcione con el endpoint de R2.
+
 ## 4d. Eventos a Meta: API de Conversiones (M6.4, ADR-45/51)
 
 Variable del servicio «app»: `GHL_PROVIDER` (`ghl` por omisión; `none` para apagar GoHighLevel; `fake` solo desarrollo y se rechaza en producción). El token y la Location de GoHighLevel de CADA empresa se guardan cifrados con `PROVIDER_CREDENTIALS_KEY`.

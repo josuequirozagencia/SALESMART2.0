@@ -47,6 +47,17 @@ function s3Handler(): HttpServer {
       };
       if (s3Mode === 'denied') return xml(403, 'AccessDenied');
       if (s3Mode === 'down') return xml(500, 'InternalError');
+      if (req.method === 'GET' && url.searchParams.get('list-type') === '2') {
+        const prefix = url.searchParams.get('prefix') ?? '';
+        const keys = [...store.keys()].filter((k) => k.startsWith(prefix)).sort().slice(0, Number(url.searchParams.get('max-keys') ?? 1000));
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        return void res.end(`<?xml version="1.0"?><ListBucketResult><Name>bucket-de-prueba</Name><Prefix>${prefix}</Prefix><KeyCount>${keys.length}</KeyCount><MaxKeys>1000</MaxKeys><IsTruncated>false</IsTruncated>${keys.map((k) => `<Contents><Key>${k}</Key></Contents>`).join('')}</ListBucketResult>`);
+      }
+      if (req.method === 'POST' && url.searchParams.has('delete')) {
+        for (const m of Buffer.concat(chunks).toString('utf8').matchAll(/<Key>([^<]*)<\/Key>/g)) store.delete(m[1] ?? '');
+        res.writeHead(200, { 'content-type': 'application/xml' });
+        return void res.end('<?xml version="1.0"?><DeleteResult></DeleteResult>');
+      }
       if (req.method === 'PUT') {
         store.set(key, { body: Buffer.concat(chunks), type: String(req.headers['content-type'] ?? '') });
         res.writeHead(200, { etag: '"abc"' });
@@ -103,6 +114,30 @@ function storageContract(name: string, make: () => StorageAdapter, opts: { signe
       } finally {
         await rm(dir, { recursive: true, force: true });
       }
+    });
+
+    it('deleteByPrefix borra TODO lo que cuelga del prefijo y nada más (ni el vecino de nombre parecido), y countByPrefix lo comprueba', async () => {
+      const s = make();
+      const P = 'org/0190a000-0000-7000-8000-0000000000f1/';
+      const mine = [`${P}attachments/a`, `${P}exports/e1/parte-001.zip`, `${P}b`];
+      const others = ['org/0190a000-0000-7000-8000-0000000000f10/x', 'org/0190a000-0000-7000-8000-0000000000f2/y'];
+      for (const k of [...mine, ...others]) await s.put(k, Buffer.from('x'), 'text/plain');
+      expect(await s.countByPrefix(P)).toBe(3);
+      expect(await s.deleteByPrefix(P)).toBe(3);
+      expect(await s.countByPrefix(P)).toBe(0);
+      expect(await s.deleteByPrefix(P)).toBe(0); // idempotente
+      for (const k of mine) expect(((await errorOf(s.get(k))) as StorageError).code).toBe('not_found');
+      for (const k of others) expect((await s.get(k)).toString()).toBe('x');
+    });
+
+    it('deleteByPrefix y countByPrefix rechazan prefijos peligrosos (vacío, sin barra final, raíz o con ..)', async () => {
+      const s = make();
+      await s.put(`${KEY}-vivo`, Buffer.from('x'), 'text/plain');
+      for (const bad of ['', 'org', 'org/', '/', '../', 'org/../', 'org//x/']) {
+        expect(await errorOf(s.deleteByPrefix(bad)), `«${bad}»`).toBeInstanceOf(StorageError);
+        expect(await errorOf(s.countByPrefix(bad)), `«${bad}»`).toBeInstanceOf(StorageError);
+      }
+      expect((await s.get(`${KEY}-vivo`)).toString()).toBe('x');
     });
 
     it('leer lo que no existe es not_found', async () => {

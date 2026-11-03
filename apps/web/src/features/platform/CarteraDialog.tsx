@@ -16,6 +16,7 @@ const STATE: Record<CompanyState, [PillKind, string]> = {
   suspended: ['warn', 'Suspendida'],
   invited: ['accent', 'Invitación pendiente'],
   deleted: ['crit', 'Eliminada'],
+  purged: ['crit', 'Borrada definitivamente'],
 };
 
 /** Todos los clientes (hasta 100) con su agencia actual: de ahí salen los de la cartera y los que se pueden agregar. */

@@ -1,4 +1,4 @@
-import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface MailContent {
   subject: string;
@@ -161,6 +161,28 @@ export function companyExportReadyMail(m: CompanyExportReadyMail): MailContent {
   );
   const text = `La copia de tus datos está lista — Sales Smart\n\nPreparamos la copia completa de los datos de ${m.organizationName} (${partsText}, ${size}). Puedes bajarla hasta el ${untilPlain}; después la borramos. Te pediremos tu contraseña.\n\nEste enlace es solo tuyo, no lo compartas:\n${m.downloadUrl}\n`;
   return { subject: `La copia de los datos de ${m.organizationName.slice(0, 60)} está lista`, html, text };
+}
+
+/** Aviso de «mañana se borra» (F3c, ADR-59 #14): la última oportunidad de recuperar la empresa o de bajar la copia de sus datos. Sin enlaces: el del primer correo sigue valiendo. */
+export function companyPurgeNoticeMail(m: CompanyPurgeNoticeMail): MailContent {
+  const org = esc(m.organizationName);
+  const untilPlain = longDate(m.purgeAfter, m.timeZone);
+  const until = esc(untilPlain);
+  const owner = m.audience === 'owner';
+  const headline = owner ? 'Mañana borramos tu cuenta de forma definitiva' : 'Mañana se borra un cliente tuyo de forma definitiva';
+  const detail = owner
+    ? `La cuenta de <b>${org}</b> está eliminada y el <b>${until}</b> borraremos todos sus datos de forma definitiva: después no se podrán recuperar. Si necesitas una copia de tus datos, usa el enlace del primer correo que te enviamos al eliminarla. Si fue un error, escribe ya a quien te atiende en Sales Smart.`
+    : `Tu cliente <b>${org}</b> está eliminado y el <b>${until}</b> se borrarán todos sus datos de forma definitiva: después no se podrán recuperar. Si fue un error, escribe ya a quien te atiende en Sales Smart.`;
+  const html = frame(
+    headline,
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">${headline}</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:8px;">${detail}</td></tr>`,
+    'Aviso informativo de Sales Smart.',
+  );
+  const plain = owner
+    ? `La cuenta de ${m.organizationName} está eliminada y el ${untilPlain} borraremos todos sus datos de forma definitiva: después no se podrán recuperar. Si necesitas una copia de tus datos, usa el enlace del primer correo que te enviamos al eliminarla. Si fue un error, escribe ya a quien te atiende en Sales Smart.`
+    : `Tu cliente ${m.organizationName} está eliminado y el ${untilPlain} se borrarán todos sus datos de forma definitiva: después no se podrán recuperar. Si fue un error, escribe ya a quien te atiende en Sales Smart.`;
+  return { subject: owner ? `Mañana borramos la cuenta de ${m.organizationName.slice(0, 60)}` : `Mañana se borra a tu cliente ${m.organizationName.slice(0, 60)}`, html, text: `${headline} — Sales Smart\n\n${plain}\n` };
 }
 
 /** Aviso de empresa recuperada (ADR-59 #14). */

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
-import { aiWallets, appointmentReminders, automationRuns, contacts, Database, metaEvents, organizationDeletions, organizationMembers, organizations, plans, sales, scheduledMessages, sessions, users, type IdentityTx } from '../../../db';
+import { aiWallets, appointmentReminders, automationRuns, contacts, Database, metaEvents, organizationDeletions, organizations, plans, sales, scheduledMessages, sessions, users, type IdentityTx } from '../../../db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
 import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
@@ -10,6 +10,7 @@ import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
 import { PlatformAuditService } from '../../platform';
 import { hashExportToken } from './company-export.store';
 import { PasswordConfirmationService } from './password-confirmation.service';
+import { deletionRecipients, type DeletionRecipient } from './recipients';
 import type { AppConfig } from '../../../config';
 import type { DeleteCompanyDto, RecoverCompanyDto } from './company-lifecycle.dto';
 
@@ -305,38 +306,8 @@ export class CompanyLifecycleService {
   }
 
   /** A quién se avisa: el dueño (o, si no consta, el primer administrador vigente) y, si la hay, el personal de la agencia que la administraba. Sin repetir correos. */
-  private async recipients(tx: IdentityTx, orgId: string, agencyId: string | null, ownerUserId: string | null): Promise<Array<{ email: string; audience: 'owner' | 'agency' }>> {
-    const out: Array<{ email: string; audience: 'owner' | 'agency' }> = [];
-    const seen = new Set<string>();
-    const add = (email: string | undefined, audience: 'owner' | 'agency'): void => {
-      if (email && !seen.has(email)) {
-        seen.add(email);
-        out.push({ email, audience });
-      }
-    };
-    if (ownerUserId) {
-      const [o] = await tx.select({ email: users.email }).from(users).where(and(eq(users.id, ownerUserId), eq(users.status, 'active'), isNull(users.deletedAt))).limit(1);
-      add(o?.email, 'owner');
-    }
-    if (out.length === 0) {
-      const [a] = await tx
-        .select({ email: users.email })
-        .from(organizationMembers)
-        .innerJoin(users, eq(users.id, organizationMembers.userId))
-        .where(and(eq(organizationMembers.organizationId, orgId), eq(organizationMembers.role, 'client_admin'), isNull(organizationMembers.revokedAt), eq(users.status, 'active'), isNull(users.deletedAt)))
-        .orderBy(asc(organizationMembers.createdAt), asc(organizationMembers.id))
-        .limit(1);
-      add(a?.email, 'owner');
-    }
-    if (agencyId) {
-      const staff = await tx
-        .select({ email: users.email })
-        .from(organizationMembers)
-        .innerJoin(users, eq(users.id, organizationMembers.userId))
-        .where(and(eq(organizationMembers.organizationId, agencyId), eq(organizationMembers.role, 'agency'), isNull(organizationMembers.revokedAt), eq(users.status, 'active'), isNull(users.deletedAt)));
-      for (const s of staff) add(s.email, 'agency');
-    }
-    return out;
+  private recipients(tx: IdentityTx, orgId: string, agencyId: string | null, ownerUserId: string | null): Promise<DeletionRecipient[]> {
+    return deletionRecipients(tx, orgId, agencyId, ownerUserId);
   }
 
   /**

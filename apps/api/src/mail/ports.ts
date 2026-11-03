@@ -72,6 +72,16 @@ export interface CompanyExportReadyMail {
   totalBytes: number;
 }
 
+/** Aviso de que a una empresa eliminada le queda menos de un día antes del borrado definitivo (F3c, ADR-59 #14): al dueño y a la agencia que la administraba. */
+export interface CompanyPurgeNoticeMail {
+  to: string;
+  organizationName: string;
+  /** Cuándo se borra de forma definitiva. */
+  purgeAfter: Date;
+  timeZone: string;
+  audience: 'owner' | 'agency';
+}
+
 /** Aviso de que una empresa eliminada fue recuperada (F3, ADR-59 #14). */
 export interface CompanyRecoveredMail {
   to: string;
@@ -88,5 +98,6 @@ export interface MailProvider {
   sendOwnershipChange(mail: OwnershipChangeMail): Promise<void>;
   sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void>;
   sendCompanyExportReady(mail: CompanyExportReadyMail): Promise<void>;
+  sendCompanyPurgeNotice(mail: CompanyPurgeNoticeMail): Promise<void>;
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void>;
 }
