@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { channelRoutes, Database, qrRoutes } from '../../db';
+import { channelRoutes, Database, organizations, qrRoutes } from '../../db';
+import { operatingOrg } from './operating';
 
 export interface ChannelRoute {
   organizationId: string;
@@ -42,7 +43,13 @@ export class ChannelRoutesService {
   /** Empresas que tienen (o tuvieron) algún número: la tarea que procesa los avisos del webhook solo recorre estas, no todas las empresas. */
   async organizationIds(): Promise<string[]> {
     // Las de WhatsApp oficial (números de Meta) y las de WhatsApp por QR (M9.6): los avisos de ambas los procesa la misma tarea
-    const [meta, qr] = await this.db.withIdentity((tx) => Promise.all([tx.selectDistinct({ id: channelRoutes.organizationId }).from(channelRoutes), tx.selectDistinct({ id: qrRoutes.organizationId }).from(qrRoutes)]));
+    // Solo las que están operando: una empresa suspendida o eliminada deja de procesar y de enviar (ADR-59 #4); sus avisos quedan guardados sin procesar
+    const [meta, qr] = await this.db.withIdentity((tx) =>
+      Promise.all([
+        tx.selectDistinct({ id: channelRoutes.organizationId }).from(channelRoutes).innerJoin(organizations, eq(organizations.id, channelRoutes.organizationId)).where(operatingOrg()),
+        tx.selectDistinct({ id: qrRoutes.organizationId }).from(qrRoutes).innerJoin(organizations, eq(organizations.id, qrRoutes.organizationId)).where(operatingOrg()),
+      ]),
+    );
     return [...new Set([...meta, ...qr].map((r) => r.id))];
   }
 

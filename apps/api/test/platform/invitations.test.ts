@@ -278,6 +278,7 @@ describe('«Nueva empresa» e invitaciones', () => {
       const inv = (await admin.query(`SELECT consumed_at, accepted_user_id FROM invitations WHERE organization_id = $1`, [orgId])).rows[0];
       expect(inv.consumed_at).not.toBeNull();
       expect(inv.accepted_user_id).toBe(u.id);
+      expect((await admin.query(`SELECT owner_user_id FROM organizations WHERE id = $1`, [orgId])).rows[0].owner_user_id).toBe(u.id); // el dueño de la empresa (ADR-59 #7)
       // el dueño ya puede entrar con la contraseña elegida y la empresa pasa de «invited» a «trial»
       expect((await call('POST', '/auth/login', undefined, { email: 'dueno@cafe.test', password: NEW_PW, token_transport: 'body' })).status).toBe(200);
       expect((await companies()).items.find((c) => c.id === orgId)).toMatchObject({ state: 'trial', users: 1, invitation: null });

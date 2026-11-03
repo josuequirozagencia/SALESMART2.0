@@ -1,6 +1,6 @@
-import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { CompanyCreated, CompanyList, CompanyState, InvitationIssued } from '../../lib/types';
+import type { CompanyCreated, CompanyList, CompanyState, DeletionPreview, InvitationIssued } from '../../lib/types';
 
 export interface CompanyFilters {
   q: string;
@@ -67,6 +67,36 @@ export function useResendInvitation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<InvitationIssued>(`/platform/companies/${id}/invitation/resend`, { method: 'POST' }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
+}
+
+/** Lo que se pierde al eliminar una empresa (conteos, plan, si una agencia aún tiene clientes). No cambia nada. */
+export function useDeletionPreview(id: string) {
+  return useQuery({ queryKey: ['platform', 'deletion-preview', id], queryFn: () => api<DeletionPreview>(`/platform/companies/${id}/deletion-preview`), staleTime: 0, gcTime: 0 });
+}
+
+export interface DeleteCompanyInput {
+  id: string;
+  password: string;
+  confirm_name: string;
+  reason: string;
+}
+
+/** Eliminar una empresa (ADR-59): contraseña del Súper Admin, nombre exacto y motivo. La empresa queda «Eliminada» 7 días antes de borrarse. */
+export function useDeleteCompany() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: DeleteCompanyInput) => api<{ id: string; purge_after: string }>(`/platform/companies/${id}/delete`, { method: 'POST', body }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
+}
+
+/** Recuperar una empresa eliminada dentro de la ventana (ADR-59 #6): vuelve a su estado anterior. */
+export function useRecoverCompany() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, password }: { id: string; password: string }) => api<{ id: string; state: 'active' | 'suspended' }>(`/platform/companies/${id}/recover`, { method: 'POST', body: { password } }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
   });
 }

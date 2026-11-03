@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
-import { Database, qrRoutes } from '../../db';
+import { Database, organizations, qrRoutes } from '../../db';
+import { operatingOrg } from './operating';
 import { TenantContext } from '../../tenant';
 
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
@@ -24,7 +25,7 @@ export class QrRoutesService {
 
   /** Empresas con alguna conexión QR (el latido solo recorre estas, no todas las empresas). */
   async organizationIds(): Promise<string[]> {
-    const rows = await this.db.withIdentity((tx) => tx.selectDistinct({ id: qrRoutes.organizationId }).from(qrRoutes));
+    const rows = await this.db.withIdentity((tx) => tx.selectDistinct({ id: qrRoutes.organizationId }).from(qrRoutes).innerJoin(organizations, eq(organizations.id, qrRoutes.organizationId)).where(operatingOrg()));
     return rows.map((r) => r.id);
   }
 

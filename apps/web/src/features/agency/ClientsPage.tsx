@@ -17,6 +17,7 @@ const STATE: Record<CompanyState, [PillKind, string]> = {
   active: ['ok', 'Activa'],
   suspended: ['warn', 'Suspendida'],
   invited: ['accent', 'Invitación pendiente'],
+  deleted: ['crit', 'Eliminada'],
 };
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
@@ -33,13 +34,14 @@ function Row({ c, onEnter, onResend, entering, resending }: { c: Company; onEnte
         <Pill kind={kind}>{label}</Pill>
         {c.trial_ends_at ? <span className="text-muted">{c.state === 'trial_expired' ? 'Venció' : 'Vence'} el {shortDate(c.trial_ends_at)}</span> : null}
         {c.invitation ? <span className="text-muted">{c.invitation.expired ? 'La invitación venció' : 'La invitación vence'} el {shortDate(c.invitation.expires_at)}</span> : null}
+        {c.deletion ? <span className="text-muted">Sin acceso. Se borra el {shortDate(c.deletion.purge_after)} si no se recupera</span> : null}
       </div>
       <div className="grid gap-1 text-[13px]">
         {c.plan ? <b>{c.plan.name}</b> : <span className="text-muted">Sin plan</span>}
         {c.agency_access_level ? <span className="text-[12px] text-muted">Tu acceso: {ACCESS_LEVEL_LABEL[c.agency_access_level]}</span> : null}
       </div>
       <div className="flex flex-wrap gap-2">
-        {c.state !== 'suspended' ? <Button variant="primary" className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Entrar a ${c.name}`} loading={entering} onClick={() => onEnter(c)}>Entrar</Button> : null}
+        {c.state !== 'suspended' && c.state !== 'deleted' ? <Button variant="primary" className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Entrar a ${c.name}`} loading={entering} onClick={() => onEnter(c)}>Entrar</Button> : null}
         {c.state === 'invited' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Reenviar la invitación de ${c.name}`} loading={resending} onClick={() => onResend(c)}>Reenviar invitación</Button> : null}
       </div>
     </li>

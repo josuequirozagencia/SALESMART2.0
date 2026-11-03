@@ -90,6 +90,8 @@ export const organizations = identityTable(
     currency: text('currency').notNull().default('USD'),
     /** Cuándo se crearon los datos de ejemplo de la empresa (M10.6, ADR-56 B5); nulo = aún no. Evita recrear lo que el cliente borró. */
     sampleSeededAt: ts('sample_seeded_at'),
+    /** El «dueño» de la empresa (F3, ADR-59 #7): quien aceptó la invitación del dueño o se registró. Solo el Súper Admin lo cambia. Es quien puede pedir la descarga de sus datos si la empresa se elimina. */
+    ownerUserId: uuid('owner_user_id').references((): AnyPgColumn => users.id),
     /** Nivel con el que el personal de la agencia entra a ESTE cliente (M2.5, ADR-41): read | advisor | admin. Solo tiene efecto si hay `parent_agency_id`. */
     agencyAccessLevel: text('agency_access_level').notNull().default('admin'),
     createdAt: ts('created_at').notNull().defaultNow(),
@@ -134,6 +136,45 @@ export const organizationMembers = identityTable(
     uniqueIndex('organization_members_active_uq').on(t.userId, t.organizationId).where(sql`${t.revokedAt} IS NULL`),
     index('organization_members_org_idx').on(t.organizationId),
     index('organization_members_user_idx').on(t.userId),
+  ],
+);
+
+/**
+ * Eliminación de una empresa (F3, ADR-59): una fila por cada vez que el Súper Admin la elimina. `scheduled` = en la ventana de 7 días (se puede recuperar); `recovered` = se recuperó;
+ * `purging`/`purge_failed`/`purged` los usa el borrado definitivo (F3c). Nunca se borra: es parte de la evidencia. Solo `app_identity` (SELECT/INSERT/UPDATE, sin DELETE).
+ * `organization_name` y `plan_name` son una foto del momento (la fila de la empresa se reduce a lápida al borrar). `previous_status` es el estado al que vuelve si se recupera.
+ */
+export const organizationDeletions = identityTable(
+  'organization_deletions',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    reason: text('reason').notNull(),
+    organizationName: text('organization_name').notNull(),
+    planName: text('plan_name'),
+    previousStatus: text('previous_status').notNull(),
+    requestedAt: ts('requested_at').notNull().defaultNow(),
+    /** Desde cuándo se puede borrar definitivamente: pedido + 7 días (constante del servidor). */
+    purgeAfter: ts('purge_after').notNull(),
+    state: text('state').notNull().default('scheduled'),
+    recoveredAt: ts('recovered_at'),
+    recoveredBy: uuid('recovered_by').references(() => users.id),
+    /** Conteos del momento (usuarios, contactos, ventas, créditos…): lo que se mostró en la confirmación. Sin datos personales. */
+    summary: jsonb('summary').notNull().default(sql`'{}'::jsonb`),
+    /** Cuándo se avisó al dueño 24 h antes del borrado (lo escribe el borrado definitivo, F3c). */
+    noticeSentAt: ts('notice_sent_at'),
+  },
+  (t) => [
+    check('organization_deletions_state_valid', sql`${t.state} IN ('scheduled', 'recovered', 'purging', 'purge_failed', 'purged')`),
+    check('organization_deletions_reason_len', sql`length(btrim(${t.reason})) BETWEEN 10 AND 300`),
+    check('organization_deletions_window', sql`${t.purgeAfter} > ${t.requestedAt}`),
+    check('organization_deletions_recovered_consistent', sql`(${t.state} = 'recovered') = (${t.recoveredAt} IS NOT NULL AND ${t.recoveredBy} IS NOT NULL)`),
+    check('organization_deletions_summary_object', sql`jsonb_typeof(${t.summary}) = 'object'`),
+    // Como mucho UNA eliminación viva por empresa (programada o en borrado)
+    uniqueIndex('organization_deletions_open_uq').on(t.organizationId).where(sql`${t.state} IN ('scheduled', 'purging', 'purge_failed')`),
+    index('organization_deletions_org_idx').on(t.organizationId, t.requestedAt),
+    index('organization_deletions_due_idx').on(t.purgeAfter).where(sql`${t.state} = 'scheduled'`),
   ],
 );
 

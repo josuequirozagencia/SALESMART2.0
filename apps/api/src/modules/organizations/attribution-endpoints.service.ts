@@ -4,6 +4,7 @@ import { and, eq, isNull, lt, or } from 'drizzle-orm';
 import { attributionEndpoints, Database, organizations } from '../../db';
 import { TenantContext } from '../../tenant';
 import { AuditService } from '../audit';
+import { operatingOrg } from './operating';
 
 export interface EndpointStatus {
   configured: boolean;
@@ -76,7 +77,7 @@ export class AttributionEndpointsService {
 
   /** Empresas cliente activas (para el job de envío de eventos, que recorre una empresa a la vez bajo su propio contexto). */
   async activeClientOrgIds(): Promise<string[]> {
-    const rows = await this.db.withIdentity((tx) => tx.select({ id: organizations.id }).from(organizations).where(and(eq(organizations.kind, 'client'), eq(organizations.status, 'active'), isNull(organizations.deletedAt))));
+    const rows = await this.db.withIdentity((tx) => tx.select({ id: organizations.id }).from(organizations).where(and(eq(organizations.kind, 'client'), operatingOrg())));
     return rows.map((r) => r.id);
   }
 }

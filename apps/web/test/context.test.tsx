@@ -6,7 +6,7 @@ import { authed, err, ME_AGENCY, ME_AGENCY_IN_CLIENT, ME_ROOT, ME_ROOT_IN_CLIENT
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
-const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, agency: { id: 'ag1', name: 'Agencia Uno' }, agency_access_level: 'admin', users: 1, owner_email: `${over.id}@cliente.test`, timezone: 'UTC', country: 'EC', invitation: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
+const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, agency: { id: 'ag1', name: 'Agencia Uno' }, agency_access_level: 'admin', users: 1, owner_email: `${over.id}@cliente.test`, timezone: 'UTC', country: 'EC', invitation: null, deletion: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
 const A = company({ id: 'c1', name: 'Barbería Norte' });
 const B = company({ id: 'c2', name: 'Estudio Luna', state: 'trial', trial_ends_at: new Date(Date.now() + 3 * 86_400_000).toISOString() });
 const INV = company({ id: 'c3', name: 'Gimnasio Sol', state: 'invited', owner_email: 'dueno@gimnasio.test', invitation: { email: 'dueno@gimnasio.test', expires_at: new Date(Date.now() + 5 * 86_400_000).toISOString(), expired: false } });

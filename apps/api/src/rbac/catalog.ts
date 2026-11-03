@@ -76,6 +76,8 @@ export const PERMISSIONS = {
   'platform.trials.manage': 'platform',
   'platform.plans.manage': 'platform',
   'platform.companies.manage': 'platform',
+  // F3 (ADR-59): eliminar una empresa (ventana de 7 días) y recuperarla. Solo el Súper Admin.
+  'platform.companies.delete': 'platform',
   'platform.access_log.read': 'platform',
   // M8.1 (ADR-53): precio y margen de los créditos IA, regalos de créditos y saldos de todas las empresas.
   'platform.ai.manage': 'platform',

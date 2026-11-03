@@ -6,7 +6,7 @@ import { NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { ContactsService, ContactTouchesService } from '../contacts';
-import { AttributionEndpointsService } from '../organizations';
+import { AttributionEndpointsService, OrgDirectoryService } from '../organizations';
 import { SystemTagsService } from '../tags';
 import type { CtwaWebhookDto } from './attribution.dto';
 import { MetaSettingsService } from './meta-settings.service';
@@ -38,6 +38,7 @@ export class AttributionService {
     @Inject(ContactTouchesService) private readonly touches: ContactTouchesService,
     @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(AttributionEndpointsService) private readonly endpoints: AttributionEndpointsService,
+    @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(MetaSettingsService) private readonly settings: MetaSettingsService,
   ) {}
 
@@ -48,6 +49,8 @@ export class AttributionService {
   async ingest(endpointId: string, secret: string | undefined, input: CtwaWebhookDto): Promise<RecordResult> {
     const organizationId = secret ? await this.endpoints.resolve(endpointId, secret) : null;
     if (!organizationId) throw new NotFoundError();
+    // Empresa suspendida o eliminada (ADR-59 #5): se acepta y se ignora, para que quien llama no reintente ni se entere de nada
+    if (!(await this.directory.isOperating(organizationId))) return { contactCreated: false, duplicate: true };
     return TenantContext.run({ organizationId }, () => this.record(input));
   }
 

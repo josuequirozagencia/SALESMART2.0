@@ -24,19 +24,22 @@ import { CAPTCHA_VERIFIER } from './signup/ports';
 import { TurnstileVerifier } from './signup/turnstile.verifier';
 import { AgencyClientRegistrationController, InvitationsController, PlatformAgencyCreationController, PlatformInvitationsController } from './invitations/invitations.controller';
 import { InvitationsService } from './invitations/invitations.service';
+import { PlatformCompanyLifecycleController } from './company-lifecycle/company-lifecycle.controller';
+import { CompanyLifecycleService } from './company-lifecycle/company-lifecycle.service';
 import { SignupController } from './signup/signup.controller';
 import { SignupLimiter } from './signup/signup-limiter';
 import { SignupService } from './signup/signup.service';
 
 @Module({
   imports: [AuditModule, PlatformModule, OrganizationsModule, MailModule],
-  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController, AgencyClientRegistrationController, ContextController, PlatformAccessSessionsController],
+  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController, AgencyClientRegistrationController, ContextController, PlatformAccessSessionsController, PlatformCompanyLifecycleController],
   providers: [
     AuthService,
     SignupService,
     PasswordService,
     InvitationsService,
     ContextService,
+    CompanyLifecycleService,
     AccessSessionsService,
     PermissionService,
     SignupLimiter,

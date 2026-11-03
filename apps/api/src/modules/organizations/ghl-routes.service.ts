@@ -1,7 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, isNull, lt, or } from 'drizzle-orm';
-import { Database, ghlRoutes } from '../../db';
+import { Database, ghlRoutes, organizations } from '../../db';
+import { operatingOrg } from './operating';
 import { TenantContext } from '../../tenant';
 import { AuditService } from '../audit';
 import type { EndpointStatus } from './attribution-endpoints.service';
@@ -26,7 +27,7 @@ export class GhlRoutesService {
 
   /** Empresas que tienen punto de entrada de GoHighLevel: la tarea que procesa los avisos solo recorre estas, no todas las empresas. */
   async organizationIds(): Promise<string[]> {
-    const rows = await this.db.withIdentity((tx) => tx.selectDistinct({ id: ghlRoutes.organizationId }).from(ghlRoutes));
+    const rows = await this.db.withIdentity((tx) => tx.selectDistinct({ id: ghlRoutes.organizationId }).from(ghlRoutes).innerJoin(organizations, eq(organizations.id, ghlRoutes.organizationId)).where(operatingOrg()));
     return rows.map((r) => r.id);
   }
 

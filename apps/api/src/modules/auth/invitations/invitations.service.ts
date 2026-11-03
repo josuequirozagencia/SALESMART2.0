@@ -315,6 +315,8 @@ export class InvitationsService {
       if (!member) {
         const [m] = await tx.insert(organizationMembers).values({ userId, organizationId: inv.organizationId, role: inv.role, grantedBy: inv.invitedBy }).returning({ id: organizationMembers.id });
         membershipId = m!.id;
+        // El primer administrador que entra a una empresa sin dueño lo es (F3, ADR-59 #7): es quien podrá pedir la descarga de sus datos si la empresa se elimina
+        if (inv.role === 'client_admin') await tx.update(organizations).set({ ownerUserId: userId }).where(and(eq(organizations.id, inv.organizationId), eq(organizations.kind, 'client'), isNull(organizations.ownerUserId)));
         // Lo que el administrador eligió al invitar (M10.3): los ajustes se aplican dentro del techo del rol; lo que no cabe se descarta (un dato indebido no concede nada)
         const setup = inv.setup;
         if (setup && isOverrideRole(inv.role)) {

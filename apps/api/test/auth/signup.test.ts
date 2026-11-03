@@ -78,6 +78,8 @@ describe('registro y verificación (proveedores fake)', () => {
     expect(org).toHaveLength(1);
     expect(org[0]).toMatchObject({ kind: 'client', name: 'Mi Empresa SA', timezone: 'America/Guayaquil', role: 'client_admin', granted_by: null, status: 'active' });
     expect(org[0].email_verified_at).not.toBeNull();
+    // quien se registra es el dueño de la empresa (ADR-59 #7)
+    expect((await admin.query(`SELECT (o.owner_user_id = u.id) AS is_owner FROM organizations o JOIN organization_members m ON m.organization_id=o.id JOIN users u ON u.id=m.user_id WHERE u.email='nueva@empresa.test'`)).rows[0].is_owner).toBe(true);
 
     const l = await api.post('/auth/login', { email: 'nueva@empresa.test', password: PW, token_transport: 'body' });
     expect(l.status).toBe(200);

@@ -137,7 +137,7 @@ export class SignupService {
         .where(and(eq(emailVerifications.id, row.id), sql`${emailVerifications.consumedAt} IS NULL`))
         .returning({ id: emailVerifications.id });
       if (consumed.length === 0) return false;
-      const [org] = await tx.insert(organizations).values({ kind: 'client', name: row.orgName, timezone: row.tz }).returning({ id: organizations.id });
+      const [org] = await tx.insert(organizations).values({ kind: 'client', name: row.orgName, timezone: row.tz, ownerUserId: row.userId }).returning({ id: organizations.id });
       await tx.insert(organizationMembers).values({ userId: row.userId, organizationId: org!.id, role: 'client_admin', grantedBy: null });
       // La prueba de 7 días empieza AQUÍ, al verificar el correo (ADR-23 #2), en la misma transacción que la organización
       await this.trials.startFor(tx, { organizationId: org!.id, ownerUserId: row.userId }, now);
