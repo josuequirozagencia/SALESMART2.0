@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { Database, organizations, trialConfig } from '../../db';
+import { operatingOrg } from './operating';
 import { TenantContext } from '../../tenant';
 import { OrgMembersService } from './org-members.service';
 
@@ -85,9 +86,18 @@ export class OrgDirectoryService {
     return o?.kind === 'client';
   }
 
-  /** Las empresas CLIENTE (para las tareas que recorren a todas, como el procesamiento de documentos). */
+  /** ¿La empresa está operando (activa y no eliminada)? Las puertas públicas lo usan para ignorar lo que llega a una empresa detenida (ADR-59 #5). */
+  async isOperating(organizationId: string): Promise<boolean> {
+    const [o] = await this.db.withIdentity((tx) => tx.select({ id: organizations.id }).from(organizations).where(and(eq(organizations.id, organizationId), operatingOrg())).limit(1));
+    return o !== undefined;
+  }
+
+  /**
+   * Las empresas CLIENTE que están operando (para las tareas que recorren a todas, como el procesamiento de documentos). Una empresa suspendida o eliminada (ADR-59 #4) NO sale: así se detienen de golpe
+   * todas las tareas periódicas que usan esta lista (y las otras tres enumeraciones, que aplican el mismo filtro con `operatingOrg`).
+   */
   async clientOrganizationIds(): Promise<string[]> {
-    const rows = await this.db.withIdentity((tx) => tx.select({ id: organizations.id }).from(organizations).where(eq(organizations.kind, 'client')));
+    const rows = await this.db.withIdentity((tx) => tx.select({ id: organizations.id }).from(organizations).where(and(eq(organizations.kind, 'client'), operatingOrg())));
     return rows.map((r) => r.id);
   }
 

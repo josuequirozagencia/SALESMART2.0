@@ -1,4 +1,5 @@
 export { OrganizationsModule } from './organizations.module';
+export { operatingOrg } from './operating';
 export { TrialsService, type TrialView, type PlatformTrialList } from './trials.service';
 export { PlansService, type PlanView } from './plans.service';
 export { CompaniesService, likeEscape } from './companies.service';

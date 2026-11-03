@@ -1,5 +1,5 @@
 import type { AppLogger } from '../logger';
-import type { InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CompanyDeletedMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 /** Sin proveedor: el servicio informa que no está disponible. Es el valor por defecto (y el único válido hoy en producción). */
 export class UnavailableMailProvider implements MailProvider {
@@ -16,6 +16,12 @@ export class UnavailableMailProvider implements MailProvider {
   sendOwnershipChange(): Promise<void> {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
+  sendCompanyDeleted(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
+  sendCompanyRecovered(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
 }
 /** SOLO PRUEBAS: guarda los correos en memoria. La configuración lo rechaza en producción. */
 export class MemoryMailProvider implements MailProvider {
@@ -24,6 +30,8 @@ export class MemoryMailProvider implements MailProvider {
   readonly resetOutbox: PasswordResetMail[] = [];
   readonly inviteOutbox: InvitationMail[] = [];
   readonly ownershipOutbox: OwnershipChangeMail[] = [];
+  readonly companyDeletedOutbox: CompanyDeletedMail[] = [];
+  readonly companyRecoveredOutbox: CompanyRecoveredMail[] = [];
   failNext = false;
   sendVerificationCode(mail: VerificationMail): Promise<void> {
     if (this.failNext) {
@@ -55,6 +63,22 @@ export class MemoryMailProvider implements MailProvider {
       return Promise.reject(new Error('fallo simulado del proveedor'));
     }
     this.ownershipOutbox.push(mail);
+    return Promise.resolve();
+  }
+  sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.companyDeletedOutbox.push(mail);
+    return Promise.resolve();
+  }
+  sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.companyRecoveredOutbox.push(mail);
     return Promise.resolve();
   }
   lastInvitation(to: string): InvitationMail | undefined {
@@ -96,6 +120,14 @@ export class ConsoleMailProvider implements MailProvider {
   }
   sendOwnershipChange(mail: OwnershipChangeMail): Promise<void> {
     this.log.warn({ to: mail.to, agency: mail.agencyName }, 'DEV ONLY: aviso de cambio de administración (no se envía)');
+    return Promise.resolve();
+  }
+  sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void> {
+    this.log.warn({ to: mail.to, audience: mail.audience }, 'DEV ONLY: aviso de empresa eliminada (no se envía)');
+    return Promise.resolve();
+  }
+  sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void> {
+    this.log.warn({ to: mail.to, audience: mail.audience }, 'DEV ONLY: aviso de empresa recuperada (no se envía)');
     return Promise.resolve();
   }
 }

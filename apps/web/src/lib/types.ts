@@ -89,7 +89,7 @@ export interface PlanList {
   feature_catalog: Array<{ key: string; label: string }>;
 }
 
-export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited';
+export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited' | 'deleted';
 
 export interface Company {
   id: string;
@@ -109,6 +109,21 @@ export interface Company {
   trial_ends_at: string | null;
   /** Invitación pendiente del dueño (solo en estado `invited`). */
   invitation: { email: string; expires_at: string; expired: boolean } | null;
+  /** Eliminación en curso (solo en estado `deleted`, ADR-59): cuándo se borra definitivamente. El motivo solo lo ve el Súper Admin. */
+  deletion: { requested_at: string; purge_after: string; reason: string | null } | null;
+}
+
+/** Lo que se muestra antes de eliminar una empresa (ADR-59 #13). */
+export interface DeletionPreview {
+  id: string;
+  name: string;
+  kind: 'client' | 'agency';
+  state: 'active' | 'suspended' | 'deleted';
+  plan: string | null;
+  footprint: { users: number; contacts: number; sales: number; ai_credits: number; clients: number };
+  blockers: Array<{ code: 'AGENCY_HAS_CLIENTS'; clients: Array<{ id: string; name: string }> }>;
+  deletion: { id: string; requested_at: string; purge_after: string; reason: string; requested_by_email: string | null } | null;
+  window_days: number;
 }
 
 /** `sent` = el correo salió (el enlace NO viaja); si no, `invite_url` va solo al Súper Admin para entregarlo por otro medio (ADR-39). */

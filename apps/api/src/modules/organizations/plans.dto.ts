@@ -27,7 +27,7 @@ export const listCompaniesQuerySchema = z
   .object({
     q: z.string().trim().min(1).max(100).optional(),
     kind: z.enum(['client', 'agency']).optional(),
-    state: z.enum(['trial', 'trial_expired', 'active', 'suspended', 'invited']).optional(),
+    state: z.enum(['trial', 'trial_expired', 'active', 'suspended', 'invited', 'deleted']).optional(),
     /** Un id de agencia (su cartera) o «none» (administración directa). */
     agency: z.union([z.uuid(), z.literal('none')]).optional(),
     /** Un id de plan o «none» (empresas sin plan). */

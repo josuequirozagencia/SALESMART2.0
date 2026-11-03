@@ -46,6 +46,25 @@ export interface OwnershipChangeMail {
   previousAgencyName: string | null;
 }
 
+/** Aviso de que una empresa fue eliminada (F3, ADR-59 #14): al dueño y a la agencia que la administraba. No lleva enlaces: no se puede entrar a una empresa eliminada. */
+export interface CompanyDeletedMail {
+  to: string;
+  organizationName: string;
+  /** Hasta cuándo se puede recuperar; después se borra definitivamente. */
+  purgeAfter: Date;
+  /** Zona horaria con la que se muestra la fecha (la de la empresa). */
+  timeZone: string;
+  /** A quién se escribe: cambia el texto (el dueño pierde su acceso; la agencia, su cliente). */
+  audience: 'owner' | 'agency';
+}
+
+/** Aviso de que una empresa eliminada fue recuperada (F3, ADR-59 #14). */
+export interface CompanyRecoveredMail {
+  to: string;
+  organizationName: string;
+  audience: 'owner' | 'agency';
+}
+
 export interface MailProvider {
   /** false = no hay proveedor configurado: el registro responde 503 en lugar de fingir que envió. */
   readonly available: boolean;
@@ -53,4 +72,6 @@ export interface MailProvider {
   sendPasswordReset(mail: PasswordResetMail): Promise<void>;
   sendInvitation(mail: InvitationMail): Promise<void>;
   sendOwnershipChange(mail: OwnershipChangeMail): Promise<void>;
+  sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void>;
+  sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void>;
 }

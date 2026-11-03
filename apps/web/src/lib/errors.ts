@@ -70,6 +70,9 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'IMPORT_NOT_STAGING': case 'IMPORT_NOT_READY': case 'IMPORT_NOT_RUNNING': case 'IMPORT_LOCKED': case 'IMPORT_ROW_OUT_OF_ORDER': case 'EXPORT_TOO_LARGE': return e.message;
     // Usuarios del equipo (ADR-56): el servidor ya redacta el motivo
     case 'LAST_ADMIN': case 'SELF_NOT_ALLOWED': case 'MEMBER_EXISTS': case 'INVITE_NOT_ALLOWED': case 'ROLE_UNCHANGED': case 'MEMBER_INACTIVE': return e.message;
+    // Eliminar y recuperar empresas (ADR-59): el servidor ya redacta el motivo
+    case 'PASSWORD_INVALID': return 'La contraseña no es correcta.';
+    case 'ALREADY_DELETED': case 'AGENCY_HAS_CLIENTS': case 'COMPANY_DELETED': case 'NOT_RECOVERABLE': case 'RECOVERY_WINDOW_CLOSED': return e.message;
     case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;

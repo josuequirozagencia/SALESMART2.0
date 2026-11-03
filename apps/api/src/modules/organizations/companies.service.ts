@@ -7,7 +7,7 @@ import { APP_LOGGER } from '../../tokens';
 import { PlatformAuditService } from '../platform';
 import type { ListCompaniesQuery } from './plans.dto';
 
-export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited';
+export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited' | 'deleted';
 
 export interface CompanyItem {
   id: string;
@@ -29,6 +29,8 @@ export interface CompanyItem {
   trial_ends_at: string | null;
   /** Invitación pendiente del dueño (solo en estado `invited`, ADR-39). */
   invitation: { email: string; expires_at: string; expired: boolean } | null;
+  /** Eliminación en curso (solo en estado `deleted`, ADR-59): cuándo se pidió y cuándo se borra definitivamente. El motivo solo lo ve el Súper Admin. */
+  deletion: { requested_at: string; purge_after: string; reason: string | null } | null;
 }
 
 export interface CompanyList {
@@ -54,6 +56,9 @@ type Row = {
   trial_ends_at: Date | string | null;
   inv_email: string | null;
   inv_expires_at: Date | string | null;
+  del_requested_at: Date | string | null;
+  del_purge_after: Date | string | null;
+  del_reason: string | null;
 };
 
 const iso = (d: Date | string): string => new Date(d).toISOString();
@@ -85,6 +90,8 @@ export class CompaniesService {
     if (f.state) where.push(sql`s.state = ${f.state}`);
     if (scope) where.push(sql`s.kind = 'client' AND s.agency_id = ${scope.agencyId}`);
     else {
+      // La lista de la plataforma no mezcla las eliminadas (ADR-59 #13): se ven con el filtro «Eliminadas». La cartera de una agencia sí las muestra, como «Eliminado»
+      if (f.state !== 'deleted') where.push(sql`s.state <> 'deleted'`);
       if (f.kind) where.push(sql`s.kind = ${f.kind}`);
       if (f.agency === 'none') where.push(sql`s.kind = 'client' AND s.agency_id IS NULL`);
       else if (f.agency) where.push(sql`s.agency_id = ${f.agency}`);
@@ -106,8 +113,12 @@ export class CompaniesService {
                    WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND m.role IN ('client_admin', 'agency') AND (o.kind = 'agency' OR m.role = 'client_admin') ORDER BY m.created_at, m.id LIMIT 1) AS owner_email,
                  (SELECT i.email FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_email,
                  (SELECT i.expires_at FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL ORDER BY i.created_at LIMIT 1) AS inv_expires_at,
+                 (SELECT d.requested_at FROM organization_deletions d WHERE d.organization_id = o.id AND d.state IN ('scheduled', 'purging', 'purge_failed') LIMIT 1) AS del_requested_at,
+                 (SELECT d.purge_after FROM organization_deletions d WHERE d.organization_id = o.id AND d.state IN ('scheduled', 'purging', 'purge_failed') LIMIT 1) AS del_purge_after,
+                 (SELECT d.reason FROM organization_deletions d WHERE d.organization_id = o.id AND d.state IN ('scheduled', 'purging', 'purge_failed') LIMIT 1) AS del_reason,
                  CASE WHEN o.plan_id IS NULL AND t.id IS NOT NULL THEN t.ends_at END AS trial_ends_at,
-                 CASE WHEN o.status <> 'active' THEN 'suspended'
+                 CASE WHEN o.status = 'deleted' THEN 'deleted'
+                      WHEN o.status <> 'active' THEN 'suspended'
                       WHEN o.kind IN ('client', 'agency') AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND (o.kind = 'agency' OR m.role <> 'agency'))
                            AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                       WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'
@@ -117,7 +128,7 @@ export class CompaniesService {
             LEFT JOIN plans p ON p.id = o.plan_id
             LEFT JOIN organizations ag ON ag.id = o.parent_agency_id
             LEFT JOIN trials t ON t.organization_id = o.id
-           WHERE o.kind <> 'platform' AND o.deleted_at IS NULL
+           WHERE o.kind <> 'platform' AND (o.deleted_at IS NULL OR o.status = 'deleted')
         ) s
         WHERE ${sql.join(where, sql` AND `)}
         ORDER BY s.id DESC
@@ -141,6 +152,7 @@ export class CompaniesService {
         created_at: iso(r.created_at),
         trial_ends_at: r.trial_ends_at ? iso(r.trial_ends_at) : null,
         invitation: r.state === 'invited' && r.inv_email && r.inv_expires_at ? { email: r.inv_email, expires_at: iso(r.inv_expires_at), expired: new Date(r.inv_expires_at).getTime() <= now.getTime() } : null,
+        deletion: r.state === 'deleted' && r.del_requested_at && r.del_purge_after ? { requested_at: iso(r.del_requested_at), purge_after: iso(r.del_purge_after), reason: scope ? null : r.del_reason } : null,
       })),
       next_cursor: rows.length > f.limit ? (page[page.length - 1]?.id ?? null) : null,
     };
@@ -152,8 +164,9 @@ export class CompaniesService {
    */
   async assignPlan(orgId: string, planId: string | null): Promise<{ id: string; state: CompanyState; plan: { id: string; name: string } | null }> {
     const out = await this.db.withIdentity(async (tx) => {
-      const [org] = await tx.select({ id: organizations.id, kind: organizations.kind, planId: organizations.planId }).from(organizations).where(eq(organizations.id, orgId)).for('update').limit(1);
+      const [org] = await tx.select({ id: organizations.id, kind: organizations.kind, planId: organizations.planId, status: organizations.status }).from(organizations).where(eq(organizations.id, orgId)).for('update').limit(1);
       if (!org || org.kind === 'platform') throw new NotFoundError();
+      if (org.status === 'deleted') throw new ConflictError('COMPANY_DELETED', 'La empresa está eliminada: recupérala antes de cambiarle el plan');
       let plan: { id: string; name: string } | null = null;
       if (planId) {
         const [p] = await tx.select({ id: plans.id, name: plans.name, archivedAt: plans.archivedAt }).from(plans).where(eq(plans.id, planId)).for('share').limit(1);
@@ -173,7 +186,8 @@ export class CompaniesService {
   private async stateOf(orgId: string): Promise<CompanyState> {
     const res = await this.db.withIdentity((tx) =>
       tx.execute<{ state: CompanyState }>(sql`
-        SELECT CASE WHEN o.status <> 'active' THEN 'suspended'
+        SELECT CASE WHEN o.status = 'deleted' THEN 'deleted'
+                    WHEN o.status <> 'active' THEN 'suspended'
                     WHEN o.kind IN ('client', 'agency') AND NOT EXISTS (SELECT 1 FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL)
                          AND EXISTS (SELECT 1 FROM invitations i WHERE i.organization_id = o.id AND i.consumed_at IS NULL) THEN 'invited'
                     WHEN o.plan_id IS NOT NULL OR t.id IS NULL THEN 'active'

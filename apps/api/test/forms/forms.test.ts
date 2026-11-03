@@ -329,6 +329,20 @@ describe('definición pública del formulario', () => {
     expect((await pub('GET', `/public/forms/${draft.public_token}`, { origin: LANDING })).status).toBe(404);
   });
 
+  it('una empresa ELIMINADA o suspendida (ADR-59 #5): su formulario publicado responde 404 uniforme (definición, página alojada y envío) y no guarda nada; al recuperarla vuelve', async () => {
+    const { token } = await ready();
+    expect((await pub('GET', `/public/forms/${token}`, { origin: LANDING })).status).toBe(200);
+    await admin.query(`UPDATE organizations SET status = 'deleted', deleted_at = now() WHERE id = $1`, [ORG_A]);
+    expect((await pub('GET', `/public/forms/${token}`, { origin: LANDING })).status).toBe(404);
+    expect((await pub('GET', `/public/forms/${token}/page`)).status).toBe(404);
+    expect((await submit(token)).status).toBe(404);
+    expect(await contactRows()).toEqual([]);
+    expect(await subs()).toEqual([]);
+    await admin.query(`UPDATE organizations SET status = 'active', deleted_at = NULL WHERE id = $1`, [ORG_A]);
+    expect((await pub('GET', `/public/forms/${token}`, { origin: LANDING })).status).toBe(200);
+    expect((await submit(token)).status).toBe(200);
+  });
+
   it('el preflight CORS responde 204 con el origen autorizado y 403 al resto', async () => {
     const { token } = await ready();
     const ok = await pub('OPTIONS', `/public/forms/${token}/submit`, { origin: LANDING });

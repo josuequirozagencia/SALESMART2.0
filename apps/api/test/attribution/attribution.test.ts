@@ -226,6 +226,21 @@ describe('webhook de atribución', () => {
     expect(audit.every((a) => a.source !== 'manual')).toBe(true);
   });
 
+  it('una empresa ELIMINADA o suspendida (ADR-59 #5): el clic se acepta con 200 y se ignora (no crea contacto ni evento); al recuperarla vuelve a registrarse', async () => {
+    const ep = await setup(T.alice);
+    await admin.query(`UPDATE organizations SET status = 'deleted', deleted_at = now() WHERE id = $1`, [ORG_A]);
+    const r = await hook(ep.id, ep.secret, click());
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true });
+    expect(await contactByPhone(ORG_A, P1)).toBeUndefined();
+    expect(await events(ORG_A)).toEqual([]);
+    expect((await hook(ep.id, 'secreto-equivocado', click())).status).toBe(404); // lo no autenticado sigue siendo 404 uniforme
+    await admin.query(`UPDATE organizations SET status = 'active', deleted_at = NULL WHERE id = $1`, [ORG_A]);
+    expect((await hook(ep.id, ep.secret, click())).status).toBe(200);
+    expect(await contactByPhone(ORG_A, P1)).toBeDefined();
+    expect(await events(ORG_A, 'Lead')).toHaveLength(1);
+  });
+
   it('es idempotente: repetir el mismo clic no cambia nada ni duplica contacto, evento, etiqueta ni auditoría', async () => {
     const ep = await setup(T.alice);
     for (let i = 0; i < 3; i++) expect((await hook(ep.id, ep.secret, click())).status).toBe(200);

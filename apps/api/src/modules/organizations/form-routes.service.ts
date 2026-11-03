@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
-import { eq, inArray } from 'drizzle-orm';
-import { Database, formRoutes } from '../../db';
+import { and, eq, inArray } from 'drizzle-orm';
+import { Database, formRoutes, organizations } from '../../db';
+import { operatingOrg } from './operating';
 import { TenantContext } from '../../tenant';
 
 /**
@@ -33,9 +34,14 @@ export class FormRoutesService {
     return new Map(rows.filter((r) => r.organizationId === org).map((r) => [r.formId, r.id]));
   }
 
-  /** Empresa y formulario de un token público, o null (inexistente). No distingue más: quien llama responde 404 uniforme. */
+  /**
+   * Empresa y formulario de un token público, o null (inexistente, o de una empresa suspendida o eliminada: ADR-59 #5, el envío de alguien que cree escribirle a una empresa activa no se guarda).
+   * No distingue más: quien llama responde 404 uniforme.
+   */
   async resolve(token: string): Promise<{ organizationId: string; formId: string } | null> {
-    const [row] = await this.db.withIdentity((tx) => tx.select({ organizationId: formRoutes.organizationId, formId: formRoutes.formId }).from(formRoutes).where(eq(formRoutes.id, token)).limit(1));
+    const [row] = await this.db.withIdentity((tx) =>
+      tx.select({ organizationId: formRoutes.organizationId, formId: formRoutes.formId }).from(formRoutes).innerJoin(organizations, eq(organizations.id, formRoutes.organizationId)).where(and(eq(formRoutes.id, token), operatingOrg())).limit(1),
+    );
     return row ?? null;
   }
 }

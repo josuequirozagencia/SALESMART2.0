@@ -298,6 +298,25 @@ describe('recibir y guardar', () => {
     expect(await events()).toEqual([]);
   });
 
+  it('una empresa ELIMINADA (ADR-59 #5): el aviso se acepta con 200 (Meta no reintenta ni desactiva el webhook) y queda guardado SIN procesar; la tarea no la recorre y, al recuperarla, se procesa', async () => {
+    await admin.query(`UPDATE organizations SET status = 'deleted', deleted_at = now() WHERE id = $1`, [ORG_A]);
+    const r = await post(wa({ text: 'llegó durante la pausa' }));
+    expect(r.status).toBe(200);
+    expect(await r.json()).toEqual({ ok: true });
+    expect(await events(ORG_A)).toHaveLength(1);
+    expect((await events(ORG_A))[0]).toMatchObject({ status: 'pending', processed_at: null });
+    // La empresa B sí se procesa; la A no se toca
+    await post(wa({ phoneId: PHONE_B, from: BETO, id: 'wamid.B1', text: 'para B', name: 'Beto Ruiz' }));
+    expect(await runJob()).toBe(1);
+    expect(await msgs(ORG_A)).toEqual([]);
+    expect((await msgs(ORG_B)).map((m) => m.body)).toEqual(['para B']);
+    expect((await events(ORG_A))[0]).toMatchObject({ status: 'pending' });
+    // Recuperada, vuelve a recorrerse y lo guardado se procesa en orden
+    await admin.query(`UPDATE organizations SET status = 'active', deleted_at = NULL WHERE id = $1`, [ORG_A]);
+    expect(await runJob()).toBe(1);
+    expect((await msgs(ORG_A)).map((m) => m.body)).toEqual(['llegó durante la pausa']);
+  });
+
   it('Meta reintenta la MISMA entrega: se guarda una sola vez', async () => {
     const p = wa();
     for (let i = 0; i < 3; i++) expect((await post(p)).status).toBe(200);

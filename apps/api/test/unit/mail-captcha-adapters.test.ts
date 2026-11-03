@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { MemoryMailProvider } from '../../src/mail/fakes';
 import type { MailProvider } from '../../src/mail/ports';
 import { ResendMailProvider } from '../../src/mail/resend.provider';
-import { invitationMail, ownershipChangeMail, passwordResetMail, verificationMail } from '../../src/mail/templates';
+import { companyDeletedMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail } from '../../src/mail/templates';
 import { FakeCaptchaVerifier } from '../../src/modules/auth/signup/fakes';
 import type { CaptchaVerifier } from '../../src/modules/auth/signup/ports';
 import { TurnstileVerifier } from '../../src/modules/auth/signup/turnstile.verifier';
@@ -169,6 +169,8 @@ describe('contrato de los puertos: el real y el fake cumplen la misma interfaz',
       await expect(p.sendPasswordReset({ to: 'a@b.test', resetUrl: 'https://x.test/reset-password#token=t', expiresInMinutes: 30 })).resolves.toBeUndefined();
       await expect(p.sendInvitation({ to: 'a@b.test', organizationName: 'Empresa', inviteUrl: 'https://x.test/accept-invite#token=t', expiresInDays: 7 })).resolves.toBeUndefined();
       await expect(p.sendOwnershipChange({ to: 'a@b.test', organizationName: 'Empresa', agencyName: 'Agencia', previousAgencyName: null })).resolves.toBeUndefined();
+      await expect(p.sendCompanyDeleted({ to: 'a@b.test', organizationName: 'Empresa', purgeAfter: new Date('2026-11-09T15:00:00Z'), timeZone: 'America/Guayaquil', audience: 'owner' })).resolves.toBeUndefined();
+      await expect(p.sendCompanyRecovered({ to: 'a@b.test', organizationName: 'Empresa', audience: 'agency' })).resolves.toBeUndefined();
     });
   }
   const captchas: Array<[string, CaptchaVerifier, string]> = [['FakeCaptchaVerifier', new FakeCaptchaVerifier(), 'fake-pass'], ['TurnstileVerifier', tvOk(), 'cualquier-token']];
@@ -220,6 +222,26 @@ describe('plantillas', () => {
     expect(d.text).toContain('la administras tú directamente');
     expect(d.subject).toContain('directamente');
     expect(d.html).not.toContain('no se hará ningún cambio'); // el pie genérico de «si no fuiste tú» no aplica a un aviso de cambio
+  });
+  it('el aviso de empresa eliminada: dice hasta cuándo se recupera (en la zona de la empresa), escapa el HTML, no lleva enlaces y cambia el texto según a quién va', () => {
+    const at = new Date('2026-11-09T15:00:00Z'); // 10:00 en Guayaquil
+    const o = companyDeletedMail({ to: 'a@b.test', organizationName: 'Café <Norte>', purgeAfter: at, timeZone: 'America/Guayaquil', audience: 'owner' });
+    expect(o.html).toContain('Tu empresa fue eliminada');
+    expect(o.html).toContain('Café &lt;Norte&gt;');
+    expect(o.html).toContain('9 de noviembre de 2026');
+    expect(o.html).toMatch(/10:00/);
+    expect(o.html).not.toMatch(/https?:\/\/|href=/);
+    expect(o.text).toContain('copia de tus datos');
+    expect(o.subject).toContain('Eliminamos la cuenta');
+    const a = companyDeletedMail({ to: 'a@b.test', organizationName: 'Empresa', purgeAfter: at, timeZone: 'Zona/Inexistente', audience: 'agency' });
+    expect(a.html).toContain('Un cliente tuyo fue eliminado');
+    expect(a.html).toMatch(/15:00/); // zona desconocida: cae a UTC, el correo no falla
+    expect(a.subject).toContain('Eliminaron a tu cliente');
+    const r = companyRecoveredMail({ to: 'a@b.test', organizationName: 'Empresa & Co', audience: 'owner' });
+    expect(r.html).toContain('Tu empresa fue recuperada');
+    expect(r.html).toContain('Empresa &amp; Co');
+    expect(r.text).toContain('las sesiones anteriores se cerraron');
+    expect(companyRecoveredMail({ to: 'a@b.test', organizationName: 'E', audience: 'agency' }).subject).toContain('Recuperaron a tu cliente');
   });
   it('minutos de vigencia: se redondean y nunca muestran 0', () => {
     expect(verificationMail({ to: 'a@b.test', code: '1', expiresInMinutes: 0.2 }).text).toContain('1 minutos');

@@ -1,4 +1,4 @@
-import type { InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CompanyDeletedMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface MailContent {
   subject: string;
@@ -98,4 +98,59 @@ ${plain}
 Si no esperabas este cambio, responde a este correo o escribe a quien te atiende en Sales Smart.
 `;
   return { subject: m.agencyName ? `Cambió la administración de ${m.organizationName.slice(0, 60)}` : `Administras ${m.organizationName.slice(0, 60)} directamente`, html, text };
+}
+
+/** Fecha larga en la zona de la empresa; si la zona no se reconoce, UTC (el correo nunca falla por eso). */
+function longDate(d: Date, timeZone: string): string {
+  const opts: Intl.DateTimeFormatOptions = { dateStyle: 'long', timeStyle: 'short' };
+  try {
+    return new Intl.DateTimeFormat('es', { ...opts, timeZone }).format(d);
+  } catch {
+    return new Intl.DateTimeFormat('es', { ...opts, timeZone: 'UTC' }).format(d);
+  }
+}
+
+/** Aviso de empresa eliminada (ADR-59 #14). Sin enlaces ni datos del negocio: la empresa ya no es accesible y el correo solo informa el plazo. */
+export function companyDeletedMail(m: CompanyDeletedMail): MailContent {
+  const org = esc(m.organizationName);
+  const untilPlain = longDate(m.purgeAfter, m.timeZone);
+  const until = esc(untilPlain);
+  const owner = m.audience === 'owner';
+  const headline = owner ? 'Tu empresa fue eliminada' : 'Un cliente tuyo fue eliminado';
+  const help = owner ? 'Si necesitas una copia de tus datos o crees que fue un error, escribe a quien te atiende en Sales Smart antes de esa fecha.' : 'Si crees que fue un error, escribe a quien te atiende en Sales Smart antes de esa fecha.';
+  const detail = owner
+    ? `La cuenta de <b>${org}</b> fue eliminada y ya nadie puede entrar. Si fue un error, se puede recuperar hasta el <b>${until}</b>; pasada esa fecha borramos todos sus datos de forma definitiva.`
+    : `Tu cliente <b>${org}</b> fue eliminado de la plataforma y ya no tienes acceso a su cuenta. Se puede recuperar hasta el <b>${until}</b>; pasada esa fecha se borran todos sus datos de forma definitiva.`;
+  const html = frame(
+    headline,
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">${headline}</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:8px;">${detail}</td></tr>
+<tr><td style="font-size:13px;line-height:1.5;color:#5f5a7a;">${help}</td></tr>`,
+    'Aviso informativo de Sales Smart.',
+  );
+  const plain = owner
+    ? `La cuenta de ${m.organizationName} fue eliminada y ya nadie puede entrar. Si fue un error, se puede recuperar hasta el ${untilPlain}; pasada esa fecha borramos todos sus datos de forma definitiva.`
+    : `Tu cliente ${m.organizationName} fue eliminado de la plataforma y ya no tienes acceso a su cuenta. Se puede recuperar hasta el ${untilPlain}; pasada esa fecha se borran todos sus datos de forma definitiva.`;
+  const text = `${headline} — Sales Smart\n\n${plain}\n\n${help}\n`;
+  return { subject: owner ? `Eliminamos la cuenta de ${m.organizationName.slice(0, 60)}` : `Eliminaron a tu cliente ${m.organizationName.slice(0, 60)}`, html, text };
+}
+
+/** Aviso de empresa recuperada (ADR-59 #14). */
+export function companyRecoveredMail(m: CompanyRecoveredMail): MailContent {
+  const org = esc(m.organizationName);
+  const owner = m.audience === 'owner';
+  const headline = owner ? 'Tu empresa fue recuperada' : 'Tu cliente fue recuperado';
+  const detail = owner
+    ? `La cuenta de <b>${org}</b> volvió a estar disponible, tal como estaba. Entra de nuevo con tu correo y tu contraseña: las sesiones anteriores se cerraron.`
+    : `Tu cliente <b>${org}</b> volvió a estar disponible y recuperas el acceso que tenías.`;
+  const html = frame(
+    headline,
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">${headline}</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:8px;">${detail}</td></tr>`,
+    'Aviso informativo de Sales Smart.',
+  );
+  const plain = owner
+    ? `La cuenta de ${m.organizationName} volvió a estar disponible, tal como estaba. Entra de nuevo con tu correo y tu contraseña: las sesiones anteriores se cerraron.`
+    : `Tu cliente ${m.organizationName} volvió a estar disponible y recuperas el acceso que tenías.`;
+  return { subject: owner ? `Recuperamos la cuenta de ${m.organizationName.slice(0, 60)}` : `Recuperaron a tu cliente ${m.organizationName.slice(0, 60)}`, html, text: `${headline} — Sales Smart\n\n${plain}\n` };
 }
