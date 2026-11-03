@@ -17,6 +17,8 @@ export interface SignedUrlOptions {
 export interface StorageAdapter {
   readonly name: 's3' | 'fake';
   put(key: string, body: Buffer, contentType: string): Promise<void>;
+  /** Sube un archivo del disco SIN cargarlo entero en memoria (paquetes de descarga de hasta ~1 GB, ADR-59 F3b). El archivo local no se toca. */
+  putFile(key: string, path: string, contentType: string): Promise<void>;
   /** Lee el archivo entero. Lanza `StorageError('not_found')` si no existe. */
   get(key: string): Promise<Buffer>;
   /** Una URL temporal para que el navegador lea el archivo directamente del almacenamiento. */

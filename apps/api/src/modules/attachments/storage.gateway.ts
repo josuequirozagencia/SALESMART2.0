@@ -55,6 +55,10 @@ export class StorageGateway implements StorageAdapter {
     return this.adapter().then((a) => a.put(key, body, contentType));
   }
 
+  putFile(key: string, path: string, contentType: string): Promise<void> {
+    return this.adapter().then((a) => a.putFile(key, path, contentType));
+  }
+
   get(key: string): Promise<Buffer> {
     return this.adapter().then((a) => a.get(key));
   }

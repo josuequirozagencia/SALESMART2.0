@@ -42,6 +42,7 @@ import { ForgotScreen } from './screens/ForgotScreen';
 import { HomeScreen } from './screens/HomeScreen';
 import { LoginScreen } from './screens/LoginScreen';
 import { AcceptInviteScreen } from './screens/AcceptInviteScreen';
+import { CompanyExportScreen } from './screens/CompanyExportScreen';
 import { ResetScreen } from './screens/ResetScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
@@ -113,6 +114,8 @@ export function App() {
       {/* El enlace del correo se abre con o sin sesión: restablecer no depende de estar autenticado */}
       <Route path="/reset-password" element={<ResetScreen />} />
       <Route path="/accept-invite" element={<AcceptInviteScreen />} />
+      {/* El dueño de una empresa eliminada no puede iniciar sesión: entra con el enlace de su correo (token en el fragmento) y su contraseña */}
+      <Route path="/company-export" element={<CompanyExportScreen />} />
       <Route element={<AppGate />}>
         <Route path="/" element={<Home />} />
         <Route path="/inbox/scheduled" element={<ScheduledOverviewPage />} />

@@ -56,6 +56,20 @@ export interface CompanyDeletedMail {
   timeZone: string;
   /** A quién se escribe: cambia el texto (el dueño pierde su acceso; la agencia, su cliente). */
   audience: 'owner' | 'agency';
+  /** Solo para el dueño (F3b): enlace de un solo propósito para pedir y bajar la copia completa de sus datos. El token va en el fragmento (#token=…), nunca en la ruta. */
+  exportUrl?: string;
+}
+
+/** Aviso al dueño de que la copia completa de sus datos ya está lista (F3b, ADR-59 #9). El enlace lleva a una página que pide su contraseña antes de entregar la descarga. */
+export interface CompanyExportReadyMail {
+  to: string;
+  organizationName: string;
+  downloadUrl: string;
+  /** Hasta cuándo se puede bajar (las partes se borran a las 48 horas). */
+  expiresAt: Date;
+  timeZone: string;
+  parts: number;
+  totalBytes: number;
 }
 
 /** Aviso de que una empresa eliminada fue recuperada (F3, ADR-59 #14). */
@@ -73,5 +87,6 @@ export interface MailProvider {
   sendInvitation(mail: InvitationMail): Promise<void>;
   sendOwnershipChange(mail: OwnershipChangeMail): Promise<void>;
   sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void>;
+  sendCompanyExportReady(mail: CompanyExportReadyMail): Promise<void>;
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void>;
 }

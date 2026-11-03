@@ -1,6 +1,6 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { CompanyCreated, CompanyList, CompanyState, DeletionPreview, InvitationIssued } from '../../lib/types';
+import type { CompanyCreated, CompanyExport, CompanyExportStatus, CompanyList, CompanyState, DeletionPreview, ExportDownloadLink, InvitationIssued } from '../../lib/types';
 
 export interface CompanyFilters {
   q: string;
@@ -89,6 +89,30 @@ export function useDeleteCompany() {
   return useMutation({
     mutationFn: ({ id, ...body }: DeleteCompanyInput) => api<{ id: string; purge_after: string }>(`/platform/companies/${id}/delete`, { method: 'POST', body }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
+}
+
+/** El estado de la copia completa de una empresa eliminada (F3b). Se consulta solo mientras el diálogo está abierto y se actualiza cada pocos segundos mientras se arma. */
+export function useCompanyExport(id: string) {
+  return useQuery({
+    queryKey: ['platform', 'company-export', id],
+    queryFn: () => api<CompanyExportStatus>(`/platform/companies/${id}/export`),
+    refetchInterval: (q) => (q.state.data?.export && (q.state.data.export.state === 'queued' || q.state.data.export.state === 'running') ? 4000 : false),
+  });
+}
+
+export function useRequestCompanyExport() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, password }: { id: string; password: string }) => api<CompanyExport>(`/platform/companies/${id}/export`, { method: 'POST', body: { password } }),
+    onSettled: (_d, _e, v) => qc.invalidateQueries({ queryKey: ['platform', 'company-export', v.id] }),
+  });
+}
+
+/** Pide la URL firmada de una parte (vale 15 minutos). La descarga la inicia quien llama. */
+export function useCompanyExportDownload() {
+  return useMutation({
+    mutationFn: ({ id, part }: { id: string; part: number }) => api<ExportDownloadLink>(`/platform/companies/${id}/export/download`, { method: 'POST', body: { part } }),
   });
 }
 

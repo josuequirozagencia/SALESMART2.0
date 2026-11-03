@@ -7,6 +7,9 @@ export function timeLeft(ms: number): string {
   return h >= 1 ? `${h} h` : 'menos de 1 h';
 }
 
+/** Tamaño de un archivo en unidades legibles. */
+export const fileSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1024 ** 2 ? `${(n / 1024).toFixed(1)} KB` : n < 1024 ** 3 ? `${(n / 1024 ** 2).toFixed(1)} MB` : `${(n / 1024 ** 3).toFixed(2)} GB`);
+
 export const shortDate = (iso: string): string => new Date(iso).toLocaleDateString('es-EC', { day: '2-digit', month: '2-digit' });
 
 /** «12/10 14:05» en la hora del navegador. */

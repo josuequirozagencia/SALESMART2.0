@@ -1,5 +1,8 @@
 // Contratos de los puertos de M5.6d (ADR-50): almacenamiento, antivirus y conversor de audio. Cada adaptador real se prueba contra un servidor simulado
 // (S3 por HTTP, clamd por TCP) y debe comportarse igual que su fake. NINGUNO se ha probado todavía contra el servicio real.
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createServer as createHttp, type Server as HttpServer } from 'node:http';
 import { createServer as createTcp, type Server as TcpServer, type Socket } from 'node:net';
 import type { AddressInfo } from 'node:net';
@@ -85,6 +88,21 @@ function storageContract(name: string, make: () => StorageAdapter, opts: { signe
       const body = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 0, 255]);
       await s.put(KEY, body, 'image/jpeg');
       expect((await s.get(KEY)).equals(body)).toBe(true);
+    });
+
+    it('sube un archivo del disco y se lee igual; el archivo local queda intacto', async () => {
+      const s = make();
+      const dir = await mkdtemp(join(tmpdir(), 'ss-put-'));
+      try {
+        const path = join(dir, 'paquete.zip');
+        const body = Buffer.from(Array.from({ length: 5000 }, (_, i) => i % 251));
+        await writeFile(path, body);
+        await s.putFile(`${KEY}-archivo`, path, 'application/zip');
+        expect((await s.get(`${KEY}-archivo`)).equals(body)).toBe(true);
+        expect((await readFile(path)).equals(body)).toBe(true);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
     });
 
     it('leer lo que no existe es not_found', async () => {

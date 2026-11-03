@@ -1,3 +1,5 @@
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
@@ -12,6 +14,8 @@ export interface S3StorageConfig {
 
 /** Tope de espera a una operación de red, en milisegundos. */
 const TIMEOUT_MS = 30_000;
+/** Subir un paquete grande desde el disco tarda más que una operación común. */
+const UPLOAD_FILE_TIMEOUT_MS = 30 * 60_000;
 
 /** Un nombre de descarga seguro para la cabecera `Content-Disposition` (ASCII, sin comillas ni saltos de línea). */
 const asciiName = (name: string): string => name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
@@ -44,6 +48,18 @@ export class S3Storage implements StorageAdapter {
       await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: body.length }), { abortSignal: AbortSignal.timeout(TIMEOUT_MS) });
     } catch (e) {
       throw this.fail(e);
+    }
+  }
+
+  async putFile(key: string, path: string, contentType: string): Promise<void> {
+    const body = createReadStream(path);
+    try {
+      const { size } = await stat(path);
+      await this.client.send(new PutObjectCommand({ Bucket: this.bucket, Key: key, Body: body, ContentType: contentType, ContentLength: size }), { abortSignal: AbortSignal.timeout(UPLOAD_FILE_TIMEOUT_MS) });
+    } catch (e) {
+      throw this.fail(e);
+    } finally {
+      body.destroy();
     }
   }
 

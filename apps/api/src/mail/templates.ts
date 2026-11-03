@@ -1,4 +1,4 @@
-import type { CompanyDeletedMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface MailContent {
   subject: string;
@@ -110,7 +110,7 @@ function longDate(d: Date, timeZone: string): string {
   }
 }
 
-/** Aviso de empresa eliminada (ADR-59 #14). Sin enlaces ni datos del negocio: la empresa ya no es accesible y el correo solo informa el plazo. */
+/** Aviso de empresa eliminada (ADR-59 #14). Sin datos del negocio: la empresa ya no es accesible y el correo informa el plazo. Al dueño se le suma el enlace para pedir la copia de sus datos (F3b). */
 export function companyDeletedMail(m: CompanyDeletedMail): MailContent {
   const org = esc(m.organizationName);
   const untilPlain = longDate(m.purgeAfter, m.timeZone);
@@ -121,18 +121,46 @@ export function companyDeletedMail(m: CompanyDeletedMail): MailContent {
   const detail = owner
     ? `La cuenta de <b>${org}</b> fue eliminada y ya nadie puede entrar. Si fue un error, se puede recuperar hasta el <b>${until}</b>; pasada esa fecha borramos todos sus datos de forma definitiva.`
     : `Tu cliente <b>${org}</b> fue eliminado de la plataforma y ya no tienes acceso a su cuenta. Se puede recuperar hasta el <b>${until}</b>; pasada esa fecha se borran todos sus datos de forma definitiva.`;
+  const exportUrl = owner && m.exportUrl && /^https?:\/\//i.test(m.exportUrl) ? m.exportUrl : null;
+  const exportHtml = exportUrl
+    ? `<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding:6px 0 14px;">Puedes pedir una <b>copia completa de tus datos</b> antes de esa fecha. Te pediremos tu contraseña para entregártela.</td></tr>
+<tr><td align="center" style="padding-bottom:14px;"><a href="${esc(exportUrl)}" style="display:inline-block;background:#6a44f2;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;padding:12px 22px;">Pedir la copia de mis datos</a></td></tr>
+<tr><td style="font-size:12px;line-height:1.5;color:#5f5a7a;word-break:break-all;padding-bottom:10px;">Este enlace es solo tuyo: no lo compartas. Si el botón no funciona, copia y pega este enlace en tu navegador:<br>${esc(exportUrl)}</td></tr>`
+    : '';
   const html = frame(
     headline,
     `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">${headline}</td></tr>
 <tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:8px;">${detail}</td></tr>
-<tr><td style="font-size:13px;line-height:1.5;color:#5f5a7a;">${help}</td></tr>`,
+${exportHtml}<tr><td style="font-size:13px;line-height:1.5;color:#5f5a7a;">${help}</td></tr>`,
     'Aviso informativo de Sales Smart.',
   );
   const plain = owner
     ? `La cuenta de ${m.organizationName} fue eliminada y ya nadie puede entrar. Si fue un error, se puede recuperar hasta el ${untilPlain}; pasada esa fecha borramos todos sus datos de forma definitiva.`
     : `Tu cliente ${m.organizationName} fue eliminado de la plataforma y ya no tienes acceso a su cuenta. Se puede recuperar hasta el ${untilPlain}; pasada esa fecha se borran todos sus datos de forma definitiva.`;
-  const text = `${headline} — Sales Smart\n\n${plain}\n\n${help}\n`;
+  const exportText = exportUrl ? `Puedes pedir una copia completa de tus datos antes de esa fecha (te pediremos tu contraseña). Este enlace es solo tuyo, no lo compartas:\n${exportUrl}\n\n` : '';
+  const text = `${headline} — Sales Smart\n\n${plain}\n\n${exportText}${help}\n`;
   return { subject: owner ? `Eliminamos la cuenta de ${m.organizationName.slice(0, 60)}` : `Eliminaron a tu cliente ${m.organizationName.slice(0, 60)}`, html, text };
+}
+
+/** Aviso de que la copia completa de los datos ya está lista (F3b, ADR-59 #9). El enlace no baja nada por sí solo: abre una página que pide la contraseña del dueño. */
+export function companyExportReadyMail(m: CompanyExportReadyMail): MailContent {
+  if (!/^https?:\/\//i.test(m.downloadUrl)) throw new Error('downloadUrl debe ser http(s)');
+  const org = esc(m.organizationName);
+  const url = esc(m.downloadUrl);
+  const untilPlain = longDate(m.expiresAt, m.timeZone);
+  const until = esc(untilPlain);
+  const size = m.totalBytes < 1024 ** 2 ? `${Math.max(1, Math.round(m.totalBytes / 1024))} KB` : m.totalBytes < 1024 ** 3 ? `${(m.totalBytes / 1024 ** 2).toFixed(1)} MB` : `${(m.totalBytes / 1024 ** 3).toFixed(2)} GB`;
+  const partsText = m.parts === 1 ? 'un archivo' : `${m.parts} archivos`;
+  const html = frame(
+    'La copia de tus datos está lista',
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">La copia de tus datos está lista</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:18px;">Preparamos la copia completa de los datos de <b>${org}</b> (${partsText}, ${size}). Puedes bajarla hasta el <b>${until}</b>; después la borramos. Te pediremos tu contraseña.</td></tr>
+<tr><td align="center" style="padding-bottom:14px;"><a href="${url}" style="display:inline-block;background:#6a44f2;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;padding:12px 22px;">Bajar mis datos</a></td></tr>
+<tr><td style="font-size:12px;line-height:1.5;color:#5f5a7a;word-break:break-all;">Este enlace es solo tuyo: no lo compartas. Si el botón no funciona, copia y pega este enlace en tu navegador:<br>${url}</td></tr>`,
+    'Aviso informativo de Sales Smart.',
+  );
+  const text = `La copia de tus datos está lista — Sales Smart\n\nPreparamos la copia completa de los datos de ${m.organizationName} (${partsText}, ${size}). Puedes bajarla hasta el ${untilPlain}; después la borramos. Te pediremos tu contraseña.\n\nEste enlace es solo tuyo, no lo compartas:\n${m.downloadUrl}\n`;
+  return { subject: `La copia de los datos de ${m.organizationName.slice(0, 60)} está lista`, html, text };
 }
 
 /** Aviso de empresa recuperada (ADR-59 #14). */

@@ -17,6 +17,14 @@ export interface PlatformAuditEntry {
 export class PlatformAuditService {
   constructor(@Inject(Database) private readonly db: Database) {}
 
+  /**
+   * Como `record`, pero con un actor explícito y SIN requerir un PlatformContext previo: para lo que una persona hace desde un enlace público (el dueño de una empresa eliminada pidiendo la copia de sus
+   * datos) o una tarea de fondo, que no tienen sesión de plataforma. Abre un contexto de plataforma solo para escribir esta fila.
+   */
+  recordAs(actorUserId: string, e: PlatformAuditEntry): Promise<void> {
+    return PlatformContext.run({ actorUserId }, () => this.record(e));
+  }
+
   async record(e: PlatformAuditEntry): Promise<void> {
     const c = PlatformContext.current();
     const details = e.details ? Object.fromEntries(Object.entries(e.details).filter(([k]) => isSensitiveKey(k) !== 'secret')) : null;

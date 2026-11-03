@@ -126,6 +126,26 @@ export interface DeletionPreview {
   window_days: number;
 }
 
+/** La copia completa de los datos de una empresa eliminada (F3b, ADR-59 #8). Nunca trae claves del almacenamiento: solo nombre y tamaño de cada parte. */
+export interface CompanyExportPart { n: number; filename: string; bytes: number }
+export type CompanyExportState = 'queued' | 'running' | 'ready' | 'failed' | 'expired';
+export interface CompanyExport {
+  id: string;
+  state: CompanyExportState;
+  requested_via: 'platform' | 'owner';
+  requested_at: string;
+  finished_at: string | null;
+  expires_at: string | null;
+  parts: CompanyExportPart[];
+  total_bytes: number;
+  error: string | null;
+}
+/** Lo que ve el Súper Admin: ¿se puede pedir (empresa eliminada dentro de su plazo)? y el último paquete. */
+export interface CompanyExportStatus { available: boolean; purge_after: string | null; export: CompanyExport | null }
+/** Lo que ve el dueño desde el enlace de su correo. */
+export interface OwnerExportStatus { organization_name: string; purge_after: string; export: CompanyExport | null }
+export interface ExportDownloadLink { url: string; filename: string; expires_in_seconds: number }
+
 /** `sent` = el correo salió (el enlace NO viaja); si no, `invite_url` va solo al Súper Admin para entregarlo por otro medio (ADR-39). */
 export interface InvitationIssued {
   email: string;
