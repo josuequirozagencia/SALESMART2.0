@@ -49,6 +49,13 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/platform/companies/:id/deletion-preview', kind: 'platform', test: '../../platform/company-lifecycle.test.ts' },
   { route: 'POST /v1/platform/companies/:id/delete', kind: 'platform', test: '../../platform/company-lifecycle.test.ts' },
   { route: 'POST /v1/platform/companies/:id/recover', kind: 'platform', test: '../../platform/company-lifecycle.test.ts' },
+  // Descargar todo (F3b, ADR-59). Consola: solo el Súper Admin. Públicas: el dueño de una empresa eliminada con el enlace de su correo (token + contraseña; 404 uniforme; límites). Pruebas: company-export.test.ts
+  { route: 'GET /v1/platform/companies/:id/export', kind: 'platform', test: '../../platform/company-export.test.ts' },
+  { route: 'POST /v1/platform/companies/:id/export', kind: 'platform', test: '../../platform/company-export.test.ts' },
+  { route: 'POST /v1/platform/companies/:id/export/download', kind: 'platform', test: '../../platform/company-export.test.ts' },
+  { route: 'POST /v1/public/company-export/status', kind: 'public' },
+  { route: 'POST /v1/public/company-export/request', kind: 'public' },
+  { route: 'POST /v1/public/company-export/download', kind: 'public' },
   // Agencias y carteras (M2.4, ADR-22/ADR-40). Pruebas: test/platform/agencies.test.ts (acceso, A↔B, acceso al instante, suspensión, historial, BD)
   { route: 'GET /v1/platform/agencies', kind: 'platform', test: '../../platform/agencies.test.ts' },
   { route: 'POST /v1/platform/agencies', kind: 'platform', test: '../../platform/agencies.test.ts' },

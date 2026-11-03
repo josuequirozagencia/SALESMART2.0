@@ -164,8 +164,12 @@ export const organizationDeletions = identityTable(
     summary: jsonb('summary').notNull().default(sql`'{}'::jsonb`),
     /** Cuándo se avisó al dueño 24 h antes del borrado (lo escribe el borrado definitivo, F3c). */
     noticeSentAt: ts('notice_sent_at'),
+    /** SHA-256 (hex) del token del enlace «Descargar todo» que recibe el dueño en el correo de eliminación (F3b). El token NO se guarda: solo su huella. */
+    exportTokenHash: text('export_token_hash'),
   },
   (t) => [
+    check('organization_deletions_export_token_hex', sql`${t.exportTokenHash} IS NULL OR ${t.exportTokenHash} ~ '^[0-9a-f]{64}$'`),
+    uniqueIndex('organization_deletions_export_token_uq').on(t.exportTokenHash).where(sql`${t.exportTokenHash} IS NOT NULL`),
     check('organization_deletions_state_valid', sql`${t.state} IN ('scheduled', 'recovered', 'purging', 'purge_failed', 'purged')`),
     check('organization_deletions_reason_len', sql`length(btrim(${t.reason})) BETWEEN 10 AND 300`),
     check('organization_deletions_window', sql`${t.purgeAfter} > ${t.requestedAt}`),
@@ -175,6 +179,56 @@ export const organizationDeletions = identityTable(
     uniqueIndex('organization_deletions_open_uq').on(t.organizationId).where(sql`${t.state} IN ('scheduled', 'purging', 'purge_failed')`),
     index('organization_deletions_org_idx').on(t.organizationId, t.requestedAt),
     index('organization_deletions_due_idx').on(t.purgeAfter).where(sql`${t.state} = 'scheduled'`),
+  ],
+);
+
+/**
+ * Paquete «Descargar todo» de una empresa eliminada (F3b, ADR-59 #8). Una fila por pedido: lo pide el Súper Admin (`platform`) o el dueño desde el enlace de su correo (`owner`). Una tarea de fondo
+ * lo arma en partes ZIP que quedan en `org/<id>/exports/` del almacenamiento y caducan a las 48 horas (`expires_at`). `queued` → `running` (con arrendamiento) → `ready` | `failed`; `expired` cuando
+ * ya se borraron las partes. A lo sumo UN paquete en curso por empresa. Sin credenciales ni datos de contactos: `counts` solo lleva filas por tabla. Solo `app_identity` (SELECT/INSERT/UPDATE, sin DELETE;
+ * el borrado definitivo de la empresa, F3c, es quien las limpia).
+ */
+export const companyExports = identityTable(
+  'company_exports',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id),
+    deletionId: uuid('deletion_id').notNull().references(() => organizationDeletions.id),
+    requestedBy: uuid('requested_by').notNull().references(() => users.id),
+    /** `platform` (Súper Admin desde la Consola) o `owner` (el dueño, con el enlace de su correo y su contraseña). */
+    requestedVia: text('requested_via').notNull(),
+    state: text('state').notNull().default('queued'),
+    attempts: integer('attempts').notNull().default(0),
+    /** Mientras corre, hasta cuándo es suyo el trabajo; si el proceso muere, otro lo retoma al vencer. */
+    leaseUntil: ts('lease_until'),
+    /** Las partes del paquete: [{ n, key, filename, bytes, entries }]. */
+    parts: jsonb('parts').notNull().default(sql`'[]'::jsonb`),
+    /** Filas por tabla y archivos incluidos. Sin datos personales. */
+    counts: jsonb('counts').notNull().default(sql`'{}'::jsonb`),
+    /** Por qué falló (texto genérico, sin datos del cliente). */
+    error: text('error'),
+    requestedAt: ts('requested_at').notNull().defaultNow(),
+    startedAt: ts('started_at'),
+    finishedAt: ts('finished_at'),
+    /** Cuándo se borran las partes (listo + 48 horas). */
+    expiresAt: ts('expires_at'),
+    /** Cuándo se avisó al dueño que está listo. */
+    readyNoticeAt: ts('ready_notice_at'),
+    /** SHA-256 (hex) del token del enlace del correo «tu copia está lista» (solo en los pedidos del dueño). El token no se guarda; sirve para ver el estado y bajar ESTE paquete, con la contraseña. */
+    downloadTokenHash: text('download_token_hash'),
+  },
+  (t) => [
+    check('company_exports_state_valid', sql`${t.state} IN ('queued', 'running', 'ready', 'failed', 'expired')`),
+    check('company_exports_via_valid', sql`${t.requestedVia} IN ('platform', 'owner')`),
+    check('company_exports_parts_array', sql`jsonb_typeof(${t.parts}) = 'array'`),
+    check('company_exports_counts_object', sql`jsonb_typeof(${t.counts}) = 'object'`),
+    check('company_exports_download_token_hex', sql`${t.downloadTokenHash} IS NULL OR ${t.downloadTokenHash} ~ '^[0-9a-f]{64}$'`),
+    uniqueIndex('company_exports_download_token_uq').on(t.downloadTokenHash).where(sql`${t.downloadTokenHash} IS NOT NULL`),
+    check('company_exports_ready_consistent', sql`(${t.state} IN ('ready', 'expired')) = (${t.expiresAt} IS NOT NULL)`),
+    // Un solo paquete en curso por empresa
+    uniqueIndex('company_exports_open_uq').on(t.organizationId).where(sql`${t.state} IN ('queued', 'running')`),
+    index('company_exports_org_idx').on(t.organizationId, t.requestedAt),
+    index('company_exports_work_idx').on(t.state, t.leaseUntil),
   ],
 );
 

@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
 
 /**
@@ -14,6 +15,11 @@ export class FakeStorage implements StorageAdapter {
     if (this.down) return Promise.reject(new StorageError('unavailable', 'El almacenamiento no responde'));
     this.objects.set(key, { body: Buffer.from(body), contentType });
     return Promise.resolve();
+  }
+
+  async putFile(key: string, path: string, contentType: string): Promise<void> {
+    if (this.down) throw new StorageError('unavailable', 'El almacenamiento no responde');
+    this.objects.set(key, { body: await readFile(path), contentType });
   }
 
   get(key: string): Promise<Buffer> {

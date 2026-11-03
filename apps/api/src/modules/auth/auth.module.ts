@@ -25,7 +25,9 @@ import { TurnstileVerifier } from './signup/turnstile.verifier';
 import { AgencyClientRegistrationController, InvitationsController, PlatformAgencyCreationController, PlatformInvitationsController } from './invitations/invitations.controller';
 import { InvitationsService } from './invitations/invitations.service';
 import { PlatformCompanyLifecycleController } from './company-lifecycle/company-lifecycle.controller';
+import { CompanyExportStore } from './company-lifecycle/company-export.store';
 import { CompanyLifecycleService } from './company-lifecycle/company-lifecycle.service';
+import { PasswordConfirmationService } from './company-lifecycle/password-confirmation.service';
 import { SignupController } from './signup/signup.controller';
 import { SignupLimiter } from './signup/signup-limiter';
 import { SignupService } from './signup/signup.service';
@@ -40,6 +42,8 @@ import { SignupService } from './signup/signup.service';
     InvitationsService,
     ContextService,
     CompanyLifecycleService,
+    CompanyExportStore,
+    PasswordConfirmationService,
     AccessSessionsService,
     PermissionService,
     SignupLimiter,
@@ -56,6 +60,6 @@ import { SignupService } from './signup/signup.service';
       inject: [APP_CONFIG],
     },
      IdentityCleanupJob, SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
-  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService],
+  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService, CompanyExportStore, PasswordConfirmationService],
 })
 export class AuthModule {}

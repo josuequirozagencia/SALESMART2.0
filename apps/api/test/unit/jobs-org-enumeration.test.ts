@@ -21,6 +21,7 @@ const read = (rel: string): string => readFileSync(path.join(SRC, rel), 'utf8');
 const EXEMPT: Record<string, string> = {
   'modules/auth/identity-cleanup.job.ts': 'limpia tablas de identidad (sesiones, códigos, intentos): no atiende a ninguna empresa',
   'modules/organizations/trial-expiry.job.ts': 'vence pruebas en la tabla de identidad; no envía ni procesa nada de la empresa',
+  'modules/company-export/company-export.job.ts': 'atiende pedidos concretos de la copia de datos de UNA empresa eliminada dentro de su plazo (el único caso en que se lee una empresa detenida) y borra paquetes vencidos; no recorre empresas',
 };
 const ENUMERATION = /\.(clientOrganizationIds|activeClientOrgIds|organizationIds)\(\)/;
 

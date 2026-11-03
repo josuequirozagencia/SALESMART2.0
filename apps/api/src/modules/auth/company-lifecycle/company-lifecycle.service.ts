@@ -1,15 +1,16 @@
+import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull, lt, or, sql } from 'drizzle-orm';
 import { aiWallets, appointmentReminders, automationRuns, contacts, Database, metaEvents, organizationDeletions, organizationMembers, organizations, plans, sales, scheduledMessages, sessions, users, type IdentityTx } from '../../../db';
-import { AppError, ConflictError, NotFoundError, TooManyAttemptsError, UnauthorizedError, ValidationError } from '../../../errors';
+import { AppError, ConflictError, NotFoundError, ValidationError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
 import { MAIL_PROVIDER, type MailProvider } from '../../../mail';
-import type { PasswordHasher } from '../../../security';
 import { PlatformContext, TenantContext } from '../../../tenant';
-import { APP_LOGGER } from '../../../tokens';
+import { APP_CONFIG, APP_LOGGER } from '../../../tokens';
 import { PlatformAuditService } from '../../platform';
-import { PASSWORD_HASHER } from '../auth.tokens';
-import { ThrottleService } from '../throttle.service';
+import { hashExportToken } from './company-export.store';
+import { PasswordConfirmationService } from './password-confirmation.service';
+import type { AppConfig } from '../../../config';
 import type { DeleteCompanyDto, RecoverCompanyDto } from './company-lifecycle.dto';
 
 /** Días que una empresa eliminada queda recuperable antes del borrado definitivo (ADR-59 #3). Constante del servidor: cambiarla es un cambio de código con ADR. */
@@ -84,8 +85,8 @@ export class CompanyLifecycleService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(PlatformAuditService) private readonly audit: PlatformAuditService,
-    @Inject(PASSWORD_HASHER) private readonly hasher: PasswordHasher,
-    @Inject(ThrottleService) private readonly throttle: ThrottleService,
+    @Inject(PasswordConfirmationService) private readonly passwords: PasswordConfirmationService,
+    @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     @Inject(MAIL_PROVIDER) private readonly mail: MailProvider,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
@@ -113,7 +114,7 @@ export class CompanyLifecycleService {
 
   async delete(orgId: string, input: DeleteCompanyDto, now = new Date()): Promise<DeleteResult> {
     const actor = PlatformContext.current().actorUserId;
-    await this.confirmPassword(actor, input.password);
+    await this.passwords.confirm(actor, input.password);
     const t = await this.load(orgId);
     if (!t || t.kind === 'platform' || (t.deletedAt !== null && t.status !== 'deleted')) throw new NotFoundError();
     if (t.status === 'deleted') throw new ConflictError('ALREADY_DELETED', 'La empresa ya está eliminada');
@@ -121,6 +122,8 @@ export class CompanyLifecycleService {
     const footprint = await this.footprint(t);
     const planName = await this.planName(t.planId);
     const purgeAfter = new Date(now.getTime() + DELETION_WINDOW_DAYS * DAY_MS);
+    // El enlace del dueño para pedir la copia de sus datos (F3b): un token aleatorio de 256 bits; en la base solo queda su huella
+    const exportToken = randomBytes(32).toString('base64url');
 
     const out = await this.db.withIdentity(async (tx) => {
       // Se vuelve a leer CON bloqueo: dos Súper Admin a la vez, o un cambio entre medias, no pueden dejar dos eliminaciones ni borrar una agencia que ganó un cliente
@@ -137,7 +140,7 @@ export class CompanyLifecycleService {
       }
       const [deletion] = await tx
         .insert(organizationDeletions)
-        .values({ organizationId: org.id, requestedBy: actor, reason: input.reason, organizationName: org.name, planName, previousStatus: org.status, requestedAt: now, purgeAfter, summary: footprint })
+        .values({ organizationId: org.id, requestedBy: actor, reason: input.reason, organizationName: org.name, planName, previousStatus: org.status, requestedAt: now, purgeAfter, summary: footprint, exportTokenHash: hashExportToken(exportToken) })
         .returning({ id: organizationDeletions.id });
       await tx.update(organizations).set({ status: 'deleted', deletedAt: now, updatedAt: now }).where(eq(organizations.id, org.id));
       // Las sesiones no reviven al recuperar: cada persona entra de nuevo (ADR-59 #3)
@@ -158,10 +161,11 @@ export class CompanyLifecycleService {
         details: { name: t.name, kind: t.kind, plan: planName, previous_status: t.status, reason: input.reason, purge_after: purgeAfter.toISOString(), deletion_id: out.deletionId, ...footprint },
       }),
     );
+    const exportLink = this.exportUrl(exportToken);
     let notified = 0;
     for (const r of out.recipients) {
       try {
-        await this.mail.sendCompanyDeleted({ to: r.email, organizationName: t.name, purgeAfter, timeZone: t.timezone, audience: r.audience });
+        await this.mail.sendCompanyDeleted({ to: r.email, organizationName: t.name, purgeAfter, timeZone: t.timezone, audience: r.audience, ...(r.audience === 'owner' && exportLink ? { exportUrl: exportLink } : {}) });
         notified += 1;
       } catch (e) {
         this.log.error({ err: e instanceof Error ? e.message : 'desconocido' }, 'no se pudo avisar de la empresa eliminada (la eliminación ya está confirmada)');
@@ -172,7 +176,7 @@ export class CompanyLifecycleService {
 
   async recover(orgId: string, input: RecoverCompanyDto, now = new Date()): Promise<RecoverResult> {
     const actor = PlatformContext.current().actorUserId;
-    await this.confirmPassword(actor, input.password);
+    await this.passwords.confirm(actor, input.password);
     const t = await this.load(orgId);
     if (!t || t.kind === 'platform' || t.status !== 'deleted') throw new NotFoundError();
     const open = await this.db.withIdentity(async (tx) => {
@@ -227,18 +231,10 @@ export class CompanyLifecycleService {
 
   // ---------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-  /** La contraseña de quien opera, comparada con su hash y limitada como el inicio de sesión. Un fallo cuenta y NO cierra la sesión. */
-  private async confirmPassword(userId: string, password: string): Promise<void> {
-    const [u] = await this.db.withIdentity((tx) => tx.select({ email: users.email, hash: users.passwordHash }).from(users).where(eq(users.id, userId)).limit(1));
-    if (!u) throw new UnauthorizedError();
-    const key = this.throttle.keyFor('e', u.email);
-    const wait = await this.throttle.waitSeconds([key]);
-    if (wait > 0) throw new TooManyAttemptsError(wait);
-    if (!(await this.hasher.verify(u.hash, password))) {
-      await this.throttle.recordFailure(key);
-      throw new AppError(403, 'PASSWORD_INVALID', 'La contraseña no es correcta');
-    }
-    await this.throttle.reset(key);
+  /** El enlace con el que el dueño pide la copia de sus datos. El token va en el fragmento (como las invitaciones): no queda en registros del servidor ni en el `Referer`. Sin dirección pública configurada, no hay enlace. */
+  private exportUrl(token: string): string | undefined {
+    const base = this.cfg.frontend.baseUrl;
+    return base ? `${base}/company-export#token=${token}` : undefined;
   }
 
   private async load(orgId: string): Promise<Target | null> {

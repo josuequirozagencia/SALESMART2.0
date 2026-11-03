@@ -1,5 +1,5 @@
 import type { AppLogger } from '../logger';
-import type { CompanyDeletedMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 /** Sin proveedor: el servicio informa que no está disponible. Es el valor por defecto (y el único válido hoy en producción). */
 export class UnavailableMailProvider implements MailProvider {
@@ -19,6 +19,9 @@ export class UnavailableMailProvider implements MailProvider {
   sendCompanyDeleted(): Promise<void> {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
+  sendCompanyExportReady(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
   sendCompanyRecovered(): Promise<void> {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
@@ -31,6 +34,7 @@ export class MemoryMailProvider implements MailProvider {
   readonly inviteOutbox: InvitationMail[] = [];
   readonly ownershipOutbox: OwnershipChangeMail[] = [];
   readonly companyDeletedOutbox: CompanyDeletedMail[] = [];
+  readonly companyExportReadyOutbox: CompanyExportReadyMail[] = [];
   readonly companyRecoveredOutbox: CompanyRecoveredMail[] = [];
   failNext = false;
   sendVerificationCode(mail: VerificationMail): Promise<void> {
@@ -71,6 +75,14 @@ export class MemoryMailProvider implements MailProvider {
       return Promise.reject(new Error('fallo simulado del proveedor'));
     }
     this.companyDeletedOutbox.push(mail);
+    return Promise.resolve();
+  }
+  sendCompanyExportReady(mail: CompanyExportReadyMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.companyExportReadyOutbox.push(mail);
     return Promise.resolve();
   }
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void> {
@@ -124,6 +136,10 @@ export class ConsoleMailProvider implements MailProvider {
   }
   sendCompanyDeleted(mail: CompanyDeletedMail): Promise<void> {
     this.log.warn({ to: mail.to, audience: mail.audience }, 'DEV ONLY: aviso de empresa eliminada (no se envía)');
+    return Promise.resolve();
+  }
+  sendCompanyExportReady(mail: CompanyExportReadyMail): Promise<void> {
+    this.log.warn({ to: mail.to, downloadUrl: mail.downloadUrl }, 'DEV ONLY: aviso de copia de datos lista (no se envía)');
     return Promise.resolve();
   }
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void> {

@@ -73,6 +73,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Eliminar y recuperar empresas (ADR-59): el servidor ya redacta el motivo
     case 'PASSWORD_INVALID': return 'La contraseña no es correcta.';
     case 'ALREADY_DELETED': case 'AGENCY_HAS_CLIENTS': case 'COMPANY_DELETED': case 'NOT_RECOVERABLE': case 'RECOVERY_WINDOW_CLOSED': return e.message;
+    // Descargar todo (F3b)
+    case 'NOT_DELETED': case 'EXPORT_NOT_READY': return e.message;
     case 'INVITATION_ALREADY_ACCEPTED': return 'Esta invitación ya fue aceptada.';
     // Mensajes del servidor ya redactados para la persona (nombres de plan duplicados, plan en uso…)
     case 'PLAN_NAME_TAKEN': case 'PLAN_IN_USE': case 'PLAN_ARCHIVED': case 'PLAN_NOT_FOUND': return e.message;
