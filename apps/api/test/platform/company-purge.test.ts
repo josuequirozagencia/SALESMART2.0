@@ -18,13 +18,16 @@ import { CompanyPurgeJob, CompanyPurgeModule } from '../../src/modules/company-p
 import { OrganizationsModule } from '../../src/modules/organizations';
 import { FAKE_QR_KEY, FakeQrSession, QR_SESSION, QrConnectionsService, QrSessionError } from '../../src/modules/qr';
 import { Argon2idHasher } from '../../src/security';
-import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
+import { TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
 @Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, CompanyExportModule, CompanyPurgeModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
 class TestAppModule {}
 
 const info = requireDb();
+// Empresas PROPIAS de esta prueba: las constantes ORG_A/ORG_B son las de los fixtures de aislamiento (fx_*) y el borrado definitivo vaciaría también esas filas de la base compartida
+const ORG_A = 'f3c0a000-0000-4000-8000-00000000000a';
+const ORG_B = 'f3c0b000-0000-4000-8000-00000000000b';
 const PW = 'Correct-Horse-9!';
 const KEY = randomBytes(32).toString('base64');
 const IDS = {

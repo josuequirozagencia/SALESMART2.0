@@ -2,10 +2,12 @@
 // son idempotentes y por lotes, y que dejan la lápida. Quien las llama en producción es la tarea `company-purge` (company-purge.test.ts).
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { ORG_A, ORG_B } from '../support/constants';
 import { requireDb } from '../support/harness';
 
 const info = requireDb();
+// Empresas PROPIAS de esta prueba: las constantes ORG_A/ORG_B son las de los fixtures de aislamiento (fx_*) y el borrado definitivo vaciaría también esas filas de la base compartida
+const ORG_A = 'f3c0a000-0000-4000-8000-00000000000a';
+const ORG_B = 'f3c0b000-0000-4000-8000-00000000000b';
 const IDS = {
   platformOrg: '00000000-0000-4000-8000-0000000000f0',
   agencyOrg: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
