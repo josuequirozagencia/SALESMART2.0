@@ -30,7 +30,7 @@ async function errorOf(p: Promise<unknown>): Promise<unknown> {
 // Almacenamiento
 // ═════════════════════════════════════════════════════════════════════════════
 const store = new Map<string, { body: Buffer; type: string }>();
-let s3Mode: 'ok' | 'denied' | 'down' = 'ok';
+let s3Mode: 'ok' | 'denied' | 'down' | 'unauthorized' | 'nobucket' = 'ok';
 let s3: HttpServer;
 let s3Origin = '';
 
@@ -47,6 +47,8 @@ function s3Handler(): HttpServer {
       };
       if (s3Mode === 'denied') return xml(403, 'AccessDenied');
       if (s3Mode === 'down') return xml(500, 'InternalError');
+      if (s3Mode === 'unauthorized') return xml(401, 'Unauthorized');
+      if (s3Mode === 'nobucket') return xml(404, 'NoSuchBucket');
       if (req.method === 'GET' && url.searchParams.get('list-type') === '2') {
         const prefix = url.searchParams.get('prefix') ?? '';
         const keys = [...store.keys()].filter((k) => k.startsWith(prefix)).sort().slice(0, Number(url.searchParams.get('max-keys') ?? 1000));
@@ -188,6 +190,43 @@ describe('S3Storage · errores', () => {
       expect(e.message).toContain('Proveedores');
       expect(`${e.message} ${e.stack ?? ''}`).not.toContain(SECRET);
       expect(`${e.message} ${e.stack ?? ''}`).not.toContain(ACCESS);
+    } finally {
+      s3Mode = 'ok';
+    }
+  });
+
+  it('R2 responde 401 («Unauthorized») cuando la llave no vale: también es not_configured, no «no respondió»', async () => {
+    s3Mode = 'unauthorized';
+    try {
+      const e = (await errorOf(adapter().put(KEY, Buffer.from('x'), 'text/plain'))) as StorageError;
+      expect(e.code).toBe('not_configured');
+      expect(e.message).toContain('credenciales');
+    } finally {
+      s3Mode = 'ok';
+    }
+  });
+
+  it('un bucket que no existe (o al que la llave no llega) es not_configured con su propio mensaje, no «el archivo no existe»', async () => {
+    s3Mode = 'nobucket';
+    try {
+      const e = (await errorOf(adapter().put(KEY, Buffer.from('x'), 'text/plain'))) as StorageError;
+      expect(e.code).toBe('not_configured');
+      expect(e.message).toContain('bucket');
+      expect(e.detail).toContain('NoSuchBucket');
+    } finally {
+      s3Mode = 'ok';
+    }
+  });
+
+  it('el detalle para el registro dice qué respondió el almacenamiento y NO lleva las claves; el mensaje para la persona no lo lleva', async () => {
+    s3Mode = 'down';
+    try {
+      const e = (await errorOf(adapter().get(KEY))) as StorageError;
+      expect(e.code).toBe('unavailable');
+      expect(e.detail).toMatch(/http=500/);
+      expect(`${e.detail} ${e.message}`).not.toContain(SECRET);
+      expect(`${e.detail} ${e.message}`).not.toContain(ACCESS);
+      expect(e.message).toBe('El almacenamiento no respondió');
     } finally {
       s3Mode = 'ok';
     }

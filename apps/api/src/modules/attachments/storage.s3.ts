@@ -127,9 +127,17 @@ export class S3Storage implements StorageAdapter {
 
   private fail(e: unknown): StorageError {
     if (e instanceof StorageError) return e;
-    const err = e as { name?: string; $metadata?: { httpStatusCode?: number } };
-    if (err.name === 'NoSuchKey' || err.name === 'NotFound' || err.$metadata?.httpStatusCode === 404) return new StorageError('not_found', 'El archivo no existe');
-    if (err.name === 'InvalidAccessKeyId' || err.name === 'SignatureDoesNotMatch' || err.name === 'AccessDenied' || err.$metadata?.httpStatusCode === 403) return new StorageError('not_configured', 'El almacenamiento rechazó las credenciales: revisa Proveedores › Almacenamiento');
-    return new StorageError('unavailable', 'El almacenamiento no respondió');
+    const err = e as { name?: string; Code?: string; code?: string; message?: string; $metadata?: { httpStatusCode?: number } };
+    const status = err.$metadata?.httpStatusCode;
+    // Lo que se ve en el registro del servidor para diagnosticar (nunca al cliente): tipo de error, código HTTP y el mensaje sin firmas ni credenciales
+    const detail = `${err.name ?? 'Error'} http=${status ?? '-'} code=${err.Code ?? err.code ?? '-'} ${String(err.message ?? '').replace(/(signature|credential|authorization|x-amz-[a-z-]+)=[^&\s"']+/gi, '$1=***').slice(0, 200)}`;
+    // El bucket no existe, o la llave no llega a él: es un problema de configuración, no de un archivo que falte
+    if (err.name === 'NoSuchBucket') return new StorageError('not_configured', 'El bucket no existe o la llave no tiene acceso a él: revisa el nombre del bucket y los permisos de la llave en Proveedores › Almacenamiento', detail);
+    if (err.name === 'NoSuchKey' || err.name === 'NotFound' || status === 404) return new StorageError('not_found', 'El archivo no existe', detail);
+    // R2 responde 401 («Unauthorized») además de 403 cuando la llave no vale
+    if (err.name === 'InvalidAccessKeyId' || err.name === 'SignatureDoesNotMatch' || err.name === 'AccessDenied' || err.name === 'Unauthorized' || status === 401 || status === 403) {
+      return new StorageError('not_configured', 'El almacenamiento rechazó las credenciales: revisa Proveedores › Almacenamiento', detail);
+    }
+    return new StorageError('unavailable', 'El almacenamiento no respondió', detail);
   }
 }

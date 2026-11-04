@@ -46,6 +46,8 @@ export class StorageError extends Error {
   constructor(
     readonly code: StorageErrorCode,
     message: string,
+    /** Qué respondió realmente el almacenamiento (tipo de error, código HTTP…), SOLO para el registro del servidor: nunca va al cliente ni lleva claves. */
+    readonly detail: string | null = null,
   ) {
     super(message);
     this.name = 'StorageError';

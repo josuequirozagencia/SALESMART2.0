@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import type { AppConfig } from '../../config';
-import { APP_CONFIG } from '../../tokens';
+import type { AppLogger } from '../../logger';
+import { APP_CONFIG, APP_LOGGER } from '../../tokens';
 import { PlatformCredentialsReader } from '../platform';
 import { FakeStorage } from './storage.fake';
 import { StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
@@ -21,7 +22,18 @@ export class StorageGateway implements StorageAdapter {
   constructor(
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     @Inject(PlatformCredentialsReader) private readonly credentials: PlatformCredentialsReader,
+    @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
+
+  /** Ejecuta una operación y, si falla, deja en el registro del servidor QUÉ respondió el almacenamiento (la persona solo ve un mensaje general). Sin claves ni URL firmadas. */
+  private async run<T>(op: string, fn: (adapter: StorageAdapter) => Promise<T>): Promise<T> {
+    try {
+      return await fn(await this.adapter());
+    } catch (e) {
+      if (e instanceof StorageError) this.log.warn({ op, code: e.code, detail: e.detail ?? e.message }, 'el almacenamiento falló');
+      throw e;
+    }
+  }
 
   get name(): 's3' | 'fake' {
     return this.cfg.attachments.storageProvider === 'fake' ? 'fake' : 's3';
@@ -52,31 +64,31 @@ export class StorageGateway implements StorageAdapter {
   }
 
   put(key: string, body: Buffer, contentType: string): Promise<void> {
-    return this.adapter().then((a) => a.put(key, body, contentType));
+    return this.run('put', (a) => a.put(key, body, contentType));
   }
 
   putFile(key: string, path: string, contentType: string): Promise<void> {
-    return this.adapter().then((a) => a.putFile(key, path, contentType));
+    return this.run('putFile', (a) => a.putFile(key, path, contentType));
   }
 
   deleteByPrefix(prefix: string): Promise<number> {
-    return this.adapter().then((a) => a.deleteByPrefix(prefix));
+    return this.run('deleteByPrefix', (a) => a.deleteByPrefix(prefix));
   }
 
   countByPrefix(prefix: string, limit?: number): Promise<number> {
-    return this.adapter().then((a) => a.countByPrefix(prefix, limit));
+    return this.run('countByPrefix', (a) => a.countByPrefix(prefix, limit));
   }
 
   get(key: string): Promise<Buffer> {
-    return this.adapter().then((a) => a.get(key));
+    return this.run('get', (a) => a.get(key));
   }
 
   signedUrl(key: string, options: SignedUrlOptions): Promise<string> {
-    return this.adapter().then((a) => a.signedUrl(key, options));
+    return this.run('signedUrl', (a) => a.signedUrl(key, options));
   }
 
   delete(key: string): Promise<void> {
-    return this.adapter().then((a) => a.delete(key));
+    return this.run('delete', (a) => a.delete(key));
   }
 
   private async adapter(): Promise<StorageAdapter> {
