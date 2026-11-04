@@ -53,6 +53,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/platform/companies/:id/export', kind: 'platform', test: '../../platform/company-export.test.ts' },
   { route: 'POST /v1/platform/companies/:id/export', kind: 'platform', test: '../../platform/company-export.test.ts' },
   { route: 'POST /v1/platform/companies/:id/export/download', kind: 'platform', test: '../../platform/company-export.test.ts' },
+  // Probar conexión del almacenamiento (ADR-42). Pruebas: storage-probe.test.ts
+  { route: 'POST /v1/platform/providers/storage/test', kind: 'platform', test: '../../platform/storage-probe.test.ts' },
   { route: 'POST /v1/public/company-export/status', kind: 'public' },
   { route: 'POST /v1/public/company-export/request', kind: 'public' },
   { route: 'POST /v1/public/company-export/download', kind: 'public' },
