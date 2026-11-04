@@ -2647,3 +2647,47 @@ test('tareas que se repiten: el administrador crea una semanal para Carlos, a Ca
     await db.end();
   }
 });
+
+test.describe('navegación móvil y tema (ADR-60)', () => {
+  test.describe('móvil', () => {
+    test.use({ viewport: { width: 390, height: 800 } });
+    test('barra inferior en las secciones, Menú con cuadrícula y sin desborde; el modo oscuro se recuerda al recargar', async ({ page, request }) => {
+      const email = await createAccount(request, uniqueEmail('navmovil'));
+      await uiLogin(page, email);
+      await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+      const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      const bar = page.getByRole('navigation', { name: 'Navegación principal' });
+      await expect(bar.getByRole('link')).toHaveText(['Inicio', 'Calendario', 'Ventas', 'Inbox', 'Menú']);
+      expect(await overflow()).toBeLessThanOrEqual(0);
+      for (const [label, url] of [['Ventas', /\/sales$/], ['Calendario', /\/agenda$/]] as const) {
+        await bar.getByRole('link', { name: label }).click();
+        await expect(page).toHaveURL(url);
+        await expect(bar).toBeVisible();
+        expect(await overflow()).toBeLessThanOrEqual(0);
+      }
+      await bar.getByRole('link', { name: 'Menú' }).click();
+      await expect(page).toHaveURL(/\/menu$/);
+      await expect(page.getByRole('navigation', { name: 'Todas las secciones' }).getByRole('link', { name: 'Contactos' })).toBeVisible();
+      await expect(page.getByRole('region', { name: 'Cuenta y ajustes' }).getByRole('button', { name: 'Cerrar sesión' })).toBeVisible();
+      expect(await overflow()).toBeLessThanOrEqual(0);
+      // modo oscuro: se aplica, y tras recargar ya viene puesto desde el inicio (sin esperar a que cargue la aplicación)
+      await page.getByRole('region', { name: 'Tu cuenta' }).getByRole('switch').click();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    });
+  });
+
+  test('escritorio: no hay barra inferior y la barra lateral se pliega a iconos y se recuerda al recargar', async ({ page, request }) => {
+    const email = await createAccount(request, uniqueEmail('navdesk'));
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toHaveCount(0);
+    const side = page.getByRole('complementary', { name: 'Menú principal' });
+    await side.getByRole('button', { name: 'Plegar el menú' }).click();
+    await expect(side.getByRole('button', { name: 'Desplegar el menú' })).toBeVisible();
+    await expect.poll(async () => (await side.boundingBox())?.width ?? 999).toBeLessThan(80);
+    await page.reload();
+    await expect(page.getByRole('complementary', { name: 'Menú principal' }).getByRole('button', { name: 'Desplegar el menú' })).toBeVisible();
+  });
+});

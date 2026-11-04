@@ -16,7 +16,7 @@ export function InboxPage() {
   const [filters, setFilters] = useState<InboxFilters>(DEFAULT_INBOX_FILTERS);
   const meId = state.status === 'authed' ? state.me.user.id : '';
   return (
-    <div className="grid h-[calc(100dvh-110px)] min-h-[420px] grid-cols-1 lg:h-[calc(100dvh-70px)] overflow-hidden rounded-2xl border border-line bg-surface lg:grid-cols-[340px_minmax(0,1fr)]">
+    <div className={`grid min-h-[420px] grid-cols-1 overflow-hidden rounded-2xl border border-line bg-surface md:h-[calc(100dvh-70px)] lg:grid-cols-[340px_minmax(0,1fr)] ${id ? 'h-[calc(100dvh-32px)]' : 'h-[calc(100dvh-var(--bottom-nav-h)-env(safe-area-inset-bottom)-32px)]'}`}>
       <ConversationList filters={filters} onFilters={setFilters} activeId={id} className={id ? 'hidden lg:flex' : 'flex'} />
       {id ? (
         <Thread key={id} id={id} meId={meId} />

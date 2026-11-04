@@ -75,7 +75,7 @@ const importsRule = (allow = []) => {
 const TS_FILES = ['apps/*/src/**/*.ts', 'packages/*/src/**/*.ts'];
 
 export default tseslint.config(
-  { ignores: ['**/node_modules/**', '**/dist/**', 'spikes/**', 'prototype/**', 'docs/**', '**/migrations/**', 'packages/ui/**'] },
+  { ignores: ['**/node_modules/**', '**/dist/**', 'spikes/**', 'prototype/**', 'docs/**', '**/migrations/**', 'packages/ui/**', 'apps/web/public/**'] },
   { linterOptions: { noInlineConfig: true, reportUnusedDisableDirectives: 'error' } },
   js.configs.recommended,
   ...tseslint.configs.recommended,

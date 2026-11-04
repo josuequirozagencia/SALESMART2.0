@@ -2153,3 +2153,49 @@ Construida el 2026-11-03 (migraciones `0121`–`0122`). Lo que se decidió al co
 
 ### Precisión posterior a ADR-42 («Probar conexión» del almacenamiento, 2026-11-04; PROPUESTA)
 ADR-42 dejó diferido «Probar conexión». Se construye **solo para el almacenamiento** (el único servicio cuya configuración se prueba sin efectos fuera de nuestro propio bucket): `POST /v1/platform/providers/storage/test` (permiso `platform.providers.manage`, solo Súper Admin, `no-store`) prueba el almacenamiento **en uso**: sube `_probe/<uuid>.txt` (nunca bajo `org/`), lo lee de vuelta, genera una URL firmada y lo borra, siempre intentando dejarlo limpio. La respuesta dice cada paso, su mensaje, el detalle técnico del almacenamiento (tipo de error, código HTTP y mensaje sin firmas ni credenciales: seguro, pero solo lo ve el Súper Admin) y una pista de qué revisar (endpoint, llaves, bucket). Los errores del almacenamiento pasan a ser diagnosticables: R2 responde 401 además de 403 cuando la llave no vale, un bucket inexistente tiene su propio mensaje y el detalle va al registro del servidor. **Sin validar contra R2 real** (solo contra un servidor simulado). Los demás servicios (WhatsApp por QR, OpenAI…) siguen sin «Probar conexión».
+
+## ADR-60 — Rediseño de la capa de navegación y del Inbox: móvil primero, tres columnas en escritorio, tema claro/oscuro (solo interfaz)
+**Estado: PROPUESTO.** El responsable respondió el 2026-11-04 a las cinco preguntas de la auditoría de la Fase 1 (abajo, «Decisiones del responsable») y pidió seguir con la Fase 2; el ADR en sí queda PROPUESTO hasta que lo apruebe. Prompt de origen: `docs/prompts/PROMPT_CODE_REDISENO_INBOX_V2.md`. (ADR-61 queda reservado para la «IA asistente en el composer», Fase 6, solo como documento.)
+
+### Contexto
+A 1280 px, con la lista (340) y el panel de contacto (340) abiertos, el chat queda en unos 304 px; a 1440 px, en unos 464. En móvil la navegación es una barra superior con ☰ y un panel lateral. Los cortes responsive están dispersos (520, 560, 640, 700, 720, 861, 900, 960, 1181 y los de Tailwind), no hay un solo origen, no existe un componente de iconos ni de hojas/cajones, y la escala tipográfica de la M5.9 deja casi todo el texto en 11 px. El CSS ya sabe oscuro (`prefers-color-scheme` y `[data-theme]`), pero nada lo elige ni lo guarda; **no existe un selector de temas ni temas verde o rojo** (el prompt los daba por existentes).
+
+### Decisión
+Cambio **solo de interfaz** (`apps/web`), sin base de datos, API, permisos ni dependencias nuevas:
+1. **Un solo origen de cortes:** `ui/breakpoints.ts` (`MOBILE_MAX = 767`, `DESKTOP_MIN = 1280`; coinciden con `md` y `xl` de Tailwind) y el hook `useBreakpoint()` (`matchMedia`).
+2. **`ui/Icon`** propio (SVG en línea, trazo 1,75, 24×24), extraído de `SidebarShell` y ampliado.
+3. **Móvil (< 768):** barra inferior (Inicio · Calendario · Ventas · Inbox · Menú), página `/menu` con cuadrícula de iconos, sin barra superior ni panel lateral en el marco de la empresa. La barra se oculta en `/inbox/:id` y con el teclado virtual abierto. **Un solo origen de secciones** (el que usaba `AppShell`), compartido por barra lateral, barra inferior y menú.
+4. **Tablet y escritorio:** barra lateral plegable (≈232 / ≈68 px; plegada por defecto en tablet), guardada por persona y empresa en `localStorage` (`ss.inbox.layout.v1:<userId>:<orgId>`).
+5. **Tema:** índigo por defecto; interruptor **Claro · Oscuro · Sistema** para toda la plataforma sobre los tokens existentes (un solo mecanismo: el atributo `data-theme` en `<html>`); un archivo `public/theme-init.js` (compatible con el CSP `script-src 'self'`) lo aplica antes del primer pintado. El selector de acentos verde/rojo **no se construye** ahora.
+6. **Escala tipográfica:** máximo 13 px y mínimo 11 px para el texto de la interfaz en toda la aplicación (los títulos grandes conservan su reducción de la M5.9); los campos de formulario siguen en 16 px en móvil.
+7. **Fases posteriores (no incluidas en la Fase 2):** Inbox de escritorio con tres columnas y divisores propios con Pointer Events (la columna del chat nunca baja de 520 px), tablet con cajón de contacto, lista y chat móviles a pantalla completa. En el chat móvil se **ocultan los banners** (contexto, «Ver como», prueba).
+8. **Se quedan como están:** `PlatformShell` y `AgencyShell` (barra superior y panel lateral actuales; la barra lateral nueva es compartida pero con el modo «barra superior» en móvil).
+
+### Alternativas consideradas
+- **A. Retocar los cortes actuales sin módulo común.** Rápido, pero los cortes seguirían contradiciéndose.
+- **B. Librerías de paneles redimensionables y de iconos.** Más rápido de construir, pero añade dependencias (prohibido por el prompt).
+- **C. Una interfaz móvil aparte.** Duplica la lógica de permisos y del Inbox.
+
+### Ventajas
+Una sola definición de secciones y de cortes; sin dependencias; sin riesgo de datos ni de multi-tenancy; entrega por fases pequeñas.
+
+### Desventajas
+La distribución elegida no sigue a la persona entre dispositivos (`localStorage`); hay que mover el panel de contacto fuera de `Thread`; el cambio de escala tipográfica toca toda la interfaz (hay que revisarla).
+
+### Impacto
+Multi-tenancy y seguridad: **ninguno** (sin API, sin BD, sin permisos nuevos). Pruebas: pruebas de componente, y Playwright con los viewports del prompt en las fases siguientes. **No validable sin dispositivo real:** teclado virtual de iOS/Android, áreas seguras, rendimiento en gama baja, lectores de pantalla.
+
+### Decisiones del responsable (2026-11-04)
+1. Copiar el prompt al repo y numerar los ADR como 60 y 61.
+2. Construir solo índigo con claro, oscuro y sistema.
+3. Escala tipográfica: máximo 13 px y mínimo 11 px en toda la aplicación; en móvil, a criterio de diseño (recomendación aplicada: la misma escala, porque en pantallas táctiles leídas a distancia de brazo bajar de 11 px perjudica la lectura).
+4. `PlatformShell` y `AgencyShell` se quedan como están.
+5. En el chat móvil a pantalla completa, los banners se ocultan.
+
+### Precisiones de la Fase 2 (ADR-60; PROPUESTAS, 2026-11-04)
+1. **Un solo token de acento.** En oscuro el acento es `#a5b4fc` con tinta oscura (`#14153a`) para los botones, en lugar de dos tokens (botón `#5b5cf0` y texto `#a5b4fc`): se evita un segundo sistema de variables y el contraste del botón es 8,8:1. En claro, `#4f46e5` con tinta blanca (6,3:1). El degradado de marca y de la barra lateral pasa de violeta a índigo.
+2. **Contraste (WCAG AA) comprobado con un script** (texto 4,5:1; elementos de interfaz 3:1) para los pares de texto, acento y estados de los dos modos: 0 fallos. Se oscureció el verde de «ok» en claro (`#176b3c`) y se añadió `--line-strong` para el borde de los campos (3,2:1 claro; 4,2:1 oscuro). Los bordes decorativos (`--line`) siguen siendo suaves a propósito.
+3. **Escala tipográfica.** Hasta 15 px: entre `--fs-min` (11) y `--fs-max` (13); desde 16 px (títulos): el tamaño menos 2 pt, sin bajar de 11. En móvil se conserva la misma escala; los campos de formulario siguen en 16 px (≤ 767 px) para que iOS no haga zoom.
+4. **Fallo global corregido.** `button, input, select, textarea { color: inherit }` estaba fuera de las capas de Tailwind y le ganaba a toda utilidad (el botón primario mostraba el color del acento sobre fondo de acento). Pasa a `@layer base`: los botones muestran ahora los colores de texto que sus clases declaran. Es una corrección visual de toda la aplicación que conviene revisar en navegador real.
+5. **Menú plegado.** Con la barra lateral plegada la campana de avisos pasa a icono con punto y el selector «Ver como» no se muestra (se vuelve a ver al desplegarla); la marca «Viendo como X» sigue en la barra permanente de arriba. En móvil ya no hay barra superior con esa marca en el marco de la empresa.
+6. **Dónde van la campana y «Ver como» en móvil:** arriba de la página `/menu`, en un panel oscuro.

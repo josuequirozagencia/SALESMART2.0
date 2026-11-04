@@ -39,8 +39,7 @@ describe('«Ver como»', () => {
     expect(bar.getByText(/Viendo como/)).toHaveTextContent('Viendo como Asesor · Solo lectura');
     expect(st.posts).toEqual([{ role: 'advisor' }]);
     expect(screen.queryByRole('region', { name: 'Ver como' })).not.toBeInTheDocument();
-    // la barra superior del menú (móvil) también lo dice
-    expect(screen.getAllByText('Viendo como Asesor').length).toBeGreaterThan(0);
+    // (ADR-60) en móvil ya no hay barra superior con la marca «Viendo como»: la barra permanente de arriba es la que lo dice
     await userEvent.click(bar.getByRole('button', { name: 'Volver a mi vista' }));
     await waitFor(() => expect(screen.queryByRole('region', { name: 'Viendo como otro rol' })).not.toBeInTheDocument());
     expect(st.posts).toEqual([{ role: 'advisor' }, { role: null }]);
