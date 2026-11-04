@@ -2691,3 +2691,36 @@ test.describe('navegación móvil y tema (ADR-60)', () => {
     await expect(page.getByRole('complementary', { name: 'Menú principal' }).getByRole('button', { name: 'Desplegar el menú' })).toBeVisible();
   });
 });
+
+test.describe('Inbox: distribución y viewports (ADR-60, Fase 3)', () => {
+  test('escritorio: el divisor de la lista se mueve con el teclado, se recuerda al recargar y el doble clic lo restaura', async ({ page, request }) => {
+    const email = await createAccount(request, uniqueEmail('inboxdiv'));
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    await page.goto('/inbox');
+    const sep = page.getByRole('separator', { name: /lista de conversaciones/ });
+    await expect(sep).toHaveAttribute('aria-valuenow', '300');
+    await sep.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(sep).toHaveAttribute('aria-valuenow', '316');
+    await page.reload();
+    await expect(page.getByRole('separator', { name: /lista de conversaciones/ })).toHaveAttribute('aria-valuenow', '316');
+    await page.getByRole('separator', { name: /lista de conversaciones/ }).dblclick();
+    await expect(page.getByRole('separator', { name: /lista de conversaciones/ })).toHaveAttribute('aria-valuenow', '300');
+  });
+
+  test('sin desborde horizontal en el Inbox y el Menú en los tamaños de teléfono, tablet y escritorio', async ({ page, request }) => {
+    const email = await createAccount(request, uniqueEmail('inboxvp'));
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    for (const [w, h] of [[360, 800], [375, 812], [390, 844], [412, 915], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1440, 900]] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      for (const path of ['/inbox', '/menu', '/']) {
+        await page.goto(path);
+        await expect(page.getByRole('main')).toBeVisible();
+        expect(await overflow(), `${path} a ${w} px`).toBeLessThanOrEqual(0);
+      }
+    }
+  });
+});

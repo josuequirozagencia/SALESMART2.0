@@ -6,11 +6,11 @@ import { initials, timeLeft } from '../../lib/format';
 import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Icon } from '../../ui/Icon';
 import { Menu, type MenuItem } from '../../ui/Menu';
 import { Pill } from '../../ui/Pill';
 import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
-import { ContactSidebar } from './ContactSidebar';
 import { ConversationTags } from './ConversationTags';
 import { ScheduledButton } from './ScheduledList';
 import { SlaPill } from './SlaPill';
@@ -30,7 +30,21 @@ function WindowNote({ c }: { c: Conversation }) {
   return <Pill kind={left < 3 * 3_600_000 ? 'warn' : 'muted'}>Puedes escribir libremente: quedan {timeLeft(left)}</Pill>;
 }
 
-function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void; contactOpen: boolean; onToggleContact: () => void }) {
+/** Lo que la cabecera necesita de la distribución del Inbox (la maneja `InboxPage`; el hilo no sabe de columnas). */
+export interface ThreadLayout {
+  contactOpen: boolean;
+  onToggleContact: () => void;
+  /** El panel de contacto está pedido pero no cabe en esta ventana (escritorio): el botón se desactiva y lo explica. */
+  contactBlocked?: boolean;
+  /** Solo escritorio: la lista de conversaciones se puede plegar desde aquí. */
+  listOpen?: boolean;
+  onToggleList?: () => void;
+  /** Solo escritorio: vuelve la distribución de columnas a sus anchos de origen. */
+  onResetLayout?: () => void;
+}
+
+function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void; layout: ThreadLayout }) {
+  const { contactOpen, onToggleContact, contactBlocked = false, listOpen, onToggleList, onResetLayout } = layout;
   const act = useConversationAction(c.id);
   const leave = useRevoke(c.id);
   const navigate = useNavigate();
@@ -51,21 +65,39 @@ function Header({ c, meId, onBackError, contactOpen, onToggleContact }: { c: Con
   return (
     <header className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line bg-surface px-3 py-2.5">
       <div className="flex items-center gap-2.5">
-        <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 lg:hidden">←</Link>
+        <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 md:hidden">←</Link>
         <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
         <div className="min-w-0 flex-1">
           <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
+          {onToggleList ? (
+            <button
+              type="button"
+              aria-label="Lista de conversaciones"
+              aria-pressed={listOpen === true}
+              title={listOpen ? 'Ocultar la lista de conversaciones' : 'Mostrar la lista de conversaciones'}
+              onClick={onToggleList}
+              className={`grid size-11 place-items-center rounded-full border transition ${listOpen ? 'border-accent bg-accent-soft text-accent' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'}`}
+            >
+              <Icon name="list" />
+            </button>
+          ) : null}
+          {onResetLayout ? (
+            <button type="button" aria-label="Restaurar distribución" title="Restaurar la distribución de las columnas" onClick={onResetLayout} className="grid size-11 place-items-center rounded-full border border-transparent text-muted transition hover:bg-surface2 hover:text-fg">
+              <Icon name="reset" />
+            </button>
+          ) : null}
           <ScheduledButton conversationId={c.id} />
           <button
             type="button"
             aria-label="Datos del contacto"
             aria-pressed={contactOpen}
-            title={contactOpen ? 'Ocultar los datos del contacto' : 'Ver los datos del contacto'}
+            disabled={contactBlocked}
+            title={contactBlocked ? 'No hay espacio para los datos del contacto: ensancha la ventana, pliega el menú lateral o la lista' : contactOpen ? 'Ocultar los datos del contacto' : 'Ver los datos del contacto'}
             onClick={onToggleContact}
-            className={`grid size-11 place-items-center rounded-full border transition ${contactOpen ? 'border-accent bg-accent-soft text-accent' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'}`}
+            className={`grid size-11 place-items-center rounded-full border transition disabled:cursor-not-allowed disabled:opacity-50 ${contactOpen ? 'border-accent bg-accent-soft text-accent' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'}`}
           >
             <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 5h18v14H3z" /><path d="M12 11a2 2 0 1 0 0-4 2 2 0 0 0 0 4z" /><path d="M8 16a4 4 0 0 1 8 0" /></svg>
           </button>
@@ -157,12 +189,11 @@ function Messages({ c }: { c: Conversation }) {
  * El hilo de UNA conversación: cabecera con su estado y acciones (aceptar, asignarme, finalizar), los mensajes y el redactor. Se actualiza cada 5 s. Al abrirla,
  * si la persona es su dueña, se marca como leída.
  */
-export function Thread({ id, meId }: { id: string; meId: string }) {
+export function Thread({ id, meId, layout }: { id: string; meId: string; layout: ThreadLayout }) {
   const q = useConversation(id);
   const { mutate: markRead } = useMarkRead(id);
   const tried = useRef('');
   const [actionError, setActionError] = useState<string>();
-  const [contactOpen, setContactOpen] = useState(false);
   const c = q.data;
   const unread = c && c.owner?.id === meId ? c.unread_count : 0;
 
@@ -174,11 +205,11 @@ export function Thread({ id, meId }: { id: string; meId: string }) {
     markRead();
   }, [unread, id, markRead]);
 
-  if (q.isPending) return <section aria-label="Conversación" className="grid place-items-center text-muted"><Spinner label="Cargando conversación" /></section>;
+  if (q.isPending) return <section aria-label="Conversación" className="grid min-w-0 flex-1 place-items-center text-muted"><Spinner label="Cargando conversación" /></section>;
   if (q.isError || !c) {
     const gone = q.error instanceof ApiError && q.error.status === 404;
     return (
-      <section aria-label="Conversación" className="grid place-content-center gap-3 p-8 text-center">
+      <section aria-label="Conversación" className="grid min-w-0 flex-1 place-content-center gap-3 p-8 text-center">
         <p className="text-[14px] text-muted">{gone ? 'Esa conversación no existe o no tienes acceso a ella.' : friendlyError(q.error, 'No pudimos cargar la conversación.')}</p>
         <div className="flex justify-center gap-2">
           {gone ? null : <Button onClick={() => void q.refetch()}>Reintentar</Button>}
@@ -188,20 +219,12 @@ export function Thread({ id, meId }: { id: string; meId: string }) {
     );
   }
   return (
-    <div className="flex min-h-0 min-w-0">
-      <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
-        <Header c={c} meId={meId} onBackError={setActionError} contactOpen={contactOpen} onToggleContact={() => setContactOpen((v) => !v)} />
-        {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
-        <AgentBanner c={c} />
-        <Messages c={c} />
-        <Composer key={c.id} c={c} />
-      </section>
-      {contactOpen ? (
-        // En pantallas de hasta 1180 px la columna se abre como panel sobre el hilo; más anchas, queda al lado
-        <div className="fixed inset-y-0 right-0 z-40 flex w-[min(380px,100%)] shadow-[var(--shadow)] min-[1181px]:static min-[1181px]:z-auto min-[1181px]:w-[340px] min-[1181px]:shrink-0 min-[1181px]:shadow-none">
-          <ContactSidebar c={c} onClose={() => setContactOpen(false)} />
-        </div>
-      ) : null}
-    </div>
+    <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
+      <Header c={c} meId={meId} onBackError={setActionError} layout={layout} />
+      {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
+      <AgentBanner c={c} />
+      <Messages c={c} />
+      <Composer key={c.id} c={c} />
+    </section>
   );
 }

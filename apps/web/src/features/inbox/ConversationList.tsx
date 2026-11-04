@@ -84,7 +84,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
   const emptyText = filters.q || filtered ? 'No hay conversaciones con estos filtros.' : filters.tab === 'working' ? 'No tienes conversaciones en curso.' : filters.tab === 'pending' ? 'No hay conversaciones pendientes.' : 'Aún no hay conversaciones finalizadas.';
 
   return (
-    <section aria-label="Conversaciones" className={`flex min-h-0 flex-col border-line bg-surface lg:border-r ${className}`}>
+    <section aria-label="Conversaciones" className={`flex min-h-0 min-w-0 flex-col border-line bg-surface md:border-r ${className}`}>
       <div className="grid gap-2 border-b border-line p-3 pb-0">
         <div className="flex items-center gap-2">
           <input type="search" aria-label="Buscar conversaciones" placeholder="Buscar por nombre o teléfono" value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 rounded-full border border-transparent bg-surface2 px-3.5 py-2 text-[13.5px] placeholder:text-muted/70" />
@@ -144,9 +144,9 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
             {filtered ? <Button variant="link" className="justify-self-start text-[12.5px]" onClick={() => onFilters({ ...DEFAULT_INBOX_FILTERS, tab: filters.tab, q: filters.q })}>Limpiar filtros</Button> : null}
           </div>
         ) : null}
-        <div role="tablist" aria-label="Estado de las conversaciones" className="flex">
+        <div role="tablist" aria-label="Estado de las conversaciones" className="flex overflow-x-auto [scrollbar-width:none]">
           {TABS.map((t) => (
-            <button key={t.id} type="button" role="tab" title={t.hint} aria-selected={filters.tab === t.id} onClick={() => set({ tab: t.id })} className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-1 py-2 text-[13px] font-semibold ${filters.tab === t.id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`}>
+            <button key={t.id} type="button" role="tab" title={t.hint} aria-selected={filters.tab === t.id} onClick={() => set({ tab: t.id })} className={`flex shrink-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap border-b-2 px-2 py-2 text-[13px] font-semibold ${filters.tab === t.id ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`}>
               {t.label}
               {counts ? <span className={`grid min-w-[18px] place-items-center rounded-full px-1.5 text-[10.5px] ${filters.tab === t.id ? 'bg-accent text-accent-ink' : 'bg-surface2 text-muted'}`}>{counts[t.id]}</span> : null}
             </button>
