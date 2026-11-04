@@ -33,6 +33,7 @@ export const ICONS = {
   bell: 'M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8 M10.3 21a1.9 1.9 0 0 0 3.4 0',
   chevronRight: 'M9 5l7 7-7 7',
   reset: 'M3 12a9 9 0 1 0 3-6.7 M3 4v5h5',
+  filter: 'M3 5h18 M6 12h12 M10 19h4',
   list: 'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01',
   chevronsLeft: 'M11 17l-5-5 5-5 M18 17l-5-5 5-5',
   chevronsRight: 'M13 17l5-5-5-5 M6 17l5-5-5-5',
