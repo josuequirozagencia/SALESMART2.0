@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises';
-import { StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
+import { assertDeletablePrefix, StorageError, type SignedUrlOptions, type StorageAdapter } from './storage.port';
 
 /**
  * Almacenamiento de mentira (ADR-02): guarda en memoria. Solo desarrollo y pruebas (la configuración lo prohíbe en producción). Las «URL firmadas» apuntan a un
@@ -35,9 +35,37 @@ export class FakeStorage implements StorageAdapter {
     return Promise.resolve(`https://fake-storage.test/${key}?${q.toString()}`);
   }
 
+  /** Un prefijo inválido es un rechazo de la promesa (nunca una excepción síncrona), igual que en el adaptador real. */
+  private badPrefix(prefix: string): StorageError | null {
+    try {
+      assertDeletablePrefix(prefix);
+      return null;
+    } catch (e) {
+      return e instanceof StorageError ? e : new StorageError('unavailable', 'Prefijo de borrado inválido');
+    }
+  }
+
   delete(key: string): Promise<void> {
     if (this.down) return Promise.reject(new StorageError('unavailable', 'El almacenamiento no responde'));
     this.objects.delete(key);
     return Promise.resolve();
+  }
+
+  deleteByPrefix(prefix: string): Promise<number> {
+    if (this.down) return Promise.reject(new StorageError('unavailable', 'El almacenamiento no responde'));
+    const bad = this.badPrefix(prefix);
+    if (bad) return Promise.reject(bad);
+    let n = 0;
+    for (const k of [...this.objects.keys()]) if (k.startsWith(prefix)) { this.objects.delete(k); n += 1; }
+    return Promise.resolve(n);
+  }
+
+  countByPrefix(prefix: string, limit = Infinity): Promise<number> {
+    if (this.down) return Promise.reject(new StorageError('unavailable', 'El almacenamiento no responde'));
+    const bad = this.badPrefix(prefix);
+    if (bad) return Promise.reject(bad);
+    let n = 0;
+    for (const k of this.objects.keys()) if (k.startsWith(prefix) && ++n >= limit) break;
+    return Promise.resolve(n);
   }
 }

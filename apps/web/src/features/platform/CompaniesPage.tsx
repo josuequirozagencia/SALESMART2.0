@@ -25,6 +25,7 @@ const STATE: Record<CompanyState, [PillKind, string]> = {
   suspended: ['warn', 'Suspendida'],
   invited: ['accent', 'Invitación pendiente'],
   deleted: ['crit', 'Eliminada'],
+  purged: ['crit', 'Borrada definitivamente'],
 };
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
@@ -34,7 +35,10 @@ const daysLeft = (iso: string): number => Math.max(0, Math.ceil((new Date(iso).g
 
 function Row({ c, onPlan, onAgency, onResend, onEnter, onDelete, onRecover, onExport, resending, entering }: { c: Company; onPlan: (c: Company) => void; onAgency: (c: Company) => void; onResend: (c: Company) => void; onEnter: (c: Company) => void; onDelete: (c: Company) => void; onRecover: (c: Company) => void; onExport: (c: Company) => void; resending: boolean; entering: boolean }) {
   const [kind, label] = STATE[c.state];
-  const deleted = c.state === 'deleted';
+  const deleted = c.state === 'deleted' || c.state === 'purged';
+  // Solo dentro del plazo de 7 días se puede recuperar o descargar; después el borrado ya está en marcha o terminó
+  const dstate = c.deletion?.state ?? 'scheduled';
+  const open = c.state === 'deleted' && dstate === 'scheduled';
   return (
     <li className="grid gap-3 rounded-2xl border border-line bg-surface p-4 min-[900px]:grid-cols-[minmax(0,1.6fr)_minmax(0,1.3fr)_150px_80px_auto] min-[900px]:items-center">
       <div className="min-w-0">
@@ -45,15 +49,18 @@ function Row({ c, onPlan, onAgency, onResend, onEnter, onDelete, onRecover, onEx
       <div className="grid justify-items-start gap-1 text-[12.5px]">
         <Pill kind={kind}>{label}</Pill>
         {c.trial_ends_at ? <span className="text-muted">{c.state === 'trial_expired' ? 'Venció' : 'Vence'} el {shortDate(c.trial_ends_at)}</span> : null}
-        {c.deletion ? <span className="text-muted">Se borra el {shortDate(c.deletion.purge_after)} ({daysLeft(c.deletion.purge_after)} {daysLeft(c.deletion.purge_after) === 1 ? 'día' : 'días'})</span> : null}
-        {c.deletion?.reason ? <span className="text-muted">Motivo: {c.deletion.reason}</span> : null}
+        {c.deletion && dstate === 'scheduled' ? <span className="text-muted">Se borra el {shortDate(c.deletion.purge_after)} ({daysLeft(c.deletion.purge_after)} {daysLeft(c.deletion.purge_after) === 1 ? 'día' : 'días'})</span> : null}
+        {c.deletion && dstate === 'purging' ? <span className="text-muted">Borrando de forma definitiva…</span> : null}
+        {c.deletion && dstate === 'purge_failed' ? <span className="text-crit">El borrado definitivo falló{c.deletion.purge_error ? ` (${c.deletion.purge_error})` : ''}; se reintenta solo</span> : null}
+        {c.deletion && dstate === 'purged' ? <span className="text-muted">Borrada de forma definitiva el {shortDate(c.deletion.purged_at ?? c.deletion.purge_after)}</span> : null}
+        {c.deletion?.reason && dstate !== 'purged' ? <span className="text-muted">Motivo: {c.deletion.reason}</span> : null}
         {c.invitation ? <span className="text-muted">{c.invitation.expired ? 'La invitación venció' : 'La invitación vence'} el {shortDate(c.invitation.expires_at)}</span> : null}
       </div>
       <div className="text-[13px]">{c.plan ? <b>{c.plan.name}</b> : <span className="text-muted">Sin plan</span>}</div>
       <div className="font-mono text-[13px]" aria-label={`${c.users} usuarios`}>{c.users} <span className="font-sans text-[11.5px] text-muted">usuarios</span></div>
       <div className="flex flex-wrap gap-2">
-        {deleted ? <Button className="!px-3 !py-1.5 !text-[12.5px]" variant="primary" aria-label={`Recuperar ${c.name}`} onClick={() => onRecover(c)}>Recuperar</Button> : null}
-        {deleted ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Descargar todo de ${c.name}`} onClick={() => onExport(c)}>Descargar todo</Button> : null}
+        {open ? <Button className="!px-3 !py-1.5 !text-[12.5px]" variant="primary" aria-label={`Recuperar ${c.name}`} onClick={() => onRecover(c)}>Recuperar</Button> : null}
+        {open ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Descargar todo de ${c.name}`} onClick={() => onExport(c)}>Descargar todo</Button> : null}
         {!deleted && c.state !== 'suspended' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Entrar a ${c.name} (soporte)`} loading={entering} onClick={() => onEnter(c)}>Entrar</Button> : null}
         {!deleted ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar el plan de ${c.name}`} onClick={() => onPlan(c)}>{c.plan ? 'Cambiar plan' : 'Asignar plan'}</Button> : null}
         {!deleted && c.kind === 'client' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar la administración de ${c.name}`} onClick={() => onAgency(c)}>Administración</Button> : null}

@@ -133,7 +133,7 @@ export default tseslint.config(
   },
   // Herramientas de línea de comandos dentro de db/ (no corren en la API)
   {
-    files: ['apps/api/src/db/migrate-cli.ts', 'apps/api/src/db/audit/cli.ts', 'apps/api/src/db/load-disposable-domains.cli.ts'],
+    files: ['apps/api/src/db/migrate-cli.ts', 'apps/api/src/db/audit/cli.ts', 'apps/api/src/db/load-disposable-domains.cli.ts', 'apps/api/src/db/reapply-purges.cli.ts'],
     rules: { 'no-restricted-syntax': syntaxRule(['P1+P5-guc', 'P3-env', 'P8-rls-bypass-sql', 'P9-casts', 'P10-platform', 'P12-identity']) },
   },
   // Identidad (ADR-25): únicos módulos autorizados a usar withIdentity. El CLI de bootstrap además lee process.env.

@@ -42,5 +42,5 @@ export const FIXTURE_CATALOG = {
   identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config', 'plans', 'invitations', 'organization_ownership_history', 'organization_deletions', 'company_exports', 'access_sessions', 'view_as_log', 'attribution_endpoints', 'ghl_routes', 'form_routes', 'qr_routes', 'member_permissions', 'member_history', 'channel_routes'],
   reference: [],
   tenantRoot: [],
-  securityDefiner: ['purge_expired_identity_rows'],
+  securityDefiner: ['purge_expired_identity_rows', 'purge_company_step', 'purge_company_identity'],
 } as const;

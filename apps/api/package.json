@@ -14,7 +14,8 @@
     "db:audit": "tsx src/db/audit/cli.ts",
     "bootstrap:super-admin": "tsx src/modules/auth/bootstrap-super-admin.cli.ts",
     "e2e": "vitest run --config vitest.e2e.config.mts",
-    "db:load-disposable-domains": "tsx src/db/load-disposable-domains.cli.ts"
+    "db:load-disposable-domains": "tsx src/db/load-disposable-domains.cli.ts",
+    "db:reapply-purges": "tsx src/db/reapply-purges.cli.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1154.0",

@@ -89,7 +89,9 @@ export interface PlanList {
   feature_catalog: Array<{ key: string; label: string }>;
 }
 
-export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited' | 'deleted';
+export type CompanyState = 'trial' | 'trial_expired' | 'active' | 'suspended' | 'invited' | 'deleted' | 'purged';
+/** Dónde va el borrado definitivo de una empresa eliminada (F3c, ADR-59): `scheduled` (dentro del plazo de 7 días, se puede recuperar), `purging` (en curso), `purge_failed` (falló; se reintenta solo) o `purged` (ya no existe). */
+export type DeletionProgress = 'scheduled' | 'purging' | 'purge_failed' | 'purged';
 
 export interface Company {
   id: string;
@@ -110,7 +112,7 @@ export interface Company {
   /** Invitación pendiente del dueño (solo en estado `invited`). */
   invitation: { email: string; expires_at: string; expired: boolean } | null;
   /** Eliminación en curso (solo en estado `deleted`, ADR-59): cuándo se borra definitivamente. El motivo solo lo ve el Súper Admin. */
-  deletion: { requested_at: string; purge_after: string; reason: string | null } | null;
+  deletion: { requested_at: string; purge_after: string; reason: string | null; state: DeletionProgress; purge_error: string | null; purged_at: string | null } | null;
 }
 
 /** Lo que se muestra antes de eliminar una empresa (ADR-59 #13). */

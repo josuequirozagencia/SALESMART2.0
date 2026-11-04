@@ -26,6 +26,7 @@ import { AgencyClientRegistrationController, InvitationsController, PlatformAgen
 import { InvitationsService } from './invitations/invitations.service';
 import { PlatformCompanyLifecycleController } from './company-lifecycle/company-lifecycle.controller';
 import { CompanyExportStore } from './company-lifecycle/company-export.store';
+import { CompanyPurgeStore } from './company-lifecycle/company-purge.store';
 import { CompanyLifecycleService } from './company-lifecycle/company-lifecycle.service';
 import { PasswordConfirmationService } from './company-lifecycle/password-confirmation.service';
 import { SignupController } from './signup/signup.controller';
@@ -43,6 +44,7 @@ import { SignupService } from './signup/signup.service';
     ContextService,
     CompanyLifecycleService,
     CompanyExportStore,
+    CompanyPurgeStore,
     PasswordConfirmationService,
     AccessSessionsService,
     PermissionService,
@@ -60,6 +62,6 @@ import { SignupService } from './signup/signup.service';
       inject: [APP_CONFIG],
     },
      IdentityCleanupJob, SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
-  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService, CompanyExportStore, PasswordConfirmationService],
+  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService, CompanyExportStore, CompanyPurgeStore, PasswordConfirmationService],
 })
 export class AuthModule {}

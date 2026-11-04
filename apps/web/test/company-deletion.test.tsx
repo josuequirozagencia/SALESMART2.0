@@ -13,7 +13,7 @@ const clist = (items: Company[]): CompanyList => ({ items, next_cursor: null });
 
 const CAFE = company({ id: 'cafe', name: 'Café Origen', plan: { id: 'pro', name: 'Pro' } });
 const AGENCIA = company({ id: 'ag', name: 'Agencia Demo', kind: 'agency' });
-const ELIMINADA = company({ id: 'elim', name: 'Taller Pérez', state: 'deleted', deletion: { requested_at: new Date().toISOString(), purge_after: new Date(Date.now() + 5 * DAY + 3600_000).toISOString(), reason: 'La empresa pidió cerrar su cuenta' } });
+const ELIMINADA = company({ id: 'elim', name: 'Taller Pérez', state: 'deleted', deletion: { requested_at: new Date().toISOString(), purge_after: new Date(Date.now() + 5 * DAY + 3600_000).toISOString(), reason: 'La empresa pidió cerrar su cuenta', state: 'scheduled', purge_error: null, purged_at: null } });
 
 const PREVIEW_CAFE: DeletionPreview = { id: 'cafe', name: 'Café Origen', kind: 'client', state: 'active', plan: 'Pro', footprint: { users: 2, contacts: 120, sales: 7, ai_credits: 300, clients: 0 }, blockers: [], deletion: null, window_days: 7 };
 const PREVIEW_AGENCIA: DeletionPreview = { id: 'ag', name: 'Agencia Demo', kind: 'agency', state: 'active', plan: null, footprint: { users: 1, contacts: 0, sales: 0, ai_credits: 0, clients: 2 }, blockers: [{ code: 'AGENCY_HAS_CLIENTS', clients: [{ id: 'c1', name: 'Barbería Norte' }, { id: 'c2', name: 'Estudio Luna' }] }], deletion: null, window_days: 7 };
@@ -133,5 +133,36 @@ describe('Recuperar empresa', () => {
     await u.type(within(dlg).getByLabelText(/Tu contraseña/), 'Correct-Horse-9!');
     await u.click(within(dlg).getByRole('button', { name: 'Recuperar empresa' }));
     expect(await within(dlg).findByRole('alert')).toHaveTextContent('El plazo para recuperar esta empresa terminó');
+  });
+});
+
+describe('Borrado definitivo en la lista (F3c)', () => {
+  const del = (state: 'purging' | 'purge_failed' | 'purged', extra: Record<string, unknown> = {}) =>
+    company({ id: 'x', name: 'Taller Vega', state: state === 'purged' ? 'purged' : 'deleted', deletion: { requested_at: new Date(Date.now() - 9 * DAY).toISOString(), purge_after: new Date(Date.now() - DAY).toISOString(), reason: 'Cierre', state, purge_error: null, purged_at: null, ...extra } });
+
+  it('mientras se borra de forma definitiva no ofrece Recuperar ni Descargar todo', async () => {
+    mockApi(server({}, [del('purging')]));
+    renderApp('/platform/companies');
+    const row = within(await screen.findByRole('list', { name: 'Empresas' })).getAllByRole('listitem')[0]!;
+    expect(within(row).getByText('Eliminada')).toBeInTheDocument();
+    expect(within(row).getByText(/Borrando de forma definitiva/)).toBeInTheDocument();
+    for (const name of [/Recuperar/, /Descargar todo/, /Eliminar/, /Entrar a/]) expect(within(row).queryByRole('button', { name })).not.toBeInTheDocument();
+  });
+
+  it('si el borrado falló lo dice con su código y avisa que se reintenta solo; sigue sin ofrecer Recuperar', async () => {
+    mockApi(server({}, [del('purge_failed', { purge_error: 'STORAGE_UNAVAILABLE' })]));
+    renderApp('/platform/companies');
+    const row = within(await screen.findByRole('list', { name: 'Empresas' })).getAllByRole('listitem')[0]!;
+    expect(within(row).getByText(/El borrado definitivo falló \(STORAGE_UNAVAILABLE\); se reintenta solo/)).toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /Recuperar/ })).not.toBeInTheDocument();
+  });
+
+  it('una empresa ya borrada se ve como «Borrada definitivamente» con su fecha y sin ninguna acción', async () => {
+    mockApi(server({}, [del('purged', { purged_at: new Date().toISOString() })]));
+    renderApp('/platform/companies');
+    const row = within(await screen.findByRole('list', { name: 'Empresas' })).getAllByRole('listitem')[0]!;
+    expect(within(row).getByText('Borrada definitivamente')).toBeInTheDocument();
+    expect(within(row).getByText(/Borrada de forma definitiva el \d{1,2}\/\d{1,2}/)).toBeInTheDocument();
+    expect(within(row).queryAllByRole('button')).toHaveLength(0);
   });
 });

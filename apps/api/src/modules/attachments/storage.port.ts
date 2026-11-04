@@ -25,6 +25,18 @@ export interface StorageAdapter {
   signedUrl(key: string, options: SignedUrlOptions): Promise<string>;
   /** Borra el archivo; borrar uno que no existe no es un error. */
   delete(key: string): Promise<void>;
+  /**
+   * Borra TODO lo que cuelga de un prefijo (borrado definitivo de una empresa, ADR-59 #10) y devuelve cuántos archivos borró. El prefijo debe terminar en `/` (así `org/<a>/` nunca toca a `org/<ab>/`).
+   * Un prefijo vacío o sin la barra final se rechaza: un error de código no puede vaciar el almacenamiento entero.
+   */
+  deleteByPrefix(prefix: string): Promise<number>;
+  /** Cuántos archivos cuelgan de un prefijo (hasta `limit`); sirve para comprobar, tras borrar, que no quedó ninguno. */
+  countByPrefix(prefix: string, limit?: number): Promise<number>;
+}
+
+/** Un prefijo válido para borrar por lote: `org/<uuid>/` (o más largo), siempre con la barra final. */
+export function assertDeletablePrefix(prefix: string): void {
+  if (!/^[A-Za-z0-9_.-]+\/(?:[A-Za-z0-9_.-]+\/)*$/.test(prefix) || prefix.length < 8) throw new StorageError('unavailable', 'Prefijo de borrado inválido');
 }
 
 /** `not_configured` la plataforma no tiene almacenamiento configurado · `unavailable` no respondió (se puede reintentar) · `not_found` el archivo no existe. */
