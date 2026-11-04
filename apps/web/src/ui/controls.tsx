@@ -38,7 +38,7 @@ export function Field({ label, error, hint, required, children }: { label: strin
   );
 }
 
-const inputCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg placeholder:text-muted/70 aria-[invalid=true]:border-crit';
+const inputCls = 'w-full rounded-[10px] border border-line-strong bg-surface px-3 py-[11px] text-[14px] font-normal text-fg placeholder:text-muted/70 aria-[invalid=true]:border-crit';
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(inputCls, props.className)} />;
 }
