@@ -1,12 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
-import type { ProviderItem, ProvidersList } from '../../lib/types';
+import type { ProviderItem, ProvidersList, StorageProbe } from '../../lib/types';
 
 const KEY = ['platform', 'providers'] as const;
 
 /** Catálogo de proveedores con su estado. El servidor nunca manda un secreto: solo si existe y su final. */
 export function useProviders() {
   return useQuery({ queryKey: KEY, queryFn: () => api<ProvidersList>('/platform/providers') });
+}
+
+/** «Probar conexión» del almacenamiento en uso: sube, lee, firma y borra un archivo de prueba. */
+export function useTestStorage() {
+  return useMutation({ mutationFn: () => api<StorageProbe>('/platform/providers/storage/test', { method: 'POST' }) });
 }
 
 export interface SaveCredentialsInput {

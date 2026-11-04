@@ -285,3 +285,63 @@ describe('WhatsApp oficial · dirección del webhook (M5.2)', () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://app.ejemplo.test/v1/channels/meta/webhook'));
   });
 });
+
+describe('Probar conexión del almacenamiento (ADR-42)', () => {
+  const withStorageInUse = (): ProvidersList => {
+    const w = world();
+    const s = w.services.find((x) => x.key === 'storage')!;
+    s.active = 's3_compatible';
+    s.providers[0]!.configured = true;
+    return w;
+  };
+  const OK = { ok: true, provider: 's3', checked_at: new Date().toISOString(), hint: null, steps: [
+    { key: 'upload', label: 'Subir un archivo de prueba', ok: true, message: null, detail: null },
+    { key: 'download', label: 'Leerlo de vuelta', ok: true, message: null, detail: null },
+    { key: 'url', label: 'Generar una URL firmada', ok: true, message: null, detail: null },
+    { key: 'delete', label: 'Borrar el archivo de prueba', ok: true, message: null, detail: null },
+  ] };
+  const TLS = { ok: false, provider: 's3', checked_at: new Date().toISOString(), hint: 'No se pudo abrir una conexión segura con el Endpoint. Revisa que sea exactamente la URL «S3 API» de tu cuenta de R2.', steps: [
+    { key: 'upload', label: 'Subir un archivo de prueba', ok: false, message: 'El almacenamiento no respondió', detail: 'Error http=- code=[REDACTED] write EPROTO ssl/tls alert handshake failure' },
+  ] };
+
+  it('sin un almacenamiento en uso no ofrece la prueba', async () => {
+    mockApi(routed(world(), newCalls()));
+    renderApp('/platform/providers');
+    expect(within(await card('Almacenamiento')).queryByRole('button', { name: /Probar conexión/ })).not.toBeInTheDocument();
+  });
+
+  it('con uno en uso ofrece «Probar conexión»; si todo sale bien lo dice y lista los cuatro pasos', async () => {
+    const api = mockApi({ ...routed(withStorageInUse(), newCalls()), 'POST /platform/providers/storage/test': () => ({ body: OK }) });
+    renderApp('/platform/providers');
+    const u = userEvent.setup();
+    const st = await card('Almacenamiento');
+    await u.click(within(st).getByRole('button', { name: 'Probar conexión de Almacenamiento' }));
+    expect(await within(st).findByText(/Conexión correcta/)).toBeInTheDocument();
+    const steps = within(st).getByRole('list', { name: 'Pasos de la prueba' });
+    expect(within(steps).getAllByRole('listitem')).toHaveLength(4);
+    expect(api.count('POST /platform/providers/storage/test')).toBe(1);
+    expect(within(st).queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('si falla muestra el paso, el mensaje, lo que respondió el almacenamiento y qué revisar', async () => {
+    mockApi({ ...routed(withStorageInUse(), newCalls()), 'POST /platform/providers/storage/test': () => ({ body: TLS }) });
+    renderApp('/platform/providers');
+    const u = userEvent.setup();
+    const st = await card('Almacenamiento');
+    await u.click(within(st).getByRole('button', { name: 'Probar conexión de Almacenamiento' }));
+    expect(await within(st).findByRole('alert')).toHaveTextContent('La prueba falló');
+    expect(within(st).getByText(/Subir un archivo de prueba — El almacenamiento no respondió/)).toBeInTheDocument();
+    expect(within(st).getByText(/EPROTO ssl\/tls alert handshake failure/)).toBeInTheDocument();
+    expect(within(st).getByText(/conexión segura con el Endpoint/)).toBeInTheDocument();
+    expect(within(st).queryByText(/Conexión correcta/)).not.toBeInTheDocument();
+  });
+
+  it('si la propia petición falla lo explica sin romper la pantalla', async () => {
+    mockApi({ ...routed(withStorageInUse(), newCalls()), 'POST /platform/providers/storage/test': () => err(500, 'INTERNAL_ERROR', 'Error interno') });
+    renderApp('/platform/providers');
+    const u = userEvent.setup();
+    const st = await card('Almacenamiento');
+    await u.click(within(st).getByRole('button', { name: 'Probar conexión de Almacenamiento' }));
+    expect(await within(st).findByRole('alert')).toBeInTheDocument();
+  });
+});

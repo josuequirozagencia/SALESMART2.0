@@ -11,6 +11,7 @@ import { AttachmentsService } from './attachments.service';
 import { InboundMediaService } from './inbound-media.service';
 import { ClamAvScanner, FakeScanner, NoScanner, VIRUS_SCANNER, type VirusScanner } from './scanner';
 import { StorageGateway } from './storage.gateway';
+import { StorageProbeController } from './storage-probe.controller';
 import { AUDIO_TRANSCODER, FakeTranscoder, FfmpegTranscoder, NoTranscoder, type AudioTranscoder } from './transcoder';
 
 /** El antivirus que dice la configuración. */
@@ -33,6 +34,7 @@ export function buildTranscoder(cfg: AppConfig): AudioTranscoder {
  */
 @Module({
   imports: [ChannelsModule, OrganizationsModule, PlatformModule, RealtimeModule],
+  controllers: [StorageProbeController],
   providers: [
     StorageGateway,
     AttachmentsService,

@@ -3,6 +3,7 @@ export { AttachmentsService, URL_TTL_SECONDS, extensionOf, type PreparedFile } f
 export { AttachmentsJob } from './attachments.job';
 export { InboundMediaService, DOWNLOAD_BATCH, DOWNLOAD_MAX_ATTEMPTS, DOWNLOAD_LEASE_MS, ORPHAN_TTL_MS } from './inbound-media.service';
 export { StorageGateway } from './storage.gateway';
+export { probeStorage, storageHint, type ProbeResult, type ProbeStep } from './storage-probe';
 export { FakeStorage } from './storage.fake';
 export { S3Storage, type S3StorageConfig } from './storage.s3';
 export { StorageError, STORAGE, assertDeletablePrefix, type StorageAdapter, type SignedUrlOptions } from './storage.port';

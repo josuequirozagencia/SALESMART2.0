@@ -277,6 +277,9 @@ export interface ProviderService {
   webhook_url: string | null;
   providers: ProviderItem[];
 }
+/** El resultado de «Probar conexión» del almacenamiento (ADR-42): cada paso con su mensaje y, si falló, qué respondió el almacenamiento (sin claves) y qué revisar. */
+export interface StorageProbeStep { key: 'upload' | 'download' | 'url' | 'delete'; label: string; ok: boolean; message: string | null; detail: string | null }
+export interface StorageProbe { ok: boolean; provider: 's3' | 'fake'; steps: StorageProbeStep[]; hint: string | null; checked_at: string }
 export interface ProvidersList {
   vault: { available: boolean };
   services: ProviderService[];

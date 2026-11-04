@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { shortDate } from '../../lib/format';
-import type { ProviderItem, ProviderMaturity, ProviderService } from '../../lib/types';
+import type { ProviderItem, ProviderMaturity, ProviderService, StorageProbe } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { CopyField } from '../../ui/CopyField';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { ProviderCredentialsDialog } from './ProviderCredentialsDialog';
-import { useProviders, useSetActiveProvider } from './useProviders';
+import { useProviders, useSetActiveProvider, useTestStorage } from './useProviders';
 
 const MATURITY: Record<ProviderMaturity, [PillKind, string]> = {
   planned: ['ok', 'Previsto'],
@@ -19,6 +19,35 @@ const MODE: Record<string, Record<string, [PillKind, string]>> = {
   mail: { none: ['warn', 'Sin proveedor: los correos no salen'], console: ['info', 'Consola (solo desarrollo)'], memory: ['info', 'Memoria (solo pruebas)'], resend: ['ok', 'Resend activo'] },
   captcha: { none: ['warn', 'Sin anti-bots: el registro responde 503'], fake: ['info', 'Falso (solo desarrollo)'], turnstile: ['ok', 'Turnstile activo'] },
 };
+
+/** «Probar conexión» del almacenamiento: dice si se puede subir, leer, firmar y borrar un archivo, y qué revisar si no. Prueba lo que está guardado y en uso. */
+function StorageProbePanel() {
+  const test = useTestStorage();
+  const r: StorageProbe | undefined = test.data;
+  return (
+    <div className="grid gap-2 rounded-xl border border-line p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-[12.5px] text-muted">Sube un archivo de prueba, lo lee, genera una URL firmada y lo borra.</span>
+        <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label="Probar conexión de Almacenamiento" loading={test.isPending} onClick={() => test.mutate()}>Probar conexión</Button>
+      </div>
+      {test.isError ? <Alert>{friendlyError(test.error, 'No pudimos ejecutar la prueba.')}</Alert> : null}
+      {r ? (
+        <>
+          {r.ok ? <Alert kind="ok">Conexión correcta: se pudo subir, leer y borrar un archivo de prueba.</Alert> : <Alert>La prueba falló. Revisa el detalle de abajo.</Alert>}
+          <ul className="grid gap-1 text-[12.5px]" aria-label="Pasos de la prueba">
+            {r.steps.map((s) => (
+              <li key={s.key} className="grid gap-0.5">
+                <span><span aria-hidden>{s.ok ? '✓' : '✕'}</span> <span className="sr-only">{s.ok ? 'Bien:' : 'Falló:'}</span> {s.label}{s.message ? ' — ' + s.message : ''}</span>
+                {s.detail ? <code className="break-all rounded bg-surface2 px-2 py-1 text-[11.5px] text-muted">{s.detail}</code> : null}
+              </li>
+            ))}
+          </ul>
+          {r.hint ? <p className="rounded-xl bg-info-soft px-3 py-2 text-[12.5px] text-info">{r.hint}</p> : null}
+        </>
+      ) : null}
+    </div>
+  );
+}
 
 function ProviderRow({ s, p, vault, onConfigure, onToggle, busy }: { s: ProviderService; p: ProviderItem; vault: boolean; onConfigure: (p: ProviderItem) => void; onToggle: (p: ProviderItem, on: boolean) => void; busy: boolean }) {
   const [kind, label] = MATURITY[p.maturity];
@@ -69,6 +98,7 @@ function ServiceCard({ s, vault, onConfigure, onToggle, busyKey }: { s: Provider
           <span className="text-[12px] text-muted">Pégala como URL de devolución de llamada del webhook de WhatsApp en tu app de Meta, junto con el token de verificación que guardes aquí, y suscribe el campo «messages».</span>
         </div>
       ) : null}
+      {s.key === 'storage' && s.active ? <StorageProbePanel /> : null}
       {s.managed === 'platform' ? (
         s.providers.length === 0 ? (
           <p className="rounded-xl border border-dashed border-line p-3 text-center text-[12.5px] text-muted">Todavía no hay candidatos.</p>
