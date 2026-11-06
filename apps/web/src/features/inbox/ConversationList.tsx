@@ -1,11 +1,11 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
-import { initials } from '../../lib/format';
 import type { Conversation, InboxFilters, InboxOptions, InboxTab } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Avatar } from '../../ui/Avatar';
 import { Drawer } from '../../ui/Drawer';
 import { Icon } from '../../ui/Icon';
 import { Pill } from '../../ui/Pill';
@@ -17,6 +17,7 @@ import { ViewAsMenu } from '../context/ViewAs';
 import { NotificationsBell } from '../notifications/NotificationsBell';
 import { chatTime, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
+import { usePhotos } from '../photos/usePhotos';
 import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
 
 const TABS: Array<{ id: InboxTab; label: string; hint: string }> = [
@@ -43,7 +44,7 @@ function ChannelMark({ kind }: { kind: Conversation['channel']['kind'] }) {
   return null;
 }
 
-function Row({ c, active, now, mobile }: { c: Conversation; active: boolean; now: number; mobile: boolean }) {
+function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boolean; now: number; mobile: boolean; photo?: string | undefined }) {
   const status = STATUS_PILL[c.status];
   const last = c.last_message;
   const unread = c.unread_count > 0;
@@ -58,7 +59,7 @@ function Row({ c, active, now, mobile }: { c: Conversation; active: boolean; now
         aria-label={`${c.contact.name}${unread ? `, ${c.unread_count} sin leer` : ''}`}
         className={`grid gap-2.5 border-b border-line px-3 hover:bg-surface2 ${mobile ? 'min-h-[72px] grid-cols-[48px_minmax(0,1fr)] gap-3 py-3 active:bg-accent-soft' : 'grid-cols-[42px_minmax(0,1fr)] py-2.5'} ${active ? 'bg-accent-soft' : ''}`}
       >
-        <span aria-hidden="true" className={`grid place-items-center self-start rounded-full bg-surface2 text-[13px] font-bold text-muted ${mobile ? 'size-12' : 'size-[42px]'}`}>{initials(c.contact.name)}</span>
+        <Avatar name={c.contact.name} src={photo} size={mobile ? 48 : 42} className="self-start" />
         <span className="grid min-w-0 gap-0.5">
           <span className="flex items-baseline gap-2">
             <b className={`min-w-0 flex-1 truncate text-[14px] ${mobile && !unread ? 'font-semibold' : ''}`}>{c.contact.name}</b>
@@ -157,6 +158,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
   const [panel, setPanel] = useState(false);
   const [sheet, setSheet] = useState(false);
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  const photos = usePhotos(items.map((c) => c.contact.id), []);
   const counts = q.data?.pages[0]?.counts ?? null;
   const filtered = activeFilterCount(filters);
   // Las horas relativas («hace 5 min», «Vence en 2 min») se cuentan desde el último dato que llegó: así un listado recién consultado nunca muestra un cronómetro «de hace un minuto»
@@ -255,7 +257,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
             {filtered || filters.q ? <Button variant="link" className="text-[12.5px]" onClick={() => { setSearch(''); onFilters({ ...DEFAULT_INBOX_FILTERS, tab: filters.tab }); }}>Quitar búsqueda y filtros</Button> : null}
           </div>
         ) : null}
-        <ul>{items.map((c) => <Row key={c.id} c={c} active={c.id === activeId} now={now} mobile={mobile} />)}</ul>
+        <ul>{items.map((c) => <Row key={c.id} c={c} active={c.id === activeId} now={now} mobile={mobile} photo={photos.contact(c.contact.id)} />)}</ul>
         {q.hasNextPage ? <div className="grid place-items-center p-3"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
       </div>
       {mobile && sheet ? (

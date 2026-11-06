@@ -1,17 +1,19 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
-import { initials, timeLeft } from '../../lib/format';
+import { timeLeft } from '../../lib/format';
 import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { useChatBackground } from '../../ui/chatBackground';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Drawer } from '../../ui/Drawer';
+import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
 import { Menu, type MenuItem } from '../../ui/Menu';
 import { Pill } from '../../ui/Pill';
+import { usePhotos } from '../photos/usePhotos';
 import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
 import { ConversationTags } from './ConversationTags';
@@ -60,6 +62,7 @@ function useGoBack(): (e: MouseEvent) => void {
 }
 
 function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void; layout: ThreadLayout }) {
+  const headPhotos = usePhotos([c.contact.id], []);
   const { contactOpen, onToggleContact, contactBlocked = false, listOpen, onToggleList, onResetLayout } = layout;
   const act = useConversationAction(c.id);
   const leave = useRevoke(c.id);
@@ -93,7 +96,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
       <header className="border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-1 px-1 py-1">
           <Link to="/inbox" onClick={goBack} aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2"><Icon name="back" size={22} /></Link>
-          <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
+          <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
           <div className="min-w-0 flex-1 px-1">
             <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
             <p className="truncate text-[12.5px] text-muted">{c.channel.name} · {c.owner ? c.owner.name : 'Sin asesor'}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn">QR · no oficial</span> : null}</p>
@@ -149,7 +152,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
     <header className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line bg-surface px-3 py-2.5">
       <div className="flex items-center gap-2.5">
         <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 md:hidden">←</Link>
-        <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
+        <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
         <div className="min-w-0 flex-1">
           <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
@@ -216,6 +219,24 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
 }
 
 /** Mensajes del hilo agrupados por día, con la carga de los más antiguos arriba. */
+/** Quién habla, para agrupar los mensajes seguidos de la misma persona (las notas internas no cuentan y cortan el grupo). */
+function senderKey(m: ChatMessage): string {
+  if (m.is_note) return 'note';
+  if (m.direction === 'in') return 'contact';
+  if (m.sender_type === 'ai') return 'ai';
+  if (m.sender_type === 'automation') return 'automation';
+  return m.author ? `u:${m.author.id}` : 'out';
+}
+
+/** El avatar de un mensaje: solo en el primero de cada grupo (los demás reservan el espacio); la foto si existe y, si no, las siglas. El agente y los avisos automáticos llevan un icono propio, nunca una foto. */
+function avatarFor(m: ChatMessage, first: boolean, contactName: string, photos: { contact: (id: string) => string | undefined; user: (id: string) => string | undefined }, contactId = ''): ReactNode {
+  if (!first) return null;
+  if (m.direction === 'in') return <Avatar name={contactName} src={photos.contact(contactId)} size={28} />;
+  if (m.sender_type === 'ai') return <span aria-hidden="true" className="grid size-7 place-items-center rounded-full bg-accent text-[10px] font-bold text-accent-ink">IA</span>;
+  if (m.sender_type === 'automation') return <span aria-hidden="true" className="grid size-7 place-items-center rounded-full bg-surface2 text-muted"><Icon name="clock" size={14} /></span>;
+  return <Avatar name={m.author?.name ?? '?'} src={m.author ? photos.user(m.author.id) : undefined} size={28} tone="accent" />;
+}
+
 function Messages({ c }: { c: Conversation }) {
   const q = useMessages(c.id);
   const retry = useRetryMessage(c.id);
@@ -231,6 +252,8 @@ function Messages({ c }: { c: Conversation }) {
   const lastSeen = useRef<string | undefined>(undefined);
   // Las páginas vienen de la más reciente a la más antigua; cada una, de antigua a reciente
   const items = useMemo<ChatMessage[]>(() => [...(q.data?.pages ?? [])].reverse().flatMap((p) => p.items), [q.data]);
+  const authorIds = useMemo(() => items.flatMap((m) => (m.author && m.direction === 'out' && !m.is_note ? [m.author.id] : [])), [items]);
+  const photos = usePhotos([c.contact.id], authorIds);
   const last = items[items.length - 1]?.id;
 
   // Se queda al final mientras la persona no haya subido a leer lo anterior
@@ -283,6 +306,7 @@ function Messages({ c }: { c: Conversation }) {
             {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-surface2 px-3 py-0.5 shadow-sm text-[11.5px] font-semibold text-muted">{dayLabel(m.sent_at, now)}</span></li> : null}
             <MessageBubble
               m={m}
+              avatar={m.is_note ? undefined : avatarFor(m, i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at), c.contact.name, photos, c.contact.id)}
               canRetry={c.can.reply}
               retrying={retry.isPending && retry.variables === m.id}
               onRetry={(id) => { setRetryError(undefined); retry.mutate(id, { onError: (e) => setRetryError(friendlyError(e, 'No pudimos reintentar el envío.')) }); }}

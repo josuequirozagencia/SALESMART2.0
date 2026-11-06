@@ -102,6 +102,9 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   'GET /analytics/summary': () => ({ body: EMPTY_SUMMARY }),
   // La campana de avisos del menú lateral (F1, ADR-57): sin avisos por omisión
   'GET /notifications': () => ({ body: { items: [], next_cursor: null, unread: 0 } }),
+  // Fotos de perfil (v5): sin fotos por omisión
+  'GET /photos': () => ({ body: { contacts: {}, users: {} } }),
+  'GET /me/photo': () => ({ body: { photo_url: null } }),
 });
 
 export const EMPTY_SUMMARY = {
