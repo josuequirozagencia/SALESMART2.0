@@ -2700,6 +2700,10 @@ test.describe('Inbox: distribución y viewports (ADR-60, Fase 3)', () => {
     await page.goto('/inbox');
     const sep = page.getByRole('separator', { name: /lista de conversaciones/ });
     await expect(sep).toHaveAttribute('aria-valuenow', '300');
+    // El botón «Filtros» (el último de la fila de la lista) no debe quedar bajo el divisor aunque la letra sea más ancha (la CI no carga las fuentes de Google)
+    const filtros = await page.getByRole('button', { name: /Filtros/ }).boundingBox();
+    const divisor = await sep.boundingBox();
+    expect((filtros?.x ?? 0) + (filtros?.width ?? 0)).toBeLessThan(divisor?.x ?? 0);
     await sep.focus();
     await page.keyboard.press('ArrowRight');
     await expect(sep).toHaveAttribute('aria-valuenow', '316');

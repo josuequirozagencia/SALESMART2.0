@@ -199,7 +199,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
   return (
     <section aria-label="Conversaciones" className={`flex min-h-0 min-w-0 flex-col border-line bg-surface md:border-r ${className}`}>
       {mobile ? (
-        <div className="grid gap-2 border-b border-line p-3 pb-0">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line p-3 pb-0">
           <div className="flex items-center gap-2">
             <h1 className="flex-1 text-[18px] font-bold">Inbox</h1>
             <ThemeSwitch compact touch />
@@ -222,13 +222,13 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
           </div>
         </div>
       ) : (
-        <div className="grid gap-2 border-b border-line p-3 pb-0">
+        <div className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line p-3 pb-0">
           <div className="flex items-center gap-2">
             <input type="search" aria-label="Buscar conversaciones" placeholder="Buscar por nombre o teléfono" value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 rounded-full border border-transparent bg-surface2 px-3.5 py-2 text-[13px] placeholder:text-muted" />
             <Link to="/inbox/scheduled" aria-label="Mensajes programados de todas las conversaciones" title="Mensajes programados" className="grid size-9 shrink-0 place-items-center rounded-full border border-line text-muted hover:text-fg">
               <Icon name="clock" size={18} />
             </Link>
-            <button type="button" aria-expanded={panel} aria-controls="inbox-filters" onClick={() => setPanel((p) => !p)} className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-semibold ${panel || filtered ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>
+            <button type="button" aria-expanded={panel} aria-controls="inbox-filters" onClick={() => setPanel((p) => !p)} className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-[13px] font-semibold ${panel || filtered ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>
               Filtros{filtered ? <span className="grid min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[11px] text-accent-ink">{filtered}</span> : null}
             </button>
           </div>
