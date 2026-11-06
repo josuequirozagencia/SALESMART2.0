@@ -18,7 +18,7 @@ import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOpt
 
 const TABS: Array<{ id: InboxTab; label: string; hint: string }> = [
   { id: 'working', label: 'Trabajando', hint: 'Conversaciones en curso, incluso las que esperan respuesta del cliente' },
-  { id: 'pending', label: 'Pendientes', hint: 'Asignadas que aún no se aceptan y, para quien ve todo, las que no tienen asesor' },
+  { id: 'pending', label: 'Esperando', hint: 'Asignadas que aún no se aceptan y, para quien ve todo, las que no tienen asesor' },
   { id: 'closed', label: 'Finalizadas', hint: 'Conversaciones cerradas' },
 ];
 

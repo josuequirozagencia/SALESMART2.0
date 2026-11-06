@@ -39,6 +39,7 @@ export const ICONS = {
   plus: 'M12 5v14 M5 12h14',
   arrowDown: 'M12 5v14 M5 12l7 7 7-7',
   send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4z',
+  eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
   list: 'M8 6h13 M8 12h13 M8 18h13 M3 6h.01 M3 12h.01 M3 18h.01',
   chevronsLeft: 'M11 17l-5-5 5-5 M18 17l-5-5 5-5',
   chevronsRight: 'M13 17l5-5-5-5 M6 17l5-5-5-5',

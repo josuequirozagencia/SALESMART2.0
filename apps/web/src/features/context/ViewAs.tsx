@@ -1,8 +1,10 @@
 import { useState } from 'react';
+import { Icon } from '../../ui/Icon';
+import { Menu } from '../../ui/Menu';
 import { friendlyError } from '../../lib/errors';
 import { ROLE_LABEL } from '../../lib/format';
 import { useSession } from '../../lib/session';
-import type { Me, ViewAsRole } from '../../lib/types';
+import type { Me } from '../../lib/types';
 import { Button } from '../../ui/controls';
 
 /**
@@ -40,41 +42,27 @@ export function ViewAsBar({ me }: { me: Me }) {
   );
 }
 
-/** El selector del menú lateral: aparece solo si el servidor ofrece alguna vista (no hay selector para un Asesor ni en la plataforma). */
+/**
+ * «Ver como» (M10.5): un solo icono (ojo) que despliega las vistas disponibles. Aparece solo si el servidor ofrece alguna vista (no hay selector para un Asesor ni en la plataforma) y
+ * se oculta mientras se está mirando como otro rol (ahí manda la barra permanente).
+ */
 export function ViewAsMenu({ me }: { me: Me }) {
   const { viewAs } = useSession();
-  const [busy, setBusy] = useState<ViewAsRole | null>(null);
   const [error, setError] = useState<string>();
   if (me.view_as_options.length === 0 || me.viewing_as) return null;
-  async function pick(role: ViewAsRole) {
-    setError(undefined);
-    setBusy(role);
-    try {
-      await viewAs(role);
-    } catch (e) {
-      setError(friendlyError(e, 'No pudimos cambiar de vista.'));
-      setBusy(null);
-    }
-  }
+  const items = me.view_as_options.map((r) => ({
+    label: `Ver como ${ROLE_LABEL[r] ?? r}`,
+    onSelect: () => {
+      setError(undefined);
+      viewAs(r).catch((e: unknown) => setError(friendlyError(e, 'No pudimos cambiar de vista.')));
+    },
+  }));
   return (
-    <section aria-label="Ver como" className="mx-3 mb-2 rounded-xl bg-white/8 px-3 py-2">
-      <span className="block text-[10.5px] font-semibold uppercase tracking-wider text-white/50">Ver como</span>
-      <div className="mt-1.5 flex flex-wrap gap-1.5">
-        {me.view_as_options.map((r) => (
-          <button
-            key={r}
-            type="button"
-            aria-label={`Ver como ${ROLE_LABEL[r] ?? r}`}
-            title={`Mira la aplicación como un ${ROLE_LABEL[r] ?? r} (solo lectura)`}
-            disabled={busy !== null}
-            onClick={() => void pick(r)}
-            className="min-h-9 rounded-lg border border-white/20 px-2.5 py-1 text-[12px] font-semibold text-white/85 hover:bg-white/10 disabled:opacity-60"
-          >
-            {ROLE_LABEL[r] ?? r}
-          </button>
-        ))}
-      </div>
-      {error ? <p role="alert" className="mt-1.5 text-[12px] text-white">{error}</p> : null}
-    </section>
+    <div className="relative">
+      <Menu label="Ver como" items={items} buttonClass="relative grid size-11 place-items-center rounded-full text-muted transition-colors hover:bg-surface2 hover:text-fg md:size-10">
+        <Icon name="eye" size={20} />
+      </Menu>
+      {error ? <p role="alert" className="absolute right-0 top-full z-40 mt-1 w-56 rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[12px] font-semibold text-crit">{error}</p> : null}
+    </div>
   );
 }

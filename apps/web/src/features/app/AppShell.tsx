@@ -1,11 +1,10 @@
 import { useMemo, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { ContextBanner } from '../context/ContextBanner';
-import { ViewAsBar, ViewAsMenu } from '../context/ViewAs';
+import { ViewAsBar } from '../context/ViewAs';
 import { useInboxRealtime } from '../inbox/useInboxRealtime';
 import { useInboxUnread } from '../inbox/useInbox';
 import { useCustomFields } from '../custom-fields/useCustomFields';
-import { NotificationsBell } from '../notifications/NotificationsBell';
 import { TrialBanner } from '../trial/TrialBanner';
 import type { Me, Trial } from '../../lib/types';
 import { useBreakpoint } from '../../ui/breakpoints';
@@ -13,6 +12,7 @@ import { BottomNav } from '../../ui/BottomNav';
 import { SidebarShell } from '../../ui/SidebarShell';
 import { useKeyboardOpen } from '../../ui/useKeyboardOpen';
 import { AppNavContext } from './AppNav';
+import { UtilityBar } from './UtilityBar';
 import { buildNavGroups, isChatPath } from './navGroups';
 
 /**
@@ -43,11 +43,11 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         navLabel="Secciones"
         onLogout={onLogout}
         banner={chat ? null : <><ContextBanner me={me} /><ViewAsBar me={me} /></>}
-        extra={(compact) => <><NotificationsBell me={me} compact={compact} />{compact ? null : <ViewAsMenu me={me} />}</>}
         wide={inInbox}
         mobileNav="bottom"
         reserveBottom={showBottom}
       >
+        {chat ? null : <UtilityBar me={me} />}
         {trial && !chat ? <TrialBanner trial={trial} role={me.role} /> : null}
         <main>{children}</main>
       </SidebarShell>

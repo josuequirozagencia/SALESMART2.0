@@ -1484,11 +1484,11 @@ test('inbox: un cliente escribe, el asesor acepta, responde (sale por el proveed
     }
     expect(conv?.status).toBe('pending');
 
-    // 2) Carlos la ve en «Pendientes» con un mensaje sin leer, la abre y la acepta
+    // 2) Carlos la ve en «Esperando» con un mensaje sin leer, la abre y la acepta
     await uiLogin(page, carlosEmail);
     await page.getByRole('link', { name: 'Inbox' }).click();
-    await expect(page.getByRole('tab', { name: /Pendientes\s*1/ })).toBeVisible();
-    await page.getByRole('tab', { name: /Pendientes/ }).click();
+    await expect(page.getByRole('tab', { name: /Esperando\s*1/ })).toBeVisible();
+    await page.getByRole('tab', { name: /Esperando/ }).click();
     await page.getByRole('link', { name: 'Cliente Inbox, 1 sin leer' }).click();
     const thread = page.getByRole('region', { name: 'Conversación con Cliente Inbox' });
     await expect(thread.getByRole('heading', { name: 'Cliente Inbox' })).toBeVisible();
@@ -1602,7 +1602,7 @@ test('inbox: compartir (solo ver) y transferir una conversación entre dos aseso
     // 1) Carlos la acepta y la comparte con Elena «solo ver y notas»
     await uiLogin(page, carlosEmail);
     await page.getByRole('link', { name: 'Inbox' }).click();
-    await page.getByRole('tab', { name: /Pendientes/ }).click();
+    await page.getByRole('tab', { name: /Esperando/ }).click();
     await page.getByRole('link', { name: /^Cliente Compartido/ }).click();
     const carlos = page.getByRole('region', { name: 'Conversación con Cliente Compartido' });
     await carlos.getByRole('button', { name: 'Aceptar' }).click();
@@ -1772,21 +1772,21 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     const t1 = (await db.query(`SELECT kind, owner_id, (EXTRACT(EPOCH FROM (due_at - started_at)) / 60)::int AS minutes, reassign_at FROM response_timers WHERE conversation_id = $1 AND stopped_at IS NULL`, [one.id])).rows;
     expect(t1).toEqual([{ kind: 'first', owner_id: one.owner_id, minutes: 20, reassign_at: null }]);
 
-    // 3) Su asesor lo ve en «Pendientes» con el cronómetro; al vencer se marca «Vencida» y el filtro la encuentra
+    // 3) Su asesor lo ve en «Esperando» con el cronómetro; al vencer se marca «Vencida» y el filtro la encuentra
     const login = async (id: string) => {
       const ctx = await browser.newContext();
       contexts.push(ctx);
       const p = await ctx.newPage();
       await uiLogin(p, advisors[id]!.email);
       await p.getByRole('link', { name: 'Inbox' }).click();
-      await p.getByRole('tab', { name: /Pendientes/ }).click();
+      await p.getByRole('tab', { name: /Esperando/ }).click();
       return p;
     };
     const owner = await login(one.owner_id);
     await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByText(/Responder en (19|20) min/)).toBeVisible();
     await db.query(`UPDATE response_timers SET started_at = now() - interval '25 minutes', due_at = now() - interval '5 minutes' WHERE conversation_id = $1 AND stopped_at IS NULL`, [one.id]);
     await owner.reload();
-    await owner.getByRole('tab', { name: /Pendientes/ }).click();
+    await owner.getByRole('tab', { name: /Esperando/ }).click();
     await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByText(/Vencida hace [56] min/)).toBeVisible();
     await owner.getByRole('button', { name: /Filtros/ }).click();
     await owner.getByRole('combobox', { name: 'Tiempo de respuesta' }).selectOption('late');
@@ -1840,7 +1840,7 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     // 6) Quien la recibe la ve «Pendiente» con su propio cronómetro y el aviso en el historial; quien la tenía ya no la ve
     const receiver = next === one.owner_id ? owner : await login(next);
     await receiver.getByRole('link', { name: 'Inbox' }).click();
-    await receiver.getByRole('tab', { name: /Pendientes/ }).click();
+    await receiver.getByRole('tab', { name: /Esperando/ }).click();
     await expect(receiver.getByRole('link', { name: /^Cliente Dos/ }).getByText(/Responder en (19|20) min/)).toBeVisible({ timeout: 30_000 });
     await receiver.getByRole('link', { name: /^Cliente Dos/ }).click();
     await expect(receiver.getByRole('region', { name: 'Conversación con Cliente Dos' }).getByRole('log', { name: 'Mensajes' }).getByText(noteText)).toBeVisible();
@@ -1933,7 +1933,7 @@ test('mensajes automáticos de la cola: el administrador escribe el saludo, el a
     const carlos = await ctx.newPage();
     await uiLogin(carlos, carlosEmail);
     await carlos.getByRole('link', { name: 'Inbox' }).click();
-    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('tab', { name: /Esperando/ }).click();
     const row = carlos.getByRole('link', { name: /^Cliente Uno/ });
     await expect(row.getByText('Hola, quiero una cita')).toBeVisible();
     await expect(row.getByText(GREETING)).toHaveCount(0);
@@ -1955,7 +1955,7 @@ test('mensajes automáticos de la cola: el administrador escribe el saludo, el a
     await waitFor('el segundo mensaje del cliente', async () => ((await db.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND direction = 'in'`, [notice.conversation_id])).rows[0].n === 2 ? true : undefined));
     expect(await autoMessages('Cliente Dos')).toHaveLength(1); // sigue cerrada: no se repite
     await carlos.getByRole('link', { name: 'Inbox' }).click();
-    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('tab', { name: /Esperando/ }).click();
     await carlos.getByRole('link', { name: /^Cliente Dos/ }).click();
     await expect(carlos.getByRole('region', { name: 'Conversación con Cliente Dos' }).getByRole('log', { name: 'Mensajes' }).getByText(OOH)).toBeVisible();
 
@@ -2047,7 +2047,7 @@ test('plantillas de WhatsApp: el administrador sincroniza las de su número; fue
     const carlos = await ctx.newPage();
     await uiLogin(carlos, carlosEmail);
     await carlos.getByRole('link', { name: 'Inbox' }).click();
-    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('tab', { name: /Esperando/ }).click();
     await carlos.getByRole('link', { name: /^Ana Plantillas/ }).click();
     const thread = carlos.getByRole('region', { name: 'Conversación con Ana Plantillas' });
     await expect(thread.getByText(/solo permite escribirle con una plantilla aprobada: usa el botón «Plantillas»/)).toBeVisible();
@@ -2170,7 +2170,7 @@ test('respuestas rápidas: el administrador crea una compartida con variables; e
     const carlos = await ctx.newPage();
     await uiLogin(carlos, carlosEmail);
     await carlos.getByRole('link', { name: 'Inbox' }).click();
-    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('tab', { name: /Esperando/ }).click();
     await carlos.getByRole('link', { name: /^Ana Respuestas/ }).click();
     const thread = carlos.getByRole('region', { name: 'Conversación con Ana Respuestas' });
     const box = thread.getByRole('textbox', { name: 'Mensaje' });
@@ -2270,7 +2270,7 @@ test('mensajes programados: el asesor programa un mensaje, lo ve pendiente, canc
     const carlos = await ctx.newPage();
     await uiLogin(carlos, carlosEmail);
     await carlos.getByRole('link', { name: 'Inbox' }).click();
-    await carlos.getByRole('tab', { name: /Pendientes/ }).click();
+    await carlos.getByRole('tab', { name: /Esperando/ }).click();
     await carlos.getByRole('link', { name: /^Ana Programados/ }).click();
     const thread = carlos.getByRole('region', { name: 'Conversación con Ana Programados' });
     const box = thread.getByRole('textbox', { name: 'Mensaje' });
@@ -2463,13 +2463,14 @@ test('«ver como» (M10.5): el administrador mira su empresa como Asesor (barra 
   const side = page.getByRole('complementary', { name: 'Menú principal' });
   await expect(side.getByRole('link', { name: 'Usuarios' })).toBeVisible();
 
-  await side.getByRole('button', { name: 'Ver como Asesor' }).click();
+  await page.getByRole('button', { name: 'Ver como' }).click();
+  await page.getByRole('menuitem', { name: 'Ver como Asesor' }).click();
   const bar = page.getByRole('region', { name: 'Viendo como otro rol' });
   await expect(bar).toContainText('Viendo como Asesor · Solo lectura');
   // Lo que solo ve un administrador desaparece del menú, y el selector ya no está
   await expect(side.getByRole('link', { name: 'Usuarios' })).toHaveCount(0);
   await expect(side.getByRole('link', { name: 'Configuración' })).toHaveCount(0);
-  await expect(side.getByRole('region', { name: 'Ver como' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Ver como' })).toHaveCount(0);
 
   // La vista vive en la sesión: recargar no la pierde
   await page.reload();
@@ -2530,7 +2531,7 @@ test('menciones: el asesor menciona al administrador en una nota (quien no ve la
     // 1) Carlos la acepta y escribe una nota con «@»: Elena (que no ve la conversación) sale desactivada; elige al administrador y la guarda
     await uiLogin(page, carlosEmail);
     await page.getByRole('link', { name: 'Inbox' }).click();
-    await page.getByRole('tab', { name: /Pendientes/ }).click();
+    await page.getByRole('tab', { name: /Esperando/ }).click();
     await page.getByRole('link', { name: /^Cliente Menciones/ }).click();
     const carlos = page.getByRole('region', { name: 'Conversación con Cliente Menciones' });
     await carlos.getByRole('button', { name: 'Aceptar' }).click();
