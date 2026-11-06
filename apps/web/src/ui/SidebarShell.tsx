@@ -32,7 +32,7 @@ export const isNavActive = (item: NavItem, pathname: string): boolean => (item.e
 const link = (compact: boolean) => ({ isActive }: { isActive: boolean }): string =>
   `relative flex min-h-10 items-center rounded-[10px] text-[13px] font-semibold transition-colors ${compact ? 'justify-center px-0' : 'gap-2.5 px-3'} ${
     isActive
-      ? 'text-white [background:var(--side-active)] before:absolute before:inset-y-2 before:left-0 before:w-[3px] before:rounded-full before:bg-[color:var(--side-active-bar)]'
+      ? 'text-[color:var(--on-grad)] [background:var(--grad)] shadow-[0_8px_18px_var(--glow)]'
       : 'text-white/75 hover:bg-white/10 hover:text-white'
   }`;
 

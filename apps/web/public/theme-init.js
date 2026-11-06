@@ -4,6 +4,8 @@
   try {
     var m = window.localStorage.getItem('ss.theme.v1');
     if (m === 'light' || m === 'dark') document.documentElement.setAttribute('data-theme', m);
+    var b = window.localStorage.getItem('ss.brand.v1');
+    if (b === 'green' || b === 'red') document.documentElement.setAttribute('data-brand', b);
   } catch (e) {
     /* sin almacenamiento: se usa el tema del sistema */
   }
