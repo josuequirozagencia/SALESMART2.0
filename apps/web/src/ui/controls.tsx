@@ -4,7 +4,7 @@ const cx = (...c: Array<string | false | undefined>): string => c.filter(Boolean
 
 type Variant = 'primary' | 'secondary' | 'danger' | 'link';
 export function Button({ variant = 'secondary', block, className, loading, children, disabled, ...rest }: ComponentPropsWithRef<'button'> & { variant?: Variant; block?: boolean; loading?: boolean }) {
-  const base = 'inline-flex items-center justify-center gap-2 rounded-[10px] text-[14px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60';
+  const base = 'inline-flex items-center justify-center gap-2 rounded-[11px] text-[14px] font-semibold transition disabled:cursor-not-allowed disabled:opacity-60';
   const styles: Record<Variant, string> = {
     primary: 'bg-accent text-accent-ink border border-accent px-4 py-3 hover:brightness-110',
     secondary: 'bg-surface text-fg border border-line px-4 py-3 hover:bg-surface2',
@@ -38,7 +38,7 @@ export function Field({ label, error, hint, required, children }: { label: strin
   );
 }
 
-const inputCls = 'w-full rounded-[10px] border border-line-strong bg-surface px-3 py-[11px] text-[14px] font-normal text-fg placeholder:text-muted/70 aria-[invalid=true]:border-crit';
+const inputCls = 'w-full rounded-[11px] border border-line-strong bg-surface px-3 py-[11px] text-[14px] font-normal text-fg placeholder:text-muted/70 aria-[invalid=true]:border-crit';
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cx(inputCls, props.className)} />;
 }
@@ -58,7 +58,7 @@ export function PasswordInput(props: InputHTMLAttributes<HTMLInputElement>) {
 export function Alert({ kind = 'error', children }: { kind?: 'error' | 'ok' | 'info'; children: ReactNode }) {
   const styles = { error: 'bg-crit-soft text-crit', ok: 'bg-ok-soft text-ok', info: 'bg-info-soft text-info' } as const;
   return (
-    <div role={kind === 'error' ? 'alert' : 'status'} className={cx('rounded-[10px] px-3 py-2.5 text-[13px] font-medium', styles[kind])}>
+    <div role={kind === 'error' ? 'alert' : 'status'} className={cx('rounded-[11px] px-3 py-2.5 text-[13px] font-medium', styles[kind])}>
       {children}
     </div>
   );

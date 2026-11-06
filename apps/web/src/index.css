@@ -38,12 +38,36 @@
   --side-bg: linear-gradient(180deg, #0b0c1e 0%, #070816 100%);
 }
 
+/*
+ * MARCAS (alineación con v10): verde y rojo cambian acento, degradado, barra lateral y fondos; el modo oscuro de cada una sobreescribe las superficies. El índigo es el valor por omisión
+ * (sin atributo). Los pares texto/fondo se verificaron con la auditoría de contraste (e2e/contrast.ts).
+ */
+:root[data-brand="green"] {
+  --accent: #00704a; --accent-soft: #d6f8e5; --accent-ink: #ffffff;
+  --grad: linear-gradient(135deg, #00834a 0%, #006b3f 100%); --on-grad: #ffffff;
+  --side-bg: linear-gradient(180deg, #0b1b12 0%, #06110a 100%); --side-active-bar: #5dffa6;
+  --bg: #f0f8f3; --surface2: #e6f3eb; --line: #d3e6da; --fg: #0e1a13; --muted: #4f6a5c; --glow: rgba(0, 163, 90, 0.35);
+}
+:root[data-brand="red"] {
+  --accent: #c2002a; --accent-soft: #ffe1e7; --accent-ink: #ffffff;
+  --grad: linear-gradient(135deg, #d4103a 0%, #b00028 100%); --on-grad: #ffffff;
+  --side-bg: linear-gradient(180deg, #1f0a10 0%, #12060a 100%); --side-active-bar: #ff8fa5;
+  --bg: #fcf2f4; --surface2: #f8e6ea; --line: #ebd0d6; --fg: #1e0e12; --muted: #74505a; --glow: rgba(194, 0, 42, 0.35);
+}
+:root[data-brand="green"][data-theme="dark"] { --bg: #06100a; --surface: #0c1a12; --surface2: #12251a; --line: #1e3a29; --fg: #e8f7ee; --muted: #93b8a3; --accent: #34ff92; --accent-soft: #0f3d25; --accent-ink: #03200f; }
+:root[data-brand="red"][data-theme="dark"] { --bg: #12070a; --surface: #1d0d12; --surface2: #29131a; --line: #45222c; --fg: #fbeaee; --muted: #c79aa6; --accent: #ff5c7a; --accent-soft: #4a1320; --accent-ink: #1a0409; }
+@media (prefers-color-scheme: dark) {
+  :root[data-brand="green"]:not([data-theme="light"]) { --bg: #06100a; --surface: #0c1a12; --surface2: #12251a; --line: #1e3a29; --fg: #e8f7ee; --muted: #93b8a3; --accent: #34ff92; --accent-soft: #0f3d25; --accent-ink: #03200f; }
+  :root[data-brand="red"]:not([data-theme="light"]) { --bg: #12070a; --surface: #1d0d12; --surface2: #29131a; --line: #45222c; --fg: #fbeaee; --muted: #c79aa6; --accent: #ff5c7a; --accent-soft: #4a1320; --accent-ink: #1a0409; }
+}
+:root { --glow: rgba(79, 70, 229, 0.32); }
+
 @theme inline {
   --color-bg: var(--bg); --color-surface: var(--surface); --color-surface2: var(--surface2); --color-line: var(--line); --color-line-strong: var(--line-strong);
   --color-fg: var(--fg); --color-muted: var(--muted); --color-accent: var(--accent); --color-accent-soft: var(--accent-soft);
   --color-accent-ink: var(--accent-ink); --color-ok: var(--ok); --color-ok-soft: var(--ok-soft); --color-warn: var(--warn);
   --color-warn-soft: var(--warn-soft); --color-crit: var(--crit); --color-crit-soft: var(--crit-soft); --color-info: var(--info);
-  --color-info-soft: var(--info-soft); --font-sans: var(--f-ui); --font-mono: var(--f-mono);
+  --color-info-soft: var(--info-soft); --radius-card: 16px; --radius-control: 11px; --font-sans: var(--f-ui); --font-mono: var(--f-mono);
 }
 
 html, body, #root { height: 100%; }
@@ -127,3 +151,6 @@ body { font-size: min(var(--fs-max), max(var(--fs-min), 13.5px)); }
   to { transform: none; opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) { .chat-screen { animation: none; } }
+
+/* Botón primario con el degradado de la marca y su brillo (v10); el texto usa --on-grad */
+button.bg-accent.border-accent, a.bg-accent { background: var(--grad); border-color: transparent; color: var(--on-grad); box-shadow: 0 6px 16px var(--glow); }
