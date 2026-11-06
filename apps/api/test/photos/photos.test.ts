@@ -127,7 +127,7 @@ describe('mi foto', () => {
     expect(body['photo_url']).toEqual(expect.stringMatching(/^https:\/\/fake-storage\.test\//));
     const key = await memberKey(IDS.carol, ORG_A);
     expect(key).toMatch(new RegExp(`^org/${ORG_A}/members/${IDS.carol}/[0-9a-f-]+\\.png$`));
-    expect(JSON.stringify(body)).not.toContain('org/');
+    expect(Object.keys(body)).toEqual(['photo_url']); // solo la URL firmada: ningún campo con la clave
     expect(storage.fake.objects.get(key!)?.contentType).toBe('image/png');
     const mine = (await (await call('GET', '/me/photo', T.carol)).json()) as Row;
     expect(mine['photo_url']).toEqual(expect.stringContaining('fake-storage.test'));
@@ -229,7 +229,7 @@ describe('tarea contact-photos: la foto de los contactos que escriben por QR', (
 
   it('pide la foto con la sesión abierta, la guarda bajo org/<empresa>/contacts/<contacto>/ y anota la consulta', async () => {
     const c = await insertContact(ORG_A, 'Ana', '+593990000010', IDS.carol);
-    await qrChannel(ORG_A, 'inst-a', 'open', c);
+    await qrChannel(ORG_A, 'ss-inst-a-0001', 'open', c);
     qr.pictures.set('593990000010', 'https://pps.whatsapp.net/v/ana.jpg');
     const seen: string[] = [];
     downloader().download = (url) => (seen.push(url), Promise.resolve(JPEG));
@@ -247,7 +247,7 @@ describe('tarea contact-photos: la foto de los contactos que escriben por QR', (
 
   it('sin foto o con la privacidad cerrada solo se anota la consulta, y no se repite antes de 7 días', async () => {
     const c = await insertContact(ORG_A, 'Sin foto', '+593990000011', IDS.carol);
-    await qrChannel(ORG_A, 'inst-b', 'open', c);
+    await qrChannel(ORG_A, 'ss-inst-b-0001', 'open', c);
     expect(await run()).toBe(1);
     const row = await contactRow(c);
     expect(row['photo_key']).toBeNull();
@@ -259,7 +259,7 @@ describe('tarea contact-photos: la foto de los contactos que escriben por QR', (
 
   it('una imagen no admisible (otro formato o el descargador la rechaza) no se guarda', async () => {
     const c = await insertContact(ORG_A, 'Rara', '+593990000012', IDS.carol);
-    await qrChannel(ORG_A, 'inst-c', 'open', c);
+    await qrChannel(ORG_A, 'ss-inst-c-0001', 'open', c);
     qr.pictures.set('593990000012', 'https://pps.whatsapp.net/v/rara.gif');
     downloader().download = () => Promise.resolve(GIF);
     await run();
@@ -269,12 +269,12 @@ describe('tarea contact-photos: la foto de los contactos que escriben por QR', (
 
   it('con la sesión caída o el almacenamiento sin responder NO se anota nada (se reintenta en la vuelta siguiente)', async () => {
     const down = await insertContact(ORG_A, 'Caída', '+593990000013', IDS.carol);
-    await qrChannel(ORG_A, 'inst-d', 'closed', down);
+    await qrChannel(ORG_A, 'ss-inst-d-0001', 'closed', down);
     await run();
     expect((await contactRow(down))['photo_checked_at']).toBeNull();
 
     const ok = await insertContact(ORG_A, 'Almacén', '+593990000014', IDS.carol);
-    await qrChannel(ORG_A, 'inst-e', 'open', ok);
+    await qrChannel(ORG_A, 'ss-inst-e-0001', 'open', ok);
     qr.pictures.set('593990000014', 'https://pps.whatsapp.net/v/almacen.jpg');
     downloader().download = () => Promise.resolve(PNG);
     storage.fake.down = true;
@@ -289,8 +289,8 @@ describe('tarea contact-photos: la foto de los contactos que escriben por QR', (
     const a = await insertContact(ORG_A, 'De A', '+593990000015', IDS.carol);
     const b = await insertContact(ORG_B, 'De B', '+593990000016', IDS.bob);
     const loose = await insertContact(ORG_A, 'Suelto', '+593990000017', IDS.carol);
-    await qrChannel(ORG_A, 'inst-f', 'open', a);
-    await qrChannel(ORG_B, 'inst-g', 'open', b);
+    await qrChannel(ORG_A, 'ss-inst-f-0001', 'open', a);
+    await qrChannel(ORG_B, 'ss-inst-g-0001', 'open', b);
     qr.pictures.set('593990000015', 'https://pps.whatsapp.net/v/a.jpg');
     qr.pictures.set('593990000016', 'https://pps.whatsapp.net/v/b.jpg');
     downloader().download = () => Promise.resolve(JPEG);
