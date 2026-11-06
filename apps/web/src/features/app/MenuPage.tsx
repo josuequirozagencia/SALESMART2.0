@@ -30,15 +30,11 @@ export function MenuPage() {
             <h1 className="truncate text-[15px] font-bold">{me.organization.name}</h1>
             <p className="truncate text-[12.5px] text-muted">{name} · {ROLE_LABEL[me.role] ?? me.role}</p>
           </div>
+          <ViewAsMenu me={me} />
+          <NotificationsBell me={me} />
         </div>
         <ThemeSwitch />
       </section>
-      <div className="overflow-hidden rounded-2xl [background:var(--side-bg)]">
-        <div className="pt-2">
-          <NotificationsBell me={me} />
-          <ViewAsMenu me={me} />
-        </div>
-      </div>
       <nav aria-label="Todas las secciones" className="grid gap-4">
         {groups.map((g) => {
           const items = g.items.filter((i) => i.to !== SETTINGS);

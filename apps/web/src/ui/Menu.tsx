@@ -10,7 +10,7 @@ export interface MenuItem {
  * Menú desplegable accesible (patrón «menu button»): el botón abre una lista de acciones; Esc o un clic fuera la cierran (Esc devuelve el foco al botón), las flechas, Inicio y Fin
  * mueven el foco entre las acciones y elegir una la ejecuta y cierra. `label` es el nombre accesible del botón; `children` su contenido visible.
  */
-export function Menu({ label, items, children, className = '' }: { label: string; items: MenuItem[]; children: React.ReactNode; className?: string }) {
+export function Menu({ label, items, children, className = '', buttonClass }: { label: string; items: MenuItem[]; children: React.ReactNode; className?: string; buttonClass?: string }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -40,7 +40,7 @@ export function Menu({ label, items, children, className = '' }: { label: string
 
   return (
     <div ref={root} className={`relative ${className}`} onKeyDown={open ? onKeys : undefined}>
-      <button ref={button} type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen((v) => !v)} className={`inline-flex items-center gap-1 rounded-[10px] border px-3 py-1.5 text-[12.5px] font-semibold transition ${open ? 'border-accent bg-accent-soft text-accent' : 'border-line hover:bg-surface2'}`}>
+      <button ref={button} type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined} onClick={() => setOpen((v) => !v)} className={buttonClass ?? `inline-flex items-center gap-1 rounded-[10px] border px-3 py-1.5 text-[12.5px] font-semibold transition ${open ? 'border-accent bg-accent-soft text-accent' : 'border-line hover:bg-surface2'}`}>
         {children}
       </button>
       {open ? (

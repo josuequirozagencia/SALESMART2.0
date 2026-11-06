@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Icon } from '../../ui/Icon';
 import { Link } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import { shortDateTime } from '../../lib/format';
@@ -68,7 +69,7 @@ function Panel({ canMark, onClose }: { canMark: boolean; onClose: () => void }) 
  * Campana de avisos del menú lateral (F1, ADR-57; F2, ADR-58): el contador de lo que no se ha leído y un panel con los avisos (menciones «@» en notas y avisos de tareas). Si la persona no puede ver avisos
  * (permiso o error), no se muestra. «Ver como» y el acceso de solo lectura ven los avisos pero no los pueden marcar como leídos (el servidor lo rechazaría).
  */
-export function NotificationsBell({ me, compact = false }: { me: Me; compact?: boolean }) {
+export function NotificationsBell({ me }: { me: Me }) {
   const unread = useUnreadNotifications();
   const [open, setOpen] = useState(false);
   if (unread === null) return null;
@@ -78,14 +79,13 @@ export function NotificationsBell({ me, compact = false }: { me: Me; compact?: b
       <button
         type="button"
         aria-label={unread > 0 ? `Avisos (${unread} sin leer)` : 'Avisos'}
+        title="Avisos"
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
-        className={compact ? "relative mx-auto mb-2 grid size-10 place-items-center rounded-[10px] bg-white/8 text-white/90 hover:bg-white/12" : "mx-3 mb-2 flex min-h-11 items-center gap-2.5 rounded-xl bg-white/8 px-3 py-2 text-left text-[13px] font-semibold text-white/90 hover:bg-white/12"}
-        title={compact ? "Avisos" : undefined}
+        className="relative grid size-11 place-items-center rounded-full text-muted transition-colors hover:bg-surface2 hover:text-fg md:size-10"
       >
-        <svg aria-hidden="true" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8z" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
-        {compact ? null : <span className="flex-1">Avisos</span>}
-        {unread > 0 ? compact ? <span aria-hidden="true" className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-crit" /> : <span aria-hidden="true" className="grid min-w-5 place-items-center rounded-full bg-crit px-1.5 text-[11px] font-bold leading-5 text-white">{unread > 99 ? '99+' : unread}</span> : null}
+        <Icon name="bell" size={20} />
+        {unread > 0 ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 grid min-w-[18px] place-items-center rounded-full bg-crit px-1 text-[11px] font-bold leading-[18px] text-white">{unread > 99 ? '99+' : unread}</span> : null}
       </button>
       {open ? <Panel canMark={canMark} onClose={() => setOpen(false)} /> : null}
     </>

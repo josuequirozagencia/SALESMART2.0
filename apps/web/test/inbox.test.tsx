@@ -157,7 +157,7 @@ describe('Inbox · listado', () => {
     expect(b.getByText('Esperando al cliente')).toBeInTheDocument();
     expect(b.getByText('Te espero a las 3')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Trabajando\s*2/ })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: /Pendientes\s*5/ })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /Esperando\s*5/ })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /Finalizadas\s*7/ })).toBeInTheDocument();
   });
 
@@ -167,7 +167,7 @@ describe('Inbox · listado', () => {
     renderApp('/inbox');
     await screen.findByRole('link', { name: 'Ana Torres' });
     expect(api.last('GET /conversations')!.query.get('tab')).toBe('working');
-    await userEvent.click(screen.getByRole('tab', { name: /Pendientes/ }));
+    await userEvent.click(screen.getByRole('tab', { name: /Esperando/ }));
     await waitFor(() => expect(api.last('GET /conversations')!.query.get('tab')).toBe('pending'));
     await userEvent.type(screen.getByRole('searchbox', { name: 'Buscar conversaciones' }), 'ana');
     await waitFor(() => expect(api.last('GET /conversations')!.query.get('q')).toBe('ana'));
