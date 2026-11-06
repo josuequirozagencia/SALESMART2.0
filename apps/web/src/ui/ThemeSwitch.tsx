@@ -5,7 +5,7 @@ import { useTheme } from './theme';
  * Interruptor de modo oscuro para toda la plataforma (ADR-60). Es un `role="switch"`: activado = oscuro. Mientras la elección sea manual aparece «Usar el del sistema»
  * para volver a seguir al aparato. `onDark` lo pinta para la barra lateral (siempre oscura); `compact` deja solo el icono (barra lateral plegada).
  */
-export function ThemeSwitch({ onDark = false, compact = false }: { onDark?: boolean; compact?: boolean }) {
+export function ThemeSwitch({ onDark = false, compact = false, touch = false }: { onDark?: boolean; compact?: boolean; touch?: boolean }) {
   const { mode, effective, setMode } = useTheme();
   const dark = effective === 'dark';
   const label = dark ? 'Modo claro' : 'Modo oscuro';
@@ -19,7 +19,7 @@ export function ThemeSwitch({ onDark = false, compact = false }: { onDark?: bool
         aria-label={label}
         title={label}
         onClick={() => setMode(dark ? 'light' : 'dark')}
-        className={`flex min-h-10 min-w-10 items-center gap-2.5 rounded-[10px] px-2.5 text-[13px] font-semibold transition-colors ${tone} ${compact ? 'justify-center' : 'flex-1'}`}
+        className={`flex items-center gap-2.5 rounded-[10px] px-2.5 text-[13px] font-semibold transition-colors ${touch ? 'min-h-11 min-w-11' : 'min-h-10 min-w-10'} ${tone} ${compact ? 'justify-center' : 'flex-1'}`}
       >
         <Icon name={dark ? 'sun' : 'moon'} size={18} />
         {compact ? null : (

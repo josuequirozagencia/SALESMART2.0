@@ -3,10 +3,10 @@ import { useEffect, useRef, type KeyboardEvent, type ReactNode } from 'react';
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Cajón superpuesto desde la derecha (ADR-60): en tablet y móvil muestra el panel de contacto encima del chat, con el fondo atenuado. `role="dialog"` y `aria-modal`; se cierra con
+ * Cajón superpuesto (ADR-60): desde la derecha (`right`, el panel de contacto en tablet y móvil) o hoja inferior (`bottom`, los filtros de la lista móvil), con el fondo atenuado. `role="dialog"` y `aria-modal`; se cierra con
  * Esc, tocando fuera o con el botón del propio panel (`onClose`); el foco entra al abrir, queda atrapado dentro (Tab y Mayús+Tab dan la vuelta) y se devuelve a quien lo abrió al cerrar.
  */
-export function Drawer({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+export function Drawer({ label, onClose, children, placement = 'right' }: { label: string; onClose: () => void; children: ReactNode; placement?: 'right' | 'bottom' }) {
   const panel = useRef<HTMLDivElement>(null);
   const opener = useRef<Element | null>(null);
 
@@ -45,9 +45,9 @@ export function Drawer({ label, onClose, children }: { label: string; onClose: (
   };
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div className={`fixed inset-0 z-40 flex ${placement === 'bottom' ? 'items-end' : 'justify-end'}`}>
       <div aria-hidden="true" onClick={onClose} className="absolute inset-0 bg-black/45" />
-      <div ref={panel} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} onKeyDown={key} className="relative flex h-full w-[min(380px,100%)] shadow-[var(--shadow)] outline-none">
+      <div ref={panel} role="dialog" aria-modal="true" aria-label={label} tabIndex={-1} onKeyDown={key} className={placement === 'bottom' ? 'relative flex max-h-[85dvh] w-full flex-col overflow-y-auto rounded-t-2xl bg-surface pb-[env(safe-area-inset-bottom)] shadow-[var(--shadow)] outline-none' : 'relative flex h-full w-[min(380px,100%)] shadow-[var(--shadow)] outline-none'}>
         {children}
       </div>
     </div>

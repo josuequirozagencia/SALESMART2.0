@@ -2728,3 +2728,24 @@ test.describe('Inbox: distribución y viewports (ADR-60, Fase 3)', () => {
     }
   });
 });
+
+test.describe('Inbox móvil: lista (ADR-60, Fase 4)', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test('cabecera compacta, pestañas, hoja de filtros que se abre y se cierra con Esc, y la barra inferior a la vista', async ({ page, request }) => {
+    const email = await createAccount(request, uniqueEmail('inboxmovil'));
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    await page.goto('/inbox');
+    await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible();
+    await expect(page.getByRole('searchbox', { name: 'Buscar conversaciones' })).toBeVisible();
+    await expect(page.getByRole('tab')).toHaveCount(3);
+    await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
+    await expect(page.getByText('No tienes conversaciones en curso.')).toBeVisible();
+    await page.getByRole('button', { name: 'Filtros' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Filtros' });
+    await expect(sheet.getByRole('checkbox', { name: 'Solo no leídas' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  });
+});
