@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { useBreakpoint } from '../../ui/breakpoints';
+import { Drawer } from '../../ui/Drawer';
+import { Icon } from '../../ui/Icon';
 import type { ChatMessage } from '../../lib/types';
 import { Button } from '../../ui/controls';
 import { QUICK_REACTIONS } from './emoji';
@@ -16,6 +19,26 @@ const TICK: Record<string, { text: string; label: string; cls: string }> = {
 function Ticks({ status }: { status: ChatMessage['status'] }) {
   const t = TICK[status];
   return t ? <span role="img" aria-label={t.label} title={t.label} className={`ml-1 tracking-[-2px] ${t.cls}`}>{t.text}</span> : null;
+}
+
+/** Una imagen del hilo. En móvil se toca para verla ampliada a pantalla completa (con botón de cerrar); en escritorio es un enlace a otra pestaña, como siempre. */
+function ChatImage({ url, name }: { url: string; name: string }) {
+  const mobile = useBreakpoint() === 'mobile';
+  const [open, setOpen] = useState(false);
+  if (!mobile) return <a href={url} target="_blank" rel="noopener noreferrer" className="mt-1 block"><img src={url} alt={name} className="max-w-[260px] rounded-lg" loading="lazy" /></a>;
+  return (
+    <>
+      <button type="button" aria-label="Ver la imagen ampliada" onClick={() => setOpen(true)} className="mt-1 block max-w-full"><img src={url} alt={name} className="max-h-72 max-w-full rounded-lg object-cover" loading="lazy" /></button>
+      {open ? (
+        <Drawer label="Imagen ampliada" placement="full" onClose={() => setOpen(false)}>
+          <div className="relative grid h-full w-full place-items-center bg-black">
+            <img src={url} alt={name} className="max-h-full max-w-full object-contain" />
+            <button type="button" aria-label="Cerrar la imagen" onClick={() => setOpen(false)} className="absolute right-3 top-3 grid size-11 place-items-center rounded-full bg-white/20 text-white"><Icon name="close" /></button>
+          </div>
+        </Drawer>
+      ) : null}
+    </>
+  );
 }
 
 /** El contenido: texto, o el nombre del tipo de contenido cuando no hay texto (los archivos aún no se descargan: llega en M5.6). */
@@ -36,7 +59,7 @@ function Body({ m }: { m: ChatMessage }) {
         att.scan_status === 'infected' ? <span className="mt-0.5 block text-[12px] font-semibold text-crit">El antivirus bloqueó este archivo{att.error ? `: ${att.error}` : ''}</span>
         : att.scan_status === 'pending' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo se está revisando…</span>
         : att.url ? (
-          att.mime_type?.startsWith('image/') ? <a href={att.url} target="_blank" rel="noopener noreferrer" className="mt-1 block"><img src={att.url} alt={att.filename ?? 'imagen'} className="max-w-[260px] rounded-lg" loading="lazy" /></a>
+          att.mime_type?.startsWith('image/') ? <ChatImage url={att.url} name={att.filename ?? 'imagen'} />
           : att.mime_type?.startsWith('video/') ? <video src={att.url} controls className="mt-1 max-w-[260px] rounded-lg" />
           : att.mime_type?.startsWith('audio/') ? <audio src={att.url} controls className="mt-1 w-full max-w-[260px]" />
           : <a href={att.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[12.5px] font-semibold text-accent">Descargar {att.filename ?? 'archivo'}</a>

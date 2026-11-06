@@ -109,3 +109,21 @@ body { font-size: min(var(--fs-max), max(var(--fs-min), 13.5px)); }
 @media (max-width: 767px) {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea { font-size: 16px !important; }
 }
+
+/*
+ * Conversación a pantalla completa en móvil (ADR-60, Fase 5): alto de la ventana visible (`100dvh`, con `100vh` de respaldo), sin que arrastrar el hilo mueva la página de atrás, con las
+ * áreas seguras de los lados, y una entrada de ≤ 200 ms desde la derecha que se apaga con `prefers-reduced-motion`.
+ */
+.chat-screen {
+  height: 100vh;
+  height: 100dvh;
+  overscroll-behavior: none;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+  animation: chat-in 180ms ease-out;
+}
+@keyframes chat-in {
+  from { transform: translateX(24px); opacity: 0.6; }
+  to { transform: none; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .chat-screen { animation: none; } }

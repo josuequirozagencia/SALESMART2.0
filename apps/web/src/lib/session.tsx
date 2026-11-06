@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { clearDrafts } from '../features/inbox/draftStore';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, CSRF_HEADER, CSRF_VALUE, onSessionLost, refreshSession, tokens } from './api';
 import type { LoginResponse, Me, ViewAsRole } from './types';
@@ -76,6 +77,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     tokens.set(null);
     boot = Promise.resolve(null);
     qc.clear();
+    // Los borradores del redactor son de esta persona y esta sesión: no deben verse al entrar otra
+    clearDrafts();
     setState({ status: 'anon' });
   }, [qc]);
 
