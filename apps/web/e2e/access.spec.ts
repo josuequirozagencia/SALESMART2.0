@@ -2749,3 +2749,19 @@ test.describe('Inbox móvil: lista (ADR-60, Fase 4)', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   });
 });
+
+test.describe('Chat móvil (ADR-60, Fase 5)', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+  test('un enlace a una conversación que no existe o no es tuya da el mismo aviso uniforme, sin barra inferior ni desborde, y se puede volver a la lista', async ({ page, request }) => {
+    const email = await createAccount(request, uniqueEmail('chatmovil'));
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    await page.goto('/inbox/00000000-0000-4000-8000-000000000000');
+    await expect(page.getByText('Esa conversación no existe o no tienes acceso a ella.')).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    await page.getByRole('link', { name: 'Ver conversaciones' }).click();
+    await expect(page).toHaveURL(/\/inbox$/);
+    await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
+  });
+});

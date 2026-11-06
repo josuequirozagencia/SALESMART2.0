@@ -1,11 +1,13 @@
 import '@testing-library/jest-dom/vitest';
 import { cleanup, configure } from '@testing-library/react';
 import { afterEach, vi } from 'vitest';
+import { clearDrafts } from '../src/features/inbox/draftStore';
 
 // Con toda la suite en paralelo (y en los runners de CI) 1 s se queda corto para findBy*/waitFor: no es un fallo de la app
 configure({ asyncUtilTimeout: 4000 });
 afterEach(() => {
   cleanup();
+  clearDrafts();
   // Las preferencias de distribución (barra lateral, columnas del Inbox) y el tema viven en localStorage: una prueba no debe heredar las de otra
   if (typeof window !== 'undefined') window.localStorage.clear();
 });

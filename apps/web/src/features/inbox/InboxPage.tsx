@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { useSession } from '../../lib/session';
 import type { InboxFilters } from '../../lib/types';
 import { useBreakpoint } from '../../ui/breakpoints';
+import { useVisualViewport } from '../../ui/useVisualViewport';
 import { Drawer } from '../../ui/Drawer';
 import { useLayoutPrefs } from '../../ui/layoutStore';
 import { ResizeHandle } from '../../ui/ResizeHandle';
@@ -91,12 +92,25 @@ export function InboxPage() {
       }
     : { contactOpen: drawerOpen, onToggleContact: () => setDrawerFor(drawerOpen || !id ? null : id) };
 
+  // Móvil con una conversación abierta: pantalla completa (ADR-60, Fase 5). El contenedor ocupa toda la ventana visible, también con el teclado virtual abierto, y la página de atrás no se mueve
+  const mobileChat = bp === 'mobile' && id !== undefined;
+  const viewport = useVisualViewport(mobileChat);
+  useEffect(() => {
+    if (!mobileChat) return;
+    const root = document.documentElement;
+    const before = root.style.overflow;
+    root.style.overflow = 'hidden';
+    return () => {
+      root.style.overflow = before;
+    };
+  }, [mobileChat]);
+
   const vars = desktop ? ({ '--il-list': `${layout.list}px`, '--il-contact': `${layout.contact}px` } as CSSProperties) : undefined;
   return (
     <div
       ref={rootRef}
-      style={vars}
-      className={`flex min-h-[420px] overflow-hidden rounded-2xl border border-line bg-surface md:h-[calc(100dvh-70px)] ${id ? 'h-[calc(100dvh-32px)]' : 'h-[calc(100dvh-var(--bottom-nav-h)-env(safe-area-inset-bottom)-32px)]'}`}
+      style={mobileChat ? { ...(viewport ? { height: viewport.height, top: viewport.top } : {}) } : vars}
+      className={mobileChat ? 'chat-screen fixed inset-x-0 top-0 z-20 flex overflow-hidden bg-surface' : `flex min-h-[420px] overflow-hidden rounded-2xl border border-line bg-surface md:h-[calc(100dvh-70px)] ${id ? 'h-[calc(100dvh-32px)]' : 'h-[calc(100dvh-var(--bottom-nav-h)-env(safe-area-inset-bottom)-32px)]'}`}
     >
       {desktop && !layout.listShown ? null : (
         <div key="list" style={desktop ? { width: 'var(--il-list)' } : undefined} className={`min-h-0 shrink-0 ${id ? 'hidden md:flex' : 'flex'} ${desktop ? '' : 'w-full md:w-[300px] lg:w-[320px]'}`}>
@@ -145,7 +159,7 @@ export function InboxPage() {
         </div>
       ) : null}
       {drawerOpen && id ? (
-        <Drawer label="Datos del contacto" onClose={() => setDrawerFor(null)}>
+        <Drawer label="Datos del contacto" placement={bp === 'mobile' ? 'full' : 'right'} onClose={() => setDrawerFor(null)}>
           <ContactPanel id={id} onClose={() => setDrawerFor(null)} />
         </Drawer>
       ) : null}

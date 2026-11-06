@@ -1,14 +1,19 @@
-import { useId, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
 import type { Conversation, MentionOption, ResolvedQuickReply } from '../../lib/types';
+import { useBreakpoint } from '../../ui/breakpoints';
 import { Alert, Button } from '../../ui/controls';
+import { Drawer } from '../../ui/Drawer';
+import { Icon } from '../../ui/Icon';
 import { Pill } from '../../ui/Pill';
 import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
 import { AttachmentPicker } from './AttachmentPicker';
 import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
+import { readDraft, writeDraft } from './draftStore';
 import { EmojiPicker } from './EmojiPicker';
 import { mentionAt, mentionIdsIn, suggestMentions, type Picked } from './mentions';
 import { ScheduleDialog } from './ScheduleDialog';
+import { SheetButton } from './SheetButton';
 import { TemplatePicker } from './TemplatePicker';
 import { useConversationQuickReplies, useMentionOptions, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
 
@@ -53,9 +58,9 @@ export function Composer({ c }: { c: Conversation }) {
   const reply = useSendReply(c.id);
   const note = useSendNote(c.id);
   const media = useSendMedia(c.id);
-  const [mode, setMode] = useState<'reply' | 'note'>('reply');
-  const [text, setText] = useState('');
-  const [caret, setCaret] = useState(0);
+  const [mode, setMode] = useState<'reply' | 'note'>(() => readDraft(c.id).mode);
+  const [text, setText] = useState(() => readDraft(c.id).text);
+  const [caret, setCaret] = useState(() => readDraft(c.id).text.length);
   const [picker, setPicker] = useState(false);
   const [manage, setManage] = useState(false);
   const [scheduling, setScheduling] = useState(false);
@@ -75,6 +80,19 @@ export function Composer({ c }: { c: Conversation }) {
   const [mentionClosedAt, setMentionClosedAt] = useState<number | null>(null);
   const ref = useRef<HTMLTextAreaElement>(null);
   const listId = useId();
+  // Móvil (ADR-60, Fase 5): el borrador de cada conversación se conserva al volver a la lista y reabrirla (solo en memoria de esta sesión); Enter da salto de línea y se envía con el botón;
+  // el cuadro crece hasta ~5 líneas; las acciones secundarias van en una hoja inferior
+  const mobile = useBreakpoint() === 'mobile';
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    writeDraft(c.id, { text, mode });
+  }, [c.id, text, mode]);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !mobile) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  }, [text, mobile]);
   const block = replyBlock(c);
   const noteMode = mode === 'note' || block !== null;
   const canWrite = noteMode ? c.can.note : true;
@@ -208,16 +226,22 @@ export function Composer({ c }: { c: Conversation }) {
       setClosedAt(slash.start);
       return;
     }
-    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === 'Enter' && !e.shiftKey && !mobile && !e.nativeEvent.isComposing) {
       e.preventDefault();
       submit();
     }
   };
 
   return (
-    <div className={`grid gap-2 border-t border-line px-3 py-2.5 ${noteMode ? 'bg-warn-soft' : 'bg-surface'}`}>
+    <div className={`grid gap-2 border-t border-line px-3 ${mobile ? 'pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5' : 'py-2.5'} ${noteMode ? 'bg-warn-soft' : 'bg-surface'}`}>
       {block ? <p role="status" className="text-[12.5px] text-muted">{block}</p> : null}
-      {c.can.reply ? (
+      {mobile && noteMode && c.can.note ? (
+        <p role="status" className="flex items-center gap-2 text-[12.5px] font-semibold text-warn">
+          <span className="min-w-0 flex-1">Nota interna · solo la ve tu equipo</span>
+          {block === null ? <button type="button" onClick={() => setMode('reply')} className="min-h-11 rounded-full border border-warn px-3 text-[12.5px] font-semibold text-warn">Volver a responder</button> : null}
+        </p>
+      ) : null}
+      {c.can.reply && !mobile ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {c.can.note ? (
         <div role="group" aria-label="Qué vas a escribir" className="flex gap-1.5">
@@ -301,30 +325,75 @@ export function Composer({ c }: { c: Conversation }) {
             )}
           </div>
         ) : null}
+        {mobile ? <IconButton label="Más opciones" onClick={() => setSheet(true)}><Icon name="plus" /></IconButton> : null}
         <textarea
           ref={ref}
-          rows={2}
+          rows={mobile ? 1 : 2}
           value={text}
           maxLength={MAX}
           disabled={!canWrite}
           aria-label={noteMode ? 'Nota interna' : 'Mensaje'}
           {...(open && options.length > 0 ? { 'aria-controls': listId, 'aria-activedescendant': `${listId}-${Math.min(active, options.length - 1)}`, 'aria-expanded': true } : {})}
           {...(mentionOpen && people.length > 0 ? { 'aria-controls': `${listId}-people`, 'aria-activedescendant': `${listId}-p${Math.min(active, people.length - 1)}`, 'aria-expanded': true } : {})}
-          placeholder={noteMode ? 'Nota interna: solo la ve tu equipo. Escribe «@» para mencionar a alguien' : pendingAttachment ? 'Pie del archivo (opcional)' : 'Escribe un mensaje o «/» para una respuesta rápida'}
+          placeholder={mobile ? (noteMode ? 'Nota interna' : pendingAttachment ? 'Pie del archivo' : 'Mensaje') : noteMode ? 'Nota interna: solo la ve tu equipo. Escribe «@» para mencionar a alguien' : pendingAttachment ? 'Pie del archivo (opcional)' : 'Escribe un mensaje o «/» para una respuesta rápida'}
           onChange={onChange}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={onKey}
-          className="max-h-40 min-h-[44px] flex-1 resize-none rounded-[14px] border border-line bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted/70 disabled:opacity-60"
+          className={`min-h-[44px] min-w-0 flex-1 resize-none rounded-[14px] border border-line-strong bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted disabled:opacity-60 ${mobile ? 'max-h-[132px] overflow-y-auto' : 'max-h-40'}`}
         />
-        <div className="relative">
-          <IconButton label="Emojis" pressed={emojis} disabled={!canWrite} onClick={() => setEmojis((v) => !v)}><SmileIcon /></IconButton>
-          {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
-        </div>
-        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
-        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
-        {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
-        <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
+        {mobile ? (
+          <>
+            <div className="relative">
+              <IconButton label="Emojis" pressed={emojis} disabled={!canWrite} onClick={() => setEmojis((v) => !v)}><SmileIcon /></IconButton>
+              {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
+            </div>
+            {mobile && !noteMode && c.can.reply && c.channel.kind !== 'ghl' && !trimmed && !pendingAttachment ? (
+              <IconButton label="Grabar nota de voz" disabled={!!block || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton>
+            ) : (
+              <button
+                type="button"
+                aria-label={noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
+                title={noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
+                aria-busy={send.isPending || undefined}
+                disabled={send.isPending || (!trimmed && !pendingAttachment) || !canWrite || pending.length > 0}
+                onClick={submit}
+                className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-accent-ink disabled:opacity-50"
+              >
+                <Icon name="send" size={20} />
+              </button>
+            )}
+          </>
+        ) : (
+          <>
+          <div className="relative">
+            <IconButton label="Emojis" pressed={emojis} disabled={!canWrite} onClick={() => setEmojis((v) => !v)}><SmileIcon /></IconButton>
+            {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
+          </div>
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
+          <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
+
+          </>
+        )}
       </div>
+      {sheet ? (
+        <Drawer label="Más opciones del mensaje" placement="bottom" onClose={() => setSheet(false)}>
+          <div className="grid w-full gap-1 p-3">
+            <div className="flex items-center justify-between gap-2 px-1 pb-1">
+              <h3 className="text-[15px] font-bold">Más opciones</h3>
+              <button type="button" aria-label="Cerrar las opciones" onClick={() => setSheet(false)} className="grid size-11 place-items-center rounded-full text-muted hover:bg-surface2"><Icon name="close" /></button>
+            </div>
+            {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <SheetButton icon="plus" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => { setSheet(false); setAttaching(true); }}>Adjuntar archivo</SheetButton> : null}
+            {c.can.reply && c.channel.kind !== 'ghl' && c.channel.kind !== 'qr' ? <SheetButton icon="form" {...(c.window.open ? {} : { primary: true, hint: 'La ventana de 24 h está cerrada: solo puedes escribir con una plantilla' })} onClick={() => { setSheet(false); setPicker(true); }}>Plantillas</SheetButton> : null}
+            {c.can.reply ? <SheetButton icon="bolt" onClick={() => { setSheet(false); setManage(true); }}>Respuestas rápidas</SheetButton> : null}
+            {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <SheetButton icon="clock" disabled={!trimmed || pending.length > 0} hint={trimmed ? undefined : 'Escribe el mensaje primero'} onClick={() => { setSheet(false); setScheduling(true); }}>Programar mensaje</SheetButton> : null}
+            {c.can.note ? (
+              noteMode && block === null ? <SheetButton icon="reset" onClick={() => { setSheet(false); setMode('reply'); }}>Volver a responder al cliente</SheetButton> : block === null ? <SheetButton icon="list" onClick={() => { setSheet(false); setMode('note'); }}>Escribir una nota interna</SheetButton> : null
+            ) : null}
+          </div>
+        </Drawer>
+      ) : null}
     </div>
   );
 }

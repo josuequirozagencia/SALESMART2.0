@@ -1,23 +1,26 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import { initials, timeLeft } from '../../lib/format';
 import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
+import { useBreakpoint } from '../../ui/breakpoints';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { Drawer } from '../../ui/Drawer';
 import { Icon } from '../../ui/Icon';
 import { Menu, type MenuItem } from '../../ui/Menu';
 import { Pill } from '../../ui/Pill';
 import { AgentBanner } from './AgentBanner';
 import { Composer } from './Composer';
 import { ConversationTags } from './ConversationTags';
-import { ScheduledButton } from './ScheduledList';
+import { ScheduledButton, ScheduledDialog } from './ScheduledList';
+import { AgentSheetItem, SheetButton } from './SheetButton';
 import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
 import { TransferDialog } from './TransferDialog';
-import { useConversation, useConversationAction, useMarkRead, useMessages, useReact, useRetryMessage, useRevoke } from './useInbox';
+import { useConversation, useConversationAction, useMarkRead, useMessages, useReact, useRetryMessage, useRevoke, useScheduledMessages } from './useInbox';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 
@@ -43,6 +46,18 @@ export interface ThreadLayout {
   onResetLayout?: () => void;
 }
 
+/** «Atrás» del chat móvil: vuelve a la pantalla anterior; si no la hay (se abrió desde un aviso o un enlace directo), a la lista. El enlace conserva su destino `/inbox`. */
+function useGoBack(): (e: MouseEvent) => void {
+  const navigate = useNavigate();
+  const location = useLocation();
+  return (e) => {
+    if (location.key !== 'default') {
+      e.preventDefault();
+      navigate(-1);
+    }
+  };
+}
+
 function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void; layout: ThreadLayout }) {
   const { contactOpen, onToggleContact, contactBlocked = false, listOpen, onToggleList, onResetLayout } = layout;
   const act = useConversationAction(c.id);
@@ -51,6 +66,12 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const [confirm, setConfirm] = useState(false);
   const [dialog, setDialog] = useState(false);
   const now = useNow(30_000);
+  const mobile = useBreakpoint() === 'mobile';
+  const goBack = useGoBack();
+  const [sheet, setSheet] = useState(false);
+  const [scheduledOpen, setScheduledOpen] = useState(false);
+  const scheduled = useScheduledMessages(c.id);
+  const scheduledPending = (scheduled.data?.items ?? []).filter((m) => m.status === 'scheduled').length;
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
   // «⋯ Más» (M5.10): lo que no se usa a cada rato —transferir, dejar de participar, finalizar— sale de la cabecera y se junta en un menú; Aceptar y Asignarme siguen a la vista
@@ -62,6 +83,67 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
     onBackError(undefined);
     act.mutate(a, { onSettled: () => setConfirm(false), onError: (e) => onBackError(friendlyError(e, fallback)) });
   };
+  if (mobile) {
+    const close = (): void => {
+      setSheet(false);
+      setConfirm(false);
+    };
+    return (
+      <header className="border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
+        <div className="flex items-center gap-1 px-1 py-1">
+          <Link to="/inbox" onClick={goBack} aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2"><Icon name="back" size={22} /></Link>
+          <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-full bg-surface2 text-[13px] font-bold text-muted">{initials(c.contact.name)}</span>
+          <div className="min-w-0 flex-1 px-1">
+            <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
+            <p className="truncate text-[12.5px] text-muted">{c.channel.name} · {c.owner ? c.owner.name : 'Sin asesor'}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn">QR · no oficial</span> : null}</p>
+          </div>
+          <button type="button" aria-label="Más acciones" aria-haspopup="dialog" onClick={() => setSheet(true)} className="relative grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2">
+            <Icon name="more" size={22} strokeWidth={3.2} />
+            {scheduledPending > 0 ? <span aria-hidden="true" className="absolute right-1 top-1 size-2.5 rounded-full bg-accent" /> : null}
+          </button>
+        </div>
+        {c.channel.kind === 'qr' && c.channel.session === 'down' ? <p role="alert" className="mx-3 mb-2 rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[12.5px] font-semibold text-crit">La sesión de WhatsApp por QR está caída. Lo que escribas queda en espera y sale cuando el administrador vuelva a escanear el QR en Configuración › Conexiones.</p> : null}
+        <div className="flex items-center gap-2 overflow-x-auto px-3 pb-2 [scrollbar-width:none]">
+          <Pill kind={status.kind}>{status.label}</Pill>
+          <SlaPill sla={c.sla} now={now} />
+          <WindowNote c={c} />
+        </div>
+        {sheet ? (
+          <Drawer label="Acciones de la conversación" placement="bottom" onClose={close}>
+            <div className="grid w-full gap-1 p-3">
+              <div className="flex items-center justify-between gap-2 px-1 pb-1">
+                <h3 className="min-w-0 truncate text-[15px] font-bold">{c.contact.name}</h3>
+                <button type="button" aria-label="Cerrar las acciones" onClick={close} className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2"><Icon name="close" /></button>
+              </div>
+              {confirm ? (
+                <div role="alertdialog" aria-label="Finalizar la conversación" className="grid gap-2 rounded-xl border border-crit bg-crit-soft p-3 text-[13px] text-crit">
+                  <p>¿Finalizar? Si el cliente escribe de nuevo se abrirá otra conversación.</p>
+                  <div className="flex gap-2">
+                    <Button variant="danger" className="flex-1" loading={act.isPending} onClick={() => { run('close', 'No pudimos finalizar la conversación.'); setSheet(false); }}>Sí, finalizar</Button>
+                    <Button className="flex-1" onClick={() => setConfirm(false)}>No</Button>
+                  </div>
+                </div>
+              ) : null}
+              {c.can.accept ? <SheetButton primary onClick={() => { close(); run('accept', 'No pudimos aceptar la conversación.'); }}>Aceptar</SheetButton> : null}
+              {c.can.take ? <SheetButton primary onClick={() => { close(); run('take', 'No pudimos asignarte la conversación.'); }}>Asignarme</SheetButton> : null}
+              <SheetButton icon="users" onClick={() => { close(); onToggleContact(); }}>Ver contacto</SheetButton>
+              {c.can.transfer || c.can.share ? <SheetButton icon="swap" onClick={() => { close(); setDialog(true); }}>Transferir o compartir</SheetButton> : null}
+              <SheetButton icon="clock" onClick={() => { close(); setScheduledOpen(true); }}>{scheduledPending > 0 ? `Mensajes programados (${scheduledPending})` : 'Mensajes programados'}</SheetButton>
+              <AgentSheetItem c={c} onDone={close} onError={(m) => onBackError(m)} />
+              <div className="grid gap-1 px-1 py-1.5">
+                <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Etiquetas</span>
+                <ConversationTags c={c} />
+              </div>
+              {collaborator ? <SheetButton icon="logout" onClick={() => { close(); onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</SheetButton> : null}
+              {c.can.close && !confirm ? <SheetButton icon="check" danger onClick={() => setConfirm(true)}>Finalizar la conversación</SheetButton> : null}
+            </div>
+          </Drawer>
+        ) : null}
+        {scheduledOpen ? <ScheduledDialog conversationId={c.id} onClose={() => setScheduledOpen(false)} /> : null}
+        {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
+      </header>
+    );
+  }
   return (
     <header className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line bg-surface px-3 py-2.5">
       <div className="flex items-center gap-2.5">
@@ -142,6 +224,10 @@ function Messages({ c }: { c: Conversation }) {
   const canReact = c.can.reply && c.window.open && (c.channel.kind ?? 'whatsapp') === 'whatsapp';
   const box = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  // Mensajes que llegaron mientras la persona leía lo anterior (más arriba del final): se ofrece bajar con un botón en vez de saltar
+  const [newCount, setNewCount] = useState(0);
+  const counted = useRef(0);
+  const lastSeen = useRef<string | undefined>(undefined);
   // Las páginas vienen de la más reciente a la más antigua; cada una, de antigua a reciente
   const items = useMemo<ChatMessage[]>(() => [...(q.data?.pages ?? [])].reverse().flatMap((p) => p.items), [q.data]);
   const last = items[items.length - 1]?.id;
@@ -151,16 +237,37 @@ function Messages({ c }: { c: Conversation }) {
     const el = box.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [last, items.length]);
+  useEffect(() => {
+    const added = items.length - counted.current;
+    const hadSome = counted.current > 0;
+    counted.current = items.length;
+    const newest = items[items.length - 1]?.id;
+    const arrivedAtEnd = newest !== lastSeen.current;
+    lastSeen.current = newest;
+    // Solo cuenta lo que llega al final (no la primera carga ni los mensajes antiguos que se piden arriba) y solo si no se está viendo el final
+    if (added > 0 && hadSome && arrivedAtEnd && !stick.current) setNewCount((n) => n + added);
+  }, [items]);
+  const toBottom = (): void => {
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    stick.current = true;
+    setNewCount(0);
+  };
 
   const now = useNow(60_000);
   return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
     <div
       ref={box}
       role="log"
       aria-label="Mensajes"
       aria-live="polite"
-      onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}
-      className="min-h-0 flex-1 overflow-y-auto bg-bg px-[4%] py-3"
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+        if (stick.current) setNewCount((n) => (n === 0 ? n : 0));
+      }}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-bg px-[4%] py-3"
     >
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando mensajes" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los mensajes.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
@@ -170,7 +277,7 @@ function Messages({ c }: { c: Conversation }) {
       <ul className="grid gap-1.5">
         {items.map((m, i) => (
           <Fragment key={m.id}>
-            {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="my-1 text-center"><span className="rounded-full bg-surface2 px-3 py-0.5 text-[11.5px] font-semibold text-muted">{dayLabel(m.sent_at, now)}</span></li> : null}
+            {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-surface2 px-3 py-0.5 shadow-sm text-[11.5px] font-semibold text-muted">{dayLabel(m.sent_at, now)}</span></li> : null}
             <MessageBubble
               m={m}
               canRetry={c.can.reply}
@@ -181,6 +288,13 @@ function Messages({ c }: { c: Conversation }) {
           </Fragment>
         ))}
       </ul>
+    </div>
+    {newCount > 0 ? (
+      <button type="button" onClick={toBottom} className="absolute bottom-3 right-3 z-[2] inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-semibold text-accent-ink shadow-[var(--shadow)]">
+        <Icon name="arrowDown" size={16} />
+        {newCount === 1 ? '1 mensaje nuevo' : `${newCount} mensajes nuevos`}
+      </button>
+    ) : null}
     </div>
   );
 }
