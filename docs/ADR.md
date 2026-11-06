@@ -2224,3 +2224,71 @@ Multi-tenancy y seguridad: **ninguno** (sin API, sin BD, sin permisos nuevos). P
 5. **Borrador por conversación** en un `Map` en memoria del módulo (`draftStore`): sobrevive a volver a la lista y reabrir, no se guarda en el servidor ni en `localStorage` (puede llevar datos del cliente), se borra al enviar y al cerrar sesión. Vale también en escritorio.
 6. **Enter** inserta un salto de línea en móvil; en escritorio sigue enviando. El texto del cuadro es de 16 px (evita el zoom de iOS).
 7. **Imágenes:** en móvil se tocan para verlas ampliadas dentro de la aplicación; en escritorio siguen abriéndose en otra pestaña. **Sin hacer:** gesto de pellizcar para acercar (se usa el del navegador), transición compartida entre la lista y el chat más allá de la entrada deslizada.
+
+## ADR-61 — «IA asistente» en el redactor: respuestas sugeridas para la persona (estudio de viabilidad; NO se implementa)
+**Estado: PROPUESTO (solo documento; 2026-11-06).** Es la Fase 6 del rediseño del Inbox (ADR-60, `docs/prompts/PROMPT_CODE_REDISENO_INBOX_V2.md` §10). **No hay código, ni un interruptor de maqueta.** Necesita una decisión del responsable (al final) antes de construir nada.
+
+### Contexto
+El responsable quiere un interruptor **dentro de la información del contacto** que active respuestas sugeridas en el redactor. Hoy existen dos piezas de IA que no son esto: el **agente autónomo** (M8.5: contesta solo, con estado `active|paused|handed_off` por conversación en `ai_conversation_state`) y el **simulador** (M8.4: prueba sin enviar). Lo nuevo es un **borrador para la persona**: no se envía solo, no cambia quién atiende y la persona lo edita y lo envía (o lo descarta).
+
+### 1. Qué es (y qué no es)
+- Una **sugerencia de borrador de texto** que se genera con el hilo que la persona ya ve, la base de conocimiento y las reglas fijas de «no inventar». Se muestra solo a quien la pidió.
+- **No** es el agente autónomo: no manda mensajes, no pausa ni reanuda al agente, no pasa la conversación a nadie, no usa herramientas (no toca campos ni crea tareas).
+- **No** reemplaza el criterio de la persona: siempre pasa por sus ojos y sus manos.
+
+### 2. Qué se reutiliza
+- **`AIProvider` / `AiGateway`** (puerto con fake y OpenAI) y `AgentTurnService`/`buildChatMessages`/`composePrompt`: las instrucciones guardadas con variables (sin `{{telefono}}`: el teléfono del cliente nunca entra al mensaje) y las **REGLAS fijas de «no inventar»** al final. Un turno de sugerencia es un turno **sin herramientas** (`tools` ausente), así que el motor ya lo soporta.
+- **Búsqueda en la base de conocimiento** con `organization_id` + `agent_id` (`KnowledgeService.search`): sin respaldo, se le ordena no dar datos del negocio (igual que hoy).
+- **Créditos «reservar y liquidar»** (`AiCreditsService`, bajo el bloqueo del monedero; un fallo libera la reserva). Se propone un tipo propio de movimiento, `suggest` (hoy: `welcome|grant|use|test`), para poder separar el gasto en los reportes; si se prefiere no tocar la restricción del libro, valdría `use` con una referencia «Sugerencia» (peor para informes).
+- **Topes de uso** como los del simulador (`agent_test_runs`: 100 al día por empresa) y **auditoría** (`audit_logs`, origen `ai`; sin el texto).
+- **Qué agente.** El de la conexión de la conversación (`agent_channels`: una conexión, un agente). Sin agente en esa conexión, la función no está disponible y la interfaz lo dice. El agente puede estar **apagado** para contestar solo y servir igual para sugerir (decisión abierta, abajo).
+
+### 3. Lo que NO cabe hoy sin backend (y por qué es una decisión aparte)
+1. **Un endpoint nuevo:** `POST /v1/conversations/:id/ai/suggest`. Permiso nuevo (`inbox.suggest`: administrador y asesor, no entra en el techo de solo lectura), visibilidad por persona aplicada en el servidor (**404 uniforme** si no ve la conversación), **prueba de aislamiento A↔B**, validación Zod compartida, límites por persona y por conversación, y la regla de que el servidor valida aunque la interfaz oculte el botón.
+2. **Dónde guardar el interruptor** — exige una **migración con RLS** (tabla de negocio nueva). Opciones:
+
+| Opción | Ventajas | Desventajas |
+|---|---|---|
+| A. **Por conversación** (columna o tabla ligada a la conversación) | Coincide con el lugar del interruptor (panel del contacto). | Lo ve y lo cambia todo el equipo: una persona lo activa y gasta créditos de otra; mezcla un gusto personal con un dato compartido. |
+| B. **Por persona** (preferencia global del usuario) | Simple; sigue a la persona entre dispositivos. | «Activo en todas las conversaciones» puede gastar de más; no es lo que pide el responsable (interruptor en el contacto). |
+| C. **Por persona y conversación** (tabla `reply_suggestion_prefs`: empresa, conversación, persona, activo) | Cada quien decide para sí; es el significado natural de un interruptor en el panel del contacto; el costo lo provoca quien lo enciende. | Una tabla más; hay que limpiar filas al borrar la conversación. |
+| D. **Por contacto** | El gusto se mantiene aunque cambie la conversación. | Los contactos son compartidos; mismo problema que A, y una conversación nueva del mismo contacto heredaría un gasto no pedido. |
+
+   **Recomendación: C**, más un **interruptor general de la empresa** (administrador, apagado por omisión, junto a los ajustes del agente) para que el gasto de créditos lo autorice quien paga. Fuera de `ai_conversation_state`: esa tabla es del agente autónomo (qué agente responde y por qué se pausó); mezclarlas haría que «pausar al agente» y «mostrar sugerencias» parecieran lo mismo y obligaría a cambiar su máquina de estados.
+3. **Un registro de uso** `ai_suggestions` (solo de inserción, RLS forzada): conversación, persona, créditos, modelo, tokens y **resultado** (usada, editada, descartada), **sin el texto** (igual que `agent_test_runs`).
+
+### 4. Privacidad y seguridad
+- **El teléfono del cliente nunca entra al mensaje** (regla de `composePrompt`). Los datos del contacto que llegan al modelo son solo las variables que ya se permiten a los agentes.
+- **Solo lo que la persona ya ve:** el historial se arma con los mensajes de esa conversación visibles para ella; las **notas internas se excluyen** del contexto (podrían filtrarse en un borrador que se envía al cliente), y los avisos automáticos del sistema también.
+- **Los mensajes del cliente son datos, no instrucciones** (inyección de instrucciones): la orden va aparte y los fragmentos y mensajes se entregan como contenido. La respuesta se recorta al largo del agente.
+- **Sin créditos:** error claro (`INSUFFICIENT_CREDITS`, sin gastar ni pausar nada) y el botón explica que faltan créditos; el administrador ya los ve en «Créditos IA».
+- **Si la IA falla** (o no está configurada): se libera la reserva sin cobrar, se muestra «No pudimos generar la sugerencia» con «Reintentar» y el redactor sigue funcionando igual.
+- **No se guarda el texto** de la sugerencia en el servidor ni en el navegador; vive en memoria mientras la tarjeta esté a la vista.
+- **Ventana de 24 h de WhatsApp:** fuera de la ventana solo valen plantillas; la sugerencia de texto libre no se ofrece (o se ofrece con el aviso), igual que el botón de enviar.
+
+### 5. UX propuesta (para cuando se apruebe)
+- **Dónde:** bloque «Respuestas sugeridas» en el panel del contacto (en móvil, en la hoja de acciones del chat), con el interruptor (persona + conversación) y una línea que dice cuántos créditos suele costar.
+- **Cuándo se genera (decisión abierta):** (a) **a pedido**: con el interruptor activo, aparece «Sugerir respuesta» sobre el redactor (recomendado para empezar: el gasto lo provoca un clic); (b) **automática** al llegar un mensaje del cliente sin responder (más cómoda, gasta por cada mensaje entrante y puede resultar ruidosa).
+- **La tarjeta** sobre el redactor: el borrador, con **«Usar»** (lo copia al campo; si ya hay texto, pregunta si reemplazar o agregar), **«Descartar»** y **«Regenerar»** (cuenta como otro uso). Muestra el **costo en créditos** del último y estados de **carga** (esqueleto) y **error** (con «Reintentar»). Accesible: `role="status"`, foco que no se roba al campo de texto.
+- **Qué no hace:** no envía, no se genera mientras la persona escribe, no aparece en conversaciones donde no puede responder (solo-ver, finalizadas, sin asesor).
+
+### 6. Costos y riesgos
+- **Créditos:** cada sugerencia es una búsqueda más una respuesta (como un turno del simulador); en modo automático, **uno por cada mensaje entrante** (una conversación animada puede gastar mucho). Mitigación: modo a pedido primero, tope por persona/hora y por conversación/día, interruptor de la empresa.
+- **Latencia:** unos segundos; no debe bloquear el redactor.
+- **Calidad sin validar:** el simulador y el agente en vivo **aún no se han probado contra OpenAI real** (formato de respuestas, costos, umbral de parecido, obediencia a «sin respaldo»). Una sugerencia mala que la persona envía sin leer es un riesgo de reputación del cliente; las reglas fijas lo reducen, no lo eliminan.
+- **Confianza excesiva:** el equipo podría enviar sin revisar. Mitigación de interfaz: rótulo «Sugerencia de IA, revísala», registro de «usada / editada / descartada» para medir.
+- **Abuso:** límites de ritmo por persona y la validación en el servidor.
+- **Mantenimiento:** un tercer uso del motor de turnos (simulador, agente en vivo, sugerencias); un cambio de reglas fijas afecta a los tres.
+
+### 7. Recomendación y rebanadas
+**Hacerlo, pero después de validar M8 con una clave real de OpenAI** (probar el simulador y el agente en vivo); no bloquea nada del rediseño. En tres rebanadas, cada una con su ADR de precisiones y su aprobación:
+1. **Backend:** migración (tabla `reply_suggestion_prefs`, registro `ai_suggestions`, tipo `suggest` en el libro y el interruptor de la empresa), permiso `inbox.suggest`, endpoint con topes, pruebas de aislamiento A↔B, de créditos (reserva y liberación) y de que el texto no se guarda.
+2. **Interfaz:** interruptor en el panel del contacto, botón «Sugerir respuesta», tarjeta con Usar / Descartar / Regenerar, estados de carga y error, y la versión móvil.
+3. **Medición y modo automático opcional:** reporte de «usadas, editadas y descartadas» y, si los números lo justifican, la generación automática.
+
+### Decisiones que necesito del responsable
+1. ¿Interruptor **por persona y conversación** (C) con un **interruptor general de la empresa**, o prefieres otra opción de la tabla?
+2. ¿Empezamos **a pedido** (botón «Sugerir respuesta») o **automático**?
+3. ¿Puede el agente de la conexión servir para sugerir **aunque esté apagado** para contestar solo, o debe marcarse expresamente?
+4. ¿Tipo de movimiento propio `suggest` en el libro de créditos (recomendado) o reutilizar `use`?
+5. ¿Se construye **ya** o **después de validar OpenAI real** (recomendado)?
