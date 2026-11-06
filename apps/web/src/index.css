@@ -61,6 +61,42 @@
   :root[data-brand="red"]:not([data-theme="light"]) { --bg: #12070a; --surface: #1d0d12; --surface2: #29131a; --line: #45222c; --fg: #fbeaee; --muted: #c79aa6; --accent: #ff5c7a; --accent-soft: #4a1320; --accent-ink: #1a0409; }
 }
 :root { --glow: rgba(79, 70, 229, 0.32); }
+/* Burbujas y fondo del chat: por omisión siguen al tema; el tema WhatsApp los cambia */
+:root { --chat-bg: var(--bg); --bubble-out: var(--accent-soft); --bubble-in: var(--surface); }
+/*
+ * Tema WHATSAPP (v5): paleta verde azulada de WhatsApp, en claro y en oscuro. Solo cambia el color (el fondo del chat se elige aparte en Apariencia). Los acentos están oscurecidos
+ * respecto de #00A884 para cumplir AA con texto blanco; el verde original queda en el degradado del modo oscuro.
+ */
+:root[data-brand="whatsapp"] {
+  --accent: #00725d; --accent-soft: #d9fdd3; --accent-ink: #ffffff;
+  --grad: linear-gradient(135deg, #008069 0%, #006b58 100%); --on-grad: #ffffff;
+  --side-bg: linear-gradient(180deg, #0a6b58 0%, #064d3f 100%); --side-active-bar: #d9fdd3;
+  --bg: #f0f2f5; --surface: #ffffff; --surface2: #eef1f3; --line: #dde3e7; --fg: #111b21; --muted: #55656f; --glow: rgba(0, 128, 105, 0.35);
+  --chat-bg: #efeae2; --bubble-out: #d9fdd3; --bubble-in: #ffffff;
+}
+:root[data-brand="whatsapp"][data-theme="dark"] {
+  --accent: #2bd9ae; --accent-soft: #0f3a31; --accent-ink: #04130e;
+  --grad: linear-gradient(135deg, #00a884 0%, #008f70 100%); --on-grad: #04130e;
+  --side-bg: linear-gradient(180deg, #202c33 0%, #111b21 100%); --side-active-bar: #2bd9ae;
+  --bg: #0b141a; --surface: #111b21; --surface2: #202c33; --line: #2a3942; --fg: #e9edef; --muted: #9aabb4; --glow: rgba(0, 168, 132, 0.3);
+  --chat-bg: #0b141a; --bubble-out: #005c4b; --bubble-in: #202c33;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-brand="whatsapp"]:not([data-theme="light"]) {
+    --accent: #2bd9ae; --accent-soft: #0f3a31; --accent-ink: #04130e;
+    --grad: linear-gradient(135deg, #00a884 0%, #008f70 100%); --on-grad: #04130e;
+    --side-bg: linear-gradient(180deg, #202c33 0%, #111b21 100%); --side-active-bar: #2bd9ae;
+    --bg: #0b141a; --surface: #111b21; --surface2: #202c33; --line: #2a3942; --fg: #e9edef; --muted: #9aabb4; --glow: rgba(0, 168, 132, 0.3);
+    --chat-bg: #0b141a; --bubble-out: #005c4b; --bubble-in: #202c33;
+  }
+}
+/* Patrón propio del fondo del chat (puntos de dos tamaños, baja opacidad): sin imágenes, solo CSS */
+.chat-bg-pattern {
+  background-image:
+    radial-gradient(circle at 2px 2px, color-mix(in srgb, var(--fg) 8%, transparent) 1.3px, transparent 1.8px),
+    radial-gradient(circle at 15px 15px, color-mix(in srgb, var(--fg) 5%, transparent) 1px, transparent 1.5px);
+  background-size: 28px 28px;
+}
 
 @theme inline {
   --color-bg: var(--bg); --color-surface: var(--surface); --color-surface2: var(--surface2); --color-line: var(--line); --color-line-strong: var(--line-strong);

@@ -111,7 +111,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact }: { m: 
   return (
     <li className={`flex flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className="flex max-w-full items-start gap-1">
-      <div className={`relative min-w-24 max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-accent-soft text-fg' : 'rounded-tl-sm border border-line bg-surface text-fg'}`}>
+      <div className={`relative min-w-24 max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
         {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{m.author.name.split(' ')[0]}</span> : null}
         {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Agente de IA</span> : null}
         {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}

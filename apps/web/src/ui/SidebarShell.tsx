@@ -6,7 +6,7 @@ import { Logo } from './AuthShell';
 import { useBreakpoint } from './breakpoints';
 import { Icon, type IconName } from './Icon';
 import { useSidebarCollapsed } from './layoutStore';
-import { ThemeSwitch } from './ThemeSwitch';
+import { ThemeToggle } from './ThemeToggle';
 
 export type { IconName } from './Icon';
 
@@ -59,6 +59,8 @@ type SidebarProps = {
   mobileNav?: 'bar' | 'bottom';
   /** Con `mobileNav = 'bottom'`: reservar al pie el alto de la barra inferior para que no tape contenido. */
   reserveBottom?: boolean;
+  /** Contenido a todo el alto y ancho de la ventana, sin márgenes ni ancho máximo (el Inbox, v5). */
+  flush?: boolean;
   children: ReactNode;
 };
 
@@ -68,7 +70,7 @@ type SidebarProps = {
  * desaparece (la reemplazan la barra inferior y `/menu`). Con `mobileNav = 'bar'` se comporta como siempre: en pantallas angostas se abre desde una barra superior (☰).
  * Es solo navegación: lo que cada persona puede hacer lo decide el servidor; los grupos que se pasan ya vienen filtrados por quien los arma.
  */
-export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, mobileNav = 'bar', reserveBottom = false, children }: SidebarProps) {
+export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, mobileNav = 'bar', reserveBottom = false, flush = false, children }: SidebarProps) {
   const { pathname } = useLocation();
   const bottom = mobileNav === 'bottom';
   const bp = useBreakpoint();
@@ -155,7 +157,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
           </nav>
           {extraNode}
           <div className={`border-t border-white/10 ${compact ? 'grid justify-items-center gap-1 px-2 py-2' : 'grid gap-1 p-3'}`}>
-            <ThemeSwitch onDark compact={compact} />
+            {bottom ? null : <ThemeToggle onDark />}
             <div className={`flex items-center gap-2.5 ${compact ? 'flex-col pt-1' : 'pt-1'}`}>
               <span aria-hidden="true" title={compact ? `${name} · ${ROLE_LABEL[me.role] ?? me.role}` : undefined} className="grid size-9 shrink-0 place-items-center rounded-full text-[12px] font-bold text-[color:var(--on-grad)] [background:var(--grad)]">{initials(name)}</span>
               {compact ? null : (
@@ -172,8 +174,8 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
             </div>
           </div>
         </aside>
-        <div className="min-w-0">
-          <div className={`mx-auto grid ${wide ? 'max-w-[1500px]' : 'max-w-[1180px]'} grid-cols-[minmax(0,1fr)] gap-4 p-4 sm:p-5 ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom)+16px)]' : ''}`}>{children}</div>
+        <div className={`min-w-0 ${flush ? 'flex h-dvh flex-col' : ''}`}>
+          <div className={flush ? `flex min-h-0 min-w-0 flex-1 flex-col ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))]' : ''}` : `mx-auto grid ${wide ? 'max-w-[1500px]' : 'max-w-[1180px]'} grid-cols-[minmax(0,1fr)] gap-4 p-4 sm:p-5 ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom)+16px)]' : ''}`}>{children}</div>
         </div>
       </div>
     </div>

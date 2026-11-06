@@ -13,7 +13,7 @@ import { SidebarShell } from '../../ui/SidebarShell';
 import { useKeyboardOpen } from '../../ui/useKeyboardOpen';
 import { AppNavContext } from './AppNav';
 import { UtilityBar } from './UtilityBar';
-import { buildNavGroups, isChatPath } from './navGroups';
+import { buildNavGroups, isChatPath, isInboxMain } from './navGroups';
 
 /**
  * Marco de una empresa cliente (la propia o una que una agencia / el Súper Admin visita): banner de contexto, MENÚ LATERAL plegable (tablet y escritorio) o barra inferior + página `/menu`
@@ -33,6 +33,8 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
   const keyboard = useKeyboardOpen();
   const chat = mobile && isChatPath(pathname);
   const showBottom = mobile && !chat && !keyboard;
+  // El Inbox ocupa toda la altura de la ventana: sin márgenes ni barra de utilidades (esos botones viven en la cabecera de su lista)
+  const flush = isInboxMain(pathname);
   const groups = useMemo(() => buildNavGroups({ admin, unread }), [admin, unread]);
   const nav = useMemo(() => ({ me, groups, unread, onLogout }), [me, groups, unread, onLogout]);
   return (
@@ -46,10 +48,11 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         wide={inInbox}
         mobileNav="bottom"
         reserveBottom={showBottom}
+        flush={flush}
       >
-        {chat ? null : <UtilityBar me={me} />}
+        {chat || flush ? null : <UtilityBar me={me} />}
         {trial && !chat ? <TrialBanner trial={trial} role={me.role} /> : null}
-        <main>{children}</main>
+        <main className={flush ? 'min-h-0 flex-1' : undefined}>{children}</main>
       </SidebarShell>
       {showBottom ? <BottomNav groups={groups} pathname={pathname} unread={unread} /> : null}
     </AppNavContext.Provider>

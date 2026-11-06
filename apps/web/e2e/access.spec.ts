@@ -2673,7 +2673,7 @@ test.describe('navegación móvil y tema (ADR-60)', () => {
       await expect(page.getByRole('region', { name: 'Cuenta y ajustes' }).getByRole('button', { name: 'Cerrar sesión' })).toBeVisible();
       expect(await overflow()).toBeLessThanOrEqual(0);
       // modo oscuro: se aplica, y tras recargar ya viene puesto desde el inicio (sin esperar a que cargue la aplicación)
-      await page.getByRole('region', { name: 'Tu cuenta' }).getByRole('switch').click();
+      await page.getByRole('region', { name: 'Tu cuenta' }).getByRole('button', { name: 'Cambiar a modo oscuro' }).click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
       await page.reload({ waitUntil: 'domcontentloaded' });
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');

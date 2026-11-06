@@ -2,7 +2,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { initials, ROLE_LABEL } from '../../lib/format';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { Icon } from '../../ui/Icon';
-import { ThemeSwitch } from '../../ui/ThemeSwitch';
+import { ThemeToggle } from '../../ui/ThemeToggle';
 import { NotificationsBell } from '../notifications/NotificationsBell';
 import { ViewAsMenu } from '../context/ViewAs';
 import { useAppNav } from './AppNav';
@@ -31,9 +31,9 @@ export function MenuPage() {
             <p className="truncate text-[12.5px] text-muted">{name} · {ROLE_LABEL[me.role] ?? me.role}</p>
           </div>
           <ViewAsMenu me={me} />
+          <ThemeToggle touch />
           <NotificationsBell me={me} />
         </div>
-        <ThemeSwitch />
       </section>
       <nav aria-label="Todas las secciones" className="grid gap-4">
         {groups.map((g) => {

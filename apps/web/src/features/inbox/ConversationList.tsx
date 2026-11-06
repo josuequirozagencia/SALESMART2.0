@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import { initials } from '../../lib/format';
@@ -11,7 +11,10 @@ import { Icon } from '../../ui/Icon';
 import { Pill } from '../../ui/Pill';
 import { SkeletonRows } from '../../ui/Skeleton';
 import { TagBadge } from '../../ui/TagBadge';
-import { ThemeSwitch } from '../../ui/ThemeSwitch';
+import { ThemeToggle } from '../../ui/ThemeToggle';
+import { AppNavContext } from '../app/AppNav';
+import { ViewAsMenu } from '../context/ViewAs';
+import { NotificationsBell } from '../notifications/NotificationsBell';
 import { chatTime, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
 import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
@@ -148,6 +151,7 @@ function FilterFields({ filters, set, opts, filtered, onClear }: { filters: Inbo
 export function ConversationList({ filters, onFilters, activeId, className = '' }: { filters: InboxFilters; onFilters: (f: InboxFilters) => void; activeId: string | undefined; className?: string }) {
   const q = useConversations(filters);
   const options = useInboxOptions();
+  const nav = useContext(AppNavContext);
   const mobile = useBreakpoint() === 'mobile';
   const [search, setSearch] = useState(filters.q);
   const [panel, setPanel] = useState(false);
@@ -198,7 +202,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
         <div className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line p-3 pb-0">
           <div className="flex items-center gap-2">
             <h1 className="flex-1 text-[18px] font-bold">Inbox</h1>
-            <ThemeSwitch compact touch />
+            <ThemeToggle touch />
             <Link to="/inbox/scheduled" aria-label="Mensajes programados de todas las conversaciones" title="Mensajes programados" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 hover:text-fg">
               <Icon name="clock" />
             </Link>
@@ -219,6 +223,12 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
         </div>
       ) : (
         <div className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line p-3 pb-0">
+          <div className="flex items-center gap-1">
+            <h1 className="min-w-0 flex-1 truncate text-[16px] font-bold">Inbox</h1>
+            {nav ? <ViewAsMenu me={nav.me} /> : null}
+            <ThemeToggle />
+            {nav ? <NotificationsBell me={nav.me} /> : null}
+          </div>
           <div className="flex items-center gap-2">
             <input type="search" aria-label="Buscar conversaciones" placeholder="Buscar por nombre o teléfono" value={search} onChange={(e) => setSearch(e.target.value)} className="min-w-0 flex-1 rounded-full border border-transparent bg-surface2 px-3.5 py-2 text-[13px] placeholder:text-muted" />
             <Link to="/inbox/scheduled" aria-label="Mensajes programados de todas las conversaciones" title="Mensajes programados" className="grid size-9 shrink-0 place-items-center rounded-full border border-line text-muted hover:text-fg">
