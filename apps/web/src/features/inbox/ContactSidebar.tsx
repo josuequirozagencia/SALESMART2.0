@@ -6,8 +6,8 @@ import { friendlyError } from '../../lib/errors';
 import { initials, money, shortDateTime } from '../../lib/format';
 import type { Contact, Conversation } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { RemovableTags } from './ConversationTags';
 import { Pill } from '../../ui/Pill';
-import { TagBadge } from '../../ui/TagBadge';
 import { AttributionSection } from '../contacts/AttributionSection';
 import { customText } from '../contacts/columns';
 import { ContactDialog } from '../contacts/ContactDialog';
@@ -139,7 +139,7 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
               <div><dt className="text-[12px] text-muted">Consentimiento</dt><dd>{CONSENT[contact.consent]}</dd></div>
               {contact.companies.length > 0 ? <div><dt className="text-[12px] text-muted">Empresas</dt><dd>{contact.companies.map((x) => x.name).join(', ')}</dd></div> : null}
             </dl>
-            <div className="flex flex-wrap gap-1.5">{c.tags.map((t) => <TagBadge key={t.id} name={t.name} color={t.color} />)}</div>
+            <div className="flex flex-wrap gap-1.5"><RemovableTags c={c} /></div>
             <div className="flex flex-wrap gap-2">
               <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setEditing(true)}>Editar contacto</Button>
               <Link to="/contacts" className="inline-flex items-center rounded-[10px] border border-line px-3 py-1.5 text-[12.5px] font-semibold hover:bg-surface2">Ver en Contactos</Link>

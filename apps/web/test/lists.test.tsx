@@ -476,7 +476,7 @@ describe('Configuración › Etiquetas', () => {
     expect(await screen.findByText('Muy VIP')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Borrar Frío' }));
-    expect(screen.getByText(/Los contactos no se borran/)).toBeInTheDocument();
+    expect(screen.getByText(/Se quita de todos los contactos y conversaciones/)).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Sí, borrar' }));
     await waitFor(() => expect(s.deletes).toEqual(['t-frio']));
     await waitFor(() => expect(screen.queryByText('Frío')).not.toBeInTheDocument());
