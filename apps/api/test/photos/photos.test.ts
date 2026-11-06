@@ -78,7 +78,7 @@ const insertContact = async (org: string, name: string, phone: string, owner: st
 };
 /** Una conexión QR con la sesión en `state` y una conversación del contacto en ella. */
 async function qrChannel(org: string, instance: string, state: string, contact: string): Promise<void> {
-  const ch = (await admin.query(`INSERT INTO channel_accounts(id, organization_id, provider, is_official, name) VALUES (gen_random_uuid(), $1, 'evolution', false, 'QR') RETURNING id`, [org])).rows[0].id as string;
+  const ch = (await admin.query(`INSERT INTO channel_accounts(id, organization_id, provider, is_official, name) VALUES (gen_random_uuid(), $1, 'evolution', false, $2) RETURNING id`, [org, `QR ${instance}`])).rows[0].id as string;
   await admin.query(`INSERT INTO qr_accounts(organization_id, channel_account_id, instance_name, state) VALUES ($1, $2, $3, $4)`, [org, ch, instance, state]);
   await admin.query(`INSERT INTO qr_routes(id, organization_id, channel_account_id, token_hash) VALUES (gen_random_uuid(), $1, $2, $3)`, [org, ch, randomBytes(32).toString('hex')]);
   await admin.query(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id) VALUES (gen_random_uuid(), $1, $2, $3)`, [org, contact, ch]);
