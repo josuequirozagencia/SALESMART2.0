@@ -102,12 +102,41 @@ function TagsDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
   );
 }
 
+/**
+ * Las etiquetas del contacto como chips. Cada etiqueta PERSONALIZADA lleva un × para quitarla (no borra al contacto ni la conversación; se audita y, si estaba enviada a GoHighLevel, se
+ * quita allá por el mismo flujo de siempre). Las del sistema (Lead, Cita agendada, Venta) no lo llevan: solo las pone el sistema.
+ */
+export function RemovableTags({ c }: { c: Conversation }) {
+  const setTags = useSetContactTags(c);
+  const [error, setError] = useState<string>();
+  const remove = (t: ContactTag): void => {
+    setError(undefined);
+    const next = c.tags.filter((x) => !x.is_system && x.id !== t.id).map((x) => x.id);
+    setTags.mutate(next, { onError: (e) => setError(friendlyError(e, 'No pudimos quitar la etiqueta.')) });
+  };
+  return (
+    <>
+      {c.tags.map((t) =>
+        t.is_system ? (
+          <TagChip key={t.id} t={t} />
+        ) : (
+          <span key={t.id} className="inline-flex items-center gap-0.5">
+            <TagChip t={t} />
+            <button type="button" aria-label={`Quitar la etiqueta «${t.name}»`} title="Quitar la etiqueta" disabled={setTags.isPending} onClick={() => remove(t)} className="grid size-5 place-items-center rounded-full text-[13px] leading-none text-muted hover:bg-surface2 hover:text-fg disabled:opacity-50 max-md:size-8">×</button>
+          </span>
+        ),
+      )}
+      {error ? <span role="alert" className="text-[12px] font-semibold text-crit">{error}</span> : null}
+    </>
+  );
+}
+
 /** Las etiquetas del contacto como chips y el botón «Etiquetas» que abre el diálogo para cambiarlas. */
 export function ConversationTags({ c }: { c: Conversation }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      {c.tags.map((t) => <TagChip key={t.id} t={t} />)}
+      <RemovableTags c={c} />
       <button type="button" onClick={() => setOpen(true)} aria-label="Etiquetas del contacto" className="rounded-full border border-line px-2.5 py-0.5 text-[12px] font-semibold text-muted hover:text-fg">+ Etiquetas</button>
       {open ? <TagsDialog c={c} onClose={() => setOpen(false)} /> : null}
     </>

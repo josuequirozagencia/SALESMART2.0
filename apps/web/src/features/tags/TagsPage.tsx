@@ -94,7 +94,7 @@ export function TagsPage() {
                     <span className="inline-flex items-center gap-2 text-[14px] font-semibold"><span aria-hidden="true" className="size-3 rounded-full" style={{ backgroundColor: t.color }} />{t.name}</span>
                     {manage ? (
                       confirm === t.id ? (
-                        <span className="flex items-center gap-2 text-[13px]">¿Borrar «{t.name}»? Los contactos no se borran.
+                        <span className="flex items-center gap-2 text-[13px]">¿Borrar «{t.name}»? Se quita de todos los contactos y conversaciones; los contactos no se borran.
                           <Button variant="danger" className="!px-3 !py-1.5 !text-[12.5px]" loading={remove.isPending} onClick={() => remove.mutate(t.id, { onSuccess: () => setConfirm(undefined), onError: (e) => { setConfirm(undefined); setError(friendlyError(e, 'No pudimos borrar la etiqueta.')); } })}>Sí, borrar</Button>
                           <Button className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setConfirm(undefined)}>No</Button>
                         </span>

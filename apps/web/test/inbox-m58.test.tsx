@@ -89,6 +89,19 @@ const open = async (w: World, me = ME_ADVISOR) => {
 };
 
 describe('Inbox · etiquetas del contacto', () => {
+  it('cada etiqueta personalizada lleva un × para quitarla; las del sistema no lo llevan; quitar manda solo las personalizadas que quedan', async () => {
+    const w = world();
+    await open(w);
+    await screen.findAllByText('VIP');
+    const quitar = (await screen.findAllByRole('button', { name: 'Quitar la etiqueta «VIP»' }))[0]!;
+    expect(screen.queryByRole('button', { name: /Quitar la etiqueta «Lead»/ })).toBeNull();
+    await userEvent.click(quitar);
+    await waitFor(() => expect(w.patches.at(-1)).toEqual({ path: '/contacts/k1', body: { tag_ids: [] } }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Quitar la etiqueta «VIP»' })).toBeNull());
+    // Lead (del sistema) sigue ahí
+    expect((await screen.findAllByText('Lead')).length).toBeGreaterThan(0);
+  });
+
   it('la cabecera muestra las etiquetas y «Etiquetas» abre el diálogo: las del sistema solo se ven; las personalizadas se marcan y desmarcan', async () => {
     const w = world();
     await open(w);
