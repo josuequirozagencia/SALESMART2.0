@@ -2719,7 +2719,7 @@ test.describe('Inbox: distribución y viewports (ADR-60, Fase 3)', () => {
     await uiLogin(page, email);
     await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
     const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-    for (const [w, h] of [[360, 800], [375, 812], [390, 844], [412, 915], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1440, 900]] as const) {
+    for (const [w, h] of [[360, 800], [375, 812], [390, 844], [412, 915], [428, 926], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1440, 900]] as const) {
       await page.setViewportSize({ width: w, height: h });
       for (const path of ['/inbox', '/menu', '/', '/agenda', '/sales', '/contacts']) {
         await page.goto(path);
