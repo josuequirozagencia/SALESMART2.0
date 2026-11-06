@@ -89,7 +89,7 @@ describe('Inbox · lista móvil (< 768 px)', () => {
     expect(list.getByRole('searchbox', { name: 'Buscar conversaciones' })).toBeInTheDocument();
     expect(list.getByRole('button', { name: 'Filtros' })).toBeInTheDocument();
     expect(list.getByRole('link', { name: 'Mensajes programados de todas las conversaciones' })).toBeInTheDocument();
-    expect(list.getAllByRole('switch', { name: 'Modo oscuro' }).length).toBeGreaterThan(0);
+    expect(list.getAllByRole('button', { name: 'Cambiar a modo oscuro' }).length).toBeGreaterThan(0);
     const tabs = within(list.getByRole('tablist', { name: 'Estado de las conversaciones' }));
     await waitFor(() => expect(tabs.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Trabajando1', 'Esperando2', 'Finalizadas0']));
     expect(screen.getByRole('navigation', { name: 'Navegación principal' })).toBeInTheDocument();
@@ -212,7 +212,7 @@ describe('Inbox · lista de escritorio (sin cambios de estructura)', () => {
     mockApi(routes([conv()]).routes);
     renderApp('/inbox');
     await screen.findByRole('link', { name: 'Ana Torres' });
-    expect(screen.queryByRole('heading', { name: 'Inbox' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Inbox' })).toBeInTheDocument(); // el título de escritorio lleva «Ver como», el modo y los avisos (v5)
     expect(screen.queryByRole('button', { name: /No leídas/ })).not.toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Filtros' }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

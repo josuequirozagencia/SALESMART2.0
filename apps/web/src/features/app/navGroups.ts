@@ -1,6 +1,11 @@
 import type { NavGroup } from '../../ui/SidebarShell';
 
 /** ¿La ruta es una conversación individual del Inbox (`/inbox/:id`)? `/inbox` y `/inbox/scheduled` son listas. */
+/** El Inbox propiamente dicho (lista o conversación abierta), no «Programados»: ocupa toda la altura de la ventana (v5). */
+export function isInboxMain(pathname: string): boolean {
+  return /^\/inbox(\/(?!scheduled(\/|$))[^/]+)?\/?$/.test(pathname);
+}
+
 export function isChatPath(pathname: string): boolean {
   return /^\/inbox\/(?!scheduled(\/|$))[^/]+/.test(pathname);
 }

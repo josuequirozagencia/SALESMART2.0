@@ -188,7 +188,7 @@ describe('marco de la empresa por tamaño de pantalla', () => {
     const footer = screen.getByRole('region', { name: 'Cuenta y ajustes' });
     expect(within(footer).getByRole('link', { name: 'Configuración' })).toBeInTheDocument();
     expect(within(footer).getByRole('button', { name: 'Cerrar sesión' })).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'Tu cuenta' })).getByRole('switch', { name: 'Modo oscuro' })).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'Tu cuenta' })).getByRole('button', { name: 'Cambiar a modo oscuro' })).toBeInTheDocument();
   });
 
   it('móvil: un asesor solo ve las secciones permitidas', async () => {

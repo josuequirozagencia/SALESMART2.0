@@ -2,7 +2,7 @@ import { Link, Navigate } from 'react-router-dom';
 import { initials, ROLE_LABEL } from '../../lib/format';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { Icon } from '../../ui/Icon';
-import { ThemeSwitch } from '../../ui/ThemeSwitch';
+import { ThemeToggle } from '../../ui/ThemeToggle';
 import { NotificationsBell } from '../notifications/NotificationsBell';
 import { ViewAsMenu } from '../context/ViewAs';
 import { useAppNav } from './AppNav';
@@ -22,8 +22,8 @@ export function MenuPage() {
   const name = me.user.full_name ?? me.user.email;
   const settings = groups.flatMap((g) => g.items).find((i) => i.to === SETTINGS);
   return (
-    <div className="grid gap-4">
-      <section aria-label="Tu cuenta" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+    <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
+      <section aria-label="Tu cuenta" className="grid grid-cols-[minmax(0,1fr)] gap-3 rounded-2xl border border-line bg-surface p-4">
         <div className="flex items-center gap-3">
           <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-full text-[13px] font-bold text-[color:var(--on-grad)] [background:var(--grad)]">{initials(name)}</span>
           <div className="min-w-0 flex-1">
@@ -31,9 +31,9 @@ export function MenuPage() {
             <p className="truncate text-[12.5px] text-muted">{name} · {ROLE_LABEL[me.role] ?? me.role}</p>
           </div>
           <ViewAsMenu me={me} />
+          <ThemeToggle touch />
           <NotificationsBell me={me} />
         </div>
-        <ThemeSwitch />
       </section>
       <nav aria-label="Todas las secciones" className="grid gap-4">
         {groups.map((g) => {

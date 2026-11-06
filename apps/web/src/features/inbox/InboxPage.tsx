@@ -110,7 +110,7 @@ export function InboxPage() {
     <div
       ref={rootRef}
       style={mobileChat ? { ...(viewport ? { height: viewport.height, top: viewport.top } : {}) } : vars}
-      className={mobileChat ? 'chat-screen fixed inset-x-0 top-0 z-20 flex overflow-hidden bg-surface' : `flex min-h-[420px] overflow-hidden rounded-2xl border border-line bg-surface md:h-[calc(100dvh-70px)] ${id ? 'h-[calc(100dvh-32px)]' : 'h-[calc(100dvh-var(--bottom-nav-h)-env(safe-area-inset-bottom)-32px)]'}`}
+      className={mobileChat ? 'chat-screen fixed inset-x-0 top-0 z-20 flex overflow-hidden bg-surface' : `flex min-h-[420px] overflow-hidden bg-surface h-full`}
     >
       {desktop && !layout.listShown ? null : (
         <div key="list" style={desktop ? { width: 'var(--il-list)' } : undefined} className={`min-h-0 shrink-0 ${id ? 'hidden md:flex' : 'flex'} ${desktop ? '' : 'w-full md:w-[300px] lg:w-[320px]'}`}>

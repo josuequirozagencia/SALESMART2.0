@@ -6,6 +6,7 @@ import { initials, timeLeft } from '../../lib/format';
 import type { ChatMessage, Conversation } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
 import { useBreakpoint } from '../../ui/breakpoints';
+import { useChatBackground } from '../../ui/chatBackground';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Drawer } from '../../ui/Drawer';
 import { Icon } from '../../ui/Icon';
@@ -255,6 +256,7 @@ function Messages({ c }: { c: Conversation }) {
   };
 
   const now = useNow(60_000);
+  const chatBg = useChatBackground();
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
     <div
@@ -267,7 +269,8 @@ function Messages({ c }: { c: Conversation }) {
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         if (stick.current) setNewCount((n) => (n === 0 ? n : 0));
       }}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-contain bg-bg px-[4%] py-3"
+      style={chatBg.style}
+      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-[4%] py-3 ${chatBg.className}`}
     >
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando mensajes" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los mensajes.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}

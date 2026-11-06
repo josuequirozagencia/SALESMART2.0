@@ -4,15 +4,16 @@ import { useSyncExternalStore } from 'react';
  * Tema de marca (alineación con el prototipo v10): índigo (por omisión), verde o rojo. Es un eje distinto del modo claro/oscuro (`ui/theme.ts`): `data-brand` en <html> cambia el acento,
  * el degradado y los fondos; `data-theme` cambia las superficies. Se guarda en `localStorage` (`ss.brand.v1`) y `public/theme-init.js` lo aplica antes del primer pintado.
  */
-export type Brand = 'indigo' | 'green' | 'red';
+export type Brand = 'indigo' | 'green' | 'red' | 'whatsapp';
 export const BRANDS: ReadonlyArray<{ id: Brand; label: string; swatch: string }> = [
   { id: 'indigo', label: 'Índigo', swatch: '#4f46e5' },
   { id: 'green', label: 'Verde', swatch: '#00b85c' },
   { id: 'red', label: 'Rojo', swatch: '#d5002b' },
+  { id: 'whatsapp', label: 'WhatsApp', swatch: '#00a884' },
 ];
 export const BRAND_KEY = 'ss.brand.v1';
 
-export const parseBrand = (raw: string | null): Brand => (raw === 'green' || raw === 'red' ? raw : 'indigo');
+export const parseBrand = (raw: string | null): Brand => (raw === 'green' || raw === 'red' || raw === 'whatsapp' ? raw : 'indigo');
 
 export function readBrand(): Brand {
   try {
