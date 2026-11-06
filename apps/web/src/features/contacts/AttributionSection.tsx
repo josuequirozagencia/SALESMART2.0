@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { TagBadge } from '../../ui/TagBadge';
 import { shortDateTime } from '../../lib/format';
 import type { Contact, ContactTouch } from '../../lib/types';
 import { Pill, type PillKind } from '../../ui/Pill';
@@ -20,7 +21,7 @@ export function TagBadges({ tags }: { tags: Contact['tags'] }) {
     <ul className="flex flex-wrap gap-1.5" aria-label="Etiquetas">
       {tags.map((t) => (
         <li key={t.id}>
-          <span className="inline-block rounded-full px-2.5 py-0.5 text-[11.5px] font-semibold text-white" style={{ backgroundColor: t.color }} title={t.is_system ? 'Etiqueta del sistema: la pone el sistema' : undefined}>{t.name}</span>
+          <TagBadge name={t.name} color={t.color} pill {...(t.is_system ? { title: 'Etiqueta del sistema: la pone el sistema' } : {})} />
         </li>
       ))}
     </ul>

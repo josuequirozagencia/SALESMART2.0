@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { inkFor } from '../../lib/color';
 import { friendlyError } from '../../lib/errors';
 import { initials } from '../../lib/format';
 import type { Conversation, InboxFilters, InboxOptions, InboxTab } from '../../lib/types';
@@ -11,6 +10,7 @@ import { Drawer } from '../../ui/Drawer';
 import { Icon } from '../../ui/Icon';
 import { Pill } from '../../ui/Pill';
 import { SkeletonRows } from '../../ui/Skeleton';
+import { TagBadge } from '../../ui/TagBadge';
 import { ThemeSwitch } from '../../ui/ThemeSwitch';
 import { chatTime, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
@@ -32,10 +32,6 @@ const DELIVERY: Record<string, { mark: string; text: string }> = {
   read: { mark: '✓✓', text: 'leído' },
   failed: { mark: '⚠', text: 'no se pudo enviar' },
 };
-
-function TagChip({ name, color }: { name: string; color: string }) {
-  return <span className="rounded px-1.5 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: color, color: inkFor(color) }}>{name}</span>;
-}
 
 /** «QR · no oficial» y «GoHighLevel»: de dónde viene la conversación, cuando no es WhatsApp oficial. */
 function ChannelMark({ kind }: { kind: Conversation['channel']['kind'] }) {
@@ -79,7 +75,7 @@ function Row({ c, active, now, mobile }: { c: Conversation; active: boolean; now
             {mobile ? null : c.queue ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{c.queue.name}</span> : null}
             {mobile ? null : c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{c.owner.name.split(' ')[0]}</span> : null}
             {c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view' ? <span className="rounded bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info" title="Te la compartieron: la ves como colaborador">Compartida</span> : null}
-            {shown.map((t) => <TagChip key={t.id} name={t.name} color={t.color} />)}
+            {shown.map((t) => <TagBadge key={t.id} name={t.name} color={t.color} />)}
             {more > 0 ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted" title={c.tags.slice(2).map((t) => t.name).join(', ')}>+{more}</span> : null}
           </span>
         </span>

@@ -7,7 +7,7 @@ import { Pill } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
 import { useCreateTag, useDeleteTag, useTags, useUpdateTag } from './useTags';
 
-const DEFAULT_COLOR = '#6a44f2';
+const DEFAULT_COLOR = '#4f46e5';
 
 /** Alta y edición de una etiqueta personalizada: nombre y color. */
 function TagDialog({ tag, onClose }: { tag?: ContactTag; onClose: () => void }) {

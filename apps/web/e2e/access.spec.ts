@@ -4,6 +4,7 @@ import { createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import pg from 'pg';
 import { adminToken, apiLogin, createAccount, decide, expireTrialOf, hasAgencyAccess, mailMark, nextMail, pendingTrialItemOf, pendingTrialOf, requestExtensionViaApi, trialOf, PASSWORD, state, uiLogin, uniqueEmail } from './support';
+import { auditContrast } from './contrast';
 
 const REASON = 'Aún estoy conectando mi WhatsApp y probando los agentes';
 
@@ -2720,7 +2721,7 @@ test.describe('Inbox: distribución y viewports (ADR-60, Fase 3)', () => {
     const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     for (const [w, h] of [[360, 800], [375, 812], [390, 844], [412, 915], [430, 932], [768, 1024], [1024, 768], [1280, 800], [1440, 900]] as const) {
       await page.setViewportSize({ width: w, height: h });
-      for (const path of ['/inbox', '/menu', '/']) {
+      for (const path of ['/inbox', '/menu', '/', '/agenda', '/sales', '/contacts']) {
         await page.goto(path);
         await expect(page.getByRole('main')).toBeVisible();
         expect(await overflow(), `${path} a ${w} px`).toBeLessThanOrEqual(0);
@@ -2764,4 +2765,28 @@ test.describe('Chat móvil (ADR-60, Fase 5)', () => {
     await expect(page).toHaveURL(/\/inbox$/);
     await expect(page.getByRole('navigation', { name: 'Navegación principal' })).toBeVisible();
   });
+});
+
+test.describe('Regresión visual (ADR-60, Fase 7)', () => {
+  for (const scheme of ['light', 'dark'] as const) {
+    test(`contraste AA del texto en las pantallas principales (${scheme}, móvil y escritorio)`, async ({ page, request }) => {
+      const email = await createAccount(request, uniqueEmail(`contraste${scheme}`));
+      await page.addInitScript((mode) => window.localStorage.setItem('ss.theme.v1', mode), scheme);
+      await uiLogin(page, email);
+      await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+      const failures: string[] = [];
+      for (const [w, h] of [[390, 844], [1440, 900]] as const) {
+        await page.setViewportSize({ width: w, height: h });
+        for (const path of ['/', '/inbox', '/menu', '/contacts', '/sales', '/agenda', '/settings/connections']) {
+          await page.goto(path);
+          await expect(page.locator('html')).toHaveAttribute('data-theme', scheme);
+          await expect(page.getByRole('main')).toBeVisible();
+          const { low, examined } = await page.evaluate(auditContrast);
+          expect(examined, `textos examinados en ${path}`).toBeGreaterThan(0);
+          for (const l of low) failures.push(`${w}px ${path}: «${l.text}» ${l.ratio}:1 (mín. ${l.needed}) ${l.color} [${l.classes}]`);
+        }
+      }
+      expect(failures).toEqual([]);
+    });
+  }
 });
