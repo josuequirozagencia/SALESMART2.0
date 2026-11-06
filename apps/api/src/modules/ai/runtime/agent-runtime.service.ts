@@ -3,6 +3,7 @@ import { and, desc, eq, sql } from 'drizzle-orm';
 import { agents, aiConversationState, conversations, Database, messages, type TenantTx } from '../../../db';
 import { ConflictError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
+import { TenantContext } from '../../../tenant';
 import { APP_LOGGER } from '../../../tokens';
 import { writeAudit } from '../../audit';
 import { loadConversation, scopeOf, type InboxAccess } from '../../inbox';
@@ -89,7 +90,8 @@ export class AgentRuntimeService {
       const job = await this.claim(now);
       if (!job) break;
       touched += 1;
-      await this.handle(job, now, dir);
+      const outcome = await this.handle(job, now, dir);
+      this.log.info({ org_id: TenantContext.current().organizationId, conversation_id: job.conversationId, agent_id: job.agentId, outcome }, 'agente de IA: desenlace de la atención');
     }
     return touched;
   }
@@ -101,12 +103,13 @@ export class AgentRuntimeService {
     return this.db.withTenant(async (tx) => {
       const res = await tx.execute(sql`
         SELECT s.conversation_id AS id, s.agent_id,
-               EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > COALESCE(s.resumed_at, '-infinity'::timestamptz)) AS human_message
+               EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at)) AS human_message
           FROM ai_conversation_state s
           JOIN conversations c ON c.id = s.conversation_id AND c.organization_id = s.organization_id
+          JOIN agent_channels ac ON ac.channel_id = c.channel_account_id AND ac.organization_id = c.organization_id
          WHERE s.status = 'active' AND c.status <> 'closed'
            AND ((s.resumed_at IS NULL AND c.status NOT IN ('unassigned', 'pending'))
-                OR EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > COALESCE(s.resumed_at, '-infinity'::timestamptz)))
+                OR EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at)))
          LIMIT 50
          FOR UPDATE OF s SKIP LOCKED`);
       const rows = res.rows as Array<{ id: string; agent_id: string; human_message: boolean }>;
@@ -132,7 +135,7 @@ export class AgentRuntimeService {
          WHERE c.status <> 'closed'
            AND (s.conversation_id IS NULL OR (s.status = 'active' AND s.next_attempt_at <= ${now} AND (s.processing_started_at IS NULL OR s.processing_started_at < ${lease})))
            AND ((s.resumed_at IS NULL AND c.status IN ('unassigned', 'pending')) OR s.resumed_at IS NOT NULL)
-           AND NOT EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > COALESCE(s.resumed_at, '-infinity'::timestamptz))
+           AND NOT EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at))
            AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id = c.id AND m.direction = 'in' AND m.sent_at > GREATEST(COALESCE(s.handled_until, '-infinity'::timestamptz), ac.created_at, ${fresh}))
          ORDER BY c.last_inbound_at NULLS LAST
          LIMIT 1
@@ -171,7 +174,10 @@ export class AgentRuntimeService {
       // 2) Fuera de horario con «a toda hora» apagado: no contesta (la cola avisa); no se vuelve a intentar con este mensaje
       if (!settings.alwaysOn && job.queueId) {
         const open = await this.db.withTenant(async (tx) => isOpenAt((await this.sla.calendars(tx, dir.timeZone)).forQueue(job.queueId), now));
-        if (!open) return await this.finish(job, newest, { replied: 0, grounded: true }, now, null, '', route);
+        if (!open) {
+          this.log.info({ org_id: TenantContext.current().organizationId, conversation_id: job.conversationId, agent_id: job.agentId, reason: 'out_of_hours' }, 'agente de IA: sin respuesta (fuera de horario)');
+          return await this.finish(job, newest, { replied: 0, grounded: true }, now, null, '', route);
+        }
       }
       // 3) El turno
       const history = ordered
@@ -183,7 +189,10 @@ export class AgentRuntimeService {
       const turn = await this.turns.run({ agentId: job.agentId, message: text.slice(0, 1000), history, contactId: job.contactId, kind: 'use', ...(tools ? { tools } : {}) });
       const notes = turn.toolCalls.flatMap((c) => (c.summary ? [`El agente ${settings.name} ${c.summary}.`] : []));
       const extra = { notes, transfer: turn.transfer };
-      if (turn.replies.length === 0 && !turn.transfer && notes.length === 0) return await this.finish(job, newest, { replied: 0, grounded: turn.grounded }, now, null, settings.name, route);
+      if (turn.replies.length === 0 && !turn.transfer && notes.length === 0) {
+        this.log.warn({ org_id: TenantContext.current().organizationId, conversation_id: job.conversationId, agent_id: job.agentId, reason: 'empty_reply', grounded: turn.grounded }, 'agente de IA: el modelo no generó texto');
+        return await this.finish(job, newest, { replied: 0, grounded: turn.grounded }, now, null, settings.name, route);
+      }
       return await this.finish(job, newest, { replied: turn.replies.length, grounded: turn.grounded }, now, turn.replies, settings.name, route, extra);
     } catch (e) {
       return this.failed(job, e, now);
@@ -289,8 +298,11 @@ export class AgentRuntimeService {
       const agent = agentId ? ((await tx.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0] ?? null) : null;
       if (!agent) return { agent: null, state: 'idle', reason: null, can_control: false };
       const open = c.status !== 'closed';
-      const effective = (state ? state.status : c.status === 'unassigned' || c.status === 'pending' ? 'active' : 'idle') as AgentStatusView['state'];
-      return { agent, state: effective, reason: state?.reason ?? null, can_control: access.canReply && open };
+      const unattended = c.status === 'unassigned' || c.status === 'pending';
+      // Sin fila de estado el agente aún no intervino. Si una persona ya escribió después de la última asignación, la tarea NO lo atenderá: se muestra igual que si estuviera pausado (el mismo criterio de `claim`)
+      const blocked = !state && unattended && (await this.humanBlocks(tx, conversationId));
+      const effective = (state ? state.status : blocked ? 'paused' : unattended ? 'active' : 'idle') as AgentStatusView['state'];
+      return { agent, state: effective, reason: state ? state.reason : blocked ? 'human_message' : null, can_control: access.canReply && open };
     });
   }
 
@@ -377,8 +389,14 @@ export class AgentRuntimeService {
     await tx.insert(aiConversationState).values({ conversationId, agentId, createdAt: new Date(), updatedAt: new Date() }).onConflictDoNothing();
   }
 
+  /** ¿Hay un mensaje humano posterior a la última asignación (o a la vinculación del agente)? Es lo que impide que el agente atienda una conversación sin fila de estado. */
+  private async humanBlocks(tx: TenantTx, conversationId: string): Promise<boolean> {
+    const res = await tx.execute(sql`SELECT 1 FROM messages h JOIN conversations c ON c.id = h.conversation_id AND c.organization_id = h.organization_id JOIN agent_channels ac ON ac.channel_id = c.channel_account_id AND ac.organization_id = c.organization_id WHERE h.conversation_id = ${conversationId} AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at) LIMIT 1`);
+    return res.rows.length > 0;
+  }
+
   private async humanWroteSince(tx: TenantTx, conversationId: string, since: Date): Promise<boolean> {
-    const res = await tx.execute(sql`SELECT 1 FROM messages h JOIN ai_conversation_state s ON s.conversation_id = h.conversation_id AND s.organization_id = h.organization_id WHERE h.conversation_id = ${conversationId} AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > COALESCE(s.resumed_at, '-infinity'::timestamptz) AND h.sent_at >= ${new Date(since.getTime() - AGENT_LEASE_MS)} LIMIT 1`);
+    const res = await tx.execute(sql`SELECT 1 FROM messages h JOIN ai_conversation_state s ON s.conversation_id = h.conversation_id AND s.organization_id = h.organization_id JOIN conversations c ON c.id = h.conversation_id AND c.organization_id = h.organization_id JOIN agent_channels ac ON ac.channel_id = c.channel_account_id AND ac.organization_id = c.organization_id WHERE h.conversation_id = ${conversationId} AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at) AND h.sent_at >= ${new Date(since.getTime() - AGENT_LEASE_MS)} LIMIT 1`);
     return res.rows.length > 0;
   }
 
