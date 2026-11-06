@@ -6,13 +6,14 @@ import type { Contact, ContactTag, Conversation } from '../../lib/types';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { TagBadge } from '../../ui/TagBadge';
 import { useCreateTag, useTags } from '../tags/useTags';
 
-const DEFAULT_COLOR = '#6a44f2';
+const DEFAULT_COLOR = '#4f46e5';
 
 /** Una etiqueta como chip de color (las del sistema se distinguen en el diálogo, no aquí). */
 export function TagChip({ t }: { t: ContactTag }) {
-  return <span className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold text-white" style={{ backgroundColor: t.color }}>{t.name}</span>;
+  return <TagBadge name={t.name} color={t.color} />;
 }
 
 /** Cambia el conjunto de etiquetas PERSONALIZADAS del contacto (las del sistema no se tocan) y refresca la conversación y el listado. */

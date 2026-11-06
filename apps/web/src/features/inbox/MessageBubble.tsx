@@ -79,7 +79,7 @@ function ReactMenu({ m, onReact }: { m: ChatMessage; onReact: (id: string, emoji
   const pick = (emoji: string | null): void => { setOpen(false); onReact(m.id, emoji); };
   return (
     <span className="relative self-center" onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false); }}>
-      <button type="button" aria-label="Reaccionar al mensaje" aria-expanded={open} title="Reaccionar" onClick={() => setOpen((v) => !v)} className="grid size-8 place-items-center rounded-full text-[15px] text-muted opacity-60 hover:bg-surface2 hover:opacity-100 focus-visible:opacity-100 max-lg:size-11">☺</button>
+      <button type="button" aria-label="Reaccionar al mensaje" aria-expanded={open} title="Reaccionar" onClick={() => setOpen((v) => !v)} className="grid size-8 place-items-center rounded-full text-[15px] text-muted opacity-60 max-md:size-11 hover:bg-surface2 hover:opacity-100 focus-visible:opacity-100 max-lg:size-11">☺</button>
       {open ? (
         <span role="group" aria-label="Elige una reacción" className="absolute bottom-full left-0 z-10 mb-1 flex gap-0.5 rounded-full border border-line bg-surface p-1 shadow-[var(--shadow)]">
           {QUICK_REACTIONS.map((e) => (
