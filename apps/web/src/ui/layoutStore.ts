@@ -8,7 +8,15 @@ import { useCallback, useState } from 'react';
 export interface LayoutPrefs {
   /** Barra lateral: plegada a solo iconos o expandida. Sin valor = el predeterminado de cada tamaño de pantalla. */
   sidebar?: 'collapsed' | 'expanded';
+  /** Inbox de escritorio: ancho en px de la lista y del panel de contacto, y si cada uno está abierto. Sin valor = el predeterminado. */
+  listWidth?: number;
+  contactWidth?: number;
+  listOpen?: boolean;
+  contactOpen?: boolean;
 }
+
+const WIDTH_MIN = 120;
+const WIDTH_MAX = 1200;
 
 export const layoutKey = (userId: string, orgId: string): string => `ss.inbox.layout.v1:${userId}:${orgId}`;
 
@@ -17,8 +25,15 @@ export function parseLayout(raw: string | null): LayoutPrefs {
   try {
     const v: unknown = JSON.parse(raw);
     if (typeof v !== 'object' || v === null || Array.isArray(v)) return {};
-    const sidebar = (v as Record<string, unknown>)['sidebar'];
-    return sidebar === 'collapsed' || sidebar === 'expanded' ? { sidebar } : {};
+    const r = v as Record<string, unknown>;
+    const out: LayoutPrefs = {};
+    if (r['sidebar'] === 'collapsed' || r['sidebar'] === 'expanded') out.sidebar = r['sidebar'];
+    for (const k of ['listWidth', 'contactWidth'] as const) {
+      const n = r[k];
+      if (typeof n === 'number' && Number.isFinite(n) && n >= WIDTH_MIN && n <= WIDTH_MAX) out[k] = Math.round(n);
+    }
+    for (const k of ['listOpen', 'contactOpen'] as const) if (typeof r[k] === 'boolean') out[k] = r[k];
+    return out;
   } catch {
     return {};
   }
@@ -32,10 +47,11 @@ export function readLayout(userId: string, orgId: string): LayoutPrefs {
   }
 }
 
-/** Guarda solo lo que cambia, conservando el resto de lo guardado. */
-export function writeLayout(userId: string, orgId: string, patch: Partial<LayoutPrefs>): void {
+/** Guarda solo lo que cambia, conservando el resto de lo guardado; `remove` borra esas claves (volver al predeterminado). */
+export function writeLayout(userId: string, orgId: string, patch: Partial<LayoutPrefs>, remove: ReadonlyArray<keyof LayoutPrefs> = []): void {
   try {
-    const next = { ...readLayout(userId, orgId), ...patch };
+    const next: LayoutPrefs = { ...readLayout(userId, orgId), ...patch };
+    for (const k of remove) delete next[k];
     window.localStorage.setItem(layoutKey(userId, orgId), JSON.stringify(next));
   } catch {
     /* sin almacenamiento: la preferencia vale mientras la página siga abierta */
@@ -61,4 +77,26 @@ export function useSidebarCollapsed(userId: string, orgId: string, fallback: boo
     [userId, orgId],
   );
   return [collapsed, set];
+}
+
+/** Todas las preferencias de distribución de la persona en esta empresa, con cómo cambiarlas (y volver al predeterminado con `remove`). Al cambiar de persona o de empresa se vuelve a leer. */
+export function useLayoutPrefs(userId: string, orgId: string): [LayoutPrefs, (patch: Partial<LayoutPrefs>, remove?: ReadonlyArray<keyof LayoutPrefs>) => void] {
+  const [prefs, setPrefs] = useState<LayoutPrefs>(() => readLayout(userId, orgId));
+  const [forKey, setForKey] = useState(`${userId}:${orgId}`);
+  if (forKey !== `${userId}:${orgId}`) {
+    setForKey(`${userId}:${orgId}`);
+    setPrefs(readLayout(userId, orgId));
+  }
+  const update = useCallback(
+    (patch: Partial<LayoutPrefs>, remove: ReadonlyArray<keyof LayoutPrefs> = []): void => {
+      setPrefs((p) => {
+        const next: LayoutPrefs = { ...p, ...patch };
+        for (const k of remove) delete next[k];
+        return next;
+      });
+      writeLayout(userId, orgId, patch, remove);
+    },
+    [userId, orgId],
+  );
+  return [prefs, update];
 }

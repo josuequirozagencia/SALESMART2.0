@@ -4,7 +4,11 @@ import { afterEach, vi } from 'vitest';
 
 // Con toda la suite en paralelo (y en los runners de CI) 1 s se queda corto para findBy*/waitFor: no es un fallo de la app
 configure({ asyncUtilTimeout: 4000 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  // Las preferencias de distribución (barra lateral, columnas del Inbox) y el tema viven en localStorage: una prueba no debe heredar las de otra
+  if (typeof window !== 'undefined') window.localStorage.clear();
+});
 
 // La conexión en vivo del Inbox no abre red en las pruebas: `fake-socket` la sustituye y cada prueba decide qué llega
 vi.mock('socket.io-client', async () => {
