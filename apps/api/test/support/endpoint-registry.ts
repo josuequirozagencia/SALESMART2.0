@@ -337,6 +337,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/notifications/read-all', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
   { route: 'POST /v1/notifications/:id/read', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
   { route: 'GET /v1/conversations/:id/mention-options', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
+  // Fotos de perfil (v5). Pruebas: test/photos/photos.test.ts (A↔B, visibilidad por persona, validación del contenido, tarea de contactos por QR)
+  { route: 'GET /v1/photos', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
+  { route: 'GET /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
+  { route: 'PUT /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
+  { route: 'DELETE /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
   { route: 'POST /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   { route: 'DELETE /v1/conversations/:id/scheduled/:scheduledId', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Usuarios del equipo (M10.3, ADR-56). Pruebas: test/team/team.test.ts (401/403, A↔B, roles, último administrador, permisos por persona, invitar, desactivar y quitar con traspaso)

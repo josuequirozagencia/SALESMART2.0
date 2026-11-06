@@ -27,11 +27,14 @@ export class FakeQrSession implements QrSessionProvider {
   readonly name = 'fake' as const;
   readonly instances = new Map<string, FakeInstance>();
   readonly sent: FakeQrSent[] = [];
+  /** Fotos de perfil por teléfono (dígitos): lo que «WhatsApp» devolvería. */
+  readonly pictures = new Map<string, string>();
   private failures: QrSessionError[] = [];
 
   reset(): void {
     this.instances.clear();
     this.sent.length = 0;
+    this.pictures.clear();
     this.failures = [];
   }
 
@@ -59,6 +62,16 @@ export class FakeQrSession implements QrSessionProvider {
       this.check(c);
       this.instances.set(input.instance, { state: 'connecting', webhookUrl: input.webhookUrl, qrCalls: 0 });
       return Promise.resolve();
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  fetchProfilePicture(c: QrCredentials, instance: string, phone: string): Promise<string | null> {
+    try {
+      this.check(c);
+      if (this.get(instance).state !== 'open') throw new QrSessionError('session_down', 'La sesión de WhatsApp no está abierta: hay que escanear el QR de nuevo');
+      return Promise.resolve(this.pictures.get(phone) ?? null);
     } catch (e) {
       return Promise.reject(e);
     }

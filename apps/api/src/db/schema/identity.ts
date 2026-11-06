@@ -125,6 +125,8 @@ export const organizationMembers = identityTable(
     revokedAt: ts('revoked_at'),
     /** Por qué se revocó (M10.3, ADR-56): `deactivated` se puede reactivar; `removed` solo se vuelve con una invitación nueva. Nulo = vigente o revocada por otra vía (agencia). */
     revokedReason: text('revoked_reason'),
+    /** Foto de perfil de la persona EN esta empresa (v5): clave `org/<empresa>/members/<usuario>/…` en el almacenamiento. La sube la propia persona; nunca se devuelve la clave, solo una URL firmada. */
+    photoKey: text('photo_key'),
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [

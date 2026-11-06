@@ -62,6 +62,8 @@ export interface QrSessionProvider {
   logout(credentials: QrCredentials, instance: string): Promise<void>;
   /** Borra la instancia en Evolution. Una instancia que ya no existe NO es un error. */
   deleteInstance(credentials: QrCredentials, instance: string): Promise<void>;
+  /** La dirección de la foto de perfil de un número (dígitos, sin «+»), o null si no tiene foto o su privacidad no la deja ver. Falla igual que el resto (sesión caída, clave…). */
+  fetchProfilePicture(credentials: QrCredentials, instance: string, phone: string): Promise<string | null>;
   sendText(credentials: QrCredentials, instance: string, input: { to: string; text: string }): Promise<SentMessage>;
   sendMedia(credentials: QrCredentials, instance: string, input: QrSendMedia): Promise<SentMessage>;
 }
