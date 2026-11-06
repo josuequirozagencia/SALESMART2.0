@@ -5,7 +5,9 @@ import { AttachmentsModule } from '../attachments';
 import { ChannelsModule } from '../channels';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
+import { ContactPhotosJob } from './contact-photos.job';
 import { EvolutionProvider } from './evolution.provider';
+import { HttpPhotoDownloader, PHOTO_DOWNLOADER } from './photo-downloader';
 import { QrConnectionsService } from './qr-connections.service';
 import { QrHeartbeatJob } from './qr-heartbeat.job';
 import { QrOutboundService } from './qr-outbound.service';
@@ -27,8 +29,10 @@ import { QrController } from './qr.controller';
     QrWebhookService,
     QrOutboundService,
     QrHeartbeatJob,
+    ContactPhotosJob,
+    { provide: PHOTO_DOWNLOADER, useClass: HttpPhotoDownloader },
     { provide: QR_SESSION, useFactory: (cfg: AppConfig): QrSessionProvider => (cfg.channels.qrProvider === 'fake' ? new FakeQrSession() : new EvolutionProvider()), inject: [APP_CONFIG] },
   ],
-  exports: [QR_SESSION, QrConnectionsService, QrOutboundService, QrHeartbeatJob],
+  exports: [QR_SESSION, QrConnectionsService, QrOutboundService, QrHeartbeatJob, ContactPhotosJob],
 })
 export class QrModule {}

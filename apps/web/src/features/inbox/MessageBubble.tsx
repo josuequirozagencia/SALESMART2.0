@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { Drawer } from '../../ui/Drawer';
 import { Icon } from '../../ui/Icon';
@@ -93,7 +93,7 @@ function ReactMenu({ m, onReact }: { m: ChatMessage; onReact: (id: string, emoji
 }
 
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
-export function MessageBubble({ m, canRetry, retrying, onRetry, onReact }: { m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined }) {
+export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar }: { m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode }) {
   if (m.is_note) {
     const auto = m.sender_type === 'system';
     return (
@@ -109,7 +109,9 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact }: { m: 
   const out = m.direction === 'out';
   const canReact = !out && onReact !== undefined;
   return (
-    <li className={`flex flex-col ${out ? 'items-end' : 'items-start'}`}>
+    <li className={`flex gap-2 ${out ? 'flex-row-reverse' : ''}`}>
+      {avatar !== undefined ? <span className="w-7 shrink-0 self-start">{avatar}</span> : null}
+      <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className="flex max-w-full items-start gap-1">
       <div className={`relative min-w-24 max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
         {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{m.author.name.split(' ')[0]}</span> : null}
@@ -137,6 +139,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact }: { m: 
           {canRetry ? <Button variant="link" className="text-[12.5px]" loading={retrying} onClick={() => onRetry(m.id)}>Reintentar</Button> : null}
         </div>
       ) : null}
+      </div>
     </li>
   );
 }

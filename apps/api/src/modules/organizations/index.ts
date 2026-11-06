@@ -5,6 +5,7 @@ export { PlansService, type PlanView } from './plans.service';
 export { CompaniesService, likeEscape } from './companies.service';
 export { AgenciesService, type AgencyItem, type AgencyList, type OwnershipHistoryItem, type AssignAgencyResult } from './agencies.service';
 export { OrgMembersService, pendingPerson, type OrgPerson } from './org-members.service';
+export { MemberPhotosService } from './member-photos.service';
 export { SampleMarkService } from './sample-mark.service';
 export { OrgDirectoryService, type OrgDirectory } from './org-directory.service';
 export { AgencyAccessService, AGENCY_DEFAULT_ACCESS_LEVEL, type ReconcileResult } from './agency-access.service';

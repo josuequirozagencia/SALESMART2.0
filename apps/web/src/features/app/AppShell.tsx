@@ -3,6 +3,7 @@ import { useLocation } from 'react-router-dom';
 import { ContextBanner } from '../context/ContextBanner';
 import { ViewAsBar } from '../context/ViewAs';
 import { useInboxRealtime } from '../inbox/useInboxRealtime';
+import { useMyPhoto } from '../photos/usePhotos';
 import { useInboxUnread } from '../inbox/useInbox';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { TrialBanner } from '../trial/TrialBanner';
@@ -35,6 +36,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
   const showBottom = mobile && !chat && !keyboard;
   // El Inbox ocupa toda la altura de la ventana: sin márgenes ni barra de utilidades (esos botones viven en la cabecera de su lista)
   const flush = isInboxMain(pathname);
+  const myPhoto = useMyPhoto();
   const groups = useMemo(() => buildNavGroups({ admin, unread }), [admin, unread]);
   const nav = useMemo(() => ({ me, groups, unread, onLogout }), [me, groups, unread, onLogout]);
   return (
@@ -49,6 +51,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         mobileNav="bottom"
         reserveBottom={showBottom}
         flush={flush}
+        photoUrl={myPhoto.photo}
       >
         {chat || flush ? null : <UtilityBar me={me} />}
         {trial && !chat ? <TrialBanner trial={trial} role={me.role} /> : null}

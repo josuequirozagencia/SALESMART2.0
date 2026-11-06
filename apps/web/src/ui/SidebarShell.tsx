@@ -1,8 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { initials, ROLE_LABEL } from '../lib/format';
+import { ROLE_LABEL } from '../lib/format';
 import type { Me } from '../lib/types';
 import { Logo } from './AuthShell';
+import { Avatar } from './Avatar';
 import { useBreakpoint } from './breakpoints';
 import { Icon, type IconName } from './Icon';
 import { useSidebarCollapsed } from './layoutStore';
@@ -61,6 +62,8 @@ type SidebarProps = {
   reserveBottom?: boolean;
   /** Contenido a todo el alto y ancho de la ventana, sin márgenes ni ancho máximo (el Inbox, v5). */
   flush?: boolean;
+  /** Foto de la persona de la sesión (si la tiene): reemplaza a las siglas del pie. */
+  photoUrl?: string | null;
   children: ReactNode;
 };
 
@@ -70,7 +73,7 @@ type SidebarProps = {
  * desaparece (la reemplazan la barra inferior y `/menu`). Con `mobileNav = 'bar'` se comporta como siempre: en pantallas angostas se abre desde una barra superior (☰).
  * Es solo navegación: lo que cada persona puede hacer lo decide el servidor; los grupos que se pasan ya vienen filtrados por quien los arma.
  */
-export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, mobileNav = 'bar', reserveBottom = false, flush = false, children }: SidebarProps) {
+export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, mobileNav = 'bar', reserveBottom = false, flush = false, photoUrl = null, children }: SidebarProps) {
   const { pathname } = useLocation();
   const bottom = mobileNav === 'bottom';
   const bp = useBreakpoint();
@@ -159,7 +162,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
           <div className={`border-t border-white/10 ${compact ? 'grid justify-items-center gap-1 px-2 py-2' : 'grid gap-1 p-3'}`}>
             {bottom ? null : <ThemeToggle onDark />}
             <div className={`flex items-center gap-2.5 ${compact ? 'flex-col pt-1' : 'pt-1'}`}>
-              <span aria-hidden="true" title={compact ? `${name} · ${ROLE_LABEL[me.role] ?? me.role}` : undefined} className="grid size-9 shrink-0 place-items-center rounded-full text-[12px] font-bold text-[color:var(--on-grad)] [background:var(--grad)]">{initials(name)}</span>
+              <span title={compact ? `${name} · ${ROLE_LABEL[me.role] ?? me.role}` : undefined}><Avatar name={name} src={photoUrl} size={36} tone="grad" /></span>
               {compact ? null : (
                 <span className="min-w-0 flex-1 text-[12.5px] leading-tight">
                   <b className="block truncate">{name}</b>

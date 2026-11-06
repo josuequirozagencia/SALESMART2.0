@@ -15,11 +15,14 @@ interface Harness {
   readonly badCreds: QrCredentials;
   openSession(instance: string): void;
   dropSession(instance: string): void;
+  /** «WhatsApp» tiene esta foto para este número. */
+  givePicture(phone: string, url: string): void;
 }
 
 // ---- servidor de Evolution simulado --------------------------------------------------------------------------------------------------------
 const KEY = 'evo-global-key-for-tests';
 const states = new Map<string, 'open' | 'connecting' | 'close'>();
+const pictures = new Map<string, string>();
 let seq = 0;
 let server: http.Server;
 let base = '';
@@ -45,6 +48,10 @@ beforeAll(async () => {
       if (a === 'instance' && b === 'connectionState') return send(200, { instance: { instanceName: inst, state: states.get(inst) } });
       if (a === 'instance' && b === 'logout') return states.set(inst, 'close'), send(200, { status: 'SUCCESS', error: false, response: { message: 'Instance logged out' } });
       if (a === 'instance' && b === 'delete') return states.delete(inst), send(200, { status: 'SUCCESS' });
+      if (a === 'chat' && b === 'fetchProfilePictureUrl') {
+        if (states.get(inst) !== 'open') return send(400, { status: 400, error: 'Bad Request', response: { message: ['Connection Closed'] } });
+        return send(201, { wuid: `${String(body['number'])}@s.whatsapp.net`, profilePictureUrl: pictures.get(String(body['number'])) ?? null });
+      }
       if (a === 'message') {
         if (states.get(inst) !== 'open') return send(400, { status: 400, error: 'Bad Request', response: { message: ['Connection Closed'] } });
         seq += 1;
@@ -65,12 +72,12 @@ const harnesses: Array<[string, () => Harness]> = [
     'fake',
     () => {
       const provider = new FakeQrSession();
-      return { provider, creds: { baseUrl: 'http://fake', apiKey: FAKE_QR_KEY }, badCreds: { baseUrl: 'http://fake', apiKey: 'otra' }, openSession: (i) => provider.setState(i, 'open'), dropSession: (i) => provider.setState(i, 'closed') };
+      return { provider, creds: { baseUrl: 'http://fake', apiKey: FAKE_QR_KEY }, badCreds: { baseUrl: 'http://fake', apiKey: 'otra' }, openSession: (i) => provider.setState(i, 'open'), dropSession: (i) => provider.setState(i, 'closed'), givePicture: (p, u) => void provider.pictures.set(p, u) };
     },
   ],
   [
     'evolution (servidor simulado)',
-    () => ({ provider: new EvolutionProvider(), creds: { baseUrl: base, apiKey: KEY }, badCreds: { baseUrl: base, apiKey: 'otra' }, openSession: (i) => void states.set(i, 'open'), dropSession: (i) => void states.set(i, 'close') }),
+    () => ({ provider: new EvolutionProvider(), creds: { baseUrl: base, apiKey: KEY }, badCreds: { baseUrl: base, apiKey: 'otra' }, openSession: (i) => void states.set(i, 'open'), dropSession: (i) => void states.set(i, 'close'), givePicture: (p, u) => void pictures.set(p, u) }),
   ],
 ];
 
@@ -108,6 +115,19 @@ describe.each(harnesses)('puerto de sesión por QR: %s', (_name, make) => {
     const doc = await h.provider.sendMedia(h.creds, i, { to: '593990000002', kind: 'document', bytes: Buffer.from('pdf'), mimeType: 'application/pdf', filename: 'a.pdf', caption: null });
     const aud = await h.provider.sendMedia(h.creds, i, { to: '593990000002', kind: 'audio', bytes: Buffer.from('ogg'), mimeType: 'audio/ogg', filename: null, caption: null });
     expect(new Set([a.externalId, b.externalId, img.externalId, doc.externalId, aud.externalId]).size).toBe(5);
+  });
+
+  it('la foto de perfil: la dirección si el número la tiene, null si no; con la sesión caída falla «session_down» y con una clave mala «not_configured»', async () => {
+    const h = make();
+    const i = await fresh(h);
+    h.openSession(i);
+    h.givePicture('593990000020', 'https://pps.whatsapp.net/v/foto.jpg');
+    expect(await h.provider.fetchProfilePicture(h.creds, i, '593990000020')).toBe('https://pps.whatsapp.net/v/foto.jpg');
+    expect(await h.provider.fetchProfilePicture(h.creds, i, '593990000021')).toBeNull();
+    await expect(h.provider.fetchProfilePicture(h.badCreds, i, '593990000020')).rejects.toMatchObject({ code: 'not_configured' });
+    await expect(h.provider.fetchProfilePicture(h.creds, 'no-existe-0000', '593990000020')).rejects.toMatchObject({ code: 'not_found' });
+    h.dropSession(i);
+    await expect(h.provider.fetchProfilePicture(h.creds, i, '593990000020')).rejects.toMatchObject({ code: 'session_down' });
   });
 
   it('un sticker no se puede enviar por QR', async () => {

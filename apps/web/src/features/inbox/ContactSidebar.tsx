@@ -1,9 +1,11 @@
 import { useQuery } from '@tanstack/react-query';
+import { Avatar } from '../../ui/Avatar';
+import { usePhotos } from '../photos/usePhotos';
 import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
-import { initials, money, shortDateTime } from '../../lib/format';
+import { money, shortDateTime } from '../../lib/format';
 import type { Contact, Conversation } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { RemovableTags } from './ConversationTags';
@@ -102,6 +104,7 @@ function ConversationActions({ c }: { c: Conversation }) {
  * usa la misma API (y los mismos permisos) que su pantalla; lo que la persona no puede ver, el servidor no lo devuelve y el bloque no aparece.
  */
 export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () => void }) {
+  const photos = usePhotos([c.contact.id], []);
   const q = useContactDetail(c.contact.id);
   const fields = useCustomFields();
   const appt = useNextAppointment(c.contact.id);
@@ -116,7 +119,7 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
   return (
     <aside aria-label="Datos del contacto" className="flex min-h-0 w-full flex-col overflow-y-auto border-l border-line bg-surface">
       <div className="flex items-center gap-2.5 border-b border-line px-4 py-3">
-        <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-full bg-surface2 text-[14px] font-bold text-muted">{initials(c.contact.name)}</span>
+        <Avatar name={c.contact.name} src={photos.contact(c.contact.id)} size={44} />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'}</p>

@@ -40,6 +40,9 @@ export const contacts = tenantTable(
     lastTouchAdset: text('last_touch_adset'),
     lastTouchAd: text('last_touch_ad'),
     lastTouchAdId: text('last_touch_ad_id'),
+    /** Foto de perfil (v5): clave en el almacenamiento (`org/<empresa>/contacts/<contacto>/…`). Solo la trae WhatsApp por QR; `photo_checked_at` es la última vez que se pidió (se reintenta a los 7 días). */
+    photoKey: text('photo_key'),
+    photoCheckedAt: ts('photo_checked_at'),
     createdBy: uuid('created_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),

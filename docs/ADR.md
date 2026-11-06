@@ -2299,3 +2299,28 @@ El responsable quiere un interruptor **dentro de la información del contacto** 
 3. **Guarda de regresión permanente:** `e2e/contrast.ts` mide el contraste de todo el texto visible de una página dentro del navegador (mezcla las capas translúcidas hasta el fondo real; omite los fondos con degradado, cuyos valores —barra lateral, tarjetas de marca— se verificaron contra los tokens del tema) y dos E2E lo ejecutan en claro y oscuro, en móvil y escritorio, sobre siete pantallas. El E2E de desborde cubre además `/agenda`, `/sales` y `/contacts`.
 4. **CI.** El tope del trabajo sube de 30 a 50 minutos: las corridas tardan 20–24 min y dos se cancelaron por llegar al tope (la instalación del navegador de pruebas y la suite se alargan en los ejecutores lentos). No cambia lo que se prueba.
 5. **Estado del ADR.** Las fases 1–7 están construidas (la 6 es solo el ADR-61). **ADR-60 sigue PROPUESTO:** no se marca APROBADO hasta que lo apruebe el responsable. Lo no validado sigue siendo lo que exige aparatos reales: teclado virtual de iOS y Android, áreas seguras (muesca y barra de gestos), rendimiento en gama baja y lector de pantalla.
+
+---
+
+## ADR-62 — Fotos de perfil, fondo del chat y tema WhatsApp (anexo v5 de la alineación con v10)
+**Estado:** foto de contacto (solo WhatsApp por QR) y foto subida por el asesor **APROBADAS de palabra por el responsable el 2026-11-06**; el resto de las precisiones, **PROPUESTAS**.
+
+### Contexto
+Hasta ahora todos los avatares eran siglas: `contacts` y `users` no tenían foto, y solo los agentes de IA la tenían (subida a mano). La auditoría de la Fase A (2026-11-06) comprobó en el código que **WhatsApp oficial (Meta) y GoHighLevel no entregan la foto del contacto** (el aviso trae solo el nombre de perfil) y que Evolution (QR) no la manda en el aviso pero sí la ofrece por un endpoint aparte.
+
+### Decisión
+1. **Foto del contacto: solo por WhatsApp por QR.** Una tarea `contact-photos` (cada minuto, por empresa con conexión QR) toma hasta 5 contactos sin foto cuya consulta nunca se hizo o tiene más de 7 días, con una conversación en una sesión **abierta**, pide la dirección a Evolution (`POST /chat/fetchProfilePictureUrl/{instancia}`), baja la imagen y la guarda en `org/<empresa>/contacts/<contacto>/<uuid>.<ext>`. Oficial y GoHighLevel siguen con siglas hasta que un proveedor la entregue (no se inventan fotos).
+2. **Foto de la persona: la sube ella, por empresa.** `organization_members.photo_key` (identidad): la misma persona puede tener otra foto en otra empresa, y el borrado definitivo de una empresa (prefijo `org/<id>/`) la alcanza sin tocar nada más. No se guarda en `users` para no sacar archivos del prefijo de la empresa.
+3. **Entrega:** `GET /v1/photos?contacts=…&users=…` (hasta 50 de cada uno) devuelve URL firmadas de 15 min, solo de lo que existe y la persona puede ver (un asesor, solo sus contactos; con `contacts.view_all` o `inbox.view_all`, todos). La clave del almacenamiento **nunca** sale. `/v1/me/photo` (ver, subir con el archivo tal cual —JPEG, PNG o WebP de hasta 2 MB, reconocido por contenido— y quitar). Todas piden `inbox.read`; no se crea un permiso nuevo.
+4. **Contratos existentes intactos:** conversaciones y mensajes no cambian; la web pide las fotos aparte y, si falla, muestra siglas.
+5. **Interfaz:** componente único `Avatar` (foto diferida de tamaño fijo, siglas si falta o falla), avatar pequeño de 28 px en el primer mensaje de cada grupo del mismo emisor (el agente de IA y los avisos automáticos llevan insignia propia, nunca foto), «Mi foto» en Configuración › Apariencia.
+6. **Fondo del chat, tema WhatsApp y botón de modo** (solo interfaz, sin API): fondo predeterminado/liso/color/ninguno por persona y empresa en el navegador; tema WhatsApp como cuarta marca con tokens de burbuja (acentos oscurecidos para AA); Inbox a pantalla completa; botón de modo solo con icono junto a Avisos («Usar el del sistema» queda en Apariencia).
+
+### Alternativas descartadas
+Foto en `users` (global; saca archivos del prefijo de la empresa) · devolver `photo_url` dentro de cada conversación y mensaje (cambia contratos y firma decenas de URL por lista) · pedir la foto en cada mensaje entrante (carga a Evolution) · proxy autenticado de imágenes (el navegador no puede mandar el token en `<img>`).
+
+### Riesgos y lo no validado
+- **Contra Evolution real:** forma de la respuesta de `fetchProfilePictureUrl`, si la dirección caduca pronto y qué pasa con la privacidad (se trata como «sin foto»). **Contra WhatsApp real:** que los servidores sean `*.whatsapp.net`/`*.fbcdn.net` (la descarga rechaza cualquier otro host). **Contra R2/S3 real:** el origen de las URL firmadas en la política de contenido (ya sirve a los agentes).
+- La foto del contacto no se refresca sola: si cambia en WhatsApp, queda la primera (decisión de alcance; se puede reintentar con una consulta mensual).
+- Un colaborador de una conversación ajena no ve la foto de un contacto que no lleva (ve siglas).
+- Sin `inbox.read` no hay fotos (los roles de solo lectura de agencia no son miembros).

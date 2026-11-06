@@ -1,5 +1,7 @@
 export { QrModule } from './qr.module';
 export { QrHeartbeatJob } from './qr-heartbeat.job';
+export { ContactPhotosJob, CONTACT_PHOTOS_BATCH, CONTACT_PHOTOS_RECHECK_MS } from './contact-photos.job';
+export { PHOTO_DOWNLOADER, MAX_CONTACT_PHOTO_BYTES, type PhotoDownloader } from './photo-downloader';
 export { QrOutboundService, type QrDispatch } from './qr-outbound.service';
 export { QrConnectionsService, MAX_QR_CHANNELS, type QrChannelView, type QrList } from './qr-connections.service';
 export { QR_SESSION, QrSessionError, isRetryableQr, type QrSessionProvider, type QrCredentials, type QrErrorCode } from './qr-session.port';

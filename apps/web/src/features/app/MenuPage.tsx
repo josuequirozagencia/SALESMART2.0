@@ -1,10 +1,12 @@
 import { Link, Navigate } from 'react-router-dom';
-import { initials, ROLE_LABEL } from '../../lib/format';
+import { ROLE_LABEL } from '../../lib/format';
 import { useBreakpoint } from '../../ui/breakpoints';
+import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
 import { ThemeToggle } from '../../ui/ThemeToggle';
 import { NotificationsBell } from '../notifications/NotificationsBell';
 import { ViewAsMenu } from '../context/ViewAs';
+import { useMyPhoto } from '../photos/usePhotos';
 import { useAppNav } from './AppNav';
 
 /** «Configuración» no va en la cuadrícula: se muestra aparte, al final, junto a «Cerrar sesión». */
@@ -18,6 +20,7 @@ const SETTINGS = '/settings/fields';
 export function MenuPage() {
   const { me, groups, onLogout } = useAppNav();
   const bp = useBreakpoint();
+  const myPhoto = useMyPhoto();
   if (bp !== 'mobile') return <Navigate to="/" replace />;
   const name = me.user.full_name ?? me.user.email;
   const settings = groups.flatMap((g) => g.items).find((i) => i.to === SETTINGS);
@@ -25,7 +28,7 @@ export function MenuPage() {
     <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
       <section aria-label="Tu cuenta" className="grid grid-cols-[minmax(0,1fr)] gap-3 rounded-2xl border border-line bg-surface p-4">
         <div className="flex items-center gap-3">
-          <span aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-full text-[13px] font-bold text-[color:var(--on-grad)] [background:var(--grad)]">{initials(name)}</span>
+          <Avatar name={name} src={myPhoto.photo} size={44} tone="grad" />
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-[15px] font-bold">{me.organization.name}</h1>
             <p className="truncate text-[12.5px] text-muted">{name} · {ROLE_LABEL[me.role] ?? me.role}</p>

@@ -96,6 +96,17 @@ export class EvolutionProvider implements QrSessionProvider {
     return { externalId: id };
   }
 
+  /** `POST /chat/fetchProfilePictureUrl/{instancia}` → `{ wuid, profilePictureUrl }`. **Sin validar contra Evolution real** (la forma sale de la documentación). Sin foto o con privacidad → null. */
+  async fetchProfilePicture(c: QrCredentials, instance: string, phone: string): Promise<string | null> {
+    try {
+      const j = await this.call(c, 'POST', `/chat/fetchProfilePictureUrl/${encodeURIComponent(instance)}`, { number: phone });
+      return isObj(j) ? (str(j['profilePictureUrl']) ?? str(j['profilePicUrl'])) : null;
+    } catch (e) {
+      if (e instanceof QrSessionError && (e.code === 'rejected' || e.code === 'recipient_invalid')) return null;
+      throw e;
+    }
+  }
+
   async sendText(c: QrCredentials, instance: string, input: { to: string; text: string }): Promise<SentMessage> {
     return this.idOf(await this.call(c, 'POST', `/message/sendText/${encodeURIComponent(instance)}`, { number: input.to, text: input.text }));
   }
