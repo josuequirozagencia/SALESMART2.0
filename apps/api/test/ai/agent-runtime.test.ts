@@ -245,6 +245,37 @@ describe('atender conversaciones nuevas', () => {
     expect(await aiMessages(pending.id)).toHaveLength(1);
     expect(await aiMessages(working.id)).toHaveLength(0);
   });
+
+  it('una persona escribió ANTES de la última asignación (p. ej. antes de transferir a otra asesora): la conversación pendiente SÍ la contesta el agente', async () => {
+    await liveAgent();
+    await admin.query(`UPDATE agent_channels SET created_at = now() - interval '5 hours'`); // el agente lleva horas vinculado: lo que cuenta es la asignación
+    const c = await mkConv({ status: 'pending' });
+    await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, attempts) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'Soy josue', 'sent', now() - interval '2 hours', 0)`, [ORG_A, c.id, channelA]);
+    await inbound(c.id, 'Que servicio ofrece');
+    expect(await tick()).toBe(1);
+    expect(await aiMessages(c.id)).toHaveLength(1);
+    expect(await state(c.id)).toMatchObject({ status: 'active', reason: null });
+    expect(await json<Status>(await call('GET', `/conversations/${c.id}/ai`, T.alice))).toMatchObject({ state: 'active', reason: null });
+  });
+
+  it('una persona escribió DESPUÉS de la asignación y sin fila de estado: el agente no atiende y la bandeja lo dice (pausado por mensaje humano), no «atendiendo»', async () => {
+    await liveAgent();
+    const c = await mkConv({ status: 'pending' });
+    await humanReply(c.id);
+    await inbound(c.id, 'Que servicio ofrece', { at: new Date(Date.now() + 1000) });
+    expect(await tick(new Date(Date.now() + 5000))).toBe(0);
+    expect(await aiMessages(c.id)).toHaveLength(0);
+    expect(await json<Status>(await call('GET', `/conversations/${c.id}/ai`, T.alice))).toMatchObject({ state: 'paused', reason: 'human_message', can_control: true });
+  });
+
+  it('el agente vinculado DESPUÉS de un mensaje humano antiguo también atiende (lo anterior a la vinculación no cuenta)', async () => {
+    const c = await mkConv({ status: 'unassigned' });
+    await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, attempts) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'Hola desde antes', 'sent', now() - interval '3 hours', 0)`, [ORG_A, c.id, channelA]);
+    await liveAgent();
+    await inbound(c.id, 'Hola');
+    expect(await tick()).toBe(1);
+    expect(await aiMessages(c.id)).toHaveLength(1);
+  });
 });
 
 describe('cuando una persona interviene', () => {
