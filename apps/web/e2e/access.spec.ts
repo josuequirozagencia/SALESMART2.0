@@ -1066,7 +1066,8 @@ test('oportunidades: el administrador ve el pipeline por defecto, crea otro, aju
 
   // El tablero refleja la configuración: «Nuevo» está oculta
   const cursos = page.getByRole('list', { name: /Etapas del pipeline Cursos/ });
-  expect(await cursos.getByRole('listitem').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['Etapa Inscripción', 'Etapa Seguimiento', 'Etapa Descartado']);
+  // El orden se guarda en el servidor al pulsar «Bajar»: se espera a que el tablero lo refleje en vez de leerlo una sola vez
+  await expect.poll(() => cursos.getByRole('listitem').evaluateAll((els) => els.map((e) => e.getAttribute('aria-label')))).toEqual(['Etapa Inscripción', 'Etapa Seguimiento', 'Etapa Descartado']);
   await expect(page.getByText('1 etapa oculta')).toBeVisible();
   await page.getByRole('button', { name: 'Ver etapas ocultas' }).click();
   await expect(cursos.getByRole('listitem', { name: 'Etapa Nuevo' }).getByText('Oculta')).toBeVisible();

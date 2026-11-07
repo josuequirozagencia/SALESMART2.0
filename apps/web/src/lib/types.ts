@@ -803,6 +803,8 @@ export interface AgentStatus {
   reason: string | null;
   /** Con el agente activo: `out_of_hours` = espera el horario de atención. */
   outcome?: 'out_of_hours' | null;
+  /** `no_credits`: reanudar no serviría todavía (sin créditos de IA disponibles). */
+  resume_blocked?: 'no_credits' | null;
   can_control: boolean;
 }
 

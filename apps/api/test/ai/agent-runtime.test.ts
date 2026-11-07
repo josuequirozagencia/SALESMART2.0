@@ -358,6 +358,18 @@ describe('desenlaces sin respuesta (v4, parte B)', () => {
     expect(await state(c.id)).toMatchObject({ status: 'active', reason: null, empty_replies: 0 });
   });
 
+  it('pausado por falta de créditos: «reanudar» queda bloqueado mientras no haya créditos disponibles y se libera al recargar', async () => {
+    await liveAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'Hola');
+    await tick();
+    await admin.query(`UPDATE ai_conversation_state SET status = 'paused', reason = 'no_credits' WHERE conversation_id = $1`, [c.id]);
+    await admin.query(`UPDATE ai_wallets SET balance_cache = 0 WHERE organization_id = $1`, [ORG_A]);
+    expect(await json<Status>(await call('GET', `/conversations/${c.id}/ai`, T.alice))).toMatchObject({ state: 'paused', reason: 'no_credits', resume_blocked: 'no_credits' });
+    await admin.query(`UPDATE ai_wallets SET balance_cache = 500 WHERE organization_id = $1`, [ORG_A]);
+    expect(await json<Status>(await call('GET', `/conversations/${c.id}/ai`, T.alice))).toMatchObject({ resume_blocked: null });
+  });
+
   it('el estado activo con el desenlace «fuera de horario» lo informa la bandeja', async () => {
     await liveAgent();
     const c = await mkConv();

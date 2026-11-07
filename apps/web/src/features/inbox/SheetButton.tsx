@@ -28,7 +28,8 @@ export function AgentSheetItem({ c, onDone, onError }: { c: Conversation; onDone
   return (
     <SheetButton
       icon="bot"
-      disabled={control.isPending}
+      disabled={control.isPending || (!active && !!s.resume_blocked)}
+      hint={!active && s.resume_blocked ? 'No puedes reanudarlo todavía: la empresa no tiene créditos de IA disponibles.' : undefined}
       onClick={() => {
         const a = active ? 'pause' : 'resume';
         control.mutate(a, { onError: (e) => onError(friendlyError(e, a === 'pause' ? 'No pudimos pausar al agente.' : 'No pudimos reanudar al agente.')) });

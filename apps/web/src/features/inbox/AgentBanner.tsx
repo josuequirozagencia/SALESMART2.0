@@ -19,6 +19,8 @@ const REASONS: Record<string, string> = {
   no_support: 'El agente no encontró en sus documentos lo que el cliente preguntó.',
 };
 
+const NO_CREDITS_HINT = 'No puedes reanudarlo todavía: la empresa no tiene créditos de IA disponibles.';
+
 /** Motivos que se dicen con una frase completa y propia (textos aprobados por el responsable el 2026-11-06). */
 const WHOLE: Record<string, string> = {
   human_message: 'Pausado: una persona intervino. Puedes reanudarlo.',
@@ -50,8 +52,9 @@ export function AgentBanner({ c }: { c: Conversation }) {
         {active ? (s.outcome === 'out_of_hours' ? <>El agente espera el horario de atención.</> : <>Agente de IA atendiendo · <b>{name}</b></>) : whole ? <>{whole}</> : <>El agente <b>{name}</b> {s.state === 'handed_off' ? 'pasó la conversación a una persona.' : 'está en pausa.'} {s.reason ? REASONS[s.reason] ?? '' : ''}</>}
       </span>
       {s.can_control ? (
-        active ? <Button className={SMALL} loading={control.isPending} onClick={() => act('pause')}>Tomar control</Button> : <Button className={SMALL} loading={control.isPending} onClick={() => act('resume')}>Reanudar agente</Button>
+        active ? <Button className={SMALL} loading={control.isPending} onClick={() => act('pause')}>Tomar control</Button> : <Button className={SMALL} loading={control.isPending} disabled={!!s.resume_blocked} title={s.resume_blocked ? NO_CREDITS_HINT : undefined} onClick={() => act('resume')}>Reanudar agente</Button>
       ) : null}
+      {s.resume_blocked ? <div className="basis-full text-[12px]">{NO_CREDITS_HINT}</div> : null}
       {error ? <div className="basis-full"><Alert>{error}</Alert></div> : null}
     </div>
   );
