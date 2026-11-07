@@ -274,7 +274,7 @@ describe('permisos', () => {
     await ok(await call('POST', '/context/switch', T.dave, { target: ORG_A }));
     await admin.query(`UPDATE organization_members SET access_level = 'read' WHERE user_id = $1 AND organization_id = $2`, [IDS.dave, ORG_A]);
     expect(ids(await list(T.dave, '?tab=pending'))).toEqual([c.id]);
-    expect((await ok<Conv>(await call('GET', `/conversations/${c.id}`, T.dave))).can).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false });
+    expect((await ok<Conv>(await call('GET', `/conversations/${c.id}`, T.dave))).can).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false, delete: false });
     expect((await call('GET', `/conversations/${c.id}/messages`, T.dave)).status).toBe(200);
     expect((await call('GET', '/conversations/options', T.dave)).status).toBe(200);
     for (const [method, path, body] of routes(c.id, m).filter(([mt]) => mt === 'POST')) expect((await call(method, path, T.dave, body)).status, `${method} ${path} lectura`).toBe(403);
@@ -501,7 +501,7 @@ describe('listado', () => {
     expect(Date.parse(row!.window.expires_at!)).toBeGreaterThan(Date.now() + 21 * HOUR);
     expect(Date.parse(row!.window.expires_at!)).toBeLessThanOrEqual(Date.now() + 22 * HOUR);
     // el administrador ve lo mismo y, como ve todo, también puede aceptarla y responderla aunque no sea suya
-    expect((await list(T.alice, '?tab=pending')).items[0]!.can).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
+    expect((await list(T.alice, '?tab=pending')).items[0]!.can).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true, delete: true });
     // un texto largo con saltos de línea se resume en una línea
     await admin.query(`UPDATE messages SET body = $1 WHERE conversation_id = $2 AND body LIKE 'Hola%'`, ['Hola\n\n   ' + 'x'.repeat(300), c.id]);
     await admin.query(`UPDATE messages SET status = 'received', sent_at = now() WHERE conversation_id = $1 AND kind = 'image'`, [c.id]);
