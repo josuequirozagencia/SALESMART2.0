@@ -81,6 +81,14 @@ describe('Inbox · agente de IA en la conversación', () => {
     expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
   });
 
+  it('sin créditos disponibles, «Reanudar agente» queda desactivado y dice por qué', async () => {
+    mockApi(server({ status: STATUS({ state: 'paused', reason: 'no_credits', resume_blocked: 'no_credits' }), posts: [] }));
+    renderApp('/inbox/c1');
+    const banner = await screen.findByRole('status', { name: 'Agente de IA' });
+    expect(banner).toHaveTextContent('la empresa no tiene créditos de IA disponibles');
+    expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeDisabled();
+  });
+
   it('con el agente activo fuera del horario dice que espera el horario de atención y deja «Tomar control»', async () => {
     mockApi(server({ status: STATUS({ outcome: 'out_of_hours' }), posts: [] }));
     renderApp('/inbox/c1');

@@ -4,6 +4,7 @@ import { agents, aiConversationState, conversations, Database, messages, type Te
 import { ConflictError } from '../../../errors';
 import type { AppLogger } from '../../../logger';
 import { TenantContext } from '../../../tenant';
+import { AiCreditsService } from '../ai-credits.service';
 import { APP_LOGGER } from '../../../tokens';
 import { writeAudit } from '../../audit';
 import { loadConversation, scopeOf, type InboxAccess } from '../../inbox';
@@ -49,6 +50,8 @@ export interface AgentStatusView {
   reason: string | null;
   /** Desenlace de la última atención sin respuesta con el agente aún activo (`out_of_hours`: espera el horario de atención). */
   outcome: 'out_of_hours' | null;
+  /** `no_credits`: reanudar no serviría (la empresa no tiene créditos de IA disponibles); la bandeja desactiva «Reanudar» y dice por qué. */
+  resume_blocked: 'no_credits' | null;
   can_control: boolean;
 }
 
@@ -79,6 +82,7 @@ export class AgentRuntimeService {
     @Inject(AgentToolsService) private readonly tools: AgentToolsService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SlaService) private readonly sla: SlaService,
+    @Inject(AiCreditsService) private readonly credits: AiCreditsService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
@@ -299,19 +303,25 @@ export class AgentRuntimeService {
   /** Qué hace el agente en esta conversación, para la bandeja. 404 si la persona no puede ver la conversación. */
   async status(access: InboxAccess, conversationId: string): Promise<AgentStatusView> {
     const scope = scopeOf(access);
-    return this.db.withTenant(async (tx) => {
+    const view: AgentStatusView = await this.db.withTenant(async (tx): Promise<AgentStatusView> => {
       const { c } = await loadConversation(tx, scope, conversationId);
       const agentId = await this.channelAgent(tx, conversationId);
       const [state] = await tx.select({ status: aiConversationState.status, reason: aiConversationState.reason, outcome: aiConversationState.lastOutcome }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).limit(1);
       const agent = agentId ? ((await tx.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0] ?? null) : null;
-      if (!agent) return { agent: null, state: 'idle', reason: null, outcome: null, can_control: false };
+      if (!agent) return { agent: null, state: 'idle', reason: null, outcome: null, resume_blocked: null, can_control: false };
       const open = c.status !== 'closed';
       const unattended = c.status === 'unassigned' || c.status === 'pending';
       // Sin fila de estado el agente aún no intervino. Si una persona ya escribió después de la última asignación, la tarea NO lo atenderá: se muestra igual que si estuviera pausado (el mismo criterio de `claim`)
       const blocked = !state && unattended && (await this.humanBlocks(tx, conversationId));
       const effective = (state ? state.status : blocked ? 'paused' : unattended ? 'active' : 'idle') as AgentStatusView['state'];
-      return { agent, state: effective, reason: state ? state.reason : blocked ? 'human_message' : null, outcome: state?.status === 'active' && state.outcome === 'out_of_hours' ? 'out_of_hours' : null, can_control: access.canReply && open };
+      return { agent, state: effective, reason: state ? state.reason : blocked ? 'human_message' : null, outcome: state?.status === 'active' && state.outcome === 'out_of_hours' ? 'out_of_hours' : null, resume_blocked: null, can_control: access.canReply && open };
     });
+    // Pausado por falta de créditos: reanudar solo sirve si ya hay créditos disponibles (el saldo se lee aparte, fuera de la transacción de la conversación)
+    if (view.reason === 'no_credits' && view.state === 'paused' && view.can_control) {
+      const w = await this.credits.summary();
+      if (w.balance - w.held <= 0) return { ...view, resume_blocked: 'no_credits' };
+    }
+    return view;
   }
 
   /** Una persona toma el control: el agente deja de contestar en esta conversación. */
