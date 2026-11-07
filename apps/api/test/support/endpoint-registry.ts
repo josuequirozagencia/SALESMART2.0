@@ -305,6 +305,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/conversations/:id/take', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/close', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'DELETE /v1/conversations/:id', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'GET /v1/attribution/ad-performance', kind: 'tenant', isolationTest: '../../attribution/touches.test.ts' },
   { route: 'POST /v1/conversations/:id/read', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/messages/:id/retry', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   // Transferir y compartir (M5.5a, ADR-14/50). Pruebas: test/inbox/sharing.test.ts (A↔B, quién puede, visibilidad del colaborador, el lead se mueve, notas automáticas, auditoría)

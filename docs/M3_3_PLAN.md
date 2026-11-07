@@ -1,7 +1,7 @@
 # Plan M3.3 — Etiquetas del sistema + Atribución Meta + CAPI Purchase
 
 **Estado base:** implementado (ADR-45 aprobado, 2026-10-16)  
-**Adiciones:** §11 Canal del lead — **construido el 2026-11-07** · §12 Panel de rendimiento de anuncios (ver §13 «Notas de implementación»)  
+**Adiciones:** §11 Canal del lead — **construido el 2026-11-07** · §12 Panel de rendimiento de anuncios — **API construida el 2026-11-07** (ver §13 «Notas de implementación»)  
 **Fecha de elaboración:** 2026-10-16 — **Actualizado:** 2026-11-07  
 **ADRs que aplican:** ADR-08, ADR-18, ADR-43, ADR-45
 
@@ -617,3 +617,11 @@ ORDER BY sales DESC, leads DESC
 - **Esquema compartido:** `packages/shared` no tenía esquemas de contacto ni depende de Zod; exporta `CONTACT_CHANNELS` y el tipo, y la validación Zod (`contactChannelSchema`) vive en el módulo de contactos de la API.
 - **Web:** insignia de canal (`ui/ChannelBadge`) en «Origen del lead» (solo aparece si el contacto tiene datos de atribución) y columna opcional «Canal» en Contactos.
 - **Sin validar:** el relleno de la migración con filas reales y navegador real.
+
+### §12 — Rendimiento de anuncios (API construida; prompt corregido por el responsable el 2026-11-07)
+El prompt de implementación corregido (que sustituye al resumen anterior) pide **solo la API y sus pruebas**; la pantalla `/attribution`, el menú y la ★ del §12.3 **no se construyeron**.
+- **Migración `0127`:** el permiso `attribution.view` (solo `client_admin`; en el catálogo, agrupado como «Analítica y descargas», no otorgable a un asesor y no es de solo lectura).
+- **`GET /v1/attribution/ad-performance`** (`@RequirePermission('attribution.view')`): parámetros estrictos `from` y `to` (fecha o fecha con hora; una fecha sola se toma en UTC y `to` la incluye completa; por omisión, los últimos 30 días; máximo 366). Responde `{ rows, period }` y cada fila trae `ad_id, ad_name, campaign_name, adset_name, leads, appointments, sales, revenue`, ordenadas por ventas y luego ingresos (luego leads).
+- **Definiciones (las mismas que la cohorte de «Anuncio ganador», ADR-55):** *leads* = contactos vigentes cuyo `first_touch_ad_id` es ese anuncio y cuyo primer toque cae en el periodo; *appointments* = citas no canceladas de esos contactos; *sales* = ventas activas (no anuladas) de esos contactos (tabla `sales`, no la etiqueta «Venta»); *revenue* = suma de `sales.amount` (el plan decía `sale.total`; la columna real es `amount`, el total de la venta) como texto con dos decimales. Un contacto **sin id de anuncio** no entra (los anteriores a M6.6 no lo tienen). El nombre, la campaña y el conjunto son los del contacto más reciente de ese anuncio.
+- **Web:** nada nuevo para §12. El canal sí tiene insignia y columna (§11).
+- **Sin validar:** navegador real; la consulta con volumen real.

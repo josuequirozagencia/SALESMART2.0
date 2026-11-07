@@ -4,7 +4,8 @@ import { APP_CONFIG } from '../../tokens';
 import { ContactsModule } from '../contacts';
 import { OrganizationsModule } from '../organizations';
 import { TagsModule } from '../tags';
-import { AttributionEndpointController, AttributionWebhookController } from './attribution.controller';
+import { AdPerformanceService } from './ad-performance.service';
+import { AdPerformanceController, AttributionEndpointController, AttributionWebhookController } from './attribution.controller';
 import { AttributionService } from './attribution.service';
 import { CapiSenderJob } from './capi-sender.job';
 import { CapiSenderService } from './capi-sender.service';
@@ -28,9 +29,10 @@ export class AttributionModule {
     const mod: DynamicModule = {
       module: AttributionModule,
       imports: [ContactsModule, OrganizationsModule, TagsModule],
-      controllers: [AttributionWebhookController, AttributionEndpointController, MetaSettingsController],
+      controllers: [AttributionWebhookController, AttributionEndpointController, AdPerformanceController, MetaSettingsController],
       providers: [
         AttributionService,
+        AdPerformanceService,
         CapiSenderService,
         CapiSenderJob,
         MetaSettingsService,
