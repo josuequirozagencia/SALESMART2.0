@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, date, foreignKey, index, integer, jsonb, primaryKey, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, date, foreignKey, index, integer, jsonb, primaryKey, smallint, text, timestamp, uniqueIndex, uuid, varchar } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { tenantTable } from './helpers';
 import { users } from './identity';
@@ -23,6 +23,8 @@ export const contacts = tenantTable(
     email: text('email'),
     ownerId: uuid('owner_id').references(() => users.id),
     source: text('source').notNull().default('manual'),
+    /** Canal de entrada en lenguaje humano (M3.3 §11): se fija al CREAR el contacto y no se sobreescribe. */
+    channel: varchar('channel', { length: 20 }).notNull().default('manual'),
     consent: text('consent').notNull().default('unknown'),
     consentUpdatedAt: ts('consent_updated_at'),
     // Atribución de Meta Ads (M3.3, ADR-45): primer clic (inmutable una vez grabado) y último clic de Click-to-WhatsApp. `ctwa_cl_id` es el del último clic.
@@ -51,6 +53,7 @@ export const contacts = tenantTable(
   (t) => [
     check('contacts_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 200`),
     check('contacts_email_shape', sql`${t['email']!} IS NULL OR (${t['email']!} = lower(${t['email']!}) AND length(${t['email']!}) <= 254 AND ${t['email']!} ~ '^[^[:space:]@]+@[^[:space:]@]+[.][^[:space:]@]{2,}$')`),
+    check('contacts_channel_valid', sql`${t['channel']!} IN ('facebook', 'instagram', 'whatsapp', 'manual', 'other')`),
     check('contacts_source_shape', sql`${t['source']!} ~ '^[a-z][a-z0-9_]{1,31}$'`),
     check('contacts_consent_valid', sql`${t['consent']!} IN ('unknown', 'granted', 'revoked')`),
     check('contacts_ctwa_cl_id_shape', sql`${t['ctwaClId']!} IS NULL OR length(btrim(${t['ctwaClId']!})) BETWEEN 1 AND 500`),

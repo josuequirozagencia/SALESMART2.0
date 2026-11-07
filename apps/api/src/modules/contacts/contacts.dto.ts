@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { customFieldValuesSchema } from '../custom-fields';
 import { tagIdsSchema } from '../tags';
+import { contactChannelSchema } from './contact-channel';
 import { contactFiltersShape } from './contact-filters';
 
 const name = z.string().trim().min(1).max(200).refine((v) => !/\p{Cc}/u.test(v), 'caracteres no permitidos');
@@ -26,6 +27,8 @@ export const createContactSchema = z
     custom_fields: customFieldValuesSchema.optional(),
     /** Etiquetas PERSONALIZADAS del contacto (M3.4); las del sistema las pone el sistema. */
     tag_ids: tagIdsSchema.optional(),
+    /** Canal de entrada (M3.3 §11): solo al crear; después es de solo lectura (el PATCH lo rechaza). Sin él, `manual`. */
+    channel: contactChannelSchema.optional(),
   })
   .strict();
 export type CreateContactDto = z.infer<typeof createContactSchema>;

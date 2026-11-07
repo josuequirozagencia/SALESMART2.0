@@ -1,7 +1,7 @@
 # Plan M3.3 — Etiquetas del sistema + Atribución Meta + CAPI Purchase
 
 **Estado base:** implementado (ADR-45 aprobado, 2026-10-16)  
-**Adiciones pendientes:** §11 Canal del lead · §12 Panel de rendimiento de anuncios (ver abajo)  
+**Adiciones:** §11 Canal del lead — **construido el 2026-11-07** · §12 Panel de rendimiento de anuncios — **API construida el 2026-11-07** (ver §13 «Notas de implementación»)  
 **Fecha de elaboración:** 2026-10-16 — **Actualizado:** 2026-11-07  
 **ADRs que aplican:** ADR-08, ADR-18, ADR-43, ADR-45
 
@@ -605,3 +605,23 @@ ORDER BY sales DESC, leads DESC
 8. UI: columna "Canal" opcional en la tabla de contactos
 9. UI: pantalla `/attribution` con tabla, filtros y estrella dorada
 10. `pnpm check` completo
+
+---
+
+## 13. Notas de implementación (2026-11-07)
+
+### §11 — Canal del lead (construido)
+- **Migración `0126`:** `contacts.channel varchar(20) NOT NULL DEFAULT 'manual'` con el CHECK `contacts_channel_valid`. La RLS ya cubría la tabla. Los contactos que ya existían se rellenan según su origen (manual→manual, whatsapp→whatsapp, meta_ctwa→facebook, el resto→other); como la regla P8 prohíbe quitar la RLS forzada, ni siquiera dentro de una migración, el relleno recorre las empresas poniendo cada una en contexto con `set_config('app.org_id', …, true)`, igual que la aplicación.
+- **Derivación (función pura `channelOf` / `channelOfForm`, `modules/contacts/contact-channel.ts`):** CTWA con `placement = instagram` → instagram; CTWA con placement facebook o sin placement → facebook; mensaje de WhatsApp sin anuncio → whatsapp; alta manual → manual; formulario público → según el `utm_source` del envío (facebook/fb/meta → facebook; instagram/ig → instagram; otro o ninguno → other); cualquier otro origen → other. Se fija **una sola vez**, cuando la llamada crea el contacto (`ContactsService.setChannelOnCreate`); ni un clic posterior ni otro mensaje lo cambian. El método real de atribución es `recordIn` (el plan lo llamaba `recordAttribution`).
+- **API:** `channel` en `GET /v1/contacts` y `GET /v1/contacts/:id` (y dentro de `attribution`); `POST /v1/contacts` lo acepta (solo los valores permitidos; sin él, `manual`) y lo deja en la auditoría de la creación; `PATCH /v1/contacts/:id` lo rechaza (esquema estricto, 400). `placement` opcional en el punto de entrada de atribución (`facebook`|`instagram`).
+- **Esquema compartido:** `packages/shared` no tenía esquemas de contacto ni depende de Zod; exporta `CONTACT_CHANNELS` y el tipo, y la validación Zod (`contactChannelSchema`) vive en el módulo de contactos de la API.
+- **Web:** insignia de canal (`ui/ChannelBadge`) en «Origen del lead» (solo aparece si el contacto tiene datos de atribución) y columna opcional «Canal» en Contactos.
+- **Sin validar:** el relleno de la migración con filas reales y navegador real.
+
+### §12 — Rendimiento de anuncios (API construida; prompt corregido por el responsable el 2026-11-07)
+El prompt de implementación corregido (que sustituye al resumen anterior) pide **solo la API y sus pruebas**; la pantalla `/attribution`, el menú y la ★ del §12.3 **no se construyeron**.
+- **Migración `0127`:** el permiso `attribution.view` (solo `client_admin`; en el catálogo, agrupado como «Analítica y descargas», no otorgable a un asesor y no es de solo lectura).
+- **`GET /v1/attribution/ad-performance`** (`@RequirePermission('attribution.view')`): parámetros estrictos `from` y `to` (fecha o fecha con hora; una fecha sola se toma en UTC y `to` la incluye completa; por omisión, los últimos 30 días; máximo 366). Responde `{ rows, period }` y cada fila trae `ad_id, ad_name, campaign_name, adset_name, leads, appointments, sales, revenue`, ordenadas por ventas y luego ingresos (luego leads).
+- **Definiciones (las mismas que la cohorte de «Anuncio ganador», ADR-55):** *leads* = contactos vigentes cuyo `first_touch_ad_id` es ese anuncio y cuyo primer toque cae en el periodo; *appointments* = citas no canceladas de esos contactos; *sales* = ventas activas (no anuladas) de esos contactos (tabla `sales`, no la etiqueta «Venta»); *revenue* = suma de `sales.amount` (el plan decía `sale.total`; la columna real es `amount`, el total de la venta) como texto con dos decimales. Un contacto **sin id de anuncio** no entra (los anteriores a M6.6 no lo tienen). El nombre, la campaña y el conjunto son los del contacto más reciente de ese anuncio.
+- **Web:** nada nuevo para §12. El canal sí tiene insignia y columna (§11).
+- **Sin validar:** navegador real; la consulta con volumen real.

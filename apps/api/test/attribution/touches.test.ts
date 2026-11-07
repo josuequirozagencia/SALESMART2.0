@@ -1,6 +1,7 @@
 // M6.6 — Historial de toques y «Anuncio ganador» (ADR-55, fase A). Rutas cubiertas (el registro de endpoints exige que este archivo las escriba tal cual):
 //   GET /v1/contacts/:id/touches
 //   GET /v1/analytics/winning-ads
+//   GET /v1/attribution/ad-performance
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -300,5 +301,185 @@ describe('«Anuncio ganador»', () => {
     expect(csv).toContain('Chats nuevos');
     expect(csv).toMatch(/AD-?A|Corte promo/);
     expect(Number((await admin.query(`SELECT count(*) FROM analytics_exports WHERE report = 'winning_ads'`)).rows[0].count)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// M3.3 §11 (aprobado el 2026-11-07): canal del lead
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+const channelOfContact = async (id: string): Promise<string> => (await admin.query('SELECT channel FROM contacts WHERE id = $1', [id])).rows[0].channel as string;
+const ingest = (m: NormalizedMessage) => TenantContext.run({ organizationId: ORG_A }, () => import('../../src/db').then(({ Database }) => app.get(Database).withTenant((tx) => conversations.ingestInbound(tx, channelA, m, { now: new Date(), timeZone: 'America/Guayaquil', assignable: new Set() }))));
+
+describe('canal del lead (M3.3 §11)', () => {
+  it('un clic CTWA crea el contacto con channel=facebook (sin placement o con placement facebook) o instagram', async () => {
+    await record(click({ phone: '+593984100001', ctwa_cl_id: 'c-ig', placement: 'instagram' }));
+    await record(click({ phone: '+593984100002', ctwa_cl_id: 'c-fb', placement: 'facebook' }));
+    await record(click({ phone: '+593984100003', ctwa_cl_id: 'c-none' }));
+    expect(await channelOfContact(await contactOf('+593984100001'))).toBe('instagram');
+    expect(await channelOfContact(await contactOf('+593984100002'))).toBe('facebook');
+    expect(await channelOfContact(await contactOf('+593984100003'))).toBe('facebook'); // sin placement: el valor por omisión de un anuncio de Meta
+  });
+
+  it('un mensaje de WhatsApp sin anuncio crea el contacto como whatsapp; con el aviso de un anuncio (referral), como facebook', async () => {
+    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date('2026-10-15T15:00:00Z'), ...over });
+    await ingest(msg({ externalId: 'wamid.CH1', from: '+593984100004' }));
+    await ingest(msg({ externalId: 'wamid.CH2', from: '+593984100005', referral: { sourceId: '120077', sourceType: 'ad', sourceUrl: null, headline: 'Promo', body: null, thumbnailUrl: null, ctwaClid: 'clid-ch2' } }));
+    expect(await channelOfContact(await contactOf('+593984100004'))).toBe('whatsapp');
+    expect(await channelOfContact(await contactOf('+593984100005'))).toBe('facebook');
+  });
+
+  it('la creación manual deja channel=manual por omisión y acepta uno de los permitidos; el origen sigue siendo «manual»', async () => {
+    const a = await json<{ id: string; channel: string; source: string }>(await call('POST', '/contacts', T.alice, { name: 'Beto', phones: ['+593984100006'] }));
+    expect(a).toMatchObject({ channel: 'manual', source: 'manual' });
+    const b = await json<{ id: string; channel: string }>(await call('POST', '/contacts', T.alice, { name: 'Carla', phones: ['+593984100007'], channel: 'instagram' }));
+    expect(b.channel).toBe('instagram');
+    expect(await channelOfContact(b.id)).toBe('instagram');
+    // el asesor también puede crear con un canal permitido; uno que no lo es, 400
+    expect((await call('POST', '/contacts', T.carol, { name: 'Dani', phones: ['+593984100008'], channel: 'whatsapp' })).status).toBe(201);
+    for (const bad of ['tiktok', 'Facebook', '', null, 5]) expect((await call('POST', '/contacts', T.alice, { name: 'X', phones: ['+593984100009'], channel: bad })).status, String(bad)).toBe(400);
+    // la auditoría de la creación lo registra
+    const audit = (await admin.query("SELECT new_value FROM audit_logs WHERE entity_type = 'contact' AND entity_id = $1 AND field IS NULL", [b.id])).rows[0];
+    expect(audit.new_value).toMatchObject({ channel: 'instagram', source: 'manual' });
+  });
+
+  it('el canal es de solo lectura tras crear el contacto: el PATCH lo rechaza y no cambia nada', async () => {
+    const made = await json<{ id: string }>(await call('POST', '/contacts', T.alice, { name: 'Eva', phones: ['+593984100012'], channel: 'whatsapp' }));
+    expect((await call('PATCH', `/contacts/${made.id}`, T.alice, { channel: 'facebook' })).status).toBe(400);
+    expect((await call('PATCH', `/contacts/${made.id}`, T.alice, { name: 'Eva Luna', channel: 'facebook' })).status).toBe(400);
+    expect(await channelOfContact(made.id)).toBe('whatsapp');
+    expect((await call('PATCH', `/contacts/${made.id}`, T.alice, { name: 'Eva Luna' })).status).toBe(200); // lo demás se sigue editando
+    expect(await channelOfContact(made.id)).toBe('whatsapp');
+  });
+
+  it('GET /contacts y GET /contacts/:id traen el canal (también dentro de la atribución)', async () => {
+    await record(click({ phone: '+593984100010', ctwa_cl_id: 'c-list', placement: 'instagram' }));
+    const id = await contactOf('+593984100010');
+    const one = await json<{ channel: string; attribution: { channel: string } | null }>(await call('GET', `/contacts/${id}`, T.alice));
+    expect(one.channel).toBe('instagram');
+    expect(one.attribution?.channel).toBe('instagram');
+    const list = await json<{ items: Array<{ id: string; channel: string }> }>(await call('GET', '/contacts', T.alice));
+    expect(list.items.find((x) => x.id === id)?.channel).toBe('instagram');
+  });
+
+  it('una vez asignado, el canal NUNCA cambia: ni con otro clic (otro placement), ni con otro mensaje', async () => {
+    await record(click({ phone: '+593984100011', ctwa_cl_id: 'first', placement: 'instagram' }));
+    await record(click({ phone: '+593984100011', ctwa_cl_id: 'second', placement: 'facebook' }));
+    await record(click({ phone: '+593984100011', ctwa_cl_id: 'third' }));
+    const id = await contactOf('+593984100011');
+    await ingest({ externalId: 'wamid.LATE', from: '+593984100011', fromRaw: '593984100011', profileName: 'Ana', kind: 'text', text: 'Hola otra vez', media: null, extra: {}, sentAt: new Date('2026-10-16T15:00:00Z') } as NormalizedMessage);
+    expect(await channelOfContact(id)).toBe('instagram');
+  });
+
+  it('el webhook rechaza un placement desconocido (esquema estricto)', async () => {
+    const { ctwaWebhookSchema } = await import('../../src/modules/attribution/attribution.dto');
+    expect(ctwaWebhookSchema.safeParse({ phone: '+593984100013', ctwa_cl_id: 'x', placement: 'instagram' }).success).toBe(true);
+    expect(ctwaWebhookSchema.safeParse({ phone: '+593984100013', ctwa_cl_id: 'x', placement: 'tiktok' }).success).toBe(false);
+  });
+
+  it('A↔B: el canal no se filtra entre organizaciones (404 uniforme, y la lista de B no trae contactos de A)', async () => {
+    const a = await json<{ id: string }>(await call('POST', '/contacts', T.alice, { name: 'De A', phones: ['+593984100020'], channel: 'instagram' }));
+    const b = await json<{ id: string; channel: string }>(await call('POST', '/contacts', T.bob, { name: 'De B', phones: ['+593984100021'] }));
+    expect(b.channel).toBe('manual');
+    expect((await call('GET', `/contacts/${a.id}`, T.bob)).status).toBe(404);
+    expect((await call('GET', `/contacts/${b.id}`, T.alice)).status).toBe(404);
+    const listB = await json<{ items: Array<{ id: string; channel: string }> }>(await call('GET', '/contacts', T.bob));
+    expect(listB.items.map((x) => x.id)).toEqual([b.id]);
+    expect(JSON.stringify(listB)).not.toContain('instagram');
+    // un clic de A no toca el canal de un contacto de B con el mismo teléfono
+    await TenantContext.run({ organizationId: ORG_A }, () => attribution.record(click({ phone: '+593984100021', ctwa_cl_id: 'cross' }) as never));
+    expect(await channelOfContact(b.id)).toBe('manual');
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// M3.3 §12 (aprobado el 2026-11-07): rendimiento de anuncios
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+type AdRow = { ad_id: string; ad_name: string | null; campaign_name: string | null; adset_name: string | null; leads: number; appointments: number; sales: number; revenue: string };
+type AdPerf = { rows: AdRow[]; period: { from: string; to: string } };
+const perf = (t: string | undefined, qs = `from=${encodeURIComponent(FROM)}&to=${encodeURIComponent(TO)}`) => call('GET', `/attribution/ad-performance?${qs}`, t);
+
+describe('rendimiento de anuncios (M3.3 §12)', () => {
+  it('por anuncio: leads (primer toque), citas no canceladas, ventas activas e ingresos; ordenado por ventas y luego ingresos', async () => {
+    // Anuncio 1: 3 leads, 2 citas (una cancelada no cuenta), 2 ventas activas (una anulada no cuenta) por 30 + 45.50
+    const a1 = await lead({ first: { ad: 'Corte promo', adId: '120001', campaign: 'Octubre', at: '2026-10-05T15:00:00Z' } });
+    const a2 = await lead({ first: { ad: 'Corte promo', adId: '120001', campaign: 'Octubre', at: '2026-10-06T15:00:00Z' } });
+    await lead({ first: { ad: 'Corte promo', adId: '120001', campaign: 'Octubre', at: '2026-10-07T15:00:00Z' } });
+    await appointment(a1, '2026-10-10T15:00:00Z');
+    await appointment(a1, '2026-10-11T15:00:00Z');
+    await appointment(a2, '2026-10-12T15:00:00Z', 'cancelled');
+    await sale(a1, '2026-10-10T16:00:00Z', 30);
+    await sale(a2, '2026-10-12T16:00:00Z', 45.5);
+    await sale(a2, '2026-10-13T16:00:00Z', 99, 'cancelled');
+    // Anuncio 2: 1 lead y 2 ventas por 100 (más ventas): va primero
+    const b1 = await lead({ first: { ad: 'Tinte', adId: '120002', campaign: 'Noviembre', at: '2026-10-08T15:00:00Z' } });
+    await sale(b1, '2026-10-09T16:00:00Z', 40);
+    await sale(b1, '2026-10-10T16:00:00Z', 60);
+    // Anuncio 3: 2 ventas pero menos ingresos que el 1: desempata por ingresos
+    const c1 = await lead({ first: { ad: 'Barba', adId: '120003', campaign: 'Octubre', at: '2026-10-09T15:00:00Z' } });
+    await sale(c1, '2026-10-10T16:00:00Z', 10);
+    await sale(c1, '2026-10-11T16:00:00Z', 10);
+    // Anuncio 4: sin ventas
+    await lead({ first: { ad: 'Cejas', adId: '120004', campaign: 'Octubre', at: '2026-10-09T15:00:00Z' } });
+    await admin.query("UPDATE contacts SET first_touch_adset = 'Conjunto A' WHERE first_touch_ad_id = '120001'");
+
+    const r = await json<AdPerf>(await perf(T.alice));
+    expect(r.rows.map((x) => [x.ad_id, x.leads, x.appointments, x.sales, x.revenue])).toEqual([
+      ['120002', 1, 0, 2, '100.00'], // 2 ventas, 100
+      ['120001', 3, 2, 2, '75.50'], // 2 ventas, 75.50 (la anulada y la cita cancelada no cuentan)
+      ['120003', 1, 0, 2, '20.00'],
+      ['120004', 1, 0, 0, '0.00'],
+    ]);
+    expect(r.rows[1]).toMatchObject({ ad_name: 'Corte promo', campaign_name: 'Octubre', adset_name: 'Conjunto A' });
+    expect(r.period).toEqual({ from: new Date(FROM).toISOString(), to: new Date(TO).toISOString() });
+  });
+
+  it('solo cuentan los contactos vigentes, con id de anuncio y cuyo primer toque cae en el periodo; el nombre es el del contacto más reciente', async () => {
+    await lead({ first: { ad: 'Nombre viejo', adId: '120001', at: '2026-10-05T15:00:00Z' } });
+    await lead({ first: { ad: 'Nombre nuevo', adId: '120001', at: '2026-10-20T15:00:00Z' } });
+    await lead({ first: { ad: 'Fuera de periodo', adId: '120005', at: '2026-08-01T15:00:00Z' } });
+    await lead({ first: { ad: 'Sin id', adId: null, at: '2026-10-05T15:00:00Z' } });
+    await lead({ first: null });
+    const gone = await lead({ first: { ad: 'Nombre nuevo', adId: '120001', at: '2026-10-21T15:00:00Z' } });
+    await admin.query('UPDATE contacts SET deleted_at = now() WHERE id = $1', [gone]);
+    const r = await json<AdPerf>(await perf(T.alice));
+    expect(r.rows.map((x) => [x.ad_id, x.ad_name, x.leads])).toEqual([['120001', 'Nombre nuevo', 2]]);
+  });
+
+  it('from y to aceptan fecha o fecha con hora; por omisión, los últimos 30 días; "to" con fecha es inclusivo', async () => {
+    await lead({ first: { ad: 'Reciente', adId: '120006', at: new Date(Date.now() - 5 * 86_400_000).toISOString() } });
+    await lead({ first: { ad: 'Antiguo', adId: '120007', at: new Date(Date.now() - 45 * 86_400_000).toISOString() } });
+    const def = await json<AdPerf>(await perf(T.alice, ''));
+    expect(def.rows.map((x) => x.ad_id)).toEqual(['120006']);
+    expect(new Date(def.period.to).getTime() - new Date(def.period.from).getTime()).toBe(30 * 86_400_000);
+    await lead({ first: { ad: 'Último día', adId: '120008', at: '2026-10-31T23:00:00Z' } });
+    const byDate = await json<AdPerf>(await perf(T.alice, 'from=2026-10-01&to=2026-10-31'));
+    expect(byDate.rows.map((x) => x.ad_id)).toEqual(['120008']); // "to" de solo fecha incluye todo ese día
+    expect(byDate.period).toEqual({ from: '2026-10-01T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z' });
+  });
+
+  it('valida los parámetros: fechas inválidas o al revés, periodo demasiado largo y parámetros desconocidos son 400', async () => {
+    for (const qs of ['from=ayer', 'to=2026-13-40', 'from=2026-11-01&to=2026-10-01', 'from=2020-01-01&to=2026-01-01', 'channel=facebook', 'touchModel=first']) expect((await perf(T.alice, qs)).status, qs).toBe(400);
+  });
+
+  it('permisos: el asesor recibe 403 y sin sesión 401', async () => {
+    await lead({ first: { ad: 'A', adId: '120001', at: '2026-10-05T15:00:00Z' } });
+    expect((await perf(T.carol)).status).toBe(403);
+    expect((await perf(undefined)).status).toBe(401);
+    expect((await perf(T.alice)).status).toBe(200);
+  });
+
+  it('A↔B: cada empresa ve solo sus anuncios, aunque compartan el mismo id de anuncio; las ventas de A no suman en B', async () => {
+    const a = await lead({ first: { ad: 'Anuncio compartido', adId: '120001', at: '2026-10-05T15:00:00Z' } });
+    await lead({ first: { ad: 'Anuncio compartido', adId: '120001', at: '2026-10-06T15:00:00Z' } });
+    await lead({ first: { ad: 'Solo de A', adId: '120009', at: '2026-10-06T15:00:00Z' } });
+    await sale(a, '2026-10-07T16:00:00Z', 80);
+    await lead({ org: ORG_B, first: { ad: 'Anuncio compartido', adId: '120001', at: '2026-10-05T15:00:00Z' } });
+    await lead({ org: ORG_B, first: { ad: 'Solo de B', adId: '120010', at: '2026-10-05T15:00:00Z' } });
+    const ra = await json<AdPerf>(await perf(T.alice));
+    const rb = await json<AdPerf>(await perf(T.bob));
+    expect(ra.rows.map((x) => [x.ad_id, x.leads, x.sales, x.revenue])).toEqual([['120001', 2, 1, '80.00'], ['120009', 1, 0, '0.00']]);
+    expect(rb.rows.map((x) => [x.ad_id, x.leads, x.sales, x.revenue])).toEqual([['120001', 1, 0, '0.00'], ['120010', 1, 0, '0.00']]);
+    expect(JSON.stringify(rb)).not.toContain('Solo de A');
+    expect(JSON.stringify(ra)).not.toContain('Solo de B');
   });
 });

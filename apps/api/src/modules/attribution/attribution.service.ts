@@ -5,7 +5,7 @@ import { Database, metaEvents, type TenantTx } from '../../db';
 import { NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
-import { ContactsService, ContactTouchesService } from '../contacts';
+import { channelOf, ContactsService, ContactTouchesService } from '../contacts';
 import { AttributionEndpointsService, OrgDirectoryService } from '../organizations';
 import { SystemTagsService } from '../tags';
 import type { CtwaWebhookDto } from './attribution.dto';
@@ -67,6 +67,8 @@ export class AttributionService {
     const at = input.occurred_at ? new Date(input.occurred_at) : now;
     {
       const { id, created } = known ?? (await this.contacts.findOrCreateByPhone(tx, input.phone, input.source));
+      // El canal se fija UNA vez, cuando el contacto nace con este clic; un clic posterior no lo cambia
+      if (created) await this.contacts.setChannelOnCreate(tx, id, channelOf(input.source, input.placement ?? null));
       const touch = await this.contacts.applyTouch(tx, id, {
         ctwaClId: input.ctwa_cl_id,
         source: input.source,

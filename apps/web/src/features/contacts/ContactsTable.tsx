@@ -1,6 +1,7 @@
 import { shortDate } from '../../lib/format';
 import { formatPhone } from '../../lib/phone';
 import type { Consent, Contact, CustomField } from '../../lib/types';
+import { ChannelBadge } from '../../ui/ChannelBadge';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { TagBadges } from './AttributionSection';
 import { customText, type ColumnDef } from './columns';
@@ -23,6 +24,8 @@ function Cell({ c, col, field, onOpen }: { c: Contact; col: string; field: Custo
       return c.owner ? <span>{c.owner.name}</span> : <span className="text-muted">Sin asignar</span>;
     case 'source':
       return <span>{c.source}</span>;
+    case 'channel':
+      return <ChannelBadge channel={c.channel} />;
     case 'consent': {
       const [kind, label] = CONSENT[c.consent];
       return <Pill kind={kind}>{label}</Pill>;

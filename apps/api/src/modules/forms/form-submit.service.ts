@@ -11,7 +11,7 @@ import { APP_CONFIG, APP_LOGGER } from '../../tokens';
 import { AttributionService } from '../attribution';
 import { writeAudit } from '../audit';
 import { CAPTCHA_VERIFIER, type CaptchaVerifier } from '../auth';
-import { ContactsService } from '../contacts';
+import { channelOfForm, ContactsService } from '../contacts';
 import { CustomValuesService } from '../custom-fields';
 import { OpportunitiesService } from '../opportunities';
 import { FormRoutesService, OrgDirectoryService } from '../organizations';
@@ -154,6 +154,8 @@ export class FormSubmitService {
   /** Todo lo que pasa con un envío válido, en UNA transacción: o queda todo o no queda nada. */
   private async record(tx: TenantTx, form: FormRow, s: Submission, body: PublicSubmitDto, idemKey: string, meta: { ip: string | null; userAgent: string | null }, dir: { timeZone: string; assignable: ReadonlySet<string> }, now: Date): Promise<string> {
     const { id: contactId, created } = await this.contacts.findOrCreateByPhone(tx, s.phone, 'form', s.name, 'api');
+    // El canal se fija una sola vez, cuando este envío crea el contacto: sale del utm_source (facebook, instagram…) y, sin él, queda como «other»
+    if (created) await this.contacts.setChannelOnCreate(tx, contactId, channelOfForm(cleanUtm(body.utm)));
     // Completa lo que falta SIN pisar lo que la empresa ya tiene
     await this.contacts.completeProfile(tx, contactId, { name: s.name, email: s.email }, 'api');
     const filled = Object.keys(s.custom).length > 0 ? await this.custom.fillEmpty(tx, contactId, s.custom) : null;
