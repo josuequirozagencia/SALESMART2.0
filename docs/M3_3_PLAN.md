@@ -1,8 +1,9 @@
 # Plan M3.3 — Etiquetas del sistema + Atribución Meta + CAPI Purchase
 
-**Estado:** pendiente (M3.2 en curso)  
-**Fecha de elaboración:** 2026-10-16  
-**ADRs que aplican:** ADR-08, ADR-18, ADR-43 (ya aprobados); ADR nuevo para atribución (ver §5)
+**Estado base:** implementado (ADR-45 aprobado, 2026-10-16)  
+**Adiciones pendientes:** §11 Canal del lead · §12 Panel de rendimiento de anuncios (ver abajo)  
+**Fecha de elaboración:** 2026-10-16 — **Actualizado:** 2026-11-07  
+**ADRs que aplican:** ADR-08, ADR-18, ADR-43, ADR-45
 
 ---
 
@@ -13,6 +14,10 @@ M3.3 tiene dos entregables que se despliegan juntos porque comparten la misma mi
 1. **Etiquetas del sistema** — `Lead`, `Cita agendada`, `Venta` (no borrables, solo el sistema las pone, ADR-08)
 2. **Atribución de Meta Ads** — captura first-touch / last-touch en el contacto al entrar por CTWA (Click to WhatsApp)
 3. **Evento Purchase a Meta CAPI** — job diferido cancelable que se dispara cuando el sistema pone la etiqueta `Venta`
+
+**Adiciones aprobadas el 2026-11-07** (ver §11 y §12):
+4. **Canal del lead** — campo visible `channel` (`facebook` / `instagram` / `whatsapp` / `manual`) en el contacto y en la UI
+5. **Panel de rendimiento de anuncios** — pantalla de administrador con tabla de anuncios ordenada por ventas y estrella dorada ⭐ en el anuncio top
 
 ---
 
@@ -367,15 +372,236 @@ export const ContactAttributionSchema = z.object({
 
 ---
 
-## 10. Orden de implementación sugerido
+## 10. Orden de implementación sugerido (base, ya ejecutado)
 
-1. Proponer ADR-44 → esperar aprobación de Josué
-2. Migración `0027` (tablas + columnas)
-3. Schema Drizzle (`crm.ts` actualizado)
-4. `AttributionService` + tests
-5. `ICapiProvider` + fake + contract test
-6. Webhook `/v1/attribution/ctwa` + tests de aislamiento
-7. `purchase-sender.job.ts` + tests de ventana de gracia
-8. API `GET /v1/contacts/:id` — incluir `attribution` en la respuesta
-9. UI — sección "Origen del lead" en `ContactDialog`
+1. ~~Proponer ADR-45 → esperar aprobación de Josué~~ ✅
+2. ~~Migración `0027` (tablas + columnas)~~ ✅
+3. ~~Schema Drizzle (`crm.ts` actualizado)~~ ✅
+4. ~~`AttributionService` + tests~~ ✅
+5. ~~`ICapiProvider` + fake + contract test~~ ✅
+6. ~~Webhook `/v1/attribution/ctwa` + tests de aislamiento~~ ✅
+7. ~~`purchase-sender.job.ts` + tests de ventana de gracia~~ ✅
+8. ~~API `GET /v1/contacts/:id` — incluir `attribution` en la respuesta~~ ✅
+9. ~~UI — sección "Origen del lead" en `ContactDialog`~~ ✅
+10. ~~`pnpm check` completo~~ ✅
+
+---
+
+## 11. ADICIÓN — Canal del lead (`channel`)
+
+> **Aprobado 2026-11-07.** Número de migración a usar: el siguiente disponible tras las actuales.
+
+### 11.1 Por qué
+
+El campo `source` (`meta_ctwa`, `manual`, etc.) es técnico. El administrador y el asesor necesitan ver el **canal de entrada** en lenguaje humano: de qué red social llegó el cliente. Esto también permite filtrar y reportar por canal.
+
+### 11.2 Columna nueva en `contacts`
+
+```sql
+ALTER TABLE "contacts"
+  ADD COLUMN "channel" text NOT NULL DEFAULT 'manual'
+  CONSTRAINT "contacts_channel_ck"
+    CHECK("channel" IN ('facebook','instagram','whatsapp','manual','other'));
+```
+
+**Reglas de derivación automática** (en `AttributionService.recordAttribution`):
+
+| Condición | `channel` |
+|---|---|
+| `source = 'meta_ctwa'` y placement contiene `'instagram'` | `'instagram'` |
+| `source = 'meta_ctwa'` y placement contiene `'facebook'` o sin placement | `'facebook'` |
+| Contacto creado por WhatsApp sin CTWA | `'whatsapp'` |
+| Creado manualmente desde la UI | `'manual'` |
+| Cualquier otro caso | `'other'` |
+
+El campo `channel` **solo se fija en la creación** del contacto (como `first_touch`). No se sobreescribe en clics posteriores.
+
+Meta envía el placement en el payload CTWA como `referral.source_type` o `referral.media_type`; revisar el adaptador real cuando llegue en M6.
+
+### 11.3 Schema Drizzle
+
+Agregar al objeto `contacts` en `crm.ts`:
+
+```typescript
+channel: text('channel').notNull().default('manual'),
+```
+
+Con el check en la migración SQL (Drizzle no genera CHECKs con enum de texto, se pone en SQL directo).
+
+### 11.4 Webhook — payload actualizado
+
+Agregar campo opcional `placement` al `CtwaWebhookSchema`:
+
+```typescript
+const CtwaWebhookSchema = z.object({
+  // ... campos existentes ...
+  placement: z.enum(['facebook','instagram']).optional(),  // del payload de Meta/GHL
+});
+```
+
+`AttributionService.recordAttribution` recibe el `placement` y aplica la regla de derivación del §11.2.
+
+### 11.5 UI — badge de canal en "Origen del lead"
+
+En la sección **"Origen del lead"** del `ContactDialog`, agregar un badge visual justo debajo del título:
+
+| `channel` | Badge | Ícono sugerido |
+|---|---|---|
+| `facebook` | `Facebook` | ícono F azul |
+| `instagram` | `Instagram` | gradiente rosa-naranja |
+| `whatsapp` | `WhatsApp` | verde WhatsApp |
+| `manual` | `Manual` | ícono lápiz, neutro |
+| `other` | `Otro canal` | neutro |
+
+El badge también se muestra en la **tabla de contactos** como columna opcional "Canal" (junto a las columnas configurables de M3.4).
+
+### 11.6 Tipos compartidos — añadir `channel`
+
+```typescript
+export const ContactAttributionSchema = z.object({
+  // ... campos existentes ...
+  channel: z.enum(['facebook','instagram','whatsapp','manual','other']),
+});
+```
+
+### 11.7 Tests adicionales
+
+- Webhook con `placement='instagram'` → `channel='instagram'`
+- Webhook con `placement='facebook'` → `channel='facebook'`
+- Webhook sin `placement` → `channel='facebook'` (default Meta CTWA)
+- Contacto creado manualmente → `channel='manual'`
+- `channel` no cambia si llega un segundo webhook para el mismo contacto
+
+---
+
+## 12. ADICIÓN — Panel de rendimiento de anuncios
+
+> **Aprobado 2026-11-07.** Solo visible para `client_admin` y superiores. Permiso requerido: `attribution.view` (nuevo).
+
+### 12.1 Qué muestra
+
+Pantalla **"Rendimiento de anuncios"** accesible desde el menú de Configuración (o desde una sección "Atribución" en el sidebar del administrador).
+
+Tabla ordenada por **ventas (descendente)** con las siguientes columnas:
+
+| Columna | Fuente |
+|---|---|
+| ⭐ | estrella dorada solo en el 1er row (el anuncio con más ventas) |
+| Anuncio | `last_touch_ad` del contacto |
+| Conjunto de anuncios | `last_touch_adset` |
+| Campaña | `last_touch_campaign` |
+| Canal | `channel` del contacto |
+| Leads | contactos con `last_touch_ad = X` |
+| Ventas | contactos con etiqueta `Venta` y `last_touch_ad = X` |
+| Conv. % | Ventas / Leads × 100 |
+
+**Filtros disponibles:**
+- Rango de fechas (`first_touch_at` o `last_touch_at`, configurable)
+- Canal (`facebook` / `instagram` / `whatsapp` / `manual`)
+- Campaña (dropdown de campañas únicas en el periodo)
+
+**La estrella dorada ⭐** se muestra en el anuncio con más ventas en el periodo seleccionado. Si hay empate, la estrella va al que tiene más leads.
+
+### 12.2 Endpoint de API
+
+```
+GET /v1/attribution/ad-performance
+```
+
+**Query params:**
+```typescript
+z.object({
+  from:    z.string().datetime().optional(),   // default: hace 30 días
+  to:      z.string().datetime().optional(),   // default: hoy
+  channel: z.enum(['facebook','instagram','whatsapp','manual','other']).optional(),
+  touchModel: z.enum(['last','first']).default('last'),  // qué touch usar para agrupar
+})
+```
+
+**Respuesta:**
+```typescript
+{
+  rows: Array<{
+    adName:       string | null,
+    adsetName:    string | null,
+    campaignName: string | null,
+    channel:      string,
+    leads:        number,
+    sales:        number,
+    convRate:     number,   // 0-100
+    isTopAd:      boolean,  // true solo en el primero
+  }>,
+  period: { from: string, to: string },
+  touchModel: 'last' | 'first',
+}
+```
+
+**Query SQL (simplificado):**
+```sql
+SELECT
+  last_touch_ad       AS ad_name,
+  last_touch_adset    AS adset_name,
+  last_touch_campaign AS campaign_name,
+  channel,
+  COUNT(*)                                                       AS leads,
+  COUNT(*) FILTER (WHERE EXISTS (
+    SELECT 1 FROM contact_tags ct
+    JOIN tags t ON t.organization_id = ct.organization_id AND t.id = ct.tag_id
+    WHERE ct.contact_id = contacts.id
+      AND ct.organization_id = contacts.organization_id
+      AND t.system_key = 'sale'
+  ))                                                             AS sales
+FROM contacts
+WHERE organization_id = app_org()
+  AND deleted_at IS NULL
+  AND last_touch_at BETWEEN :from AND :to
+  AND last_touch_ad IS NOT NULL
+GROUP BY last_touch_ad, last_touch_adset, last_touch_campaign, channel
+ORDER BY sales DESC, leads DESC
+```
+
+**Permiso:** `attribution.view` — solo `client_admin` y superiores. Agregar a la matriz de permisos en `src/rbac/catalog.ts`.
+
+**Test de aislamiento:** org A no ve datos de org B.
+
+### 12.3 UI — pantalla "Rendimiento de anuncios"
+
+**Ruta:** `/attribution` (dentro del `AppShell` de la empresa)
+
+**Acceso:** solo visible en el sidebar para usuarios con `attribution.view`.
+
+**Comportamiento de la estrella:**
+- El primer row de la tabla lleva un ícono ⭐ dorado a la izquierda del nombre del anuncio.
+- Si no hay ventas aún (todos en 0), la estrella no aparece.
+- Tooltip al hacer hover: `"Anuncio con más ventas en el periodo"`.
+
+**Comportamiento vacío:**
+- Si no hay datos de atribución aún: mensaje vacío con enlace a "Configuración › Atribución de Meta" para configurar el webhook.
+
+**Responsive:** en móvil la tabla colapsa a cards con los datos principales (anuncio, leads, ventas, conv%).
+
+### 12.4 Criterios de aceptación de las adiciones
+
+- [ ] Migración nueva aplica sin error; `pnpm db:audit` pasa
+- [ ] Webhook con `placement='instagram'` guarda `channel='instagram'` en el contacto
+- [ ] Contacto creado manualmente tiene `channel='manual'`
+- [ ] `channel` no cambia en clics posteriores del mismo contacto
+- [ ] Badge de canal visible en la sección "Origen del lead" del ContactDialog
+- [ ] `GET /v1/attribution/ad-performance` devuelve solo datos de la org del solicitante
+- [ ] El anuncio con más ventas lleva `isTopAd: true`; si no hay ventas, ninguno lleva `isTopAd: true`
+- [ ] Pantalla "/attribution" no es accesible para `advisor` (403)
+- [ ] Tests de aislamiento A↔B para el nuevo endpoint
+- [ ] `pnpm check` verde
+
+### 12.5 Orden de implementación
+
+1. Migración nueva: columna `channel` en `contacts` + permiso `attribution.view` en `rbac/catalog.ts`
+2. Schema Drizzle: añadir `channel` al objeto `contacts`
+3. `AttributionService.recordAttribution` — derivar y grabar `channel`
+4. Webhook: añadir `placement` al schema Zod
+5. Tests de derivación de `channel`
+6. Endpoint `GET /v1/attribution/ad-performance` + test de aislamiento
+7. UI: badge de canal en `ContactDialog` › "Origen del lead"
+8. UI: columna "Canal" opcional en la tabla de contactos
+9. UI: pantalla `/attribution` con tabla, filtros y estrella dorada
 10. `pnpm check` completo
