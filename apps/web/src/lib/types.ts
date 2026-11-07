@@ -829,7 +829,7 @@ export interface Conversation {
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */
   window: { open: boolean; expires_at: string | null };
   /** Lo que la persona puede hacer; es solo ayuda de presentación, el servidor vuelve a verificarlo. */
-  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean; transfer: boolean; share: boolean };
+  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean; transfer: boolean; share: boolean; delete?: boolean };
   /** El cronómetro de respuesta; null si no hay nada que medir (sin asignar, o finalizada sin respuesta). */
   sla: ConversationSla | null;
 }

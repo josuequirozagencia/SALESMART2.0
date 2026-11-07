@@ -8,6 +8,7 @@ import { ContactTouchesService } from './contact-touches';
 import { ContactsService, type ContactScope } from './contacts.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
+const bulkDeleteSchema = z.strictObject({ ids: z.array(z.uuid()).min(1).max(200) });
 
 /** El alcance sale de los permisos VERIFICADOS del principal (nunca de la petición): sin `contacts.view_all` solo se ven y tocan los contactos propios. */
 const scopeOf = (req: AuthedRequest): ContactScope => ({ viewAll: req.principal?.permissions?.has('contacts.view_all') === true });
@@ -75,6 +76,15 @@ export class ContactsController {
   @Header('Cache-Control', 'no-store')
   update(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(updateContactSchema)) b: UpdateContactDto) {
     return this.contacts.update(scopeOf(req), id, b);
+  }
+
+  /** Borrado lógico de varios contactos (hasta 200) en una sola transacción; cada uno queda auditado. Los que no se ven o ya no existen salen en `skipped`. */
+  @RequirePermission('contacts.delete')
+  @Post('bulk-delete')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  removeMany(@Req() req: AuthedRequest, @Body(new ZodValidationPipe(bulkDeleteSchema)) b: { ids: string[] }) {
+    return this.contacts.removeMany(scopeOf(req), b.ids);
   }
 
   /** Borrado lógico (el contacto se conserva, marcado). */

@@ -21,6 +21,7 @@ const accessOf = (req: AuthedRequest): InboxAccess => ({
   canReply: req.principal?.permissions?.has('inbox.reply') === true,
   canTransfer: req.principal?.permissions?.has('inbox.transfer') === true,
   canShare: req.principal?.permissions?.has('inbox.share') === true,
+  canDelete: req.principal?.permissions?.has('conversations.delete') === true,
 });
 
 /**
@@ -212,6 +213,15 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   take(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
     return this.inbox.take(accessOf(req), id);
+  }
+
+  /** Elimina la conversación (borrado lógico, ADR-63): solo el administrador; queda auditado y los mensajes se conservan. */
+  @RequirePermission('conversations.delete')
+  @Delete(':id')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  remove(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.inbox.remove(accessOf(req), id);
   }
 
   @RequirePermission('inbox.reply')

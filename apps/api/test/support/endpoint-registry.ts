@@ -88,6 +88,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/contacts', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'PATCH /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   { route: 'DELETE /v1/contacts/:id', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
+  { route: 'POST /v1/contacts/bulk-delete', kind: 'tenant', isolationTest: '../../contacts/contacts.test.ts' },
   // Etiquetas, atribución y salida de eventos (M3.3, ADR-45). Pruebas: test/attribution/attribution.test.ts. El webhook es público: su credencial es el par (id opaco, secreto).
   { route: 'GET /v1/tags', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'GET /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
@@ -303,6 +304,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/conversations/:id/accept', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/take', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/close', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'DELETE /v1/conversations/:id', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/conversations/:id/read', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'POST /v1/messages/:id/retry', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   // Transferir y compartir (M5.5a, ADR-14/50). Pruebas: test/inbox/sharing.test.ts (A↔B, quién puede, visibilidad del colaborador, el lead se mueve, notas automáticas, auditoría)

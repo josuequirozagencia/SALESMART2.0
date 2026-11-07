@@ -11,6 +11,7 @@ import { ContactDialog } from './ContactDialog';
 import { ContactsTable } from './ContactsTable';
 import { ExportDialog } from './ExportDialog';
 import { FilterBar } from './FilterBar';
+import { BulkDeleteDialog } from './BulkDeleteDialog';
 import { ImportDialog } from './ImportDialog';
 import { ListDialog, type ListMode } from './ListDialog';
 import { NO_CONTACT_FILTERS, SORT_LABEL, SORT_PARAMS, hasFilters, useContacts, useOwners, type ContactFilters, type SortKey } from './useContacts';
@@ -54,6 +55,7 @@ export function ContactsPage() {
   const [listDialog, setListDialog] = useState<ListMode | null>(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
   const [target, setTarget] = useState('');
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string }>();
 
@@ -213,6 +215,7 @@ export function ContactsPage() {
               <Button className="!px-3 !py-1.5 !text-[12.5px]" disabled={!target} loading={addMembers.isPending} onClick={addToList}>Agregar</Button>
             </span>
           ) : null}
+          {access.delete && !readOnly ? <Button variant="danger" className="!px-3 !py-1.5 !text-[12.5px]" onClick={() => setBulkDeleting(true)}>Borrar seleccionados</Button> : null}
           <Button variant="link" onClick={() => setSelected(new Set())}>Quitar selección</Button>
         </div>
       ) : null}
@@ -241,6 +244,7 @@ export function ContactsPage() {
       ) : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
 
+      {bulkDeleting ? <BulkDeleteDialog ids={[...selected]} onClose={() => setBulkDeleting(false)} onDone={(r) => { setBulkDeleting(false); setSelected(new Set()); setNotice({ kind: 'ok', text: r.skipped.length > 0 ? `Se borraron ${r.deleted.length} contactos; ${r.skipped.length} se omitieron (ya no existían o no los puedes ver).` : r.deleted.length === 1 ? 'Se borró 1 contacto.' : `Se borraron ${r.deleted.length} contactos.` }); }} /> : null}
       {importing ? <ImportDialog onClose={() => setImporting(false)} /> : null}
       {exporting ? (
         <ExportDialog

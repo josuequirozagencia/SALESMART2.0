@@ -231,18 +231,41 @@ export class ContactsService {
   async remove(scope: ContactScope, id: string): Promise<{ id: string; deleted: true }> {
     const sc = this.scope(scope);
     await this.db.withTenant(async (tx) => {
-      const row = await this.repo.byId(tx, sc, id, true);
-      if (!row) throw new NotFoundError();
-      const now = new Date();
-      const phones = (await this.repo.phonesOf(tx, [id])).get(id) ?? [];
-      await tx.update(contactPhones).set({ deletedAt: now, isPrimary: false }).where(and(eq(contactPhones.contactId, id), isNull(contactPhones.deletedAt)));
-      await tx.update(contacts).set({ deletedAt: now, updatedAt: now }).where(eq(contacts.id, id));
-      await writeAudit(tx, { entityType: 'contact', entityId: id, oldValue: { name: row.name, email: row.email, owner_id: row.ownerId, phones: phones.map((p) => p.e164) }, source: 'manual' });
-      // Sus oportunidades dejan de existir con él (M4.2, ADR-49): si no, quedarían invisibles pero seguirían bloqueando borrar etapas y pipelines
-      const gone = await tx.update(opportunities).set({ deletedAt: now, updatedAt: now }).where(and(eq(opportunities.contactId, id), isNull(opportunities.deletedAt))).returning({ id: opportunities.id });
-      for (const o of gone) await writeAudit(tx, { entityType: 'opportunity', entityId: o.id, field: 'deleted', oldValue: false, newValue: { deleted: true, reason: 'contact_deleted' }, source: 'manual' });
+      if (!(await this.removeIn(tx, sc, id, false))) throw new NotFoundError();
     });
     return { id, deleted: true };
+  }
+
+  /**
+   * Borrado lógico de varios contactos a la vez (hasta 200), todo en UNA transacción: o se registran todos o ninguno. Cada contacto deja su propia auditoría (con la marca de lote) y los que la persona no ve
+   * o ya no existen se informan como omitidos sin revelar nada más (404 uniforme). Repetir la misma petición es seguro: los ya borrados salen como omitidos.
+   */
+  async removeMany(scope: ContactScope, ids: readonly string[]): Promise<{ deleted: string[]; skipped: string[] }> {
+    const sc = this.scope(scope);
+    const unique = [...new Set(ids)];
+    return this.db.withTenant(async (tx) => {
+      const deleted: string[] = [];
+      const skipped: string[] = [];
+      for (const id of unique) {
+        if (await this.removeIn(tx, sc, id, true)) deleted.push(id);
+        else skipped.push(id);
+      }
+      return { deleted, skipped };
+    });
+  }
+
+  private async removeIn(tx: TenantTx, sc: Scope, id: string, bulk: boolean): Promise<boolean> {
+    const row = await this.repo.byId(tx, sc, id, true);
+    if (!row) return false;
+    const now = new Date();
+    const phones = (await this.repo.phonesOf(tx, [id])).get(id) ?? [];
+    await tx.update(contactPhones).set({ deletedAt: now, isPrimary: false }).where(and(eq(contactPhones.contactId, id), isNull(contactPhones.deletedAt)));
+    await tx.update(contacts).set({ deletedAt: now, updatedAt: now }).where(eq(contacts.id, id));
+    await writeAudit(tx, { entityType: 'contact', entityId: id, oldValue: { name: row.name, email: row.email, owner_id: row.ownerId, phones: phones.map((p) => p.e164) }, ...(bulk ? { newValue: { deleted: true, bulk: true } } : {}), source: 'manual' });
+    // Sus oportunidades dejan de existir con él (M4.2, ADR-49): si no, quedarían invisibles pero seguirían bloqueando borrar etapas y pipelines
+    const gone = await tx.update(opportunities).set({ deletedAt: now, updatedAt: now }).where(and(eq(opportunities.contactId, id), isNull(opportunities.deletedAt))).returning({ id: opportunities.id });
+    for (const o of gone) await writeAudit(tx, { entityType: 'opportunity', entityId: o.id, field: 'deleted', oldValue: false, newValue: { deleted: true, reason: 'contact_deleted' }, source: 'manual' });
+    return true;
   }
 
   /** El contacto vigente que esta persona puede ver (id, nombre y responsable); 404 uniforme si no. Para los módulos que cuelgan de un contacto, dentro de su transacción. */

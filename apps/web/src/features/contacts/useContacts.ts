@@ -104,6 +104,15 @@ export function useUpdateContact() {
   });
 }
 
+/** Borrado lógico de varios contactos en una sola operación (hasta 200). Devuelve cuáles se borraron y cuáles se omitieron (no se ven o ya no existían). */
+export function useBulkDeleteContacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) => api<{ deleted: string[]; skipped: string[] }>('/contacts/bulk-delete', { method: 'POST', body: { ids } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['contacts'] }),
+  });
+}
+
 export function useDeleteContact() {
   const qc = useQueryClient();
   return useMutation({

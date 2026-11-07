@@ -12,6 +12,7 @@ import { Drawer } from '../../ui/Drawer';
 import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
 import { Menu, type MenuItem } from '../../ui/Menu';
+import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { Pill } from '../../ui/Pill';
 import { usePhotos } from '../photos/usePhotos';
 import { AgentBanner } from './AgentBanner';
@@ -68,6 +69,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const leave = useRevoke(c.id);
   const navigate = useNavigate();
   const [confirm, setConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [dialog, setDialog] = useState(false);
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
@@ -83,6 +85,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   if (c.can.transfer || c.can.share) more.push({ label: 'Transferir', onSelect: () => setDialog(true) });
   if (collaborator) more.push({ label: 'Dejar de participar', onSelect: () => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); } });
   if (c.can.close) more.push({ label: 'Finalizar', danger: true, onSelect: () => setConfirm(true) });
+  if (c.can.delete) more.push({ label: 'Eliminar conversación', danger: true, onSelect: () => setDeleting(true) });
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
     onBackError(undefined);
     act.mutate(a, { onSettled: () => setConfirm(false), onError: (e) => onBackError(friendlyError(e, fallback)) });
@@ -140,10 +143,12 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
               </div>
               {collaborator ? <SheetButton icon="logout" onClick={() => { close(); onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</SheetButton> : null}
               {c.can.close && !confirm ? <SheetButton icon="check" danger onClick={() => setConfirm(true)}>Finalizar la conversación</SheetButton> : null}
+              {c.can.delete ? <SheetButton icon="close" danger onClick={() => { close(); setDeleting(true); }}>Eliminar la conversación</SheetButton> : null}
             </div>
           </Drawer>
         ) : null}
         {scheduledOpen ? <ScheduledDialog conversationId={c.id} onClose={() => setScheduledOpen(false)} /> : null}
+        {deleting ? <DeleteConversationDialog c={c} onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); navigate('/inbox'); }} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
       </header>
     );
@@ -212,6 +217,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
           </>
         )}
         </div>
+        {deleting ? <DeleteConversationDialog c={c} onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); navigate('/inbox'); }} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
       </div>
     </header>
