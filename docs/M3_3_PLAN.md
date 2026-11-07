@@ -1,7 +1,7 @@
 # Plan M3.3 — Etiquetas del sistema + Atribución Meta + CAPI Purchase
 
 **Estado base:** implementado (ADR-45 aprobado, 2026-10-16)  
-**Adiciones pendientes:** §11 Canal del lead · §12 Panel de rendimiento de anuncios (ver abajo)  
+**Adiciones:** §11 Canal del lead · §12 Panel de rendimiento de anuncios — **construidas el 2026-11-07** (ver §13 «Notas de implementación»)  
 **Fecha de elaboración:** 2026-10-16 — **Actualizado:** 2026-11-07  
 **ADRs que aplican:** ADR-08, ADR-18, ADR-43, ADR-45
 
