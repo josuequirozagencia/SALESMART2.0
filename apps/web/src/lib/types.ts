@@ -801,6 +801,8 @@ export interface AgentStatus {
   agent: { id: string; name: string } | null;
   state: 'idle' | 'active' | 'paused' | 'handed_off';
   reason: string | null;
+  /** Con el agente activo: `out_of_hours` = espera el horario de atención. */
+  outcome?: 'out_of_hours' | null;
   can_control: boolean;
 }
 

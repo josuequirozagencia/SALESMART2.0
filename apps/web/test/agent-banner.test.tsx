@@ -47,7 +47,7 @@ describe('Inbox · agente de IA en la conversación', () => {
     mockApi(server(w));
     renderApp('/inbox/c1');
     const banner = await screen.findByRole('status', { name: 'Agente de IA' });
-    expect(banner).toHaveTextContent('El agente Sofía está atendiendo esta conversación.');
+    expect(banner).toHaveTextContent('Agente de IA atendiendo');
     await userEvent.click(screen.getByRole('button', { name: 'Tomar control' }));
     await waitFor(() => expect(w.posts).toEqual(['pause']));
     expect(await screen.findByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
@@ -68,6 +68,24 @@ describe('Inbox · agente de IA en la conversación', () => {
     const banner = await screen.findByRole('status', { name: 'Agente de IA' });
     expect(banner).toHaveTextContent(text);
     expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['human_message', 'paused', 'Pausado: una persona intervino. Puedes reanudarlo.'],
+    ['human_took', 'paused', 'Pausado: una persona intervino. Puedes reanudarlo.'],
+    ['empty_reply', 'handed_off', 'El agente no pudo responder. Revisa esta conversación.'],
+  ] as const)('texto aprobado para %s', async (reason, state, text) => {
+    mockApi(server({ status: STATUS({ state, reason }), posts: [] }));
+    renderApp('/inbox/c1');
+    expect(await screen.findByRole('status', { name: 'Agente de IA' })).toHaveTextContent(text);
+    expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
+  });
+
+  it('con el agente activo fuera del horario dice que espera el horario de atención y deja «Tomar control»', async () => {
+    mockApi(server({ status: STATUS({ outcome: 'out_of_hours' }), posts: [] }));
+    renderApp('/inbox/c1');
+    expect(await screen.findByRole('status', { name: 'Agente de IA' })).toHaveTextContent('El agente espera el horario de atención.');
+    expect(screen.getByRole('button', { name: 'Tomar control' })).toBeInTheDocument();
   });
 
   it('no se muestra si la conexión no tiene agente, si no ha intervenido o si la conversación está finalizada', async () => {

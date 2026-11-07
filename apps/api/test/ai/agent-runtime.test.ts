@@ -329,6 +329,45 @@ describe('cuando una persona interviene', () => {
   });
 });
 
+describe('desenlaces sin respuesta (v4, parte B)', () => {
+  it('un modelo que devuelve vacío se reintenta UNA vez y a la segunda pasa a una persona (nota «empty_reply»)', async () => {
+    await liveAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'Hola');
+    const t0 = new Date();
+    ai.chatReply = () => '';
+    expect(await tick(t0)).toBe(1);
+    expect(await state(c.id)).toMatchObject({ status: 'active', reason: null, empty_replies: 1 });
+    expect(await aiMessages(c.id)).toHaveLength(0);
+    expect(await tick(new Date(t0.getTime() + 1000))).toBe(0); // todavía no toca
+    expect(await tick(new Date(t0.getTime() + 30_000))).toBe(1);
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'empty_reply' });
+    expect(await json<Status>(await call('GET', `/conversations/${c.id}/ai`, T.alice))).toMatchObject({ state: 'handed_off', reason: 'empty_reply', outcome: null });
+  });
+
+  it('si el segundo intento sí responde, sigue activo y el contador vuelve a cero', async () => {
+    await liveAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'Hola');
+    const t0 = new Date();
+    ai.chatReply = () => '';
+    await tick(t0);
+    ai.chatReply = () => 'Con gusto te ayudo';
+    expect(await tick(new Date(t0.getTime() + 30_000))).toBe(1);
+    expect(await aiMessages(c.id)).toHaveLength(1);
+    expect(await state(c.id)).toMatchObject({ status: 'active', reason: null, empty_replies: 0 });
+  });
+
+  it('el estado activo con el desenlace «fuera de horario» lo informa la bandeja', async () => {
+    await liveAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'Hola');
+    await tick();
+    await admin.query(`UPDATE ai_conversation_state SET last_outcome = 'out_of_hours' WHERE conversation_id = $1`, [c.id]);
+    expect(await json<Status>(await call('GET', `/conversations/${c.id}/ai`, T.alice))).toMatchObject({ state: 'active', outcome: 'out_of_hours' });
+  });
+});
+
 describe('pasar a una persona', () => {
   it('si el cliente la pide, se le avisa, el agente se retira (nota «requested») y no llama al modelo', async () => {
     await liveAgent();

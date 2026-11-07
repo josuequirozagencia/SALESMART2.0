@@ -38,6 +38,7 @@ interface Claimed {
   turns: number;
   unsupportedStreak: number;
   attempts: number;
+  emptyReplies: number;
   handledUntil: Date | null;
 }
 
@@ -46,6 +47,8 @@ export interface AgentStatusView {
   /** `idle`: el agente no ha intervenido (una persona la lleva); `active` contesta; `paused` lo detuvo una persona o faltan créditos; `handed_off` pasó a una persona. */
   state: 'idle' | 'active' | 'paused' | 'handed_off';
   reason: string | null;
+  /** Desenlace de la última atención sin respuesta con el agente aún activo (`out_of_hours`: espera el horario de atención). */
+  outcome: 'out_of_hours' | null;
   can_control: boolean;
 }
 
@@ -126,7 +129,7 @@ export class AgentRuntimeService {
       const lease = new Date(now.getTime() - AGENT_LEASE_MS);
       const res = await tx.execute(sql`
         SELECT c.id AS conversation_id, c.contact_id, c.channel_account_id, c.queue_id, a.id AS agent_id,
-               COALESCE(s.turns, 0) AS turns, COALESCE(s.unsupported_streak, 0) AS streak, COALESCE(s.attempts, 0) AS attempts, s.handled_until
+               COALESCE(s.turns, 0) AS turns, COALESCE(s.unsupported_streak, 0) AS streak, COALESCE(s.attempts, 0) AS attempts, COALESCE(s.empty_replies, 0) AS empty_replies, s.handled_until
           FROM conversations c
           JOIN agent_channels ac ON ac.channel_id = c.channel_account_id AND ac.organization_id = c.organization_id
           JOIN agents a ON a.id = ac.agent_id AND a.organization_id = ac.organization_id AND a.active AND a.deleted_at IS NULL
@@ -140,13 +143,13 @@ export class AgentRuntimeService {
          ORDER BY c.last_inbound_at NULLS LAST
          LIMIT 1
          FOR UPDATE OF c SKIP LOCKED`);
-      const r = (res.rows as Array<{ conversation_id: string; contact_id: string; channel_account_id: string; queue_id: string | null; agent_id: string; turns: number; streak: number; attempts: number; handled_until: Date | string | null }>)[0];
+      const r = (res.rows as Array<{ conversation_id: string; contact_id: string; channel_account_id: string; queue_id: string | null; agent_id: string; turns: number; streak: number; attempts: number; empty_replies: number; handled_until: Date | string | null }>)[0];
       if (!r) return null;
       await tx
         .insert(aiConversationState)
         .values({ conversationId: r.conversation_id, agentId: r.agent_id, processingStartedAt: now, createdAt: now, updatedAt: now })
         .onConflictDoUpdate({ target: [aiConversationState.organizationId, aiConversationState.conversationId], set: { agentId: r.agent_id, processingStartedAt: now, updatedAt: now } });
-      return { conversationId: r.conversation_id, contactId: r.contact_id, channelAccountId: r.channel_account_id, queueId: r.queue_id, agentId: r.agent_id, turns: Number(r.turns), unsupportedStreak: Number(r.streak), attempts: Number(r.attempts), handledUntil: r.handled_until ? new Date(r.handled_until) : null };
+      return { conversationId: r.conversation_id, contactId: r.contact_id, channelAccountId: r.channel_account_id, queueId: r.queue_id, agentId: r.agent_id, turns: Number(r.turns), unsupportedStreak: Number(r.streak), attempts: Number(r.attempts), emptyReplies: Number(r.empty_replies), handledUntil: r.handled_until ? new Date(r.handled_until) : null };
     });
   }
 
@@ -176,7 +179,7 @@ export class AgentRuntimeService {
         const open = await this.db.withTenant(async (tx) => isOpenAt((await this.sla.calendars(tx, dir.timeZone)).forQueue(job.queueId), now));
         if (!open) {
           this.log.info({ org_id: TenantContext.current().organizationId, conversation_id: job.conversationId, agent_id: job.agentId, reason: 'out_of_hours' }, 'agente de IA: sin respuesta (fuera de horario)');
-          return await this.finish(job, newest, { replied: 0, grounded: true }, now, null, '', route);
+          return await this.finish(job, newest, { replied: 0, grounded: true, outcome: 'out_of_hours' }, now, null, '', route);
         }
       }
       // 3) El turno
@@ -191,7 +194,12 @@ export class AgentRuntimeService {
       const extra = { notes, transfer: turn.transfer };
       if (turn.replies.length === 0 && !turn.transfer && notes.length === 0) {
         this.log.warn({ org_id: TenantContext.current().organizationId, conversation_id: job.conversationId, agent_id: job.agentId, reason: 'empty_reply', grounded: turn.grounded }, 'agente de IA: el modelo no generó texto');
-        return await this.finish(job, newest, { replied: 0, grounded: turn.grounded }, now, null, settings.name, route);
+        // Un modelo que no genera texto se reintenta UNA vez; si vuelve a pasar, lo ve una persona (nunca queda en silencio)
+        if (job.emptyReplies < 1) {
+          await this.db.withTenant((tx) => tx.update(aiConversationState).set({ emptyReplies: job.emptyReplies + 1, processingStartedAt: null, nextAttemptAt: new Date(now.getTime() + 15_000), updatedAt: now }).where(eq(aiConversationState.conversationId, job.conversationId)));
+          return 'retry';
+        }
+        return await this.handoff(job, settings.name, 'empty_reply', newest, false, now, route);
       }
       return await this.finish(job, newest, { replied: turn.replies.length, grounded: turn.grounded }, now, turn.replies, settings.name, route, extra);
     } catch (e) {
@@ -200,7 +208,7 @@ export class AgentRuntimeService {
   }
 
   /** Guarda las respuestas y deja el estado de la conversación al día. Si una persona escribió mientras el agente pensaba, NO envía nada y pausa. */
-  private async finish(job: Claimed, newest: Date, r: { replied: number; grounded: boolean }, now: Date, replies: string[] | null, agentName: string, route: Route, extra: { notes: string[]; transfer: boolean } = { notes: [], transfer: false }): Promise<AgentOutcome> {
+  private async finish(job: Claimed, newest: Date, r: { replied: number; grounded: boolean; outcome?: 'out_of_hours' }, now: Date, replies: string[] | null, agentName: string, route: Route, extra: { notes: string[]; transfer: boolean } = { notes: [], transfer: false }): Promise<AgentOutcome> {
     return this.db.withTenant(async (tx) => {
       const [c] = await tx.select({ status: conversations.status }).from(conversations).where(eq(conversations.id, job.conversationId)).for('update').limit(1);
       if (!c || c.status === 'closed') {
@@ -218,7 +226,7 @@ export class AgentRuntimeService {
       const streak = replies === null ? job.unsupportedStreak : r.grounded ? 0 : job.unsupportedStreak + 1;
       await tx
         .update(aiConversationState)
-        .set({ handledUntil: newest, turns: replies ? job.turns + 1 : job.turns, unsupportedStreak: streak, attempts: 0, processingStartedAt: null, nextAttemptAt: now, updatedAt: now })
+        .set({ handledUntil: newest, turns: replies ? job.turns + 1 : job.turns, unsupportedStreak: streak, attempts: 0, emptyReplies: 0, lastOutcome: r.outcome ?? null, processingStartedAt: null, nextAttemptAt: now, updatedAt: now })
         .where(eq(aiConversationState.conversationId, job.conversationId));
       if (replies && extra.transfer) {
         await this.setState(tx, job.conversationId, job.agentId, { status: 'handed_off', reason: 'agent_decision' }, now, 'ai', agentName);
@@ -294,15 +302,15 @@ export class AgentRuntimeService {
     return this.db.withTenant(async (tx) => {
       const { c } = await loadConversation(tx, scope, conversationId);
       const agentId = await this.channelAgent(tx, conversationId);
-      const [state] = await tx.select({ status: aiConversationState.status, reason: aiConversationState.reason }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).limit(1);
+      const [state] = await tx.select({ status: aiConversationState.status, reason: aiConversationState.reason, outcome: aiConversationState.lastOutcome }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).limit(1);
       const agent = agentId ? ((await tx.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0] ?? null) : null;
-      if (!agent) return { agent: null, state: 'idle', reason: null, can_control: false };
+      if (!agent) return { agent: null, state: 'idle', reason: null, outcome: null, can_control: false };
       const open = c.status !== 'closed';
       const unattended = c.status === 'unassigned' || c.status === 'pending';
       // Sin fila de estado el agente aún no intervino. Si una persona ya escribió después de la última asignación, la tarea NO lo atenderá: se muestra igual que si estuviera pausado (el mismo criterio de `claim`)
       const blocked = !state && unattended && (await this.humanBlocks(tx, conversationId));
       const effective = (state ? state.status : blocked ? 'paused' : unattended ? 'active' : 'idle') as AgentStatusView['state'];
-      return { agent, state: effective, reason: state ? state.reason : blocked ? 'human_message' : null, can_control: access.canReply && open };
+      return { agent, state: effective, reason: state ? state.reason : blocked ? 'human_message' : null, outcome: state?.status === 'active' && state.outcome === 'out_of_hours' ? 'out_of_hours' : null, can_control: access.canReply && open };
     });
   }
 
@@ -410,7 +418,7 @@ export class AgentRuntimeService {
   private async setState(tx: TenantTx, conversationId: string, agentId: string, to: { status: 'active' | 'paused' | 'handed_off'; reason: HandoffReason | PauseReason | null }, now: Date, source: 'manual' | 'automation' | 'ai', agentName?: string): Promise<void> {
     const [cur] = await tx.select({ status: aiConversationState.status, reason: aiConversationState.reason, version: aiConversationState.version }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).for('update').limit(1);
     if (!cur || (cur.status === to.status && cur.reason === to.reason)) return;
-    await tx.update(aiConversationState).set({ status: to.status, reason: to.reason, version: cur.version + 1, processingStartedAt: null, updatedAt: now }).where(eq(aiConversationState.conversationId, conversationId));
+    await tx.update(aiConversationState).set({ status: to.status, reason: to.reason, version: cur.version + 1, emptyReplies: 0, lastOutcome: null, processingStartedAt: null, updatedAt: now }).where(eq(aiConversationState.conversationId, conversationId));
     const [conv] = await tx.select({ channelAccountId: conversations.channelAccountId }).from(conversations).where(eq(conversations.id, conversationId)).limit(1);
     const name = agentName ?? (await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0]?.name ?? 'de IA';
     if (conv) {
