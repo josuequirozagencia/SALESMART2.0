@@ -28,6 +28,10 @@ export const aiConversationState = tenantTable(
     /** Respuestas seguidas sin respaldo en los documentos. */
     unsupportedStreak: integer('unsupported_streak').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
+    /** Respuestas vacías seguidas del modelo (se reintenta una vez; a la segunda pasa a una persona). */
+    emptyReplies: integer('empty_replies').notNull().default(0),
+    /** Último desenlace de una atención que no dejó respuesta pero el agente sigue activo (hoy: `out_of_hours`). */
+    lastOutcome: text('last_outcome'),
     nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
     processingStartedAt: ts('processing_started_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
@@ -38,7 +42,9 @@ export const aiConversationState = tenantTable(
     foreignKey({ name: 'ai_conversation_state_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'ai_conversation_state_agent_fk', columns: [t['organizationId']!, t['agentId']!], foreignColumns: [agents.organizationId, agents.id] }),
     check('ai_conversation_state_status_valid', sql`${t['status']!} IN ('active', 'paused', 'handed_off')`),
-    check('ai_conversation_state_reason_valid', sql`${t['reason']!} IS NULL OR ${t['reason']!} IN ('requested', 'turn_limit', 'unsupported_media', 'ai_error', 'no_support', 'agent_decision', 'human_message', 'human_took', 'manual', 'no_credits')`),
+    check('ai_conversation_state_reason_valid', sql`${t['reason']!} IS NULL OR ${t['reason']!} IN ('requested', 'turn_limit', 'unsupported_media', 'ai_error', 'no_support', 'agent_decision', 'empty_reply', 'human_message', 'human_took', 'manual', 'no_credits')`),
+    check('ai_conversation_state_outcome_valid', sql`${t['lastOutcome']!} IS NULL OR ${t['lastOutcome']!} = 'out_of_hours'`),
+    check('ai_conversation_state_empty_valid', sql`${t['emptyReplies']!} >= 0`),
     check('ai_conversation_state_reason_by_status', sql`(${t['status']!} = 'active') = (${t['reason']!} IS NULL)`),
     check('ai_conversation_state_counts_valid', sql`${t['version']!} >= 1 AND ${t['turns']!} >= 0 AND ${t['unsupportedStreak']!} >= 0 AND ${t['attempts']!} >= 0`),
     index('ai_conversation_state_due_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'active'`),
