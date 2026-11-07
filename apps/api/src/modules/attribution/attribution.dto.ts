@@ -19,6 +19,8 @@ export const ctwaWebhookSchema = z
     thumbnail_url: z.string().trim().max(1000).optional(),
     source_url: z.string().trim().max(1000).optional(),
     source: z.string().regex(/^[a-z][a-z0-9_]{1,31}$/).default('meta_ctwa'),
+    /** Red donde se vio el anuncio (M3.3 §11): define el canal del contacto nuevo. Sin él, Facebook. */
+    placement: z.enum(['facebook', 'instagram']).optional(),
     occurred_at: z.iso.datetime({ offset: true }).optional(),
   })
   .strict()

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { TagBadge } from '../../ui/TagBadge';
 import { shortDateTime } from '../../lib/format';
 import type { Contact, ContactTouch } from '../../lib/types';
+import { ChannelBadge } from '../../ui/ChannelBadge';
 import { Pill, type PillKind } from '../../ui/Pill';
 
 const CAPI: Record<string, [PillKind, string]> = {
@@ -66,6 +67,9 @@ export function AttributionSection({ contact }: { contact: Contact }) {
         Origen del lead
         <span aria-hidden="true" className={`transition ${open ? 'rotate-180' : ''}`}>⌄</span>
       </button>
+      <div className="px-3 pb-2.5" aria-label="Canal del lead">
+        <ChannelBadge channel={contact.channel ?? a.channel} />
+      </div>
       {open ? (
         <dl className="grid gap-2.5 border-t border-line px-3 py-3 min-[520px]:grid-cols-2">
           <div>

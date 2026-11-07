@@ -5,6 +5,7 @@ import { AppShell } from './features/app/AppShell';
 import { MenuPage } from './features/app/MenuPage';
 import { AppearancePage } from './features/settings/AppearancePage';
 import { AnalyticsPage } from './features/analytics/AnalyticsPage';
+import { AdPerformancePage } from './features/attribution/AdPerformancePage';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
 import { ScheduledOverviewPage } from './features/inbox/ScheduledOverviewPage';
@@ -126,6 +127,7 @@ export function App() {
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
+        <Route path="/attribution" element={<AdPerformancePage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/companies" element={<ClientCompaniesPage />} />
         {/* «Empresas» pasó a ser una vista dentro de Contactos (M10.2): la dirección vieja sigue llevando ahí */}

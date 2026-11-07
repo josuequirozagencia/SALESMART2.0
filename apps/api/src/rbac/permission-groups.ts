@@ -75,6 +75,7 @@ export const PERMISSION_META: Readonly<Record<ManageableKey, PermissionMeta>> = 
   'appointments.view_all': all('agenda', 'Ver la agenda de todos', 'Ver las citas de toda la empresa.'),
   'analytics.view': own('analytics', 'Ver su tablero', 'Ver el tablero y los reportes de lo suyo.'),
   'analytics.export': own('analytics', 'Descargar reportes', 'Descargar reportes en CSV de lo suyo.'),
+  'attribution.view': all('analytics', 'Ver el rendimiento de anuncios', 'Ver qué anuncios traen leads y ventas (de toda la empresa).'),
   'analytics.view_all': all('analytics', 'Ver la analítica de toda la empresa', 'Ver el tablero y los reportes de todos.'),
   'analytics.manage': cfg('analytics', 'Registro de descargas', 'Ver quién descargó qué y decidir si los asesores pueden descargar.', false),
   'commissions.view': own('analytics', 'Ver su comisión', 'Ver sus comisiones (llega con el módulo de comisiones).'),

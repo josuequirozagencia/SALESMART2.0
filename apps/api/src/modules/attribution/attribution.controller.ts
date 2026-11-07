@@ -1,10 +1,11 @@
-import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { TooManyAttemptsError } from '../../errors';
 import { Public, WindowLimiter, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { AttributionEndpointsService } from '../organizations';
+import { AdPerformanceService, adPerformanceQuerySchema, type AdPerformanceQuery } from './ad-performance.service';
 import { ctwaWebhookSchema, type CtwaWebhookDto } from './attribution.dto';
 import { AttributionService } from './attribution.service';
 
@@ -63,5 +64,20 @@ export class AttributionEndpointController {
   async issue() {
     const r = await this.endpoints.issue();
     return { id: r.id, secret: r.secret, rotated: r.rotated, path: `/v1/attribution/ctwa/${r.id}` };
+  }
+}
+
+/**
+ * Rendimiento de anuncios (M3.3 §12, aprobado el 2026-11-07): qué anuncios traen leads y ventas. Solo con `attribution.view` (el administrador). `no-store`: son datos de clientes.
+ */
+@Controller('attribution')
+export class AdPerformanceController {
+  constructor(@Inject(AdPerformanceService) private readonly ads: AdPerformanceService) {}
+
+  @RequirePermission('attribution.view')
+  @Get('ad-performance')
+  @Header('Cache-Control', 'no-store')
+  adPerformance(@Query(new ZodValidationPipe(adPerformanceQuerySchema)) q: AdPerformanceQuery) {
+    return this.ads.report(q);
   }
 }

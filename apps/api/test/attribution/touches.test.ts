@@ -1,6 +1,7 @@
 // M6.6 — Historial de toques y «Anuncio ganador» (ADR-55, fase A). Rutas cubiertas (el registro de endpoints exige que este archivo las escriba tal cual):
 //   GET /v1/contacts/:id/touches
 //   GET /v1/analytics/winning-ads
+//   GET /v1/attribution/ad-performance
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -300,5 +301,140 @@ describe('«Anuncio ganador»', () => {
     expect(csv).toContain('Chats nuevos');
     expect(csv).toMatch(/AD-?A|Corte promo/);
     expect(Number((await admin.query(`SELECT count(*) FROM analytics_exports WHERE report = 'winning_ads'`)).rows[0].count)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// M3.3 §11 y §12 (aprobados el 2026-11-07): canal del lead y rendimiento de anuncios
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+const channelOfContact = async (id: string): Promise<string> => (await admin.query('SELECT channel FROM contacts WHERE id = $1', [id])).rows[0].channel as string;
+const ingest = (m: NormalizedMessage) => TenantContext.run({ organizationId: ORG_A }, () => import('../../src/db').then(({ Database }) => app.get(Database).withTenant((tx) => conversations.ingestInbound(tx, channelA, m, { now: new Date(), timeZone: 'America/Guayaquil', assignable: new Set() }))));
+
+describe('canal del lead (M3.3 §11)', () => {
+  it('se deriva al crear el contacto: instagram, facebook (con placement y sin él), whatsapp, manual y otro', async () => {
+    await record(click({ phone: '+593984100001', ctwa_cl_id: 'c-ig', placement: 'instagram' }));
+    await record(click({ phone: '+593984100002', ctwa_cl_id: 'c-fb', placement: 'facebook' }));
+    await record(click({ phone: '+593984100003', ctwa_cl_id: 'c-none' }));
+    expect(await channelOfContact(await contactOf('+593984100001'))).toBe('instagram');
+    expect(await channelOfContact(await contactOf('+593984100002'))).toBe('facebook');
+    expect(await channelOfContact(await contactOf('+593984100003'))).toBe('facebook'); // sin placement: el valor por omisión de un anuncio de Meta
+    // mensaje de WhatsApp sin anuncio → whatsapp; con aviso de anuncio (referral) → facebook
+    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date('2026-10-15T15:00:00Z'), ...over });
+    await ingest(msg({ externalId: 'wamid.CH1', from: '+593984100004' }));
+    await ingest(msg({ externalId: 'wamid.CH2', from: '+593984100005', referral: { sourceId: '120077', sourceType: 'ad', sourceUrl: null, headline: 'Promo', body: null, thumbnailUrl: null, ctwaClid: 'clid-ch2' } }));
+    expect(await channelOfContact(await contactOf('+593984100004'))).toBe('whatsapp');
+    expect(await channelOfContact(await contactOf('+593984100005'))).toBe('facebook');
+    // creado a mano desde la pantalla → manual
+    const made = await json<{ id: string; channel: string }>(await call('POST', '/contacts', T.alice, { name: 'Beto', phones: ['+593984100006'] }));
+    expect(made.channel).toBe('manual');
+    expect(await channelOfContact(made.id)).toBe('manual');
+    // otro origen (un formulario, GoHighLevel…) → other
+    const { ContactsService } = await import('../../src/modules/contacts');
+    const { Database } = await import('../../src/db');
+    const other = await TenantContext.run({ organizationId: ORG_A }, () => app.get(Database).withTenant((tx) => app.get(ContactsService).findOrCreateByPhone(tx, '+593984100007', 'form')));
+    expect(await channelOfContact(other.id)).toBe('other');
+    // y la ficha lo informa (también dentro de la atribución)
+    const ig = await json<{ channel: string; attribution: { channel: string } | null }>(await call('GET', `/contacts/${await contactOf('+593984100001')}`, T.alice));
+    expect(ig.channel).toBe('instagram');
+    expect(ig.attribution?.channel).toBe('instagram');
+  });
+
+  it('el canal no cambia con un segundo clic del mismo contacto, ni con otro placement', async () => {
+    await record(click({ phone: '+593984100010', ctwa_cl_id: 'first', placement: 'instagram' }));
+    await record(click({ phone: '+593984100010', ctwa_cl_id: 'second', placement: 'facebook' }));
+    await record(click({ phone: '+593984100010', ctwa_cl_id: 'third' }));
+    expect(await channelOfContact(await contactOf('+593984100010'))).toBe('instagram');
+  });
+
+  it('el webhook rechaza un placement desconocido (esquema estricto)', async () => {
+    const { ctwaWebhookSchema } = await import('../../src/modules/attribution/attribution.dto');
+    expect(ctwaWebhookSchema.safeParse({ phone: '+593984100011', ctwa_cl_id: 'x', placement: 'instagram' }).success).toBe(true);
+    expect(ctwaWebhookSchema.safeParse({ phone: '+593984100011', ctwa_cl_id: 'x', placement: 'tiktok' }).success).toBe(false);
+  });
+});
+
+describe('rendimiento de anuncios (M3.3 §12)', () => {
+  const tagIds: Record<string, string> = {};
+  async function saleTag(org: string): Promise<string> {
+    if (!tagIds[org]) tagIds[org] = (await admin.query(`INSERT INTO tags(organization_id, id, name, is_system, system_key) VALUES ($1, gen_random_uuid(), 'Venta', true, 'sale') RETURNING id`, [org])).rows[0].id as string;
+    return tagIds[org]!;
+  }
+  async function adLead(o: { org?: string; ad: string; adset?: string; campaign?: string; channel?: string; at?: string; sold?: boolean; first?: boolean; deleted?: boolean }): Promise<string> {
+    seq += 1;
+    const org = o.org ?? ORG_A;
+    const t = o.first ? 'first_touch' : 'last_touch';
+    const id = (
+      await admin.query(
+        `INSERT INTO contacts(id, organization_id, name, channel, ${t}_at, ${t}_source, ${t}_ad, ${t}_adset, ${t}_campaign, deleted_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'meta_ctwa', $5, $6, $7, $8) RETURNING id`,
+        [org, `Cliente ${seq}`, o.channel ?? 'facebook', o.at ?? '2026-10-15T15:00:00Z', o.ad, o.adset ?? 'Conjunto 1', o.campaign ?? 'Campaña 1', o.deleted ? '2026-10-20T00:00:00Z' : null],
+      )
+    ).rows[0].id as string;
+    if (o.sold) await admin.query('INSERT INTO contact_tags(organization_id, contact_id, tag_id, set_by) VALUES ($1, $2, $3, \'system\')', [org, id, await saleTag(org)]);
+    return id;
+  }
+  const perf = (t: string, qs = '') => call('GET', `/attribution/ad-performance?from=${encodeURIComponent(FROM)}&to=${encodeURIComponent(TO)}${qs}`, t);
+  type Perf = { rows: Array<{ adName: string | null; adsetName: string | null; campaignName: string | null; channel: string; leads: number; sales: number; convRate: number; isTopAd: boolean }>; period: { from: string; to: string }; touchModel: string };
+
+  beforeEach(() => { for (const k of Object.keys(tagIds)) delete tagIds[k]; });
+
+  it('agrupa por anuncio, cuenta leads y ventas (etiqueta «Venta»), ordena por ventas y marca solo al primero con al menos una venta', async () => {
+    for (let i = 0; i < 4; i++) await adLead({ ad: 'Corte promo', sold: i < 2 });
+    for (let i = 0; i < 3; i++) await adLead({ ad: 'Tinte', adset: 'Conjunto 2', campaign: 'Campaña 2', channel: 'instagram', sold: i === 0 });
+    await adLead({ ad: 'Barba' });
+    await adLead({ ad: 'Corte promo', sold: true, deleted: true }); // un contacto borrado no cuenta
+    const r = await json<Perf>(await perf(T.alice));
+    expect(r.rows.map((x) => [x.adName, x.leads, x.sales, x.convRate, x.isTopAd])).toEqual([['Corte promo', 4, 2, 50, true], ['Tinte', 3, 1, 33.3, false], ['Barba', 1, 0, 0, false]]);
+    expect(r.rows[1]).toMatchObject({ adsetName: 'Conjunto 2', campaignName: 'Campaña 2', channel: 'instagram' });
+    expect(r.touchModel).toBe('last');
+    expect(r.period).toEqual({ from: new Date(FROM).toISOString(), to: new Date(TO).toISOString() });
+  });
+
+  it('sin ninguna venta, ningún anuncio lleva la estrella; en empate de ventas gana el de más leads', async () => {
+    await adLead({ ad: 'A' });
+    await adLead({ ad: 'B' });
+    await adLead({ ad: 'B' });
+    let r = await json<Perf>(await perf(T.alice));
+    expect(r.rows.every((x) => !x.isTopAd)).toBe(true);
+    await adLead({ ad: 'A', sold: true });
+    await adLead({ ad: 'B', sold: true });
+    r = await json<Perf>(await perf(T.alice));
+    expect(r.rows.map((x) => [x.adName, x.sales, x.leads, x.isTopAd])).toEqual([['B', 1, 3, true], ['A', 1, 2, false]]); // empate en ventas: arriba el de más leads
+  });
+
+  it('filtra por periodo y por canal; «first» agrupa por el primer toque; valida los parámetros', async () => {
+    await adLead({ ad: 'Dentro', at: '2026-10-15T15:00:00Z' });
+    await adLead({ ad: 'Fuera', at: '2026-08-01T15:00:00Z' });
+    await adLead({ ad: 'IG', channel: 'instagram' });
+    await adLead({ ad: 'Primero', first: true });
+    expect((await json<Perf>(await perf(T.alice))).rows.map((x) => x.adName).sort()).toEqual(['Dentro', 'IG']);
+    expect((await json<Perf>(await perf(T.alice, '&channel=instagram'))).rows.map((x) => x.adName)).toEqual(['IG']);
+    expect((await json<Perf>(await perf(T.alice, '&touchModel=first'))).rows.map((x) => x.adName)).toEqual(['Primero']);
+    expect((await perf(T.alice, '&channel=tiktok')).status).toBe(400);
+    expect((await perf(T.alice, '&touchModel=middle')).status).toBe(400);
+    expect((await call('GET', `/attribution/ad-performance?from=${encodeURIComponent(TO)}&to=${encodeURIComponent(FROM)}`, T.alice)).status).toBe(400); // fechas al revés
+    expect((await call('GET', '/attribution/ad-performance?from=2020-01-01T00:00:00Z&to=2026-01-01T00:00:00Z', T.alice)).status).toBe(400); // periodo demasiado largo
+    expect((await call('GET', '/attribution/ad-performance?extra=1', T.alice)).status).toBe(400); // parámetros desconocidos
+  });
+
+  it('sin parámetros usa los últimos 30 días y la respuesta está lista aunque no haya datos', async () => {
+    const r = await json<Perf>(await call('GET', '/attribution/ad-performance', T.alice));
+    expect(r.rows).toEqual([]);
+    expect(new Date(r.period.to).getTime() - new Date(r.period.from).getTime()).toBe(30 * 86_400_000);
+  });
+
+  it('permisos: el asesor recibe 403 y sin sesión 401', async () => {
+    await adLead({ ad: 'A', sold: true });
+    expect((await perf(T.carol)).status).toBe(403);
+    expect((await call('GET', '/attribution/ad-performance')).status).toBe(401);
+  });
+
+  it('A↔B: cada empresa ve solo sus anuncios y sus ventas', async () => {
+    await adLead({ ad: 'Anuncio de A', sold: true });
+    await adLead({ org: ORG_B, ad: 'Anuncio de B', sold: true });
+    await adLead({ org: ORG_B, ad: 'Anuncio de B' });
+    const a = await json<Perf>(await perf(T.alice));
+    const b = await json<Perf>(await perf(T.bob));
+    expect(a.rows.map((x) => [x.adName, x.leads, x.sales])).toEqual([['Anuncio de A', 1, 1]]);
+    expect(b.rows.map((x) => [x.adName, x.leads, x.sales])).toEqual([['Anuncio de B', 2, 1]]);
   });
 });

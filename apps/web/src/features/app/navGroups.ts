@@ -34,7 +34,7 @@ export function buildNavGroups({ admin, unread }: { admin: boolean; unread: numb
     ...(admin ? [{ title: 'Equipo', items: [{ to: '/users', label: 'Usuarios', icon: 'shield' as const }, { to: '/departments', label: 'Departamentos', icon: 'team' as const }] }] : []),
     {
       title: 'Gestión',
-      items: [{ to: '/analytics', label: 'Analítica', icon: 'chart' }, ...(admin ? [{ to: '/settings/fields', label: 'Configuración', icon: 'gear' as const }] : [])],
+      items: [{ to: '/analytics', label: 'Analítica', icon: 'chart' }, ...(admin ? [{ to: '/attribution', label: 'Rendimiento de anuncios', icon: 'chart' as const }, { to: '/settings/fields', label: 'Configuración', icon: 'gear' as const }] : [])],
     },
   ];
 }

@@ -21,6 +21,7 @@ export const PERMISSIONS = {
   // M3.1 (ADR-43): sin `contacts.view_all` el alcance es PROPIO (contactos asignados a la persona); con él, todos los de la organización.
   'contacts.view_all': 'tenant',
   'contacts.delete': 'tenant',
+  'attribution.view': 'tenant',
   'conversations.delete': 'tenant',
   // M3.2 (ADR-44): definir los campos personalizados del contacto (tipo, opciones, obligatorio, visible en el formulario). Leerlos va con `contacts.read`.
   'custom_fields.manage': 'tenant',
@@ -127,7 +128,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
  * y cualquier acceso de agencia o de soporte a una empresa con la prueba vencida (ADR-41). Todo permiso que no está aquí es de escritura.
  * PROVISIONAL: cada módulo nuevo añade aquí sus permisos de lectura.
  */
-export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'ai.credits.view', 'notifications.read']);
+export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'attribution.view', 'ai.credits.view', 'notifications.read']);
 
 export type AccessLevel = 'read' | 'advisor' | 'admin';
 export const isAccessLevel = (v: unknown): v is AccessLevel => v === 'read' || v === 'advisor' || v === 'admin';
