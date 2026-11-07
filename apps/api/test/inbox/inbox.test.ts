@@ -8,6 +8,7 @@
 //   POST /v1/conversations/:id/accept
 //   POST /v1/conversations/:id/take
 //   POST /v1/conversations/:id/close
+//   DELETE /v1/conversations/:id
 //   POST /v1/conversations/:id/read
 //   POST /v1/messages/:id/retry
 import 'reflect-metadata';
@@ -273,7 +274,7 @@ describe('permisos', () => {
     await ok(await call('POST', '/context/switch', T.dave, { target: ORG_A }));
     await admin.query(`UPDATE organization_members SET access_level = 'read' WHERE user_id = $1 AND organization_id = $2`, [IDS.dave, ORG_A]);
     expect(ids(await list(T.dave, '?tab=pending'))).toEqual([c.id]);
-    expect((await ok<Conv>(await call('GET', `/conversations/${c.id}`, T.dave))).can).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false });
+    expect((await ok<Conv>(await call('GET', `/conversations/${c.id}`, T.dave))).can).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false, delete: false });
     expect((await call('GET', `/conversations/${c.id}/messages`, T.dave)).status).toBe(200);
     expect((await call('GET', '/conversations/options', T.dave)).status).toBe(200);
     for (const [method, path, body] of routes(c.id, m).filter(([mt]) => mt === 'POST')) expect((await call(method, path, T.dave, body)).status, `${method} ${path} lectura`).toBe(403);
@@ -335,6 +336,38 @@ describe('visibilidad', () => {
     expect(ids(await list(T.alice))).toEqual([]);
     expect((await call('GET', `/conversations/${c.id}`, T.alice)).status).toBe(404);
     expect((await call('POST', `/conversations/${c.id}/notes`, T.alice, { text: 'x' })).status).toBe(404);
+  });
+
+  it('eliminar una conversación (ADR-63): solo el administrador; desaparece de todo, se conserva, queda auditada, cancela lo pendiente y un mensaje nuevo abre otra', async () => {
+    const c = await mkConv({ owner: IDS.carol, status: 'working', unread: 2, msgs: [{ dir: 'in', at: ago(5 * MIN) }] });
+    const queued = await mkMsg(c.id, { dir: 'out', status: 'queued', at: ago(MIN) });
+    expect((await call('DELETE', `/conversations/${c.id}`, T.carol)).status).toBe(403); // ni siquiera la suya
+    expect((await json<{ can: { delete: boolean } }>(await call('GET', `/conversations/${c.id}`, T.alice))).can.delete).toBe(true);
+    expect((await json<{ can: { delete: boolean } }>(await call('GET', `/conversations/${c.id}`, T.carol))).can.delete).toBe(false);
+    expect(await json(await call('DELETE', `/conversations/${c.id}`, T.alice))).toEqual({ id: c.id, deleted: true });
+    // ya no se ve: ni en la lista, ni el detalle, ni el hilo, ni las acciones
+    expect(ids(await list(T.alice))).toEqual([]);
+    expect(ids(await list(T.carol))).toEqual([]);
+    const probes: Array<[string, string, unknown?]> = [['GET', ''], ['GET', '/messages'], ['POST', '/notes', { text: 'x' }], ['POST', '/close'], ['DELETE', '']];
+    for (const [m, tail, body] of probes) expect((await call(m, `/conversations/${c.id}${tail}`, T.alice, body)).status, `${m} ${tail}`).toBe(404);
+    // se conserva todo y queda finalizada
+    const row = (await admin.query('SELECT status, deleted_at IS NOT NULL AS gone, deleted_by, unread_count FROM conversations WHERE id = $1', [c.id])).rows[0];
+    expect(row).toMatchObject({ status: 'closed', gone: true, deleted_by: IDS.alice, unread_count: 0 });
+    expect(await msgCount(c.id)).toBe(2);
+    // lo que seguía en cola de salida no sale
+    expect((await admin.query('SELECT status, meta FROM messages WHERE id = $1', [queued])).rows[0]).toMatchObject({ status: 'failed', meta: { error_code: 'conversation_deleted' } });
+    // auditoría: quién y qué tenía
+    const a = (await admin.query("SELECT old_value, new_value, actor_user_id FROM audit_logs WHERE entity_type = 'conversation' AND entity_id = $1 AND field = 'deleted'", [c.id])).rows;
+    expect(a).toHaveLength(1);
+    expect(a[0]).toMatchObject({ actor_user_id: IDS.alice, new_value: { deleted: true }, old_value: { status: 'working', owner_id: IDS.carol, messages: 2, unsent_messages: 1 } });
+    // eliminarla otra vez es 404 y no duplica la auditoría
+    expect((await call('DELETE', `/conversations/${c.id}`, T.alice)).status).toBe(404);
+  });
+
+  it('eliminar A↔B: el administrador de B no puede eliminar (404) la conversación de A, y la de A sigue intacta', async () => {
+    const a = await mkConv({ owner: IDS.carol });
+    expect((await call('DELETE', `/conversations/${a.id}`, T.bob)).status).toBe(404);
+    expect((await convRow(a.id)).status).not.toBe('closed');
   });
 
   it('A↔B: nadie ve ni toca las conversaciones de otra empresa (404) y la lista solo trae las propias', async () => {
@@ -468,7 +501,7 @@ describe('listado', () => {
     expect(Date.parse(row!.window.expires_at!)).toBeGreaterThan(Date.now() + 21 * HOUR);
     expect(Date.parse(row!.window.expires_at!)).toBeLessThanOrEqual(Date.now() + 22 * HOUR);
     // el administrador ve lo mismo y, como ve todo, también puede aceptarla y responderla aunque no sea suya
-    expect((await list(T.alice, '?tab=pending')).items[0]!.can).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
+    expect((await list(T.alice, '?tab=pending')).items[0]!.can).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true, delete: true });
     // un texto largo con saltos de línea se resume en una línea
     await admin.query(`UPDATE messages SET body = $1 WHERE conversation_id = $2 AND body LIKE 'Hola%'`, ['Hola\n\n   ' + 'x'.repeat(300), c.id]);
     await admin.query(`UPDATE messages SET status = 'received', sent_at = now() WHERE conversation_id = $1 AND kind = 'image'`, [c.id]);

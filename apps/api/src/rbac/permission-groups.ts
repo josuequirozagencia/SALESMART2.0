@@ -53,6 +53,7 @@ export const PERMISSION_META: Readonly<Record<ManageableKey, PermissionMeta>> = 
   'contacts.read': own('contacts', 'Ver sus contactos', 'Ver los contactos que tiene asignados.'),
   'contacts.write': own('contacts', 'Crear y editar sus contactos', 'Crear contactos y editar los suyos.'),
   'contacts.view_all': all('contacts', 'Ver todos los contactos', 'Ver, filtrar y asignar los contactos de toda la empresa.'),
+  'conversations.delete': own('conversations', 'Eliminar conversaciones', 'Eliminar una conversación del Inbox (los mensajes se conservan y queda registro de quién lo hizo).', false),
   'contacts.delete': own('contacts', 'Borrar contactos', 'Borrar contactos (queda registro de quién lo hizo).'),
   'contacts.import': own('contacts', 'Importar contactos', 'Subir contactos desde un archivo CSV.'),
   'contacts.export': own('contacts', 'Exportar contactos', 'Descargar contactos en CSV (cada descarga queda registrada).'),

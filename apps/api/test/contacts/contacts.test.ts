@@ -1,5 +1,5 @@
 // M3.1 — Contactos (ADR-32 #2/#3, ADR-43). Rutas cubiertas (el registro de endpoints exige que este archivo las mencione y que haya prueba A↔B):
-//   GET /v1/contacts · GET /v1/contacts/owners · GET /v1/contacts/:id · POST /v1/contacts · PATCH /v1/contacts/:id · DELETE /v1/contacts/:id
+//   GET /v1/contacts · GET /v1/contacts/owners · GET /v1/contacts/:id · POST /v1/contacts · PATCH /v1/contacts/:id · DELETE /v1/contacts/:id · POST /v1/contacts/bulk-delete
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -333,6 +333,26 @@ describe('altas y ediciones', () => {
 });
 
 describe('borrado lógico', () => {
+  it('borrado masivo: solo con permiso, todo en una transacción, cada contacto auditado con la marca de lote; los que no se ven o ya no existen salen como omitidos', async () => {
+    const a = await make(T.alice, { name: 'Ana', phones: [P1] });
+    const b = await make(T.alice, { name: 'Beto' });
+    expect((await call('POST', '/contacts/bulk-delete', T.carol, { ids: [a.id] })).status).toBe(403); // el asesor no borra
+    expect((await call('POST', '/contacts/bulk-delete', T.alice, { ids: [] })).status).toBe(400);
+    expect((await call('POST', '/contacts/bulk-delete', T.alice, { ids: ['no-es-uuid'] })).status).toBe(400);
+    const gone = '00000000-0000-4000-8000-000000000000';
+    expect(await json(await call('POST', '/contacts/bulk-delete', T.alice, { ids: [a.id, b.id, a.id, gone] }))).toEqual({ deleted: [a.id, b.id], skipped: [gone] });
+    expect(names(await list(T.alice))).toEqual([]);
+    expect(await json(await call('POST', '/contacts/bulk-delete', T.alice, { ids: [a.id] }))).toEqual({ deleted: [], skipped: [a.id] }); // repetirlo es seguro
+    for (const id of [a.id, b.id]) expect((await audits(id)).at(-1)).toMatchObject({ field: null, new_value: { deleted: true, bulk: true } });
+  });
+
+  it('borrado masivo A↔B: los contactos de otra empresa salen como omitidos y no se tocan', async () => {
+    const a = await make(T.alice, { name: 'Ana' });
+    const res = await json<{ deleted: string[]; skipped: string[] }>(await call('POST', '/contacts/bulk-delete', T.bob, { ids: [a.id] }));
+    expect(res).toEqual({ deleted: [], skipped: [a.id] });
+    expect((await call('GET', `/contacts/${a.id}`, T.alice)).status).toBe(200);
+  });
+
   it('borra (solo con permiso), conserva los datos marcados, libera los teléfonos y lo deja auditado; borrar de nuevo es 404', async () => {
     const c = await make(T.alice, { name: 'Ana', phones: [P1] });
     expect(await json(await call('DELETE', `/contacts/${c.id}`, T.alice))).toEqual({ id: c.id, deleted: true });

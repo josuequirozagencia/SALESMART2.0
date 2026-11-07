@@ -2324,3 +2324,30 @@ Foto en `users` (global; saca archivos del prefijo de la empresa) · devolver `p
 - La foto del contacto no se refresca sola: si cambia en WhatsApp, queda la primera (decisión de alcance; se puede reintentar con una consulta mensual).
 - Un colaborador de una conversación ajena no ve la foto de un contacto que no lleva (ve siglas).
 - Sin `inbox.read` no hay fotos (los roles de solo lectura de agencia no son miembros).
+
+---
+
+## ADR-63 — Borrado lógico de conversaciones y borrado masivo de contactos
+**Estado:** el alcance (borrado lógico de conversaciones solo para el administrador, borrado masivo de contactos y que todo quede auditado) lo **APROBÓ de palabra el responsable el 2026-11-07**; las precisiones de implementación están **PROPUESTAS**.
+
+### Contexto
+Hasta ahora el Inbox solo permitía «Finalizar» una conversación; no había forma de eliminarla. Los contactos se podían borrar de uno en uno, solo desde la ficha en Contactos. La eliminación real de datos de un titular solo existe al eliminar una empresa entera (ADR-59).
+
+### Decisión
+1. **Conversación: borrado lógico.** `conversations.deleted_at` y `deleted_by` (migración `0125`); restricción: una conversación eliminada siempre está `closed`. Se conserva todo (mensajes, adjuntos, historial, citas y ventas ligadas) pero deja de verse y de procesarse. `DELETE /v1/conversations/:id` con el permiso nuevo `conversations.delete` (solo `client_admin`; no otorgable a un asesor). Un mensaje nuevo del cliente abre una conversación nueva (la eliminada ya no cuenta como abierta).
+2. **Una sola fuente de visibilidad.** `conversationVisibleTo` añade siempre `deleted_at IS NULL`, de modo que la lista, los conteos, el detalle, el hilo, todas las acciones, los programados y los avisos la tratan como inexistente (404), también para quien lo ve todo.
+3. **Efectos en la misma transacción:** finaliza (si no lo estaba), pone en cero los no leídos, detiene sus cronómetros de SLA, marca como fallidos los mensajes que seguían en cola de salida (`error_code: conversation_deleted`) y deja que la tarea de programados cancele lo suyo (conversación finalizada). El agente de IA, la reasignación y los recordatorios ya ignoran las finalizadas.
+4. **Auditoría:** una fila `conversation / deleted` con quién (actor), cuándo, y lo que tenía (estado, responsable, contacto, conexión, cuántos mensajes y cuántos sin enviar). Repetir la acción responde 404 y no duplica la fila.
+5. **Contactos: borrado masivo.** `POST /v1/contacts/bulk-delete` (`contacts.delete`, hasta 200 ids, una transacción: o se registran todos o ninguno). Reusa el borrado de siempre (teléfonos liberados, oportunidades borradas con el contacto) y cada contacto deja su auditoría con la marca `bulk: true`. Los que no se ven o ya no existen salen en `skipped` (404 uniforme, sin revelar nada); repetir es seguro.
+6. **Web:** «Eliminar conversación» en el menú «Más» de la cabecera y en la hoja de acciones móvil (solo si `can.delete`), con una confirmación que explica que los mensajes se conservan; «Borrar seleccionados» en la barra de selección de Contactos (solo con `contacts.delete`), con su confirmación y un resumen de lo borrado y lo omitido.
+
+### Alternativas descartadas
+- **Borrado real de mensajes:** choca con la auditoría, con los adjuntos en almacenamiento y con la evidencia de ventas y citas; el borrado real por solicitud de un titular se resuelve con la eliminación de empresa (ADR-59) o con un proceso aparte si se necesita.
+- **Un estado `deleted` en vez de una columna:** obligaría a revisar cada consulta que filtra por estado; la columna más la visibilidad central acotan el cambio.
+- **Dejar que el asesor elimine lo suyo:** el responsable lo limitó al administrador.
+
+### Riesgos y lo no validado
+- Una conversación eliminada no tiene pantalla de recuperación (la restauración sería un cambio directo en la base o una función futura).
+- No se borra la conversación al borrar un contacto: queda oculta por el filtro del contacto (comportamiento anterior).
+- El borrado desde el panel del contacto en el Inbox **no** se construyó (se borra desde Contactos).
+- Sin validar en navegador real.

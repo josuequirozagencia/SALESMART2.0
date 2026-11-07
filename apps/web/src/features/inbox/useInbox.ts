@@ -168,6 +168,19 @@ export function useConversationAction(id: string) {
   });
 }
 
+/** Elimina la conversación (borrado lógico, solo el administrador): desaparece de la bandeja; los mensajes se conservan. */
+export function useDeleteConversation(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api<{ id: string; deleted: true }>(`/conversations/${id}`, { method: 'DELETE' }),
+    onSettled: async () => {
+      await Promise.all([qc.invalidateQueries({ queryKey: ['conversations'] }), qc.invalidateQueries({ queryKey: ['scheduled'] })]);
+      qc.removeQueries({ queryKey: ['conversation', id] });
+      qc.removeQueries({ queryKey: ['messages', id] });
+    },
+  });
+}
+
 /** Marca como leída (solo cuenta si quien la abre es su dueño). Un fallo aquí no se le muestra a nadie: se reintenta en el siguiente aviso. */
 export function useMarkRead(id: string) {
   const qc = useQueryClient();

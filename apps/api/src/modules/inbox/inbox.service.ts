@@ -239,6 +239,30 @@ export class InboxService {
     return this.get(access, id);
   }
 
+  /**
+   * Elimina la conversación (borrado lógico, ADR-63; `conversations.delete`, solo el administrador). Se conserva todo (mensajes, adjuntos, historial) pero deja de verse y de procesarse: queda finalizada
+   * (un mensaje nuevo del cliente abre otra), se detienen sus cronómetros, lo que seguía en cola de salida se marca fallido y lo programado lo cancela la tarea (conversación finalizada).
+   * Todo en una transacción, con auditoría de quién, cuándo y qué tenía. Repetirlo responde 404 (ya no se ve).
+   */
+  async remove(access: InboxAccess, id: string): Promise<{ id: string; deleted: true }> {
+    const scope = scopeOf(access);
+    if (scope.canDelete !== true) throw new ForbiddenError();
+    await this.db.withTenant(async (tx) => {
+      const { c } = await loadConversation(tx, scope, id, true);
+      const now = new Date();
+      const [count] = await tx.select({ n: sql<number>`count(*)::int` }).from(messages).where(eq(messages.conversationId, id));
+      await tx.update(conversations).set({ status: 'closed', closedAt: c.closedAt ?? now, unreadCount: 0, deletedAt: now, deletedBy: scope.userId, updatedAt: now }).where(eq(conversations.id, id));
+      await this.sla.stopOpen(tx, id, 'closed', now);
+      const unsent = await tx
+        .update(messages)
+        .set({ status: 'failed', nextAttemptAt: null, error: 'La conversación fue eliminada antes de enviarse.', meta: sql`${messages.meta} || ${JSON.stringify({ error_code: 'conversation_deleted' })}::jsonb` })
+        .where(and(eq(messages.conversationId, id), eq(messages.direction, 'out'), eq(messages.status, 'queued')))
+        .returning({ id: messages.id });
+      await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'deleted', oldValue: { status: c.status, owner_id: c.ownerId, contact_id: c.contactId, channel_id: c.channelAccountId, messages: count?.n ?? 0, unsent_messages: unsent.length }, newValue: { deleted: true }, source: 'manual' });
+    });
+    return { id, deleted: true };
+  }
+
   /** Pone en cero los no leídos. Solo cuenta si quien la abre es su dueño: un administrador que la mira no borra los pendientes del asesor. */
   async markRead(access: InboxAccess, id: string): Promise<ConversationView> {
     const scope = scopeOf(access);

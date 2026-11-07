@@ -367,6 +367,32 @@ describe('Contactos · selección', () => {
     expect(screen.queryByLabelText('Lista a la que agregar')).not.toBeInTheDocument();
   });
 
+  it('«Borrar seleccionados»: solo con permiso de borrar; pide confirmación, manda los ids y avisa cuántos se borraron y cuántos se omitieron', async () => {
+    const w = world();
+    w.routes['POST /contacts/bulk-delete'] = (call) => { w.posts.push(call); return { body: { deleted: ['c1'], skipped: ['c2'] } }; };
+    mockApi(w.routes);
+    renderApp('/contacts');
+    await screen.findByRole('table', { name: 'Contactos' });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los contactos que se ven' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Borrar seleccionados' }));
+    const dialog = screen.getByRole('dialog', { name: 'Borrar contactos' });
+    expect(dialog).toHaveTextContent('¿Borrar 2 contactos?');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Cancelar' }));
+    expect(w.posts).toEqual([]);
+    await userEvent.click(screen.getByRole('button', { name: 'Borrar seleccionados' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Sí, borrar' }));
+    await waitFor(() => expect(w.posts.map((p) => p.body)).toEqual([{ ids: ['c1', 'c2'] }]));
+    expect(await screen.findByText(/Se borraron 1 contactos; 1 se omitieron/)).toBeInTheDocument();
+  });
+
+  it('sin permiso de borrar no aparece «Borrar seleccionados»', async () => {
+    mockApi(world(OWN).routes);
+    renderApp('/contacts');
+    await screen.findByRole('table', { name: 'Contactos' });
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los contactos que se ven' }));
+    expect(screen.queryByRole('button', { name: 'Borrar seleccionados' })).not.toBeInTheDocument();
+  });
+
   it('una selección de más de 500 contactos no se puede convertir en lista de una vez', async () => {
     const many = Array.from({ length: 501 }, (_, i) => contact(`m${i}`, `Contacto ${i}`));
     const w = world();

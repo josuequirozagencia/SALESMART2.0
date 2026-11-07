@@ -80,6 +80,9 @@ export const conversations = tenantTable(
     /** Con quién se habla en el canal (el identificador que informó el proveedor, p. ej. el `wa_id` de WhatsApp): a él se le responde. Null en las anteriores a M5.4. */
     peerId: text('peer_id'),
     closedAt: ts('closed_at'),
+    /** Borrado lógico (ADR-63): quién y cuándo la eliminó. Una conversación eliminada siempre está finalizada y no se ve ni se procesa; sus mensajes se conservan. */
+    deletedAt: ts('deleted_at'),
+    deletedBy: uuid('deleted_by').references(() => users.id),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -90,6 +93,7 @@ export const conversations = tenantTable(
     foreignKey({ name: 'conversations_queue_fk', columns: [t['organizationId']!, t['queueId']!], foreignColumns: [queues.organizationId, queues.id] }),
     check('conversations_owner_status', sql`${t['status']!} = 'closed' OR ((${t['status']!} = 'unassigned') = (${t['ownerId']!} IS NULL))`),
     check('conversations_assigned_pair', sql`(${t['ownerId']!} IS NULL) = (${t['assignedAt']!} IS NULL)`),
+    check('conversations_deleted_closed', sql`${t['deletedAt']!} IS NULL OR ${t['status']!} = 'closed'`),
     check('conversations_unread_valid', sql`${t['unreadCount']!} >= 0`),
     check('conversations_rotations_valid', sql`${t['rotations']!} >= 0`),
     check('conversations_assignment_source_valid', sql`${t['assignmentSource']!} IN ('distribution', 'manual')`),

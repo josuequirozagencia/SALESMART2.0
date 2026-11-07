@@ -46,34 +46,42 @@ describe('qué puede hacer cada persona con una conversación', () => {
   const advisor: InboxScope = { userId: me, viewAll: false, canReply: true, canTransfer: true, canShare: true };
   const admin: InboxScope = { userId: 'u-2', viewAll: true, canReply: true, canTransfer: true, canShare: true };
   const reader: InboxScope = { userId: 'u-3', viewAll: true, canReply: false, canTransfer: false, canShare: false };
+  const deleter: InboxScope = { ...admin, canDelete: true };
+
+  it('eliminar (ADR-63) solo con el permiso, en cualquier estado; el dueño sin permiso no puede', () => {
+    expect(abilities(deleter, { status: 'closed', ownerId: null }, 'active').delete).toBe(true);
+    expect(abilities(deleter, { status: 'working', ownerId: 'u-9' }, 'removed').delete).toBe(true);
+    expect(abilities(advisor, { status: 'working', ownerId: me }, 'active').delete).toBe(false);
+    expect(abilities(admin, { status: 'working', ownerId: me }, 'active').delete).toBe(false);
+  });
 
   it('el dueño responde y acepta lo pendiente; también quien ve todo; nadie más', () => {
-    expect(abilities(advisor, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
-    expect(abilities(advisor, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true });
+    expect(abilities(advisor, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true, delete: false });
+    expect(abilities(advisor, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true, delete: false });
     expect(abilities(advisor, { status: 'waiting', ownerId: me }, 'active').reply).toBe(true);
     // quien ve todo (administrador) responde y acepta igual que el dueño (enmienda de ADR-50 en M5.6c); el que solo lee no
-    expect(abilities(admin, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true });
-    expect(abilities(admin, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true });
+    expect(abilities(admin, { status: 'working', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: false, take: false, close: true, transfer: true, share: true, delete: false });
+    expect(abilities(admin, { status: 'pending', ownerId: me }, 'active')).toEqual({ reply: true, note: true, accept: true, take: false, close: true, transfer: true, share: true, delete: false });
   });
 
   it('lo sin asignar solo lo toma quien ve todo; lo finalizado no admite nada salvo notas', () => {
-    expect(abilities(admin, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: true, accept: false, take: true, close: true, transfer: true, share: false }); // una sin asignar se puede asignar a alguien, pero aún no hay con quién compartirla
+    expect(abilities(admin, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: true, accept: false, take: true, close: true, transfer: true, share: false, delete: false }); // una sin asignar se puede asignar a alguien, pero aún no hay con quién compartirla
     expect(abilities(advisor, { status: 'unassigned', ownerId: null }, 'active').take).toBe(false);
-    expect(abilities(advisor, { status: 'closed', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false });
+    expect(abilities(advisor, { status: 'closed', ownerId: me }, 'active')).toEqual({ reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false, delete: false });
   });
 
   it('con la conexión desactivada o desconectada no se responde; sin permiso de responder, nada de lo que escribe', () => {
     expect(abilities(advisor, { status: 'working', ownerId: me }, 'disabled').reply).toBe(false);
     expect(abilities(advisor, { status: 'working', ownerId: me }, 'removed').reply).toBe(false);
-    expect(abilities(reader, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false });
+    expect(abilities(reader, { status: 'unassigned', ownerId: null }, 'active')).toEqual({ reply: false, note: false, accept: false, take: false, close: false, transfer: false, share: false, delete: false });
   });
 
   it('quien recibe la conversación compartida: con permiso de responder escribe solo cuando el dueño ya la aceptó; solo para ver, deja notas y nada más; ninguno la transfiere, comparte ni finaliza', () => {
     const other = { status: 'working', ownerId: 'u-9' };
-    expect(abilities(advisor, other, 'active', 'reply')).toEqual({ reply: true, note: true, accept: false, take: false, close: false, transfer: false, share: false });
+    expect(abilities(advisor, other, 'active', 'reply')).toEqual({ reply: true, note: true, accept: false, take: false, close: false, transfer: false, share: false, delete: false });
     expect(abilities(advisor, { status: 'waiting', ownerId: 'u-9' }, 'active', 'reply').reply).toBe(true);
     expect(abilities(advisor, { status: 'pending', ownerId: 'u-9' }, 'active', 'reply').reply).toBe(false); // el dueño aún no la acepta
-    expect(abilities(advisor, other, 'active', 'view')).toEqual({ reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false });
+    expect(abilities(advisor, other, 'active', 'view')).toEqual({ reply: false, note: true, accept: false, take: false, close: false, transfer: false, share: false, delete: false });
     expect(abilities(advisor, other, 'disabled', 'reply').reply).toBe(false);
     expect(abilities(advisor, other, 'active', null).note).toBe(true); // sin acceso a ella ni llegaría aquí; la regla de visibilidad es la consulta
   });

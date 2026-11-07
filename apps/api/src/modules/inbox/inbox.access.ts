@@ -16,6 +16,8 @@ export interface InboxAccess {
   readonly canReply: boolean;
   readonly canTransfer: boolean;
   readonly canShare: boolean;
+  /** `conversations.delete` (ADR-63): eliminar conversaciones. Opcional: quien construye un alcance sin este dato no puede eliminar. */
+  readonly canDelete?: boolean;
 }
 export interface InboxScope extends InboxAccess {
   readonly userId: string;
@@ -90,6 +92,8 @@ export interface Abilities {
   transfer: boolean;
   /** Darle acceso a otra persona sin cambiar el dueño: su dueño o quien ve todo (la conversación debe tener dueño). */
   share: boolean;
+  /** Eliminar la conversación (ADR-63): solo con `conversations.delete`. */
+  delete: boolean;
 }
 
 const OPEN_OWNED = new Set(['pending', 'working', 'waiting']);
@@ -107,6 +111,7 @@ export function abilities(scope: InboxScope, c: Pick<ConversationRow, 'status' |
     close: scope.canReply && open && (mine || scope.viewAll),
     transfer: scope.canTransfer && open && (mine || scope.viewAll),
     share: scope.canShare && open && c.status !== 'unassigned' && (mine || scope.viewAll),
+    delete: scope.canDelete === true,
   };
 }
 
