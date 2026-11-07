@@ -19,6 +19,13 @@ const REASONS: Record<string, string> = {
   no_support: 'El agente no encontró en sus documentos lo que el cliente preguntó.',
 };
 
+/** Motivos que se dicen con una frase completa y propia (textos aprobados por el responsable el 2026-11-06). */
+const WHOLE: Record<string, string> = {
+  human_message: 'Pausado: una persona intervino. Puedes reanudarlo.',
+  human_took: 'Pausado: una persona intervino. Puedes reanudarlo.',
+  empty_reply: 'El agente no pudo responder. Revisa esta conversación.',
+};
+
 /**
  * Qué hace el agente de IA en esta conversación (M8.5, ADR-53; F17): si atiende, quien responde puede tomar el control; si se pausó o pasó la conversación a una persona, ve por qué y puede reanudarlo.
  * No se muestra si la conexión no tiene agente o el agente no ha intervenido.
@@ -35,11 +42,12 @@ export function AgentBanner({ c }: { c: Conversation }) {
     control.mutate(a, { onError: (e) => setError(friendlyError(e, a === 'pause' ? 'No pudimos pausar al agente.' : 'No pudimos reanudar al agente.')) });
   };
   const active = s.state === 'active';
+  const whole = !active && s.reason ? WHOLE[s.reason] : undefined;
   return (
     <div role="status" aria-label="Agente de IA" className={`flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[13px] ${active ? 'bg-accent-soft text-fg' : 'bg-warn-soft text-warn'}`}>
       <span aria-hidden="true">🤖</span>
       <span className="min-w-0 flex-1">
-        {active ? <>El agente <b>{name}</b> está atendiendo esta conversación.</> : <>El agente <b>{name}</b> {s.state === 'handed_off' ? 'pasó la conversación a una persona.' : 'está en pausa.'} {s.reason ? REASONS[s.reason] ?? '' : ''}</>}
+        {active ? (s.outcome === 'out_of_hours' ? <>El agente espera el horario de atención.</> : <>Agente de IA atendiendo · <b>{name}</b></>) : whole ? <>{whole}</> : <>El agente <b>{name}</b> {s.state === 'handed_off' ? 'pasó la conversación a una persona.' : 'está en pausa.'} {s.reason ? REASONS[s.reason] ?? '' : ''}</>}
       </span>
       {s.can_control ? (
         active ? <Button className={SMALL} loading={control.isPending} onClick={() => act('pause')}>Tomar control</Button> : <Button className={SMALL} loading={control.isPending} onClick={() => act('resume')}>Reanudar agente</Button>
