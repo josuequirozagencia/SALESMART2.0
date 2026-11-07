@@ -14,6 +14,7 @@ import { ContactListsRepository } from './contact-lists.repository';
 import { savedFilters } from './contact-lists.service';
 import type { CreateContactDto, ListContactsQuery, UpdateContactDto } from './contacts.dto';
 import { CompaniesService } from './companies.service';
+import { channelOf, CONTACT_CHANNELS, type ContactChannel } from './contact-channel';
 import { ContactsRepository, type ContactRow, type PhoneRow, type Scope } from './contacts.repository';
 
 export interface ContactView {
@@ -34,6 +35,8 @@ export interface ContactView {
   companies: Array<{ id: string; name: string }>;
   /** Origen del lead por Click-to-WhatsApp (M3.3, ADR-45); null si el contacto no llegó por un anuncio. */
   attribution: ContactAttribution | null;
+  /** Canal de entrada (M3.3 §11): facebook, instagram, whatsapp, manual u otro. Se fija al crear el contacto. */
+  channel: ContactChannel;
   created_at: string;
   updated_at: string;
 }
@@ -48,6 +51,8 @@ export interface Touch {
 }
 export interface ContactAttribution {
   ctwa_cl_id: string | null;
+  /** Canal de entrada del contacto (M3.3 §11); el mismo valor que `channel` de la ficha. */
+  channel: ContactChannel;
   first_touch: Touch | null;
   last_touch: Touch | null;
   /** Último evento Purchase hacia Meta (null si nunca se creó uno). */
@@ -95,10 +100,12 @@ const attributionOf = (r: ContactRow, capi: { status: string; sentAt: Date | nul
     ? null
     : {
         ctwa_cl_id: r.ctwaClId,
+        channel: asChannel(r.channel),
         first_touch: touchOf(r.firstTouchAt, r.firstTouchSource, r.firstTouchCampaign, r.firstTouchAdset, r.firstTouchAd, r.firstTouchAdId),
         last_touch: touchOf(r.lastTouchAt, r.lastTouchSource, r.lastTouchCampaign, r.lastTouchAdset, r.lastTouchAd, r.lastTouchAdId),
         capi: capi ? { status: capi.status, sent_at: capi.sentAt ? capi.sentAt.toISOString() : null } : null,
       };
+const asChannel = (v: string): ContactChannel => ((CONTACT_CHANNELS as readonly string[]).includes(v) ? (v as ContactChannel) : 'other');
 const asConsent = (v: string): ContactView['consent'] => (v === 'granted' || v === 'revoked' ? v : 'unknown');
 
 /**
@@ -154,7 +161,7 @@ export class ContactsService {
       await this.assertPhonesFree(tx, phones);
       const [row] = await tx
         .insert(contacts)
-        .values({ name: input.name, email: input.email ?? null, ownerId: owner, source: 'manual', consent, consentUpdatedAt: consent === 'unknown' ? null : now, createdBy: sc.userId })
+        .values({ name: input.name, email: input.email ?? null, ownerId: owner, source: 'manual', channel: input.channel ?? 'manual', consent, consentUpdatedAt: consent === 'unknown' ? null : now, createdBy: sc.userId })
         .returning();
       const c = row!;
       if (phones.length > 0) await tx.insert(contactPhones).values(phones.map((e164, i) => ({ contactId: c.id, e164, isPrimary: i === 0 })));
@@ -162,7 +169,7 @@ export class ContactsService {
       const customChanges = await this.custom.apply(tx, 'contact', c.id, input.custom_fields ?? {}, { creating: true });
       const customNew = Object.fromEntries(customChanges.map((x) => [x.key, x.newValue]));
       const tagChange = input.tag_ids && input.tag_ids.length > 0 ? await this.tagging.setCustom(tx, c.id, input.tag_ids) : null;
-      await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}), ...(tagChange ? { tags: tagChange.after } : {}) }, source: 'manual' });
+      await writeAudit(tx, { entityType: 'contact', entityId: c.id, newValue: { name: c.name, email: c.email, owner_id: c.ownerId, consent: c.consent, phones, source: c.source, channel: c.channel, ...(customChanges.length > 0 ? { custom_fields: customNew } : {}), ...(tagChange ? { tags: tagChange.after } : {}) }, source: 'manual' });
       await this.events?.emit(tx, { type: 'contact_created', contactId: c.id, key: `contact_created:${c.id}`, source: 'manual' });
       return { row: c, phones: await this.repo.phonesOf(tx, [c.id]), extras: await this.extras(tx, [c.id]) };
       })
@@ -314,11 +321,18 @@ export class ContactsService {
     // El nombre del perfil lo escribe quien tiene el teléfono: sin caracteres de control y dentro del largo permitido
     const profile = (name ?? '').replace(/\p{Cc}/gu, ' ').trim().slice(0, 200).trim();
     const finalName = profile === '' ? e164 : profile;
-    const [c] = await tx.insert(contacts).values({ name: finalName, source, consent: 'unknown', createdBy: null }).returning();
+    const [c] = await tx.insert(contacts).values({ name: finalName, source, channel: channelOf(source), consent: 'unknown', createdBy: null }).returning();
     await tx.insert(contactPhones).values({ contactId: c!.id, e164, isPrimary: true });
     await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: finalName, source, consent: 'unknown', phones: [e164] }, source: audit });
     await this.events?.emit(tx, { type: 'contact_created', contactId: c!.id, key: `contact_created:${c!.id}`, source });
     return { id: c!.id, created: true };
+  }
+
+  /**
+   * Fija el canal de un contacto RECIÉN creado por un anuncio (M3.3 §11). Solo se llama cuando quien invoca acaba de crear el contacto: un clic posterior nunca cambia el canal.
+   */
+  async setChannelOnCreate(tx: TenantTx, id: string, channel: ContactChannel): Promise<void> {
+    await tx.update(contacts).set({ channel }).where(eq(contacts.id, id));
   }
 
   /**
@@ -554,6 +568,7 @@ export class ContactsService {
       tags: x.tags.get(r.id) ?? [],
       companies: x.companies.get(r.id) ?? [],
       attribution: attributionOf(r, x.capi.get(r.id)),
+      channel: asChannel(r.channel),
       created_at: iso(r.createdAt),
       updated_at: iso(r.updatedAt),
     }));

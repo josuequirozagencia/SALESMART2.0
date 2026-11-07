@@ -368,6 +368,7 @@ describe('envío público', () => {
     const [c] = await contactRows();
     expect(c).toMatchObject({ name: 'Lucía Paredes', email: 'lucia@example.com', source: 'form', consent: 'granted', phone: '+593984217730', owner_id: IDS.carol });
     expect(await tagNames(c!['id'] as string)).toEqual(['Curso de uñas', 'Lead']);
+    expect((await admin.query('SELECT channel FROM contacts WHERE id = $1', [c!['id']])).rows[0]).toEqual({ channel: 'facebook' }); // utm_source=facebook
     const [o] = await opps();
     expect(o).toMatchObject({ contact_id: c!['id'], pipeline_id: pipeline, stage_id: stage, status: 'open', owner_id: IDS.carol });
     expect((await admin.query(`SELECT origin FROM stage_history WHERE opportunity_id = $1`, [o!['id']])).rows).toEqual([{ origin: 'system' }]);

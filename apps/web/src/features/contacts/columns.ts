@@ -14,6 +14,7 @@ export const FIXED_COLUMNS: readonly ColumnDef[] = [
   { key: 'company', label: 'Empresa' },
   { key: 'owner', label: 'Responsable' },
   { key: 'source', label: 'Origen' },
+  { key: 'channel', label: 'Canal' },
   { key: 'consent', label: 'Consentimiento' },
   { key: 'tags', label: 'Etiquetas' },
   { key: 'campaign', label: 'Último anuncio' },

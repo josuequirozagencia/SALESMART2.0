@@ -306,6 +306,8 @@ export interface Contact {
   companies: CompanyRef[];
   /** Origen del lead por Click-to-WhatsApp (M3.3); null si no llegó por un anuncio. */
   attribution: ContactAttribution | null;
+  /** Canal de entrada (M3.3 §11); lo manda siempre el servidor. */
+  channel?: ContactChannel;
   created_at: string;
   updated_at: string;
 }
@@ -410,8 +412,12 @@ export interface ContactTouch {
   adset: string | null;
   ad: string | null;
 }
+/** Canal de entrada del contacto (M3.3 §11). */
+export type ContactChannel = 'facebook' | 'instagram' | 'whatsapp' | 'manual' | 'other';
 export interface ContactAttribution {
   ctwa_cl_id: string | null;
+  /** Siempre lo manda el servidor; opcional aquí para no obligar a cada dato de ejemplo. */
+  channel?: ContactChannel;
   first_touch: ContactTouch | null;
   last_touch: ContactTouch | null;
   /** Último evento Purchase hacia Meta (null si nunca hubo uno). */

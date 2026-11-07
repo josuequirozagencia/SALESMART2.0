@@ -302,3 +302,90 @@ describe('«Anuncio ganador»', () => {
     expect(Number((await admin.query(`SELECT count(*) FROM analytics_exports WHERE report = 'winning_ads'`)).rows[0].count)).toBe(1);
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+// M3.3 §11 (aprobado el 2026-11-07): canal del lead
+// ---------------------------------------------------------------------------------------------------------------------------------------------------------------
+const channelOfContact = async (id: string): Promise<string> => (await admin.query('SELECT channel FROM contacts WHERE id = $1', [id])).rows[0].channel as string;
+const ingest = (m: NormalizedMessage) => TenantContext.run({ organizationId: ORG_A }, () => import('../../src/db').then(({ Database }) => app.get(Database).withTenant((tx) => conversations.ingestInbound(tx, channelA, m, { now: new Date(), timeZone: 'America/Guayaquil', assignable: new Set() }))));
+
+describe('canal del lead (M3.3 §11)', () => {
+  it('un clic CTWA crea el contacto con channel=facebook (sin placement o con placement facebook) o instagram', async () => {
+    await record(click({ phone: '+593984100001', ctwa_cl_id: 'c-ig', placement: 'instagram' }));
+    await record(click({ phone: '+593984100002', ctwa_cl_id: 'c-fb', placement: 'facebook' }));
+    await record(click({ phone: '+593984100003', ctwa_cl_id: 'c-none' }));
+    expect(await channelOfContact(await contactOf('+593984100001'))).toBe('instagram');
+    expect(await channelOfContact(await contactOf('+593984100002'))).toBe('facebook');
+    expect(await channelOfContact(await contactOf('+593984100003'))).toBe('facebook'); // sin placement: el valor por omisión de un anuncio de Meta
+  });
+
+  it('un mensaje de WhatsApp sin anuncio crea el contacto como whatsapp; con el aviso de un anuncio (referral), como facebook', async () => {
+    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date('2026-10-15T15:00:00Z'), ...over });
+    await ingest(msg({ externalId: 'wamid.CH1', from: '+593984100004' }));
+    await ingest(msg({ externalId: 'wamid.CH2', from: '+593984100005', referral: { sourceId: '120077', sourceType: 'ad', sourceUrl: null, headline: 'Promo', body: null, thumbnailUrl: null, ctwaClid: 'clid-ch2' } }));
+    expect(await channelOfContact(await contactOf('+593984100004'))).toBe('whatsapp');
+    expect(await channelOfContact(await contactOf('+593984100005'))).toBe('facebook');
+  });
+
+  it('la creación manual deja channel=manual por omisión y acepta uno de los permitidos; el origen sigue siendo «manual»', async () => {
+    const a = await json<{ id: string; channel: string; source: string }>(await call('POST', '/contacts', T.alice, { name: 'Beto', phones: ['+593984100006'] }));
+    expect(a).toMatchObject({ channel: 'manual', source: 'manual' });
+    const b = await json<{ id: string; channel: string }>(await call('POST', '/contacts', T.alice, { name: 'Carla', phones: ['+593984100007'], channel: 'instagram' }));
+    expect(b.channel).toBe('instagram');
+    expect(await channelOfContact(b.id)).toBe('instagram');
+    // el asesor también puede crear con un canal permitido; uno que no lo es, 400
+    expect((await call('POST', '/contacts', T.carol, { name: 'Dani', phones: ['+593984100008'], channel: 'whatsapp' })).status).toBe(201);
+    for (const bad of ['tiktok', 'Facebook', '', null, 5]) expect((await call('POST', '/contacts', T.alice, { name: 'X', phones: ['+593984100009'], channel: bad })).status, String(bad)).toBe(400);
+    // la auditoría de la creación lo registra
+    const audit = (await admin.query("SELECT new_value FROM audit_logs WHERE entity_type = 'contact' AND entity_id = $1 AND field IS NULL", [b.id])).rows[0];
+    expect(audit.new_value).toMatchObject({ channel: 'instagram', source: 'manual' });
+  });
+
+  it('el canal es de solo lectura tras crear el contacto: el PATCH lo rechaza y no cambia nada', async () => {
+    const made = await json<{ id: string }>(await call('POST', '/contacts', T.alice, { name: 'Eva', phones: ['+593984100012'], channel: 'whatsapp' }));
+    expect((await call('PATCH', `/contacts/${made.id}`, T.alice, { channel: 'facebook' })).status).toBe(400);
+    expect((await call('PATCH', `/contacts/${made.id}`, T.alice, { name: 'Eva Luna', channel: 'facebook' })).status).toBe(400);
+    expect(await channelOfContact(made.id)).toBe('whatsapp');
+    expect((await call('PATCH', `/contacts/${made.id}`, T.alice, { name: 'Eva Luna' })).status).toBe(200); // lo demás se sigue editando
+    expect(await channelOfContact(made.id)).toBe('whatsapp');
+  });
+
+  it('GET /contacts y GET /contacts/:id traen el canal (también dentro de la atribución)', async () => {
+    await record(click({ phone: '+593984100010', ctwa_cl_id: 'c-list', placement: 'instagram' }));
+    const id = await contactOf('+593984100010');
+    const one = await json<{ channel: string; attribution: { channel: string } | null }>(await call('GET', `/contacts/${id}`, T.alice));
+    expect(one.channel).toBe('instagram');
+    expect(one.attribution?.channel).toBe('instagram');
+    const list = await json<{ items: Array<{ id: string; channel: string }> }>(await call('GET', '/contacts', T.alice));
+    expect(list.items.find((x) => x.id === id)?.channel).toBe('instagram');
+  });
+
+  it('una vez asignado, el canal NUNCA cambia: ni con otro clic (otro placement), ni con otro mensaje', async () => {
+    await record(click({ phone: '+593984100011', ctwa_cl_id: 'first', placement: 'instagram' }));
+    await record(click({ phone: '+593984100011', ctwa_cl_id: 'second', placement: 'facebook' }));
+    await record(click({ phone: '+593984100011', ctwa_cl_id: 'third' }));
+    const id = await contactOf('+593984100011');
+    await ingest({ externalId: 'wamid.LATE', from: '+593984100011', fromRaw: '593984100011', profileName: 'Ana', kind: 'text', text: 'Hola otra vez', media: null, extra: {}, sentAt: new Date('2026-10-16T15:00:00Z') } as NormalizedMessage);
+    expect(await channelOfContact(id)).toBe('instagram');
+  });
+
+  it('el webhook rechaza un placement desconocido (esquema estricto)', async () => {
+    const { ctwaWebhookSchema } = await import('../../src/modules/attribution/attribution.dto');
+    expect(ctwaWebhookSchema.safeParse({ phone: '+593984100013', ctwa_cl_id: 'x', placement: 'instagram' }).success).toBe(true);
+    expect(ctwaWebhookSchema.safeParse({ phone: '+593984100013', ctwa_cl_id: 'x', placement: 'tiktok' }).success).toBe(false);
+  });
+
+  it('A↔B: el canal no se filtra entre organizaciones (404 uniforme, y la lista de B no trae contactos de A)', async () => {
+    const a = await json<{ id: string }>(await call('POST', '/contacts', T.alice, { name: 'De A', phones: ['+593984100020'], channel: 'instagram' }));
+    const b = await json<{ id: string; channel: string }>(await call('POST', '/contacts', T.bob, { name: 'De B', phones: ['+593984100021'] }));
+    expect(b.channel).toBe('manual');
+    expect((await call('GET', `/contacts/${a.id}`, T.bob)).status).toBe(404);
+    expect((await call('GET', `/contacts/${b.id}`, T.alice)).status).toBe(404);
+    const listB = await json<{ items: Array<{ id: string; channel: string }> }>(await call('GET', '/contacts', T.bob));
+    expect(listB.items.map((x) => x.id)).toEqual([b.id]);
+    expect(JSON.stringify(listB)).not.toContain('instagram');
+    // un clic de A no toca el canal de un contacto de B con el mismo teléfono
+    await TenantContext.run({ organizationId: ORG_A }, () => attribution.record(click({ phone: '+593984100021', ctwa_cl_id: 'cross' }) as never));
+    expect(await channelOfContact(b.id)).toBe('manual');
+  });
+});
