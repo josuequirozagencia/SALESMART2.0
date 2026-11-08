@@ -6,7 +6,7 @@ import { TenantContext } from '../../tenant';
 import { AttachmentsService } from '../attachments';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { parseEvolutionWebhook, WebhookEventsJob, WebhookEventsService } from '../channels';
+import { errorLabel, parseEvolutionWebhook, WebhookEventsJob, WebhookEventsService } from '../channels';
 import { QrRoutesService } from '../organizations';
 import { QrConnectionsService } from './qr-connections.service';
 
@@ -57,8 +57,9 @@ export class QrWebhookService {
     // Procesamiento inmediato: el mensaje aparece sin esperar a la tarea de cada 5 s. Si falla, el aviso ya está guardado y la tarea lo recoge
     try {
       await this.drainer.drain(organizationId, now);
-    } catch {
-      this.log.warn({ organization_id: organizationId }, 'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
+    } catch (e) {
+      // Solo la clase y el código del error (nunca su mensaje: podría llevar texto de un cliente o un teléfono)
+      this.log.warn({ organization_id: organizationId, err: errorLabel(e) },'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
     }
   }
 }

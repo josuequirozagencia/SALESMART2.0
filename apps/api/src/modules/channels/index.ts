@@ -6,7 +6,7 @@ export { FakeWhatsAppProvider, FAKE_WHATSAPP_TOKEN, FAKE_UNKNOWN_PREFIX, FAKE_UN
 export { normalizeMetaTemplate } from './meta-templates';
 export { MetaCloudProvider, type MetaCloudOptions } from './meta-cloud.provider';
 export { WebhookEventsJob, MAX_BATCHES_PER_RUN } from './webhook-events.job';
-export { WebhookEventsService, EVENT_BATCH, EVENT_MAX_ATTEMPTS, PAYLOAD_RETENTION_DAYS } from './webhook-events.service';
+export { WebhookEventsService, errorLabel, EVENT_BATCH, EVENT_MAX_ATTEMPTS, PAYLOAD_RETENTION_DAYS } from './webhook-events.service';
 export { MetaWebhookService, WHATSAPP_SERVICE, type ReceiveResult } from './meta-webhook.service';
 export { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
 export type { ChannelView } from './connections.service';
