@@ -372,7 +372,7 @@ export class AgentsService {
       let name: string = SAMPLE_CONTACT.name;
       let values: ResolveContext['custom'] = SAMPLE_CONTACT.custom;
       if (input.contact_id) {
-        const c = await this.contacts.visibleContactIn(tx, { viewAll: true }, input.contact_id); // quien administra agentes ve todos los contactos; 404 uniforme si no existe
+        const c = await this.contacts.summaryIn(tx, input.contact_id); // quien administra agentes ve todos los contactos y la tarea del agente en vivo no tiene persona detrás (por eso no hay alcance por persona); 404 uniforme si no existe
         contact = { id: c.id, name: c.name };
         name = c.name;
         const wanted = new Set(Object.values(texts).flatMap((t) => customKeysIn(t)));

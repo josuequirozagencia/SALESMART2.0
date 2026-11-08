@@ -74,7 +74,8 @@ async function login(email: string): Promise<string> {
 const inOrg = <R,>(org: string, fn: () => Promise<R>): Promise<R> => TenantContext.run({ organizationId: org, userId: org === ORG_A ? IDS.alice : IDS.bob }, fn);
 const runtime = () => app.get(AgentRuntimeService);
 /** Una pasada de la tarea para la empresa. */
-const tick = (at: Date = new Date(), org = ORG_A) => inOrg(org, () => runtime().runDue(at));
+// Igual que la tarea periódica real (agent-runtime.job.ts): SIN persona en el contexto. Con una persona (userId) un fallo de producción quedaba escondido: el agente no podía leer al contacto («No tienes permiso»).
+const tick = (at: Date = new Date(), org = ORG_A) => TenantContext.run({ organizationId: org }, () => runtime().runDue(at));
 
 /** Un agente activo atendiendo la conexión de la empresa A (con la biblioteca de horarios si se pide). */
 async function liveAgent(opts: { docs?: boolean; patch?: Record<string, unknown>; token?: string; channel?: string } = {}): Promise<string> {
