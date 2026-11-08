@@ -282,6 +282,16 @@ export class ContactsService {
     return { id: row.id, name: row.name, ownerId: row.ownerId };
   }
 
+  /**
+   * Nombre y dueño de un contacto vigente, SIN alcance por persona: para procesos del sistema que no tienen una persona detrás (la tarea del agente de IA arma las instrucciones con los datos del contacto).
+   * No lo uses en una ruta de una persona: allí manda `visibleContactIn`. 404 uniforme si no existe.
+   */
+  async summaryIn(tx: TenantTx, id: string): Promise<{ id: string; name: string; ownerId: string | null }> {
+    const [r] = await tx.select({ id: contacts.id, name: contacts.name, ownerId: contacts.ownerId }).from(contacts).where(and(eq(contacts.id, id), isNull(contacts.deletedAt))).limit(1);
+    if (!r) throw new NotFoundError();
+    return r;
+  }
+
   /** Quién atiende al contacto (su dueño, la «cartera»); null si no tiene. Sin alcance por persona: lo usa el reparto de conversaciones. */
   async ownerOf(tx: TenantTx, id: string): Promise<string | null> {
     const [r] = await tx.select({ ownerId: contacts.ownerId }).from(contacts).where(and(eq(contacts.id, id), isNull(contacts.deletedAt))).limit(1);
