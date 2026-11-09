@@ -95,12 +95,15 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
   const current = groups.flatMap((g) => g.items).find((i) => isNavActive(i, pathname));
   const name = me.user.full_name ?? me.user.email;
   const extraNode = typeof extra === 'function' ? extra(compact) : extra;
-  const grid = bottom ? (compact ? 'md:grid md:grid-cols-[68px_minmax(0,1fr)]' : 'md:grid md:grid-cols-[232px_minmax(0,1fr)]') : 'lg:grid lg:grid-cols-[232px_minmax(0,1fr)]';
+  // v6 fase B: en escritorio la página NO se desplaza. El marco mide exactamente la ventana (`h-dvh`): banners arriba, y debajo el menú y el contenido, que se desplaza por dentro
+  const frame = bottom ? 'md:flex md:h-dvh md:flex-col md:overflow-hidden' : 'lg:flex lg:h-dvh lg:flex-col lg:overflow-hidden';
+  const grid = bottom ? (compact ? 'md:grid md:min-h-0 md:flex-1 md:grid-rows-[minmax(0,1fr)] md:grid-cols-[68px_minmax(0,1fr)]' : 'md:grid md:min-h-0 md:flex-1 md:grid-rows-[minmax(0,1fr)] md:grid-cols-[232px_minmax(0,1fr)]') : 'lg:grid lg:min-h-0 lg:flex-1 lg:grid-rows-[minmax(0,1fr)] lg:grid-cols-[232px_minmax(0,1fr)]';
+  const scroller = bottom ? 'md:min-h-0 md:overflow-y-auto' : 'lg:min-h-0 lg:overflow-y-auto';
   const asideCls = bottom
-    ? 'hidden md:sticky md:top-0 md:z-auto md:flex md:h-dvh'
-    : `fixed inset-y-0 left-0 z-50 flex w-[272px] max-w-[85vw] transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'} lg:sticky lg:top-0 lg:z-auto lg:h-dvh lg:w-auto lg:max-w-none lg:translate-x-0`;
+    ? 'hidden md:z-auto md:flex md:h-full md:min-h-0'
+    : `fixed inset-y-0 left-0 z-50 flex w-[272px] max-w-[85vw] transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'} lg:sticky lg:top-0 lg:z-auto lg:h-full lg:min-h-0 lg:w-auto lg:max-w-none lg:translate-x-0`;
   return (
-    <div className="min-h-full bg-bg">
+    <div className={`min-h-full bg-bg ${frame}`}>
       {banner}
       <div className={`${grid} md:transition-[grid-template-columns] md:duration-200`}>
         {bottom ? null : (
@@ -177,7 +180,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
             </div>
           </div>
         </aside>
-        <div className={`min-w-0 ${flush ? 'flex h-dvh flex-col' : ''}`}>
+        <div className={`min-w-0 ${scroller} ${flush ? `flex h-dvh flex-col ${bottom ? 'md:h-full' : 'lg:h-full'}` : ''}`}>
           <div className={flush ? `flex min-h-0 min-w-0 flex-1 flex-col ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))]' : ''}` : `mx-auto grid ${wide ? 'max-w-[1500px]' : 'max-w-[1180px]'} grid-cols-[minmax(0,1fr)] gap-4 p-4 sm:p-5 ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom)+16px)]' : ''}`}>{children}</div>
         </div>
       </div>
