@@ -363,13 +363,14 @@ describe('envío por la sesión', () => {
 
   it('un archivo se puede subir y enviar por QR (no es «solo texto» como GoHighLevel) y sin ventana de 24 h; sale por la instancia con su pie', async () => {
     const { v, conv } = await ready();
-    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '5 days' WHERE id = $1`, [conv]);
+    // Asignada a Alice y en curso (por la API nadie responde una conversación sin asignar); el cliente escribió por última vez hace 5 días
+    await admin.query(`UPDATE conversations SET status = 'working', owner_id = $2, last_inbound_at = now() - interval '5 days' WHERE id = $1`, [conv, IDS.alice]);
     const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fcffff3f0300050001a5f645400000000049454e44ae426082', 'hex');
     const up = await fetch(`${base}/conversations/${conv}/attachments`, { method: 'POST', headers: { authorization: `Bearer ${T.alice}`, 'content-type': 'image/png', 'x-filename': 'a.png' }, body: new Uint8Array(png) });
-    expect(up.status).toBe(201);
+    expect(up.status, JSON.stringify(await up.clone().json().catch(() => null))).toBe(201);
     const att = await json<{ id: string }>(up);
     const sent = await call('POST', `/conversations/${conv}/media`, T.alice, { attachment_id: att.id, caption: 'Mira' });
-    expect(sent.status).toBe(201);
+    expect(sent.status, JSON.stringify(await sent.clone().json().catch(() => null))).toBe(201);
     const id = (await json<{ id: string }>(sent)).id;
     expect(await msg(id)).toMatchObject({ status: 'sent', kind: 'image' });
     expect(fake().sent).toHaveLength(1);
