@@ -83,6 +83,8 @@ Variables del servicio «app» (todas con valor seguro por omisión; `fake` se r
 | `VIRUS_SCANNER` | `none` o `clamav` | `none` (los archivos quedan «sin revisar», con aviso visible) |
 | `CLAMAV_HOST` / `CLAMAV_PORT` | host y puerto del servicio ClamAV | solo con `clamav` (obligatorio si se activa) |
 | `AUDIO_TRANSCODER` | `none` o `ffmpeg` | `none` (las grabaciones WebM se rechazan con explicación) |
+| `PUSH_PROVIDER` | `webpush`, `none` o `fake` | `webpush` (sin claves VAPID el push queda apagado) |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | par de claves (`pnpm --filter @sales-smart/api push:vapid`) y `mailto:` o `https://` de contacto; las tres juntas | ninguna (ADR-64; la privada es un secreto) |
 | `FFMPEG_PATH` | ruta del binario | solo con `ffmpeg` |
 
 Pasos: (1) crear el bucket (privado) y una llave de acceso solo a ese bucket; (2) en la web, **Proveedores › Almacenamiento**, cargar endpoint, región, bucket y llaves (se guardan cifradas); (3) la política de contenido de la web ya permite el origen del endpoint para imágenes y audio/video, no hace falta tocar nada más; (4) para antivirus, desplegar ClamAV como servicio aparte y activar `VIRUS_SCANNER=clamav`; para audio, instalar ffmpeg en la imagen y activar `AUDIO_TRANSCODER=ffmpeg`.

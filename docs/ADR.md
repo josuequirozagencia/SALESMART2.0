@@ -2351,3 +2351,30 @@ Hasta ahora el Inbox solo permitía «Finalizar» una conversación; no había f
 - No se borra la conversación al borrar un contacto: queda oculta por el filtro del contacto (comportamiento anterior).
 - El borrado desde el panel del contacto en el Inbox **no** se construyó (se borra desde Contactos).
 - Sin validar en navegador real.
+
+
+## ADR-64 — Notificaciones push del navegador (Web Push) y sonido de mensaje nuevo
+**Estado:** el sonido y el **push real** los **APROBÓ el responsable el 2026-11-09** («Apruebo el push real»); las precisiones de implementación están **PROPUESTAS**.
+
+### Contexto
+El Inbox solo avisaba con la pestaña abierta (aviso en vivo, campana «Avisos»). Un asesor con la pestaña cerrada o en segundo plano no se enteraba de un mensaje nuevo. El v6 pidió sonido y notificaciones push; el prompt reservó al responsable las decisiones sobre claves, tabla de suscripciones y dependencia.
+
+### Decisión
+1. **Sonido (solo web):** tono corto (Web Audio, sin archivos) al llegar un mensaje entrante; preferencia por persona y empresa en el navegador (`ss.sound.v1:<userId>:<orgId>`), activada por omisión; no suena por lo propio, notas internas ni automáticos, ni con la conversación abierta a la vista; queda habilitado tras el primer gesto de la persona.
+2. **Web Push real con VAPID:** librería `web-push` (dependencia nueva aprobada) detrás de un **puerto `PushSender`** con adaptador real, **fake** y prueba común (`PUSH_PROVIDER=webpush|none|fake`; `fake` se rechaza en producción). Claves `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` y `VAPID_SUBJECT`, **las tres juntas o ninguna**; sin ellas el push queda apagado (no impide arrancar) y la pantalla lo dice. Se generan una vez con `pnpm --filter @sales-smart/api push:vapid`; la privada es un secreto (no va al repositorio ni a chats).
+3. **Tabla `push_subscriptions`** (migración `0128`): tabla de **negocio** con `organization_id` + RLS forzada; **sin DELETE** (se marca `revoked_at`); un navegador (`endpoint`) está suscrito una vez por empresa (índice único) y pertenece a una persona; `show_text` (por omisión **falso**) decide si la notificación lleva el texto del mensaje o solo «Mensaje nuevo». La dirección de suscripción nunca se devuelve por la API.
+4. **API** (`notifications.read|write`, sin permisos nuevos): `GET /v1/push/config`, `POST /v1/push/status`, `POST /v1/push/subscribe`, `POST /v1/push/unsubscribe`; las direcciones van en el cuerpo, nunca en la URL.
+5. **Anti-SSRF:** el servidor envía una petición a la dirección que trae el navegador; solo se aceptan direcciones `https` (sin usuario ni puerto raro) de los servicios de push de los navegadores: `fcm.googleapis.com`, `updates.push.services.mozilla.com` (y `*.push.services.mozilla.com`), `web.push.apple.com` (y `*.push.apple.com`) y `*.notify.windows.com`.
+6. **A quién avisa:** el tiempo real marca el mensaje entrante (`inbound`) y, al entregarlo, `PushService.notifyInbound` avisa **al responsable** de la conversación (si lo hay y puede verla) o, **sin responsable, a quienes la pueden ver**; nunca a quien no puede abrirla. Mejor esfuerzo: no bloquea ni lanza. Un 404/410 del servicio de push da de baja la suscripción.
+7. **Web:** `public/sw.js` (solo muestra avisos: sin caché ni interceptar peticiones; no muestra nada si la aplicación está a la vista; al hacer clic abre `/inbox/<id>` de este mismo origen); el permiso se pide **solo** cuando la persona pulsa «Activar notificaciones» en Configuración › Notificaciones; activar, desactivar y «mostrar el texto».
+
+### Alternativas descartadas
+- **Un servicio externo de push (OneSignal, Firebase SDK):** datos de clientes a un tercero y otra credencial; Web Push estándar basta.
+- **Guardar el texto del aviso en la base:** el texto se lee del mensaje al enviar; no se copia.
+- **Avisar a todo el equipo de cada mensaje:** ruido; solo al responsable o, sin responsable, a quienes pueden tomarla.
+
+### Riesgos y lo no validado
+- **Probado solo con el fake y navegadores simulados:** el envío real (claves VAPID reales, FCM/Mozilla/Apple), el service worker en navegadores reales y en iOS (exige instalar la aplicación en la pantalla de inicio) **no se han validado**.
+- Un navegador compartido por dos empresas de la misma persona tiene una suscripción por empresa; el aviso abre `/inbox/<id>` en el contexto activo de la aplicación (si es otra empresa, el id no se verá: 404 uniforme).
+- Las claves de la suscripción (`p256dh`, `auth`) se guardan sin cifrar (solo sirven con la clave privada VAPID del servidor); si se prefiere cifrarlas con la bóveda, es un cambio aparte.
+- Cambiar las claves VAPID obliga a cada persona a activar de nuevo las notificaciones.

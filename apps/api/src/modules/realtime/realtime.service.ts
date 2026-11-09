@@ -1,4 +1,4 @@
-import { Inject, Injectable, OnApplicationBootstrap, OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, OnApplicationBootstrap, OnModuleDestroy, Optional } from '@nestjs/common';
 import { HttpAdapterHost } from '@nestjs/core';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { IncomingMessage, Server as HttpServer } from 'node:http';
@@ -11,6 +11,7 @@ import { TenantContext } from '../../tenant';
 import { APP_CONFIG, APP_LOGGER } from '../../tokens';
 import { SessionService } from '../auth';
 import { OrgMembersService } from '../organizations';
+import { PushService } from '../push';
 import { personRoom, type RealtimeEnvelope, type RealtimeEvent, type TouchOptions } from './realtime.types';
 
 export const REALTIME_PATH = '/v1/realtime';
@@ -37,6 +38,8 @@ interface Pending {
   scheduled: boolean;
   messages: Map<string, 'created' | 'updated'>;
   also: Set<string>;
+  /** Mensajes entrantes nuevos que además generan una notificación push. */
+  inbound: Set<string>;
 }
 
 interface SocketData {
@@ -85,6 +88,7 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
     @Inject(Database) private readonly db: Database,
     @Inject(SessionService) private readonly sessions: SessionService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
+    @Optional() @Inject(PushService) private readonly push?: PushService,
   ) {}
 
   onApplicationBootstrap(): void {
@@ -175,11 +179,12 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
     const key = `${organizationId}:${conversationId}`;
     let p = this.pending.get(key);
     if (!p) {
-      p = { organizationId, conversationId, due: Date.now() + DELAY_MS, created: false, scheduled: false, messages: new Map(), also: new Set() };
+      p = { organizationId, conversationId, due: Date.now() + DELAY_MS, created: false, scheduled: false, messages: new Map(), also: new Set(), inbound: new Set() };
       this.pending.set(key, p);
     }
     if (opts.created) p.created = true;
     if (opts.scheduled) p.scheduled = true;
+    if (opts.message && opts.inbound) p.inbound.add(opts.message.id);
     if (opts.message) {
       const prev = p.messages.get(opts.message.id);
       p.messages.set(opts.message.id, prev === 'created' ? 'created' : opts.message.kind);
@@ -229,6 +234,8 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
     if (!io) return;
     const recipients = await this.recipientsOf(p.organizationId, p.conversationId);
     for (const u of p.also) recipients.add(u);
+    // Notificación push de los mensajes entrantes nuevos (ADR-64): sin esperar y sin lanzar; el responsable o, sin responsable, quienes la pueden ver
+    for (const id of p.inbound) void this.push?.notifyInbound(p.organizationId, p.conversationId, id, new Set(recipients));
     // Quien lo veía antes (dueño anterior, colaborador retirado) también debe enterarse de que cambió
     const before = this.known.get(`${p.organizationId}:${p.conversationId}`);
     this.remember(p.organizationId, p.conversationId, recipients);

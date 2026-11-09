@@ -6,9 +6,24 @@ import { sockets, lastSocket } from './fake-socket';
 import { authed, ME_ADVISOR, mockApi, renderApp, resetWorld, type Handler } from './helpers';
 
 const play = vi.hoisted(() => vi.fn(() => true));
+const push = vi.hoisted(() => ({ support: 'ok' as 'ok' | 'unsupported' | 'insecure', sub: null as { endpoint: string } | null, enable: vi.fn(), disable: vi.fn(), showText: vi.fn() }));
+vi.mock('../src/lib/push', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/push')>()),
+  pushSupport: () => push.support,
+  notificationPermission: () => 'default' as NotificationPermission,
+  currentSubscription: () => Promise.resolve(push.sub),
+  enablePush: push.enable,
+  disablePush: push.disable,
+  updateShowText: push.showText,
+}));
 vi.mock('../src/lib/notifySound', async (importOriginal) => ({ ...(await importOriginal<typeof import('../src/lib/notifySound')>()), playIncomingSound: play }));
 
 beforeEach(() => {
+  push.support = 'ok';
+  push.sub = null;
+  push.enable.mockReset();
+  push.disable.mockReset();
+  push.showText.mockReset();
   vi.unstubAllGlobals();
   resetWorld();
   sockets.length = 0;
@@ -94,14 +109,62 @@ describe('Sonido de mensaje nuevo', () => {
 });
 
 describe('Configuración › Notificaciones', () => {
-  it('el sonido viene activado, se desactiva y se recuerda por persona y empresa; el push se declara no disponible', async () => {
-    mockApi(server());
+  const cfg = (enabled: boolean) => ({ ...server(), 'GET /push/config': () => ({ body: { enabled, public_key: enabled ? 'A'.repeat(87) : null } }) });
+
+  it('el sonido viene activado, se desactiva y se recuerda por persona y empresa', async () => {
+    mockApi(cfg(false));
     renderApp('/settings/notifications');
     const sw = await screen.findByRole('switch', { name: 'Sonido de mensaje nuevo' });
     expect(sw).toBeChecked();
     await userEvent.click(sw);
     expect(sw).not.toBeChecked();
     expect(window.localStorage.getItem('ss.sound.v1:u2:o1')).toBe('off');
-    expect(screen.getByText(/Aún no disponibles/)).toBeInTheDocument();
+  });
+
+  it('si el servidor no tiene push, lo dice y no ofrece activarlo', async () => {
+    mockApi(cfg(false));
+    renderApp('/settings/notifications');
+    expect(await screen.findByText(/no están activadas en este servidor/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activar notificaciones' })).toBeNull();
+  });
+
+  it('un navegador sin push explica por qué (y qué hacer en iPhone)', async () => {
+    push.support = 'unsupported';
+    mockApi(cfg(true));
+    renderApp('/settings/notifications');
+    expect(await screen.findByText(/no admite notificaciones push/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Activar notificaciones' })).toBeNull();
+  });
+
+  it('activar pide el permiso solo al pulsar: llama a enablePush con la clave del servidor y muestra «Activadas»', async () => {
+    push.enable.mockImplementation(() => {
+      push.sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/x' };
+      return Promise.resolve({ subscribed: true, show_text: false });
+    });
+    mockApi({ ...cfg(true), 'POST /push/status': () => ({ body: push.sub ? { subscribed: true, show_text: false } : { subscribed: false, show_text: false } }) });
+    renderApp('/settings/notifications');
+    const btn = await screen.findByRole('button', { name: 'Activar notificaciones' });
+    expect(push.enable).not.toHaveBeenCalled(); // nada se pide al entrar
+    await userEvent.click(btn);
+    expect(push.enable).toHaveBeenCalledWith('A'.repeat(87), false);
+    expect(await screen.findByText('Activadas en este navegador.')).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Mostrar el texto del mensaje/ })).not.toBeChecked();
+    await userEvent.click(screen.getByRole('switch', { name: /Mostrar el texto del mensaje/ }));
+    expect(push.showText).toHaveBeenCalledWith(true);
+    push.disable.mockImplementation(() => {
+      push.sub = null;
+      return Promise.resolve();
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Desactivar en este navegador' }));
+    expect(push.disable).toHaveBeenCalled();
+    expect(await screen.findByText('Desactivadas en este navegador.')).toBeInTheDocument();
+  });
+
+  it('si el navegador niega el permiso, el mensaje de error se muestra', async () => {
+    push.enable.mockRejectedValue(new Error('El navegador bloqueó las notificaciones. Actívalas desde el candado de la barra de direcciones.'));
+    mockApi({ ...cfg(true), 'POST /push/status': () => ({ body: { subscribed: false, show_text: false } }) });
+    renderApp('/settings/notifications');
+    await userEvent.click(await screen.findByRole('button', { name: 'Activar notificaciones' }));
+    expect(await screen.findByText(/bloqueó las notificaciones/)).toBeInTheDocument();
   });
 });

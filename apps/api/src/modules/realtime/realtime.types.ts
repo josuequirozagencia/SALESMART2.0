@@ -20,6 +20,8 @@ export interface TouchOptions {
   created?: boolean;
   /** Mensajes de la conversación que se crearon o cambiaron (id y qué pasó). */
   message?: { id: string; kind: 'created' | 'updated' };
+  /** El mensaje `message` es un mensaje ENTRANTE del cliente: además del aviso en vivo, genera la notificación push (ADR-64). */
+  inbound?: boolean;
   /** Cambiaron los mensajes programados de la conversación. */
   scheduled?: boolean;
   /** Personas que deben enterarse aunque ya no vean la conversación (p. ej. quien la tenía antes de transferirla). */

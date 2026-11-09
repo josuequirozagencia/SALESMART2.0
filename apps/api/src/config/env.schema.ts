@@ -57,6 +57,12 @@ export const envSchema = z.object({
   /** WhatsApp por QR (M9.6, ADR-54): `evolution` = Evolution API con la URL y la clave que el Súper Admin guarda en Proveedores › WhatsApp por QR; `none` = sin QR; `fake` solo desarrollo y pruebas (no se permite en producción). */
   QR_PROVIDER: z.enum(['evolution', 'none', 'fake']).default('evolution'),
   GHL_PROVIDER: z.enum(['ghl', 'none', 'fake']).default('ghl'),
+  /** Notificaciones push del navegador (v6 fase E, ADR-64): `webpush` = Web Push con las claves VAPID (si faltan, el push queda apagado y la pantalla lo dice); `none` = apagado; `fake` solo desarrollo y pruebas (no se permite en producción). */
+  PUSH_PROVIDER: z.enum(['webpush', 'none', 'fake']).default('webpush'),
+  /** Claves VAPID del servidor (par de curva P-256 en base64url) y un contacto (`mailto:` o `https:`). Se generan una vez con `pnpm push:vapid`; la privada es un secreto. Las tres juntas o ninguna. */
+  VAPID_PUBLIC_KEY: z.string().trim().regex(/^[A-Za-z0-9_-]{80,100}$/, 'VAPID_PUBLIC_KEY: clave pública en base64url').optional(),
+  VAPID_PRIVATE_KEY: z.string().trim().regex(/^[A-Za-z0-9_-]{40,50}$/, 'VAPID_PRIVATE_KEY: clave privada en base64url').optional(),
+  VAPID_SUBJECT: z.string().trim().regex(/^(mailto:[^\s@]+@[^\s@]+|https:\/\/[^\s]+)$/, 'VAPID_SUBJECT: debe ser mailto:correo o https://…').optional(),
   /** Llamadas HTTP de las automatizaciones (M9.5b, ADR-54): `real` = salida segura (lista de permitidos, solo direcciones públicas); `fake` solo desarrollo y pruebas (no sale a internet) y se rechaza en producción. */
   HTTP_OUT_PROVIDER: z.enum(['real', 'fake']).default('real'),
   /** Adaptador de IA (M8, ADR-53): `openai` con la clave que el Súper Admin guarda en Proveedores › IA de texto; `fake` solo desarrollo y pruebas. */

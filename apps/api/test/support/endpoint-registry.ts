@@ -340,6 +340,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/notifications/read-all', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
   { route: 'POST /v1/notifications/:id/read', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
   { route: 'GET /v1/conversations/:id/mention-options', kind: 'tenant', isolationTest: '../../notifications/mentions.test.ts' },
+  // Notificaciones push del navegador (v6 fase E, ADR-64). Pruebas: test/push/push.test.ts (A↔B, solo el responsable, anti-SSRF, baja, 410)
+  { route: 'GET /v1/push/config', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
+  { route: 'POST /v1/push/status', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
+  { route: 'POST /v1/push/subscribe', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
+  { route: 'POST /v1/push/unsubscribe', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
   // Fotos de perfil (v5). Pruebas: test/photos/photos.test.ts (A↔B, visibilidad por persona, validación del contenido, tarea de contactos por QR)
   { route: 'GET /v1/photos', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
   { route: 'GET /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },

@@ -47,6 +47,14 @@ export interface AppConfig {
     /** WhatsApp por QR (M9.6, ADR-54). */
     readonly qrProvider: 'evolution' | 'none' | 'fake';
   };
+  readonly push: {
+    /** Notificaciones push (ADR-64). `enabled` = hay adaptador y claves; sin ellas el push queda apagado. */
+    readonly provider: 'webpush' | 'none' | 'fake';
+    readonly enabled: boolean;
+    readonly vapidPublicKey: string | undefined;
+    readonly vapidPrivateKey: string | undefined;
+    readonly vapidSubject: string | undefined;
+  };
   readonly automations: {
     /** Salida HTTP de las automatizaciones (M9.5b, ADR-54). */
     readonly httpProvider: 'real' | 'fake';
@@ -180,6 +188,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.CAPI_PROVIDER === 'fake') issues.push('CAPI_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.GHL_PROVIDER === 'fake') issues.push('GHL_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.HTTP_OUT_PROVIDER === 'fake') issues.push('HTTP_OUT_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.PUSH_PROVIDER === 'fake') issues.push('PUSH_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.QR_PROVIDER === 'fake') issues.push('QR_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.AI_PROVIDER === 'fake') issues.push('AI_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.WHATSAPP_PROVIDER === 'fake') issues.push('WHATSAPP_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
@@ -187,6 +196,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.VIRUS_SCANNER === 'fake') issues.push('VIRUS_SCANNER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.AUDIO_TRANSCODER === 'fake') issues.push('AUDIO_TRANSCODER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
   }
+  // Push (ADR-64): las tres claves VAPID juntas o ninguna; sin ellas el push queda apagado (no impide arrancar)
+  const vapid = [e.VAPID_PUBLIC_KEY, e.VAPID_PRIVATE_KEY, e.VAPID_SUBJECT];
+  if (vapid.some((v) => v !== undefined) && vapid.some((v) => v === undefined)) issues.push('VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY y VAPID_SUBJECT van juntas o ninguna');
+  const pushEnabled = e.PUSH_PROVIDER === 'fake' || (e.PUSH_PROVIDER === 'webpush' && vapid.every((v) => v !== undefined));
   // Bóveda de credenciales de proveedores (ADR-42): 32 bytes exactos, distinta de la clave de intentos; la anterior (rotación) exige su versión menor
   let credentialsKeys: AppConfig['providers']['credentialsKeys'];
   if (e.PROVIDER_CREDENTIALS_KEY !== undefined) {
@@ -236,6 +249,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, turnstileSiteKey: e.TURNSTILE_SITE_KEY, credentialsKeys },
     channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER, qrProvider: e.QR_PROVIDER },
+    push: { provider: e.PUSH_PROVIDER, enabled: pushEnabled, vapidPublicKey: e.VAPID_PUBLIC_KEY, vapidPrivateKey: e.VAPID_PRIVATE_KEY, vapidSubject: e.VAPID_SUBJECT },
     automations: { httpProvider: e.HTTP_OUT_PROVIDER },
     ai: { provider: e.AI_PROVIDER },
     attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },
