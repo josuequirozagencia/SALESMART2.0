@@ -59,6 +59,7 @@ function server(c: Conversation = conv()): { routes: Record<string, Handler>; po
       'GET /conversations/c1': () => ({ body: c }),
       'GET /conversations/c1/messages': () => ({ body: { items: [msg()], next_cursor: null } }),
       'POST /conversations/c1/read': () => ({ body: c }),
+      'POST /conversations/c1/attachments': () => ({ status: 201, body: { id: 'a1', kind: 'image', mime_type: 'image/jpeg', filename: 'IMG_1.jpg', size_bytes: 1, scan_status: 'skipped', state: 'ready' } }),
       'GET /conversations/c1/scheduled': () => ({ body: { items: [] } }),
       'GET /conversations/c1/quick-replies': () => ({ body: { items: [] } }),
       'GET /contacts/k1': () => err(404, 'NOT_FOUND'),
@@ -162,6 +163,19 @@ describe('Chat móvil · redactor', () => {
     expect(await screen.findByRole('button', { name: 'Grabar nota de voz' })).toBeInTheDocument();
   });
 
+  it('la hoja «+» ofrece la cámara: el campo abre la cámara trasera y la foto tomada se sube y queda adjunta', async () => {
+    stubWidth(390);
+    const w = server();
+    mockApi(w.routes);
+    renderApp('/inbox/c1');
+    await screen.findByRole('textbox', { name: 'Mensaje' });
+    const cam = screen.getByLabelText('Tomar foto o video con la cámara') as HTMLInputElement;
+    expect(cam).toHaveAttribute('capture', 'environment');
+    expect(cam.accept).toBe('image/*,video/*');
+    await userEvent.upload(cam, new File(['x'], 'IMG_1.jpg', { type: 'image/jpeg' }));
+    expect(await screen.findByText(/📎 Imagen/)).toBeInTheDocument();
+  });
+
   it('«+» abre la hoja con adjuntar, plantillas, respuestas rápidas, programar y nota interna; la nota cambia el redactor y se puede dejar', async () => {
     stubWidth(390);
     const w = server();
@@ -170,7 +184,7 @@ describe('Chat móvil · redactor', () => {
     const box = await screen.findByRole('textbox', { name: 'Mensaje' });
     await userEvent.click(screen.getByRole('button', { name: 'Más opciones' }));
     const sheet = await screen.findByRole('dialog', { name: 'Más opciones del mensaje' });
-    for (const name of ['Adjuntar archivo', 'Plantillas', 'Respuestas rápidas', /Programar mensaje/, 'Escribir una nota interna']) expect(within(sheet).getByRole('button', { name })).toBeInTheDocument();
+    for (const name of [/^Cámara/, 'Fotos y videos', 'Documento o archivo', 'Plantillas', 'Respuestas rápidas', /Programar mensaje/, 'Escribir una nota interna']) expect(within(sheet).getByRole('button', { name })).toBeInTheDocument();
     expect(within(sheet).getByRole('button', { name: /Programar mensaje/ })).toBeDisabled();
     await userEvent.click(within(sheet).getByRole('button', { name: 'Escribir una nota interna' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Más opciones del mensaje' })).not.toBeInTheDocument());
