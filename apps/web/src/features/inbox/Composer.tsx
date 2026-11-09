@@ -12,6 +12,7 @@ import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecor
 import { readDraft, writeDraft } from './draftStore';
 import { EmojiPicker } from './EmojiPicker';
 import { mentionAt, mentionIdsIn, suggestMentions, type Picked } from './mentions';
+import { kindLabel } from './inboxFormat';
 import { ScheduleDialog } from './ScheduleDialog';
 import { SheetButton } from './SheetButton';
 import { TemplatePicker } from './TemplatePicker';
@@ -259,7 +260,7 @@ export function Composer({ c }: { c: Conversation }) {
       {attaching ? <AttachmentPicker conversationId={c.id} onClose={() => setAttaching(false)} onPicked={(a) => { setPendingAttachment({ id: a.id, filename: a.filename ?? 'archivo', kind: a.kind }); setAttaching(false); }} /> : null}
       {pendingAttachment ? (
         <div className="flex items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-[12.5px]">
-          <span className="truncate">📎 {pendingAttachment.filename} <span className="text-muted">· {pendingAttachment.kind}</span></span>
+          <span className="truncate">📎 {kindLabel(pendingAttachment.kind)}</span>
           <button type="button" onClick={() => setPendingAttachment(null)} className="ml-auto text-muted hover:text-fg">Quitar</button>
         </div>
       ) : null}

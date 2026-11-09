@@ -15,7 +15,7 @@ import { ThemeToggle } from '../../ui/ThemeToggle';
 import { AppNavContext } from '../app/AppNav';
 import { ViewAsMenu } from '../context/ViewAs';
 import { NotificationsBell } from '../notifications/NotificationsBell';
-import { chatTime, STATUS_PILL } from './inboxFormat';
+import { chatTime, listPreview, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
 import { usePhotos } from '../photos/usePhotos';
 import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
@@ -68,7 +68,7 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
           <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">
             <span className={`min-w-0 flex-1 truncate ${unread && mobile ? 'font-semibold text-fg' : ''}`}>
               {delivery ? <span aria-label={`Tú: ${delivery.text}. `} title={delivery.text} className={`mr-1 ${last?.status === 'read' ? 'text-accent' : last?.status === 'failed' ? 'text-crit' : ''}`}>{delivery.mark}</span> : null}
-              {last ? last.preview : 'Sin mensajes'}
+              {last ? listPreview(last) : 'Sin mensajes'}
             </span>
             {unread ? <span aria-hidden="true" className="grid min-w-[19px] place-items-center rounded-full bg-ok px-1.5 text-[11px] font-bold text-white">{c.unread_count}</span> : null}
           </span>
