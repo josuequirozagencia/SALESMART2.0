@@ -2730,6 +2730,21 @@ test.describe('Inbox: distribución y viewports (ADR-60, Fase 3)', () => {
       }
     }
   });
+
+  test('en escritorio la página no se desplaza: el contenido se desplaza por dentro (v6, fase B)', async ({ page, request }) => {
+    const email = await createAccount(request, uniqueEmail('pcscroll'));
+    await uiLogin(page, email);
+    await expect(page.getByRole('heading', { name: /Hola, Empresa E2E/ })).toBeVisible();
+    const pageScroll = () => page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+    for (const [w, h] of [[1280, 800], [1366, 768], [1440, 900], [1920, 1080]] as const) {
+      await page.setViewportSize({ width: w, height: h });
+      for (const path of ['/', '/inbox', '/agenda', '/sales', '/contacts', '/settings/connections']) {
+        await page.goto(path);
+        await expect(page.getByRole('main')).toBeVisible();
+        expect(await pageScroll(), `${path} a ${w}×${h}: la página no debe tener barra de desplazamiento`).toBeLessThanOrEqual(0);
+      }
+    }
+  });
 });
 
 test.describe('Inbox móvil: lista (ADR-60, Fase 4)', () => {
