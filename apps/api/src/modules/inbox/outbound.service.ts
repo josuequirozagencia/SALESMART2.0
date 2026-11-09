@@ -68,8 +68,9 @@ export class OutboundService {
     const messageId = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
       assertCanReply(scope, c, channel.state, collab, channel.provider);
-      if (!hasWindow(channel.provider)) throw new ConflictError('GHL_TEXT_ONLY', 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto');
-      assertWindowOpen(c.lastInboundAt, now);
+      // Solo GoHighLevel es de solo texto. WhatsApp por QR no tiene ventana de 24 h pero sí envía archivos (no usar `hasWindow` como si dijera «es GHL»)
+      if (channel.provider === 'ghl') throw new ConflictError('GHL_TEXT_ONLY', 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto');
+      assertWindowOpen(c.lastInboundAt, now, channel.provider);
       const [att] = await tx.select({ id: messageAttachments.id, conversationId: messageAttachments.conversationId, kind: messageAttachments.kind, mimeType: messageAttachments.mimeType, filename: messageAttachments.filename, state: messageAttachments.state, scanStatus: messageAttachments.scanStatus, storageKey: messageAttachments.storageKey, messageId: messageAttachments.messageId }).from(messageAttachments).where(and(eq(messageAttachments.id, dto.attachment_id), eq(messageAttachments.conversationId, conversationId), eq(messageAttachments.direction, 'out'))).limit(1);
       // 404 uniforme: un archivo de OTRA conversación (aunque sea de la misma empresa y la persona no la vea) no se distingue de uno que no existe
       if (!att) throw new NotFoundError();
