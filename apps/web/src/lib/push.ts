@@ -50,12 +50,39 @@ function body(sub: PushSubscription, showText: boolean): { endpoint: string; key
   return { endpoint: sub.endpoint, keys: { p256dh: j.keys?.['p256dh'] ?? '', auth: j.keys?.['auth'] ?? '' }, show_text: showText };
 }
 
+/**
+ * Traduce el error del navegador al activar el push a una explicación en español con lo que se puede revisar. El más común en Edge y Chrome es «Registration failed - permission denied»: el navegador
+ * dio el permiso pero SU servicio de notificaciones rechazó la suscripción (notificaciones del sistema apagadas, sitio bloqueado, red o VPN que no llega a ese servicio).
+ */
+export function explainPushError(e: unknown): string {
+  const name = e instanceof Error ? e.name : '';
+  const text = e instanceof Error ? e.message.toLowerCase() : '';
+  if (text.includes('permission denied') || name === 'NotAllowedError') {
+    return 'El servicio de notificaciones de tu navegador rechazó la activación. Revisa que las notificaciones de tu navegador estén activadas en Windows, macOS o Android (y que no esté el modo «No molestar»), que este sitio esté en «Permitir» en la configuración del navegador y que ninguna VPN o bloqueador de red lo impida. Si sigue igual, prueba en otro navegador.';
+  }
+  if (name === 'AbortError' || text.includes('push service')) {
+    return 'El servicio de notificaciones de tu navegador no respondió. Revisa tu conexión (o desactiva la VPN) e inténtalo de nuevo en unos minutos.';
+  }
+  if (name === 'SecurityError' || text.includes('failed to register') || text.includes('serviceworker')) {
+    return 'No pudimos preparar las notificaciones en este navegador. Recarga la página e inténtalo de nuevo; si usas una ventana privada o bloqueas datos del sitio, prueba en una ventana normal.';
+  }
+  if (name === 'InvalidAccessError' || name === 'InvalidStateError' || name === 'NotSupportedError') {
+    return 'Este navegador no pudo activar las notificaciones con la clave del servidor. Recarga la página e inténtalo de nuevo; si persiste, avisa al administrador.';
+  }
+  return 'No pudimos activar las notificaciones en este navegador. Inténtalo de nuevo o prueba en otro navegador.';
+}
+
 /** Activa las notificaciones: permiso, service worker, suscripción y alta en el servidor. Lanza con un mensaje claro si algo falla. */
 export async function enablePush(publicKey: string, showText: boolean): Promise<PushStatus> {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') throw new Error(permission === 'denied' ? 'El navegador bloqueó las notificaciones. Actívalas desde el candado de la barra de direcciones.' : 'No diste permiso para las notificaciones.');
-  const reg = await registration();
-  const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyToBytes(publicKey) }));
+  let sub: PushSubscription;
+  try {
+    const reg = await registration();
+    sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyToBytes(publicKey) }));
+  } catch (e) {
+    throw new Error(explainPushError(e), { cause: e });
+  }
   return api<PushStatus>('/push/subscribe', { method: 'POST', body: body(sub, showText) });
 }
 
