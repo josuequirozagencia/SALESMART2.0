@@ -12,7 +12,7 @@ import { QuickRepliesService, type ResolvedQuickReplyView } from '../quick-repli
 import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
 import { renderedText, TemplatesService, type TemplateList } from '../templates';
-import { assertCanReply, assertWindowOpen, hasWindow, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
+import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type ConversationRow, type InboxAccess, type InboxScope } from './inbox.access';
 import type { NoteDto, ReplyDto, SendMediaDto, SendTemplateDto } from './inbox.dto';
 import { messageView, type MessageView } from './inbox.views';
 import { MentionsService } from './mentions.service';
