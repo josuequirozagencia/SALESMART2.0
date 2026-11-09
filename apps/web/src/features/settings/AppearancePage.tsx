@@ -3,7 +3,8 @@ import { friendlyError } from '../../lib/errors';
 import { useSession } from '../../lib/session';
 import { Avatar } from '../../ui/Avatar';
 import { BRANDS, useBrand } from '../../ui/brand';
-import { CHAT_BG_COLORS, CHAT_BG_KINDS, useChatBackground } from '../../ui/chatBackground';
+import { CHAT_BG_COLORS, CHAT_BG_GALLERY, CHAT_BG_KINDS, MAX_CHAT_IMAGE_CHARS, chatBgPaint, useChatBackground } from '../../ui/chatBackground';
+import { fileToChatBackground } from '../../ui/chatBackgroundImage';
 import { Alert, Button } from '../../ui/controls';
 import { ThemeSwitch } from '../../ui/ThemeSwitch';
 import { useMyPhoto } from '../photos/usePhotos';
@@ -18,6 +19,39 @@ function ChatPreview() {
     <div aria-label="Vista previa del chat" role="img" style={bg.style} className={`grid gap-2 rounded-xl border border-line p-4 ${bg.className}`}>
       <span className="max-w-[70%] rounded-lg rounded-tl-sm border border-line bg-[var(--bubble-in)] px-3 py-2 text-[13px] text-fg shadow-sm">Hola, ¿qué servicios ofrecen?</span>
       <span className="ml-auto max-w-[70%] rounded-lg rounded-tr-sm bg-[var(--bubble-out)] px-3 py-2 text-[13px] text-fg shadow-sm">¡Hola! Con gusto te cuento.</span>
+    </div>
+  );
+}
+
+/** «Mi imagen»: se elige un archivo, se reduce en el navegador y se guarda solo aquí (por persona y empresa). */
+function CustomImage() {
+  const bg = useChatBackground();
+  const file = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const pick = async (f: File | undefined): Promise<void> => {
+    if (!f) return;
+    setError(undefined);
+    setBusy(true);
+    try {
+      const data = await fileToChatBackground(f);
+      if (data.length > MAX_CHAT_IMAGE_CHARS) throw new Error('La imagen sigue siendo muy pesada: prueba con una más pequeña.');
+      bg.set({ ...bg.pref, kind: 'image', image: data });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No pudimos usar esa imagen.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <input ref={file} type="file" accept="image/jpeg,image/png,image/webp" aria-label="Elegir una imagen de fondo" className="sr-only" onChange={(e) => { void pick(e.target.files?.[0]); e.target.value = ''; }} />
+        <Button loading={busy} onClick={() => file.current?.click()}>{bg.pref.image ? 'Cambiar imagen' : 'Subir una imagen'}</Button>
+        {bg.pref.image ? <Button onClick={() => bg.set({ kind: 'default', color: bg.pref.color })}>Quitar imagen</Button> : null}
+        <span className="text-[12px] text-muted">JPEG, PNG o WebP. Se reduce y se guarda solo en este navegador; no se sube a ningún servidor.</span>
+      </div>
+      {error ? <Alert>{error}</Alert> : null}
     </div>
   );
 }
@@ -107,6 +141,21 @@ export function AppearancePage() {
             ))}
           </div>
         ) : null}
+        {bg.pref.kind === 'gallery' ? (
+          <div role="radiogroup" aria-label="Fondo de la galería" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+            {CHAT_BG_GALLERY.map((g) => {
+              const paint = chatBgPaint({ kind: 'gallery', color: bg.pref.color, gallery: g.id });
+              const on = (bg.pref.gallery ?? 'lines') === g.id;
+              return (
+                <button key={g.id} type="button" role="radio" aria-checked={on} onClick={() => bg.set({ ...bg.pref, gallery: g.id })} className={`grid min-h-20 items-end overflow-hidden rounded-xl border p-0 text-left text-[12.5px] font-semibold ${on ? 'border-accent ring-2 ring-accent' : 'border-line'}`}>
+                  <span aria-hidden="true" style={paint.style} className={`block h-14 w-full ${paint.className}`} />
+                  <span className="px-3 py-1.5">{g.label}{on ? <span className="sr-only"> (elegido)</span> : null}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+        {bg.pref.kind === 'image' ? <CustomImage /> : null}
         <ChatPreview />
       </section>
     </div>
