@@ -18,6 +18,7 @@ export function SettingsNav() {
         <NavLink to="/settings/connections" className={tab}>Conexiones</NavLink>
         <NavLink to="/settings/sla" className={tab}>SLA y horario</NavLink>
         <NavLink to="/settings/quick-replies" className={tab}>Respuestas rápidas</NavLink>
+        <NavLink to="/settings/notifications" className={tab}>Notificaciones</NavLink>
         <NavLink to="/settings/appearance" className={tab}>Apariencia</NavLink>
       </nav>
     </div>

@@ -1,6 +1,9 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { api } from '../../lib/api';
+import { playIncomingSound, soundEnabled } from '../../lib/notifySound';
 import { startRealtime } from '../../lib/realtime';
+import type { Conversation } from '../../lib/types';
 
 /** Junta los avisos que llegan en ráfaga (un mensaje nuevo suele traer tres) y vuelve a pedir lo afectado una sola vez. */
 const COALESCE_MS = 300;
@@ -10,10 +13,33 @@ const COALESCE_MS = 300;
  * la API (que aplica la visibilidad de siempre) entrega el dato nuevo. Al recuperar la conexión tras una caída se vuelve a pedir todo lo abierto: pudo perderse algo.
  * Se reinicia al cambiar de persona o de empresa (agencia, soporte): nunca queda una conexión de la empresa anterior.
  */
-export function useInboxRealtime(userId: string, organizationId: string): void {
+export function useInboxRealtime(userId: string, organizationId: string, pathname = ''): void {
   const qc = useQueryClient();
+  // La ruta actual, para no sonar por la conversación que la persona ya está mirando (sin reiniciar la conexión al navegar)
+  const here = useRef(pathname);
+  useEffect(() => {
+    here.current = pathname;
+  }, [pathname]);
   useEffect(() => {
     const conversations = new Set<string>();
+    const lastSound = new Map<string, string>();
+    /**
+     * Sonido de mensaje entrante: solo si llegó un mensaje NUEVO del cliente (el último de la conversación es entrante: lo propio, las notas internas y los automáticos salen como «out»), la persona
+     * lo tiene activado y no está mirando esa conversación con la pestaña visible. Una vez por mensaje.
+     */
+    const maybeSound = async (id: string): Promise<void> => {
+      if (!soundEnabled(userId, organizationId)) return;
+      try {
+        const c = await qc.fetchQuery({ queryKey: ['conversation', id], staleTime: 0, queryFn: () => api<Conversation>(`/conversations/${id}`) });
+        const last = c.last_message;
+        if (!last || last.direction !== 'in' || lastSound.get(id) === last.at) return;
+        lastSound.set(id, last.at);
+        if (document.visibilityState === 'visible' && here.current.startsWith(`/inbox/${id}`)) return;
+        playIncomingSound();
+      } catch {
+        // sin permiso para verla o sin red: no suena
+      }
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = (): void => {
       timer = undefined;
@@ -30,7 +56,8 @@ export function useInboxRealtime(userId: string, organizationId: string): void {
       conversations.clear();
     };
     const stop = startRealtime({
-      onChange: ({ conversationId }) => {
+      onChange: ({ conversationId, event }) => {
+        if (event === 'message.created') void maybeSound(conversationId);
         conversations.add(conversationId);
         timer ??= setTimeout(flush, COALESCE_MS);
       },
