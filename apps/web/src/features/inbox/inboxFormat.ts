@@ -55,6 +55,24 @@ const KIND_LABEL: Record<string, string> = {
 };
 export const kindLabel = (kind: string): string => KIND_LABEL[kind] ?? 'Mensaje';
 
+const MIME_TYPE_LABEL: Record<string, string> = {
+  'application/pdf': 'PDF',
+  'application/msword': 'DOC',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'DOCX',
+  'application/vnd.ms-excel': 'XLS',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'XLSX',
+  'application/vnd.ms-powerpoint': 'PPT',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'PPTX',
+  'text/plain': 'TXT',
+  'text/csv': 'CSV',
+  'application/zip': 'ZIP',
+};
+/** El tipo de un archivo para mostrar, derivado del tipo MIME («PDF», «DOCX»…); «ARCHIVO» si no se reconoce. Nunca el nombre. */
+export const attachmentTypeLabel = (mime: string | null): string => (mime ? MIME_TYPE_LABEL[mime.split(';')[0]!.trim().toLowerCase()] : undefined) ?? 'ARCHIVO';
+
+/** Lo que se muestra en la lista de conversaciones: el texto, o el tipo del contenido sin nombre de archivo («Foto» en vez de «Imagen»). */
+export const listPreview = (last: { kind: string; preview: string }): string => (last.kind === 'image' && last.preview === 'Imagen' ? 'Foto' : last.preview);
+
 /** Lo que se dice de un mensaje que no es solo texto (hasta M5.6 los archivos no se descargan). */
 export function describeExtra(m: ChatMessage): string | null {
   if (m.kind === 'location') {

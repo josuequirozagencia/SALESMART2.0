@@ -231,7 +231,8 @@ describe('Inbox · redactor: emojis, íconos y notas de voz', () => {
       await userEvent.click(await screen.findByRole('button', { name: 'Grabar nota de voz' }));
       await userEvent.click(await screen.findByRole('button', { name: 'Detener y adjuntar la nota de voz' }));
       await waitFor(() => expect(uploads).toEqual([3]));
-      expect(await screen.findByText(/grabacion\.webm/)).toBeInTheDocument();
+      expect(await screen.findByText(/📎 Audio/)).toBeInTheDocument();
+      expect(screen.queryByText(/grabacion.webm/)).toBeNull();
       expect(screen.getByRole('button', { name: 'Enviar archivo' })).toBeEnabled();
     });
   });

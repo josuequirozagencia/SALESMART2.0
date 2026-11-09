@@ -74,9 +74,21 @@ describe('MessageBubble con adjuntos', () => {
     const m = msg({ kind: 'image', text: 'Mira', attachment: { id: 'a1', kind: 'image', mime_type: 'image/jpeg', filename: 'foto.jpg', size_bytes: 1234, scan_status: 'clean', error: null, url: 'https://fake-storage.test/org/x/attachments/a1?x=1', expires_at: new Date(Date.now() + 300_000).toISOString() } });
     mockApi(serverWithMessages([m]));
     renderApp('/inbox/c1');
-    const img = await screen.findByAltText('foto.jpg');
+    const img = await screen.findByAltText('Imagen');
     expect(img.getAttribute('src')).toContain('fake-storage');
     expect(await screen.findByText('Mira')).toBeInTheDocument();
+  });
+
+  it('un PDF y un DOCX muestran el tipo y el tamaño, nunca el nombre del archivo', async () => {
+    const url = 'https://fake-storage.test/org/x/attachments/a3?x=1';
+    const exp = new Date(Date.now() + 300_000).toISOString();
+    const pdf = msg({ id: 'm-pdf', kind: 'document', attachment: { id: 'a3', kind: 'document', mime_type: 'application/pdf', filename: 'COTIZACIONES SECRETAS.pdf', size_bytes: 104448, scan_status: 'clean', error: null, url, expires_at: exp } });
+    const docx = msg({ id: 'm-docx', kind: 'document', attachment: { id: 'a4', kind: 'document', mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', filename: 'LISTA PRIVADA.docx', size_bytes: 16384, scan_status: 'clean', error: null, url, expires_at: exp } });
+    mockApi(serverWithMessages([pdf, docx]));
+    renderApp('/inbox/c1');
+    expect(await screen.findByRole('link', { name: 'Descargar PDF, 102.0 KB' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Descargar DOCX, 16.0 KB' })).toBeInTheDocument();
+    expect(screen.queryByText(/COTIZACIONES|LISTA PRIVADA/)).toBeNull();
   });
 
   it('bloqueado por antivirus no muestra imagen', async () => {

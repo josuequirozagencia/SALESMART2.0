@@ -5,7 +5,8 @@ import { Icon } from '../../ui/Icon';
 import type { ChatMessage } from '../../lib/types';
 import { Button } from '../../ui/controls';
 import { QUICK_REACTIONS } from './emoji';
-import { bubbleTime, describeExtra, kindLabel } from './inboxFormat';
+import { fileSize } from '../../lib/format';
+import { attachmentTypeLabel, bubbleTime, describeExtra, kindLabel } from './inboxFormat';
 import { splitMentions } from './mentions';
 
 const TICK: Record<string, { text: string; label: string; cls: string }> = {
@@ -25,10 +26,10 @@ function Ticks({ status }: { status: ChatMessage['status'] }) {
 function ChatImage({ url, name }: { url: string; name: string }) {
   const mobile = useBreakpoint() === 'mobile';
   const [open, setOpen] = useState(false);
-  if (!mobile) return <a href={url} target="_blank" rel="noopener noreferrer" className="mt-1 block"><img src={url} alt={name} className="max-w-[260px] rounded-lg" loading="lazy" /></a>;
+  if (!mobile) return <a href={url} target="_blank" rel="noopener noreferrer" className="mt-1 block"><img src={url} alt={name} className="h-auto max-w-full rounded-lg" loading="lazy" /></a>;
   return (
     <>
-      <button type="button" aria-label="Ver la imagen ampliada" onClick={() => setOpen(true)} className="mt-1 block max-w-full"><img src={url} alt={name} className="max-h-72 max-w-full rounded-lg object-cover" loading="lazy" /></button>
+      <button type="button" aria-label="Ver la imagen ampliada" onClick={() => setOpen(true)} className="mt-1 block max-w-full"><img src={url} alt={name} className="h-auto max-w-full rounded-lg" loading="lazy" /></button>
       {open ? (
         <Drawer label="Imagen ampliada" placement="full" onClose={() => setOpen(false)}>
           <div className="relative grid h-full w-full place-items-center bg-black">
@@ -41,6 +42,20 @@ function ChatImage({ url, name }: { url: string; name: string }) {
   );
 }
 
+/** Tipos de mensaje con archivo: su tipo se muestra en la tarjeta o el reproductor, nunca el nombre del archivo. */
+const FILE_KINDS: ReadonlySet<string> = new Set(['image', 'audio', 'video', 'document']);
+
+/** Tarjeta de un documento: ícono, el TIPO como título y el tamaño debajo (como WhatsApp). El nombre del archivo no se muestra; solo viaja en el atributo de descarga. */
+function DocumentCard({ url, mime, size, filename }: { url: string; mime: string | null; size: number | null; filename: string | null }) {
+  const type = attachmentTypeLabel(mime);
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" download={filename ?? undefined} aria-label={`Descargar ${type}${size !== null ? `, ${fileSize(size)}` : ''}`} className="mt-1 flex min-h-11 items-center gap-2.5 rounded-lg border border-line bg-surface px-2.5 py-2 no-underline">
+      <span aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-md bg-accent-soft text-[11px] font-bold text-accent">{type.slice(0, 4)}</span>
+      <span className="min-w-0"><b className="block truncate text-[13px] text-fg">{type}</b>{size !== null ? <span className="block text-[12px] text-muted">{fileSize(size)}</span> : null}</span>
+    </a>
+  );
+}
+
 /** El contenido: texto, o el nombre del tipo de contenido cuando no hay texto (los archivos aún no se descargan: llega en M5.6). */
 function Body({ m }: { m: ChatMessage }) {
   const extra = describeExtra(m);
@@ -48,22 +63,18 @@ function Body({ m }: { m: ChatMessage }) {
   const att = m.attachment;
   return (
     <>
-      {!isText ? (
-        <span className="mb-0.5 block text-[12px] font-semibold opacity-80">
-          {kindLabel(m.kind)}{m.media?.filename || att?.filename ? ` · ${att?.filename ?? m.media?.filename}` : ''}
-        </span>
-      ) : null}
+      {!isText && (!FILE_KINDS.has(m.kind) || !att?.url) ? <span className="mb-0.5 block text-[12px] font-semibold opacity-80">{kindLabel(m.kind)}</span> : null}
       {m.text ? <span className="block whitespace-pre-wrap break-words">{m.is_note && m.mentions && m.mentions.length > 0 ? splitMentions(m.text, m.mentions).map((p, i) => (p.mention ? <mark key={i} className="rounded bg-accent-soft px-0.5 font-semibold text-accent">{p.text}</mark> : <span key={i}>{p.text}</span>)) : m.text}</span> : null}
       {extra ? <span className="block text-[12.5px] opacity-80">{extra}</span> : null}
       {att ? (
         att.scan_status === 'infected' ? <span className="mt-0.5 block text-[12px] font-semibold text-crit">El antivirus bloqueó este archivo{att.error ? `: ${att.error}` : ''}</span>
         : att.scan_status === 'pending' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo se está revisando…</span>
         : att.url ? (
-          att.mime_type?.startsWith('image/') ? <ChatImage url={att.url} name={att.filename ?? 'imagen'} />
-          : att.mime_type?.startsWith('video/') ? <video src={att.url} controls className="mt-1 max-w-[260px] rounded-lg" />
-          : att.mime_type?.startsWith('audio/') ? <audio src={att.url} controls className="mt-1 w-full max-w-[260px]" />
-          : <a href={att.url} target="_blank" rel="noopener noreferrer" className="mt-1 inline-flex items-center gap-1 rounded-full border border-line bg-surface px-2.5 py-1 text-[12.5px] font-semibold text-accent">Descargar {att.filename ?? 'archivo'}</a>
-        ) : att.scan_status === 'skipped' && m.kind !== 'text' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí{att.filename ? ` · ${att.filename}` : ''} · sin revisar</span>
+          att.mime_type?.startsWith('image/') ? <ChatImage url={att.url} name="Imagen" />
+          : att.mime_type?.startsWith('video/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Video</span><video src={att.url} controls className="max-w-full rounded-lg" /></>
+          : att.mime_type?.startsWith('audio/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Audio</span><audio src={att.url} controls className="w-full max-w-full" /></>
+          : <DocumentCard url={att.url} mime={att.mime_type} size={att.size_bytes} filename={att.filename} />
+        ) : att.scan_status === 'skipped' && m.kind !== 'text' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí · sin revisar</span>
         : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null
       ) : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null}
     </>
@@ -112,8 +123,8 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar 
     <li className={`flex gap-2 ${out ? 'flex-row-reverse' : ''}`}>
       {avatar !== undefined ? <span className="w-7 shrink-0 self-start">{avatar}</span> : null}
       <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
-      <div className="flex max-w-full items-start gap-1">
-      <div className={`relative min-w-24 max-w-[78%] rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
+      <div className={`flex w-full min-w-0 items-start gap-1 ${out ? 'justify-end' : ''}`}>
+      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg px-3 py-2 text-[14px] shadow-sm ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
         {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{m.author.name.split(' ')[0]}</span> : null}
         {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Agente de IA</span> : null}
         {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}
