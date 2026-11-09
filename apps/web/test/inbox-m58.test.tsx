@@ -306,6 +306,24 @@ describe('Inbox · columna de datos del contacto', () => {
     expect(await screen.findByRole('complementary', { name: 'Datos del contacto' })).toBeInTheDocument();
   });
 
+  it('los bloques se pliegan, el estado se recuerda por persona y «Ir a notas» abre el bloque', async () => {
+    window.localStorage.removeItem('ss.contactblocks.v1:u2:o1');
+    const w = world();
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+    const side = within(await screen.findByRole('complementary', { name: 'Datos del contacto' }));
+    const ventas = await side.findByRole('button', { name: 'Últimas ventas' });
+    expect(ventas).toHaveAttribute('aria-expanded', 'true');
+    await userEvent.click(ventas);
+    expect(side.getByRole('button', { name: 'Últimas ventas' })).toHaveAttribute('aria-expanded', 'false');
+    expect(side.queryByText('Aún no tiene ventas.')).toBeNull();
+    expect(Object.values(JSON.parse(window.localStorage.getItem(Object.keys(window.localStorage).find((k) => k.startsWith('ss.contactblocks.v1:')) ?? '') ?? '{}'))).toContain(false);
+    expect(side.getByRole('button', { name: 'Notas' })).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(side.getByRole('button', { name: 'Ir a notas' }));
+    expect(side.getByRole('button', { name: 'Notas' })).toHaveAttribute('aria-expanded', 'true');
+  });
+
   it('si la persona no tiene acceso a la agenda o a las ventas, esos bloques lo dicen en vez de romper', async () => {
     const w = world();
     mockApi({ ...server(w), 'GET /appointments': () => ({ status: 403, body: { error: { code: 'FORBIDDEN', message: 'x', request_id: 'r', details: [] } } }), 'GET /sales': () => ({ status: 403, body: { error: { code: 'FORBIDDEN', message: 'x', request_id: 'r', details: [] } } }) });
