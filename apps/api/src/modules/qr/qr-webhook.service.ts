@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { Database, qrAccounts } from '../../db';
 import { NotFoundError } from '../../errors';
-import { TenantContext } from '../../tenant';
+import { InvalidContextError, TenantContext } from '../../tenant';
 import { AttachmentsService } from '../attachments';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
@@ -60,7 +60,7 @@ export class QrWebhookService {
       await TenantContext.detach(() => this.drainer.drain(organizationId, now));
     } catch (e) {
       // Solo la clase y el código del error (nunca su mensaje: podría llevar texto de un cliente o un teléfono)
-      this.log.warn({ organization_id: organizationId, err: errorLabel(e) },'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
+      this.log.warn({ organization_id: organizationId, err: errorLabel(e), ...(e instanceof InvalidContextError ? { detail: e.message } : {}) },'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
     }
   }
 }
