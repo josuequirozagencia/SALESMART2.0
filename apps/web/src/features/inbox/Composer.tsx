@@ -70,6 +70,16 @@ export function Composer({ c }: { c: Conversation }) {
   const [voiceError, setVoiceError] = useState<string>();
   const [pendingAttachment, setPendingAttachment] = useState<{ id: string; filename: string; kind: string } | null>(null);
   const upload = useUploadAttachment(c.id);
+  // Cámara y galería (hoja móvil, v6 fase C): campos ocultos que abren la cámara o el selector de fotos/videos del teléfono; el archivo se sube igual que cualquier adjunto
+  const cameraRef = useRef<HTMLInputElement>(null);
+  const galleryRef = useRef<HTMLInputElement>(null);
+  const onMedia = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    setVoiceError(undefined);
+    upload.mutate(f, { onSuccess: (a) => setPendingAttachment({ id: a.id, filename: a.filename ?? 'archivo', kind: a.kind }), onError: (err) => setVoiceError(friendlyError(err, 'No pudimos subir el archivo.')) });
+  };
   const voice = useVoiceRecorder((file) => {
     setVoiceError(undefined);
     upload.mutate(file, { onSuccess: (a) => setPendingAttachment({ id: a.id, filename: a.filename ?? 'nota de voz', kind: a.kind }), onError: (e) => setVoiceError(friendlyError(e, 'No pudimos subir la nota de voz.')) });
@@ -257,6 +267,8 @@ export function Composer({ c }: { c: Conversation }) {
       {picker ? <TemplatePicker c={c} onClose={() => setPicker(false)} /> : null}
       {manage ? <QuickRepliesDialog onClose={() => setManage(false)} /> : null}
       {scheduling ? <ScheduleDialog c={c} text={trimmed} onClose={() => setScheduling(false)} onDone={() => { setText(''); setCaret(0); }} /> : null}
+      <input ref={cameraRef} type="file" accept="image/*,video/*" capture="environment" hidden aria-label="Tomar foto o video con la cámara" onChange={onMedia} />
+      <input ref={galleryRef} type="file" accept="image/jpeg,image/png,video/mp4,video/3gpp" hidden aria-label="Elegir una foto o un video" onChange={onMedia} />
       {attaching ? <AttachmentPicker conversationId={c.id} onClose={() => setAttaching(false)} onPicked={(a) => { setPendingAttachment({ id: a.id, filename: a.filename ?? 'archivo', kind: a.kind }); setAttaching(false); }} /> : null}
       {pendingAttachment ? (
         <div className="flex items-center gap-2 rounded-lg border border-line bg-surface2 px-2.5 py-1.5 text-[12.5px]">
@@ -385,7 +397,13 @@ export function Composer({ c }: { c: Conversation }) {
               <h3 className="text-[15px] font-bold">Más opciones</h3>
               <button type="button" aria-label="Cerrar las opciones" onClick={() => setSheet(false)} className="grid size-11 place-items-center rounded-full text-muted hover:bg-surface2"><Icon name="close" /></button>
             </div>
-            {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <SheetButton icon="plus" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => { setSheet(false); setAttaching(true); }}>Adjuntar archivo</SheetButton> : null}
+            {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? (
+              <>
+                <SheetButton icon="camera" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} hint="Toma una foto o graba un video" onClick={() => { setSheet(false); cameraRef.current?.click(); }}>Cámara</SheetButton>
+                <SheetButton icon="image" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => { setSheet(false); galleryRef.current?.click(); }}>Fotos y videos</SheetButton>
+                <SheetButton icon="plus" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => { setSheet(false); setAttaching(true); }}>Documento o archivo</SheetButton>
+              </>
+            ) : null}
             {c.can.reply && c.channel.kind !== 'ghl' && c.channel.kind !== 'qr' ? <SheetButton icon="form" {...(c.window.open ? {} : { primary: true, hint: 'La ventana de 24 h está cerrada: solo puedes escribir con una plantilla' })} onClick={() => { setSheet(false); setPicker(true); }}>Plantillas</SheetButton> : null}
             {c.can.reply ? <SheetButton icon="bolt" onClick={() => { setSheet(false); setManage(true); }}>Respuestas rápidas</SheetButton> : null}
             {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <SheetButton icon="clock" disabled={!trimmed || pending.length > 0} hint={trimmed ? undefined : 'Escribe el mensaje primero'} onClick={() => { setSheet(false); setScheduling(true); }}>Programar mensaje</SheetButton> : null}
