@@ -101,7 +101,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
   const scroller = bottom ? 'md:min-h-0 md:overflow-y-auto' : 'lg:min-h-0 lg:overflow-y-auto';
   const asideCls = bottom
     ? 'hidden md:z-auto md:flex md:h-full md:min-h-0'
-    : `fixed inset-y-0 left-0 z-50 flex w-[272px] max-w-[85vw] transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'} lg:z-auto lg:h-full lg:min-h-0 lg:w-auto lg:max-w-none lg:translate-x-0`;
+    : `fixed inset-y-0 left-0 z-50 flex w-[272px] max-w-[85vw] transition-transform duration-200 ${open ? 'translate-x-0' : '-translate-x-full'} lg:sticky lg:top-0 lg:z-auto lg:h-full lg:min-h-0 lg:w-auto lg:max-w-none lg:translate-x-0`;
   return (
     <div className={`min-h-full bg-bg ${frame}`}>
       {banner}
