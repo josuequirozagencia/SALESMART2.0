@@ -37,6 +37,7 @@ export const ICONS = {
   back: 'M15 5l-7 7 7 7',
   more: 'M12 5h.01 M12 12h.01 M12 19h.01',
   plus: 'M12 5v14 M5 12h14',
+  pen: 'M4 20h4L19 9l-4-4L4 16z M14 6l4 4',
   camera: 'M3 8a1 1 0 0 1 1-1h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z M12 17a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   image: 'M3 4h18v16H3z M8.5 10a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z M21 16l-5-5-8 8',
   arrowDown: 'M12 5v14 M5 12l7 7 7-7',
