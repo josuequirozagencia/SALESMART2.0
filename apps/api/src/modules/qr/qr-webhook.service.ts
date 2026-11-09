@@ -56,7 +56,8 @@ export class QrWebhookService {
     for (const { raw } of parsed.events) await this.events.store(channelAccountId, parsed.instance, { __qr: 1, instance: parsed.instance, event, data: raw, media_keys }, now);
     // Procesamiento inmediato: el mensaje aparece sin esperar a la tarea de cada 5 s. Si falla, el aviso ya está guardado y la tarea lo recoge
     try {
-      await this.drainer.drain(organizationId, now);
+      // `drain` abre su propio contexto de empresa por lote: se sale del actual (los contextos no se anidan) o fallaba siempre con InvalidContextError
+      await TenantContext.detach(() => this.drainer.drain(organizationId, now));
     } catch (e) {
       // Solo la clase y el código del error (nunca su mensaje: podría llevar texto de un cliente o un teléfono)
       this.log.warn({ organization_id: organizationId, err: errorLabel(e) },'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
