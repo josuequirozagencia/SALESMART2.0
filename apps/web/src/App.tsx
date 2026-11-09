@@ -4,6 +4,7 @@ import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
 import { MenuPage } from './features/app/MenuPage';
 import { AppearancePage } from './features/settings/AppearancePage';
+import { NotificationsSettingsPage } from './features/settings/NotificationsSettingsPage';
 import { AnalyticsPage } from './features/analytics/AnalyticsPage';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
@@ -150,6 +151,7 @@ export function App() {
         <Route path="/queues" element={<Navigate to="/departments" replace />} />
         <Route path="/settings/sla" element={<SlaPage />} />
         <Route path="/settings/appearance" element={<AppearancePage />} />
+        <Route path="/settings/notifications" element={<NotificationsSettingsPage />} />
         <Route path="/settings/quick-replies" element={<QuickRepliesPage />} />
       </Route>
       <Route path="/platform/companies" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><CompaniesPage /></PlatformShell>}</PlatformGate>} />

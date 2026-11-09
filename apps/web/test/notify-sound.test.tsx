@@ -1,0 +1,107 @@
+import userEvent from '@testing-library/user-event';
+import { screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatMessage, Conversation, ConversationList } from '../src/lib/types';
+import { sockets, lastSocket } from './fake-socket';
+import { authed, ME_ADVISOR, mockApi, renderApp, resetWorld, type Handler } from './helpers';
+
+const play = vi.hoisted(() => vi.fn(() => true));
+vi.mock('../src/lib/notifySound', async (importOriginal) => ({ ...(await importOriginal<typeof import('../src/lib/notifySound')>()), playIncomingSound: play }));
+
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  resetWorld();
+  sockets.length = 0;
+  play.mockClear();
+});
+
+const NOW = new Date().toISOString();
+let last: Conversation['last_message'] = { direction: 'in', kind: 'text', preview: 'Hola', status: 'received', at: NOW };
+const conv = (): Conversation =>
+  ({
+    id: 'c1', status: 'working', unread_count: 1, last_message_at: NOW, last_inbound_at: NOW, assigned_at: NOW, closed_at: null, created_at: NOW,
+    contact: { id: 'k1', name: 'Ana Torres', phone: '+593984217730' }, owner: { id: 'u2', name: 'Luis Navas' }, participants: [], my_access: 'owner', queue: null,
+    channel: { id: 'ch1', name: 'Barbería WhatsApp', state: 'active' }, tags: [], last_message: last,
+    window: { open: true, expires_at: new Date(Date.now() + 3_600_000).toISOString() },
+    can: { reply: true, note: true, accept: false, take: false, close: true, transfer: false, share: false }, sla: null,
+  }) as Conversation;
+
+function server(): Record<string, Handler> {
+  return {
+    ...authed(ME_ADVISOR),
+    'GET /conversations': () => ({ body: { items: [conv()], next_cursor: null, counts: { working: 1, pending: 0, closed: 0, unread: 1 } } satisfies ConversationList }),
+    'GET /conversations/options': () => ({ body: { queues: [], channels: [], owners: [], tags: [] } }),
+    'GET /conversations/c1': () => ({ body: conv() }),
+    'GET /conversations/c1/messages': () => ({ body: { items: [] as ChatMessage[], next_cursor: null } }),
+    'GET /conversations/c1/scheduled': () => ({ body: { items: [] } }),
+  };
+}
+
+const body = { organization_id: 'o1', request_id: 'r', at: NOW, data: { conversation_id: 'c1', message_id: 'm9' } };
+const live = async () => {
+  await waitFor(() => expect(sockets.length).toBeGreaterThan(0));
+  lastSocket().fire('connect');
+};
+
+describe('Sonido de mensaje nuevo', () => {
+  it('suena una vez por mensaje entrante cuando la persona está en otra pantalla', async () => {
+    last = { direction: 'in', kind: 'text', preview: 'Hola', status: 'received', at: NOW };
+    mockApi(server());
+    renderApp('/inbox');
+    await screen.findByText('Ana Torres');
+    await live();
+    lastSocket().fire('message.created', body);
+    await waitFor(() => expect(play).toHaveBeenCalledTimes(1));
+    lastSocket().fire('message.created', body); // el mismo mensaje otra vez: no repite
+    await new Promise((r) => setTimeout(r, 400));
+    expect(play).toHaveBeenCalledTimes(1);
+  });
+
+  it('no suena por lo propio (último mensaje saliente o nota interna), ni por una actualización', async () => {
+    last = { direction: 'out', kind: 'text', preview: 'Listo', status: 'sent', at: NOW };
+    mockApi(server());
+    renderApp('/inbox');
+    await screen.findByText('Ana Torres');
+    await live();
+    lastSocket().fire('message.created', body);
+    lastSocket().fire('message.updated', body);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('no suena si ya tiene esa conversación abierta y a la vista', async () => {
+    last = { direction: 'in', kind: 'text', preview: 'Hola', status: 'received', at: NOW };
+    mockApi(server());
+    renderApp('/inbox/c1');
+    await screen.findByText('Ana Torres');
+    await live();
+    lastSocket().fire('message.created', body);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(play).not.toHaveBeenCalled();
+  });
+
+  it('no suena si la persona lo desactivó en Configuración › Notificaciones', async () => {
+    last = { direction: 'in', kind: 'text', preview: 'Hola', status: 'received', at: NOW };
+    window.localStorage.setItem('ss.sound.v1:u2:o1', 'off');
+    mockApi(server());
+    renderApp('/inbox');
+    await screen.findByText('Ana Torres');
+    await live();
+    lastSocket().fire('message.created', body);
+    await new Promise((r) => setTimeout(r, 500));
+    expect(play).not.toHaveBeenCalled();
+  });
+});
+
+describe('Configuración › Notificaciones', () => {
+  it('el sonido viene activado, se desactiva y se recuerda por persona y empresa; el push se declara no disponible', async () => {
+    mockApi(server());
+    renderApp('/settings/notifications');
+    const sw = await screen.findByRole('switch', { name: 'Sonido de mensaje nuevo' });
+    expect(sw).toBeChecked();
+    await userEvent.click(sw);
+    expect(sw).not.toBeChecked();
+    expect(window.localStorage.getItem('ss.sound.v1:u2:o1')).toBe('off');
+    expect(screen.getByText(/Aún no disponibles/)).toBeInTheDocument();
+  });
+});

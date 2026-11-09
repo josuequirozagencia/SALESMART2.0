@@ -25,8 +25,8 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
   // «Agentes IA» y «Configuración» solo para quien puede administrar los campos (el servidor lo dice; no se replica la matriz de permisos aquí)
   const admin = useCustomFields().data?.access.manage === true;
   // Conexión en vivo del Inbox: una por persona y empresa; al cambiar de empresa (agencia, soporte) se cierra y se abre la de la nueva
-  useInboxRealtime(me.user.id, me.organization.id);
   const { pathname } = useLocation();
+  useInboxRealtime(me.user.id, me.organization.id, pathname);
   // El Inbox necesita más ancho que el resto de las secciones: lista y hilo, uno al lado del otro
   const inInbox = pathname.startsWith('/inbox');
   const unread = useInboxUnread(!inInbox);
