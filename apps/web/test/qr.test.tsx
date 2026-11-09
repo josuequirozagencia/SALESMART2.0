@@ -21,7 +21,7 @@ function server(w: World): Record<string, Handler> {
   return {
     ...authed(ME_ADMIN),
     'GET /channels': () => ({ body: { items: [], vault: { available: true } } }),
-    'GET /queues': () => ({ body: { items: [{ id: 'q1', name: 'Captación' }], limits: { max_queues: 20 } } as never }),
+    'GET /queues': () => ({ body: { items: [{ id: 'q1', name: 'Captación' }, { id: 'q2', name: 'Soporte' }], limits: { max_queues: 20 } } as never }),
     'GET /qr-channels': () => ({ body: { items: w.items, available: w.available, limits: { max_channels: 5 } } }),
     'POST /qr-channels': guard('create', (c) => {
       const b = c.body as { name: string; queue_id: string | null };
@@ -36,6 +36,11 @@ function server(w: World): Record<string, Handler> {
     }),
     'POST /qr-channels/qc1/disconnect': guard('disconnect', () => {
       w.items = w.items.map((i) => ({ ...i, state: 'logged_out' as const }));
+      return { body: w.items[0] };
+    }),
+    'PATCH /qr-channels/qc1': guard('patch', (c) => {
+      const b = c.body as { queue_id?: string | null };
+      w.items = w.items.map((i) => ({ ...i, queue_id: b.queue_id === undefined ? i.queue_id : b.queue_id }));
       return { body: w.items[0] };
     }),
     'DELETE /qr-channels/qc1': guard('remove', () => {
@@ -121,5 +126,30 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
     await userEvent.click(s.getByRole('button', { name: 'Sí' }));
     await waitFor(() => expect(w.calls['remove']).toHaveLength(1));
     expect(await s.findByText('Aún no hay conexiones por QR.')).toBeInTheDocument();
+  });
+
+  it('«Cambiar departamento»: elegir uno, ver el aviso de lo que de verdad pasa y guardar; también con la sesión caída', async () => {
+    const w = world({ items: [chan({ queue_id: 'q1' })] });
+    mockApi(server(w));
+    renderApp('/settings/connections');
+    const s = await section();
+    await userEvent.click(await s.findByRole('button', { name: 'Cambiar departamento de Chip de ventas' }));
+    const guardar = s.getByRole('button', { name: 'Guardar' });
+    expect(guardar).toBeDisabled(); // sin cambios
+    await userEvent.selectOptions(s.getByRole('combobox', { name: /Departamento de/ }), 'q2');
+    expect(s.getByText(/Las conversaciones nuevas de este número irán al departamento elegido\. Las conversaciones que ya existen siguen en el departamento que tenían\./)).toBeInTheDocument();
+    await userEvent.click(guardar);
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
+    expect((w.calls['patch']![0] as Call).body).toEqual({ queue_id: 'q2' });
+    expect(await s.findByText('Soporte')).toBeInTheDocument();
+
+    // con la sesión caída también se puede (la API no lo impide) y «Sin departamento» manda null
+    w.items = w.items.map((i) => ({ ...i, state: 'logged_out' as const, phone: null }));
+    await userEvent.click(await s.findByRole('button', { name: 'Cambiar departamento de Chip de ventas' }));
+    await userEvent.selectOptions(s.getByRole('combobox', { name: /Departamento de/ }), '');
+    expect(s.getByText(/quedarán sin asignar y no se repartirán solas/)).toBeInTheDocument();
+    await userEvent.click(s.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(2));
+    expect((w.calls['patch']![1] as Call).body).toEqual({ queue_id: null });
   });
 });
