@@ -31,20 +31,33 @@ export class QrWebhookService {
   async ingest(routeId: string, token: string | undefined, body: unknown, now = new Date()): Promise<void> {
     const route = token ? await this.routes.resolve(routeId, token, now) : null;
     if (!route) throw new NotFoundError();
-    await TenantContext.run({ organizationId: route.organizationId }, () => this.handle(route.organizationId, route.channelAccountId, body, now));
+    const stored = await TenantContext.run({ organizationId: route.organizationId }, () => this.handle(route.organizationId, route.channelAccountId, body, now));
+    // Procesamiento inmediato: el mensaje aparece sin esperar a la tarea de cada 5 s. Se hace FUERA del contexto de la empresa (`drain` abre el suyo por lote y los contextos no se anidan;
+    // salir con `detach` no bastaba: tras el primer `await` interno la continuación recuperaba el contexto de fuera). Si falla, el aviso ya está guardado y la tarea lo recoge
+    if (stored) await this.drainNow(route.organizationId, now);
   }
 
-  private async handle(organizationId: string, channelAccountId: string, body: unknown, now: Date): Promise<void> {
+  private async drainNow(organizationId: string, now: Date): Promise<void> {
+    try {
+      await this.drainer.drain(organizationId, now);
+    } catch (e) {
+      // Solo la clase y el código del error (nunca su mensaje: podría llevar texto de un cliente o un teléfono)
+      this.log.warn({ organization_id: organizationId, err: errorLabel(e), ...(e instanceof InvalidContextError ? { detail: e.message } : {}) }, 'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
+    }
+  }
+
+  /** Devuelve si guardó avisos de mensajes (para procesarlos al instante, ya fuera del contexto). */
+  private async handle(organizationId: string, channelAccountId: string, body: unknown, now: Date): Promise<boolean> {
     const parsed = parseEvolutionWebhook(body, now);
-    if (!parsed.instance) return;
+    if (!parsed.instance) return false;
     const [q] = await this.db.withTenant((tx) => tx.select({ instance: qrAccounts.instanceName }).from(qrAccounts).where(eq(qrAccounts.channelAccountId, channelAccountId)).limit(1));
-    if (!q || q.instance !== parsed.instance) return; // un aviso de otra instancia no es de esta conexión
+    if (!q || q.instance !== parsed.instance) return false; // un aviso de otra instancia no es de esta conexión
     if (parsed.connection) {
       await this.db.withTenant((tx) => this.connections.applyState(tx, channelAccountId, parsed.connection!, now));
     } else {
       await this.db.withTenant((tx) => tx.update(qrAccounts).set({ lastEventAt: now }).where(eq(qrAccounts.channelAccountId, channelAccountId)));
     }
-    if (parsed.events.length === 0) return;
+    if (parsed.events.length === 0) return false;
     const event = String((body as Record<string, unknown>)['event']);
     // Los archivos que traía el aviso: a una clave temporal del almacenamiento (el adjunto del mensaje los toma de ahí)
     const media_keys: Record<string, string> = {};
@@ -54,13 +67,6 @@ export class QrWebhookService {
       if (key) media_keys[messageId] = key;
     }
     for (const { raw } of parsed.events) await this.events.store(channelAccountId, parsed.instance, { __qr: 1, instance: parsed.instance, event, data: raw, media_keys }, now);
-    // Procesamiento inmediato: el mensaje aparece sin esperar a la tarea de cada 5 s. Si falla, el aviso ya está guardado y la tarea lo recoge
-    try {
-      // `drain` abre su propio contexto de empresa por lote: se sale del actual (los contextos no se anidan) o fallaba siempre con InvalidContextError
-      await TenantContext.detach(() => this.drainer.drain(organizationId, now));
-    } catch (e) {
-      // Solo la clase y el código del error (nunca su mensaje: podría llevar texto de un cliente o un teléfono)
-      this.log.warn({ organization_id: organizationId, err: errorLabel(e), ...(e instanceof InvalidContextError ? { detail: e.message } : {}) },'no se pudo procesar al instante un aviso de WhatsApp por QR; lo hará la tarea periódica');
-    }
+    return true;
   }
 }
