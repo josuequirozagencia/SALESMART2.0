@@ -9,6 +9,9 @@ async function uiLogin(page: Page, email: string): Promise<void> {
   await expect(page.getByRole('heading', { name: /Hola, / })).toBeVisible();
 }
 
+// El panel de datos del contacto necesita ancho (en una ventana angosta el botón se desactiva)
+test.use({ viewport: { width: 1440, height: 900 } });
+
 const json = (token: string) => ({ authorization: `Bearer ${token}`, 'content-type': 'application/json' });
 
 /** Los proveedores de la plataforma (solo el Súper Admin): WhatsApp oficial (sin él no se puede conectar un número) y Evolution (QR) de mentira, con su URL y su clave. */
@@ -89,13 +92,14 @@ test('departamentos y conexiones: asignar una oficial y una QR desde el departam
   await card.getByRole('combobox', { name: /Departamento de/ }).selectOption({ label: 'Soporte' });
   await expect(card.getByText(/Las conversaciones nuevas de este número irán al departamento elegido/)).toBeVisible();
   await card.getByRole('button', { name: 'Guardar' }).click();
-  await expect(card.getByText('Soporte')).toBeVisible();
+  await expect(card.getByRole('definition').filter({ hasText: 'Soporte' })).toBeVisible();
   await withDb(async (db) => expect(await queueOf(db, qr.id)).toBe(soporte.id));
 
   // 4) Otra empresa no ve estas conexiones ni departamentos, y no puede tocarlos por la API
   const otherHdr = json(await apiLogin(request, other));
-  const mine = (await (await request.get(`${apiBase}/v1/queues`, { headers: otherHdr })).json()) as { items: unknown[] };
-  expect(mine.items).toEqual([]);
+  const mine = (await (await request.get(`${apiBase}/v1/queues`, { headers: otherHdr })).json()) as { items: Array<{ name: string }> };
+  expect(mine.items.map((q) => q.name)).not.toEqual(expect.arrayContaining(['Ventas']));
+  expect(mine.items.some((q) => q.name === 'Ventas' || q.name === 'Soporte')).toBe(false);
   expect((await request.put(`${apiBase}/v1/queues/${ventas.id}/connections`, { headers: otherHdr, data: { connections: [{ kind: 'channel', id: official.id }], move_removed_to: null } })).status()).toBe(404);
   await withDb(async (db) => expect(await queueOf(db, official.id)).toBe(soporte.id));
 });
@@ -140,7 +144,10 @@ async function saleFixture(request: APIRequestContext): Promise<{ email: string;
 
 async function registerSale(page: Page, conversationId: string): Promise<void> {
   await page.goto(`/inbox/${conversationId}`);
-  await page.getByRole('button', { name: 'Datos del contacto' }).click();
+  // La columna del contacto se abre sola en una ventana ancha; si no, se abre con su botón
+  const toggle = page.getByRole('button', { name: 'Datos del contacto', exact: true });
+  await expect(toggle).toBeVisible();
+  if ((await toggle.getAttribute('aria-pressed')) !== 'true') await toggle.click();
   await page.getByRole('button', { name: 'Registrar venta' }).first().click();
   const d = page.getByRole('dialog', { name: 'Registrar venta' });
   await d.getByLabel('Producto o servicio').selectOption({ index: 1 });
