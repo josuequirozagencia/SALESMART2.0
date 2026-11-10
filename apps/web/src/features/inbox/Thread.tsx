@@ -8,20 +8,18 @@ import { useNow } from '../../lib/useNow';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { useChatBackground } from '../../ui/chatBackground';
 import { Alert, Button, Spinner } from '../../ui/controls';
-import { Drawer } from '../../ui/Drawer';
 import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
 import { Menu, type MenuItem } from '../../ui/Menu';
 import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { Pill } from '../../ui/Pill';
 import { usePhotos } from '../photos/usePhotos';
-import { AgentBanner } from './AgentBanner';
+import { AgentBanner, useAgentPaused } from './AgentBanner';
 import { Composer } from './Composer';
 import { ConversationTags } from './ConversationTags';
-import { ScheduledButton, ScheduledDialog } from './ScheduledList';
-import { AgentSheetItem, SheetButton } from './SheetButton';
+import { ScheduledButton } from './ScheduledList';
 import { SlaPill } from './SlaPill';
-import { dayKey, dayLabel, STATUS_PILL } from './inboxFormat';
+import { dayKey, dayLabel, personName, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
 import { TransferDialog } from './TransferDialog';
 import { useConversation, useConversationAction, useMarkRead, useMessages, useReact, useRetryMessage, useRevoke, useScheduledMessages } from './useInbox';
@@ -74,8 +72,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
   const goBack = useGoBack();
-  const [sheet, setSheet] = useState(false);
-  const [scheduledOpen, setScheduledOpen] = useState(false);
+  const agent = useAgentPaused(c);
   const scheduled = useScheduledMessages(c.id);
   const scheduledPending = (scheduled.data?.items ?? []).filter((m) => m.status === 'scheduled').length;
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
@@ -91,20 +88,34 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
     act.mutate(a, { onSettled: () => setConfirm(false), onError: (e) => onBackError(friendlyError(e, fallback)) });
   };
   if (mobile) {
-    const close = (): void => {
-      setSheet(false);
-      setConfirm(false);
-    };
+    // v10: una sola fila de acciones —volver, el bloque avatar+nombre (abre el panel del contacto), el chip QR, «Reanudar agente» (solo con el agente detenido) y el ⋮ (abre ese mismo panel)—;
+    // el aviso amarillo del agente ya no ocupa el chat: su texto vive dentro del panel
     return (
       <header className="border-b border-line bg-surface pt-[env(safe-area-inset-top)]">
         <div className="flex items-center gap-1 px-1 py-1">
           <Link to="/inbox" onClick={goBack} aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2"><Icon name="back" size={22} /></Link>
-          <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
-          <div className="min-w-0 flex-1 px-1">
-            <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
-            <p className="truncate text-[12.5px] text-muted">{c.channel.name} · {c.owner ? c.owner.name : 'Sin asesor'}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn">QR</span> : null}</p>
-          </div>
-          <button type="button" aria-label="Más acciones" aria-haspopup="dialog" onClick={() => setSheet(true)} className="relative grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2">
+          <button type="button" aria-haspopup="dialog" aria-label={`Ver los datos de ${c.contact.name}`} onClick={onToggleContact} className="flex min-h-11 min-w-0 flex-1 items-center gap-2 rounded-xl px-1 text-left hover:bg-surface2">
+            <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[15px] font-bold">{c.contact.name}</span>
+              <span className="block truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}</span>
+            </span>
+          </button>
+          {c.channel.kind === 'qr' ? <span className="shrink-0 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn" title="WhatsApp por QR">QR</span> : null}
+          {agent.paused ? (
+            <button
+              type="button"
+              aria-label="Reanudar agente"
+              disabled={agent.pending || agent.blocked}
+              title={agent.blocked ? 'No puedes reanudarlo todavía: la empresa no tiene créditos de IA disponibles.' : 'Reanudar al agente de IA en esta conversación'}
+              onClick={() => { onBackError(undefined); agent.resume((m) => onBackError(m)); }}
+              className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border border-warn bg-warn-soft px-3 text-[12.5px] font-semibold text-warn disabled:opacity-50"
+            >
+              <Icon name="bot" size={16} />
+              Reanudar
+            </button>
+          ) : null}
+          <button type="button" aria-label="Más acciones" aria-haspopup="dialog" onClick={onToggleContact} className="relative grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2">
             <Icon name="more" size={22} strokeWidth={3.2} />
             {scheduledPending > 0 ? <span aria-hidden="true" className="absolute right-1 top-1 size-2.5 rounded-full bg-accent" /> : null}
           </button>
@@ -115,41 +126,6 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
           <SlaPill sla={c.sla} now={now} />
           <WindowNote c={c} />
         </div>
-        {sheet ? (
-          <Drawer label="Acciones de la conversación" placement="bottom" onClose={close}>
-            <div className="grid w-full gap-1 p-3">
-              <div className="flex items-center justify-between gap-2 px-1 pb-1">
-                <h3 className="min-w-0 truncate text-[15px] font-bold">{c.contact.name}</h3>
-                <button type="button" aria-label="Cerrar las acciones" onClick={close} className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2"><Icon name="close" /></button>
-              </div>
-              {confirm ? (
-                <div role="alertdialog" aria-label="Finalizar la conversación" className="grid gap-2 rounded-xl border border-crit bg-crit-soft p-3 text-[13px] text-crit">
-                  <p>¿Finalizar? Si el cliente escribe de nuevo se abrirá otra conversación.</p>
-                  <div className="flex gap-2">
-                    <Button variant="danger" className="flex-1" loading={act.isPending} onClick={() => { run('close', 'No pudimos finalizar la conversación.'); setSheet(false); }}>Sí, finalizar</Button>
-                    <Button className="flex-1" onClick={() => setConfirm(false)}>No</Button>
-                  </div>
-                </div>
-              ) : null}
-              {c.can.accept ? <SheetButton primary onClick={() => { close(); run('accept', 'No pudimos aceptar la conversación.'); }}>Aceptar</SheetButton> : null}
-              {c.can.take ? <SheetButton primary onClick={() => { close(); run('take', 'No pudimos asignarte la conversación.'); }}>Asignarme</SheetButton> : null}
-              <SheetButton icon="users" onClick={() => { close(); onToggleContact(); }}>Ver contacto</SheetButton>
-              {c.can.transfer || c.can.share ? <SheetButton icon="swap" onClick={() => { close(); setDialog(true); }}>Transferir o compartir</SheetButton> : null}
-              <SheetButton icon="clock" onClick={() => { close(); setScheduledOpen(true); }}>{scheduledPending > 0 ? `Mensajes programados (${scheduledPending})` : 'Mensajes programados'}</SheetButton>
-              <AgentSheetItem c={c} onDone={close} onError={(m) => onBackError(m)} />
-              <div className="grid gap-1 px-1 py-1.5">
-                <span className="text-[12px] font-semibold uppercase tracking-wide text-muted">Etiquetas</span>
-                <ConversationTags c={c} />
-              </div>
-              {collaborator ? <SheetButton icon="logout" onClick={() => { close(); onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); }}>Dejar de participar</SheetButton> : null}
-              {c.can.close && !confirm ? <SheetButton icon="check" danger onClick={() => setConfirm(true)}>Finalizar la conversación</SheetButton> : null}
-              {c.can.delete ? <SheetButton icon="close" danger onClick={() => { close(); setDeleting(true); }}>Eliminar la conversación</SheetButton> : null}
-            </div>
-          </Drawer>
-        ) : null}
-        {scheduledOpen ? <ScheduledDialog conversationId={c.id} onClose={() => setScheduledOpen(false)} /> : null}
-        {deleting ? <DeleteConversationDialog c={c} onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); navigate('/inbox'); }} /> : null}
-        {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
       </header>
     );
   }
@@ -198,8 +174,8 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
       <div className="flex flex-wrap items-center gap-2">
         <Pill kind={status.kind}>{status.label}</Pill>
         <SlaPill sla={c.sla} now={now} />
-        <span className="text-[12.5px] text-muted">{c.owner ? `Asignada a ${c.owner.name}` : 'Sin asesor'}</span>
-        {c.participants.length > 0 ? <span className="text-[12.5px] text-muted" title={c.participants.map((p) => `${p.user.name}: ${p.permission === 'reply' ? 'puede responder' : 'solo ver y dejar notas'}`).join('\n')}>Compartida con {c.participants.map((p) => p.user.name.split(' ')[0]).join(', ')}</span> : null}
+        <span className="text-[12.5px] text-muted">{c.owner ? `Asignada a ${personName(c.owner.name)}` : 'Sin asesor'}</span>
+        {c.participants.length > 0 ? <span className="text-[12.5px] text-muted" title={c.participants.map((p) => `${personName(p.user.name)}: ${p.permission === 'reply' ? 'puede responder' : 'solo ver y dejar notas'}`).join('\n')}>Compartida con {c.participants.map((p) => personName(p.user.name).split(' ')[0]).join(', ')}</span> : null}
         <ConversationTags c={c} />
         <WindowNote c={c} />
         <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
@@ -240,7 +216,9 @@ function avatarFor(m: ChatMessage, first: boolean, contactName: string, photos: 
   if (m.direction === 'in') return <Avatar name={contactName} src={photos.contact(contactId)} size={28} />;
   if (m.sender_type === 'ai') return <span aria-hidden="true" className="grid size-7 place-items-center rounded-full bg-accent text-[10px] font-bold text-accent-ink">IA</span>;
   if (m.sender_type === 'automation') return <span aria-hidden="true" className="grid size-7 place-items-center rounded-full bg-surface2 text-muted"><Icon name="clock" size={14} /></span>;
-  return <Avatar name={m.author?.name ?? '?'} src={m.author ? photos.user(m.author.id) : undefined} size={28} tone="accent" />;
+  // Lo que se escribió en el teléfono de la línea no tiene autor conocido: un icono de teléfono, igual de discreto que el de los avisos automáticos (v10)
+  if (!m.author && m.extra?.['origin'] === 'device') return <span aria-hidden="true" title="Desde el teléfono" className="grid size-7 place-items-center rounded-full bg-surface2 text-muted"><Icon name="phone" size={14} /></span>;
+  return <Avatar name={personName(m.author?.name)} src={m.author ? photos.user(m.author.id) : undefined} size={28} tone="accent" />;
 }
 
 function Messages({ c }: { c: Conversation }) {
@@ -341,6 +319,7 @@ export function Thread({ id, meId, layout }: { id: string; meId: string; layout:
   const { mutate: markRead } = useMarkRead(id);
   const tried = useRef('');
   const [actionError, setActionError] = useState<string>();
+  const mobile = useBreakpoint() === 'mobile';
   const c = q.data;
   const unread = c && c.owner?.id === meId ? c.unread_count : 0;
 
@@ -369,7 +348,7 @@ export function Thread({ id, meId, layout }: { id: string; meId: string; layout:
     <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <Header c={c} meId={meId} onBackError={setActionError} layout={layout} />
       {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
-      <AgentBanner c={c} />
+      {mobile ? null : <AgentBanner c={c} />}
       <Messages c={c} />
       <Composer key={c.id} c={c} />
     </section>

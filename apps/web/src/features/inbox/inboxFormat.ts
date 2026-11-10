@@ -10,6 +10,14 @@ export const STATUS_PILL: Record<ConversationStatus, { label: string; kind: Pill
   closed: { label: 'Finalizada', kind: 'muted' },
 };
 
+/** El nombre de una persona tal como se muestra en la bandeja: NUNCA un correo (v10). Si el nombre viene vacío o es un correo, «Asesor». */
+export function personName(name: string | null | undefined): string {
+  const n = (name ?? '').trim();
+  return n === '' || n.includes('@') ? 'Asesor' : n;
+}
+/** Solo el primer nombre (la burbuja y las etiquetas de la lista). */
+export const firstName = (name: string | null | undefined): string => personName(name).split(/\s+/)[0] ?? 'Asesor';
+
 const hm = (d: Date): string => d.toLocaleTimeString('es-EC', { hour: '2-digit', minute: '2-digit', hour12: false });
 const startOfDay = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 

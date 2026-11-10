@@ -18,6 +18,16 @@ export function SheetButton({ icon, onClick, danger = false, primary = false, di
   );
 }
 
+/** Una acción rápida de la cabecera: ícono y nombre debajo (44 px de alto como mínimo). */
+export function Tile({ icon, label, onClick }: { icon: IconName; label: string; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 py-2 text-[12px] font-semibold text-fg hover:bg-surface2">
+      <Icon name={icon} size={18} className="shrink-0 text-accent" />
+      {label}
+    </button>
+  );
+}
+
 /** «Pausar / Reanudar al agente» de la hoja de acciones del chat móvil. Solo aparece si el agente intervino en esta conversación y la persona puede controlarlo. */
 export function AgentSheetItem({ c, onDone, onError }: { c: Conversation; onDone: () => void; onError: (m: string) => void }) {
   const q = useAgentStatus(c.id);

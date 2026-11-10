@@ -5,6 +5,7 @@ import type { ScheduledMessage } from '../../lib/types';
 import { Alert, Button } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { personName } from './inboxFormat';
 import { useCancelScheduled, useScheduledMessages } from './useInbox';
 
 /** Por qué un mensaje programado no salió, en palabras de quien lo programó. */
@@ -28,7 +29,7 @@ function Item({ s, conversationId }: { s: ScheduledMessage; conversationId: stri
         <span className="flex flex-wrap items-center gap-1.5">
           <Pill kind={pending ? 'info' : s.status === 'failed' ? 'crit' : 'muted'}>{pending ? 'Programado' : s.status === 'failed' ? 'No salió' : 'Cancelado'}</Pill>
           <b>{shortDateTime(s.send_at)}</b>
-          {s.mine ? null : <span className="text-muted">· {s.author.name}</span>}
+          {s.mine ? null : <span className="text-muted">· {personName(s.author.name)}</span>}
         </span>
         {s.can_cancel ? <Button className="!px-3 !py-1 !text-[12px]" aria-label={`Cancelar el mensaje programado para ${shortDateTime(s.send_at)}`} loading={cancel.isPending} onClick={() => cancel.mutate(s.id)}>Cancelar</Button> : null}
       </div>

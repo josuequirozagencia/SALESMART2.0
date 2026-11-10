@@ -15,7 +15,7 @@ import { ThemeToggle } from '../../ui/ThemeToggle';
 import { AppNavContext } from '../app/AppNav';
 import { ViewAsMenu } from '../context/ViewAs';
 import { NotificationsBell } from '../notifications/NotificationsBell';
-import { chatTime, listPreview, STATUS_PILL } from './inboxFormat';
+import { chatTime, firstName, listPreview, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
 import { usePhotos } from '../photos/usePhotos';
 import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
@@ -77,7 +77,7 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
             <SlaPill sla={c.sla} now={now} hideDone />
             <ChannelMark kind={c.channel.kind} />
             {mobile ? null : c.queue ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{c.queue.name}</span> : null}
-            {mobile ? null : c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{c.owner.name.split(' ')[0]}</span> : null}
+            {mobile ? null : c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{firstName(c.owner.name)}</span> : null}
             {c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view' ? <span className="rounded bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info" title="Te la compartieron: la ves como colaborador">Compartida</span> : null}
             {shown.map((t) => <TagBadge key={t.id} name={t.name} color={t.color} />)}
             {more > 0 ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted" title={c.tags.slice(2).map((t) => t.name).join(', ')}>+{more}</span> : null}
