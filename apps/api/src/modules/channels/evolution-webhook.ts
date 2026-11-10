@@ -11,7 +11,8 @@ import { stripNul } from './meta-webhook';
  *  - Los archivos llegan DENTRO del aviso (`message.base64`): se separan del evento ({@link ParsedEvolution.inlineMedia}) para no guardar megabytes en el registro de avisos.
  *  - Los estados y las reacciones traen un identificador `@lid`, no el teléfono: se correlacionan por el id del mensaje. Un mensaje entrante sin teléfono resoluble se descarta.
  *  - Los estados llegan fuera de orden (el consumidor no los deja retroceder) y `date_time` NO es confiable (viene en hora local etiquetada como UTC): se usa la hora de recepción.
- *  - Los grupos (`@g.us`), los estados de WhatsApp (`status@broadcast`) y lo que escribe el propio chip (`fromMe`) NO son mensajes de un cliente: se ignoran.
+ *  - Los grupos (`@g.us`) y los estados de WhatsApp (`status@broadcast`) NO son una conversación con un cliente: se ignoran. Lo que escribe la persona desde su TELÉFONO (`fromMe`, v9) SÍ entra, como mensaje de
+ *    salida con `origin: 'device'` (el destinatario es el cliente); sus reacciones siguen ignoradas. El eco de lo que envía la plataforma también llega así: lo resuelve el consumidor por el id del mensaje.
  */
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -149,10 +150,13 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
   const id = key ? str(key['id']) : null;
   const remote = key ? str(key['remoteJid']) : null;
   if (!key || !message || !id || !remote) return { ...EMPTY, ignored: 1 };
-  // Los grupos y los estados de WhatsApp no son una conversación con un cliente; lo que escribe el propio chip tampoco
-  if (remote.endsWith('@g.us') || remote === 'status@broadcast' || key['fromMe'] === true) return { ...EMPTY, ignored: 1 };
+  // Los grupos y los estados de WhatsApp no son una conversación con un cliente
+  if (remote.endsWith('@g.us') || remote === 'status@broadcast') return { ...EMPTY, ignored: 1 };
+  const fromMe = key['fromMe'] === true;
   const content = contentOf(id, message);
   if (content === 'reaction') {
+    // La reacción que pone el teléfono a un mensaje no se trae (v9, fuera de alcance)
+    if (fromMe) return { ...EMPTY, ignored: 1 };
     const r = message['reactionMessage'] as Record<string, unknown>;
     const target = isObj(r['key']) ? str(r['key']['id']) : null;
     const emoji = typeof r['text'] === 'string' ? stripNul(r['text']).trim() : '';
@@ -167,12 +171,14 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
     externalId: id,
     from,
     fromRaw: remote,
-    profileName: str(data['pushName']),
+    // En un mensaje del teléfono el `pushName` es el de la persona dueña de la línea, no el del cliente
+    profileName: fromMe ? null : str(data['pushName']),
     kind: content.kind,
     text: content.text,
     media: content.media,
     extra: content.extra,
     sentAt: toDate(data['messageTimestamp'], now),
+    ...(fromMe ? { origin: 'device' as const } : {}),
   };
   const inline = new Map<string, string>();
   if (content.inline && content.media) inline.set(id, content.inline);

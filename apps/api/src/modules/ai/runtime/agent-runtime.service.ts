@@ -110,7 +110,8 @@ export class AgentRuntimeService {
     return this.db.withTenant(async (tx) => {
       const res = await tx.execute(sql`
         SELECT s.conversation_id AS id, s.agent_id,
-               EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at)) AS human_message
+               EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at)) AS human_message,
+               NOT EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND COALESCE(h.meta->>'origin', '') <> 'device' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at)) AS via_device
           FROM ai_conversation_state s
           JOIN conversations c ON c.id = s.conversation_id AND c.organization_id = s.organization_id
           JOIN agent_channels ac ON ac.channel_id = c.channel_account_id AND ac.organization_id = c.organization_id
@@ -119,8 +120,9 @@ export class AgentRuntimeService {
                 OR EXISTS (SELECT 1 FROM messages h WHERE h.conversation_id = c.id AND h.direction = 'out' AND h.sender_type = 'human' AND h.status <> 'internal' AND h.sent_at > GREATEST(COALESCE(s.resumed_at, '-infinity'::timestamptz), COALESCE(c.assigned_at, '-infinity'::timestamptz), ac.created_at)))
          LIMIT 50
          FOR UPDATE OF s SKIP LOCKED`);
-      const rows = res.rows as Array<{ id: string; agent_id: string; human_message: boolean }>;
-      for (const r of rows) await this.setState(tx, r.id, r.agent_id, { status: 'paused', reason: r.human_message ? 'human_message' : 'human_took' }, now, 'automation');
+      const rows = res.rows as Array<{ id: string; agent_id: string; human_message: boolean; via_device: boolean }>;
+      // `via_device`: todos los mensajes humanos que lo causaron se escribieron desde el teléfono de la línea (`meta.origin = 'device'`): la nota lo dice
+      for (const r of rows) await this.setState(tx, r.id, r.agent_id, { status: 'paused', reason: r.human_message ? 'human_message' : 'human_took' }, now, 'automation', undefined, r.human_message && r.via_device);
       return rows.length;
     });
   }
@@ -425,14 +427,14 @@ export class AgentRuntimeService {
   }
 
   /** Cambia el estado del agente en la conversación, con su nota interna, su auditoría y el aviso en vivo. */
-  private async setState(tx: TenantTx, conversationId: string, agentId: string, to: { status: 'active' | 'paused' | 'handed_off'; reason: HandoffReason | PauseReason | null }, now: Date, source: 'manual' | 'automation' | 'ai', agentName?: string): Promise<void> {
+  private async setState(tx: TenantTx, conversationId: string, agentId: string, to: { status: 'active' | 'paused' | 'handed_off'; reason: HandoffReason | PauseReason | null }, now: Date, source: 'manual' | 'automation' | 'ai', agentName?: string, viaDevice = false): Promise<void> {
     const [cur] = await tx.select({ status: aiConversationState.status, reason: aiConversationState.reason, version: aiConversationState.version }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).for('update').limit(1);
     if (!cur || (cur.status === to.status && cur.reason === to.reason)) return;
     await tx.update(aiConversationState).set({ status: to.status, reason: to.reason, version: cur.version + 1, emptyReplies: 0, lastOutcome: null, processingStartedAt: null, updatedAt: now }).where(eq(aiConversationState.conversationId, conversationId));
     const [conv] = await tx.select({ channelAccountId: conversations.channelAccountId }).from(conversations).where(eq(conversations.id, conversationId)).limit(1);
     const name = agentName ?? (await tx.select({ name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0]?.name ?? 'de IA';
     if (conv) {
-      const body = to.status === 'active' ? (source === 'automation' ? `Una automatización activó al agente ${name}.` : `Una persona reanudó al agente ${name}.`) : to.reason ? handoffNote(name, to.reason) : null;
+      const body = to.status === 'active' ? (source === 'automation' ? `Una automatización activó al agente ${name}.` : `Una persona reanudó al agente ${name}.`) : to.reason ? handoffNote(name, to.reason, viaDevice) : null;
       if (body) await tx.insert(messages).values({ conversationId, channelAccountId: conv.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: body.slice(0, 2000), status: 'internal', sentAt: now });
     }
     await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'ai_agent', oldValue: { status: cur.status, reason: cur.reason }, newValue: { status: to.status, reason: to.reason }, source });

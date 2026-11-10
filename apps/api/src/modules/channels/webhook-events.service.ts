@@ -100,7 +100,13 @@ export class WebhookEventsService {
       // Un aviso sin contenido (ya vaciado) no tiene nada que procesar
       if (ev.payload) {
         for (const { event } of this.parsedEvents(ev)) {
-          for (const m of event.messages) await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
+          for (const m of event.messages) {
+            if (m.origin === 'device') {
+              // Lo que se escribió desde el teléfono (o el eco de un envío nuestro). `wait` = hay un envío en vuelo: el aviso espera como un estado que llega antes que su mensaje
+              const r = await this.conversations.ingestDeviceMessage(tx, ev.channelAccountId, m, { now, timeZone: assign.timeZone, mayWait: now.getTime() - ev.receivedAt.getTime() < STATUS_WAIT_MS });
+              if (r === 'wait') unknownTargets += 1;
+            } else await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
+          }
           for (const s of event.statuses) if ((await this.conversations.applyStatus(tx, ev.channelAccountId, s)) === 'unknown') unknownTargets += 1;
           for (const r of event.reactions) if ((await this.conversations.applyReaction(tx, ev.channelAccountId, r)) === 'unknown') unknownTargets += 1;
         }

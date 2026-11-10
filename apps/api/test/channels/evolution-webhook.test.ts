@@ -84,8 +84,8 @@ describe('mensajes entrantes (messages.upsert)', () => {
     expect(lost).toMatchObject({ events: [], ignored: 1 });
   });
 
-  it('grupos, estados de WhatsApp y lo que escribe el propio chip se ignoran (y se cuentan)', () => {
-    for (const k of [{ remoteJid: '120363424375113025@g.us', participant: `${CLIENT}@s.whatsapp.net` }, { remoteJid: 'status@broadcast' }, { fromMe: true }]) {
+  it('grupos y estados de WhatsApp se ignoran (y se cuentan), también los que escribe el teléfono', () => {
+    for (const k of [{ remoteJid: '120363424375113025@g.us', participant: `${CLIENT}@s.whatsapp.net` }, { remoteJid: 'status@broadcast' }, { remoteJid: '120363424375113025@g.us', fromMe: true }, { remoteJid: 'status@broadcast', fromMe: true }]) {
       const p = parseEvolutionWebhook(upsert('IGN-0000000000000001', { conversation: 'no' }, {}, k), NOW);
       expect(p, JSON.stringify(k)).toMatchObject({ events: [], ignored: 1 });
     }
@@ -185,5 +185,41 @@ describe('lo que no se usa, lo mal formado y los secretos', () => {
     expect(phoneFromJid(`${CLIENT}@s.whatsapp.net`)).toBe(`+${CLIENT}`);
     expect(phoneFromJid(`${CLIENT}:12@s.whatsapp.net`)).toBe(`+${CLIENT}`);
     for (const j of ['257720267587711@lid', '120363424375113025@g.us', 'status@broadcast', '', null, 5, '123@s.whatsapp.net', 'abc@s.whatsapp.net']) expect(phoneFromJid(j), String(j)).toBeNull();
+  });
+});
+
+describe('mensajes escritos desde el teléfono (fromMe, v9)', () => {
+  const mine = (id: string, message: Record<string, unknown>, over: Record<string, unknown> = {}) => upsert(id, message, { pushName: 'Negocio', status: 'SERVER_ACK', ...over }, { fromMe: true });
+
+  it('un texto: entra como mensaje de salida (origin device) dirigido al CLIENTE, sin tomar el nombre del perfil de la línea', () => {
+    const p = parseEvolutionWebhook(mine('PH-0000000000000001', { conversation: 'Te espero mañana' }), NOW);
+    expect(p.ignored).toBe(0);
+    expect(p.events[0]!.event.messages).toEqual([
+      { externalId: 'PH-0000000000000001', from: `+${CLIENT}`, fromRaw: `${CLIENT}@s.whatsapp.net`, profileName: null, kind: 'text', text: 'Te espero mañana', media: null, extra: {}, sentAt: new Date(1793143471 * 1000), origin: 'device' },
+    ]);
+  });
+
+  it('una imagen con pie y el archivo en base64: se separa del aviso igual que en los entrantes', () => {
+    const p = parseEvolutionWebhook(mine('PH-IMG-000000000001', { imageMessage: { mimetype: 'image/jpeg', caption: 'mira' }, base64: 'QUJD' }), NOW);
+    expect(p.events[0]!.event.messages[0]).toMatchObject({ kind: 'image', text: 'mira', origin: 'device', media: { id: 'PH-IMG-000000000001', mimeType: 'image/jpeg' } });
+    expect(p.inlineMedia.get('PH-IMG-000000000001')).toBe('QUJD');
+  });
+
+  it('un mensaje del cliente NO lleva origin; un chat @lid con remoteJidAlt resuelve el teléfono del cliente', () => {
+    expect(parseEvolutionWebhook(upsert('IN-0000000000000001', { conversation: 'Hola' }), NOW).events[0]!.event.messages[0]).not.toHaveProperty('origin');
+    const lid = parseEvolutionWebhook(mine('PH-LID-00000000001', { conversation: 'ok' }, {}), NOW);
+    expect(lid.events[0]!.event.messages[0]).toMatchObject({ from: `+${CLIENT}`, origin: 'device' });
+    const onlyLid = parseEvolutionWebhook(upsert('PH-LID-00000000002', { conversation: 'ok' }, {}, { fromMe: true, remoteJid: '154640482095149@lid', remoteJidAlt: undefined }), NOW);
+    expect(onlyLid).toMatchObject({ events: [], ignored: 1 });
+  });
+
+  it('la reacción que pone el teléfono se sigue ignorando; la del cliente se sigue leyendo', () => {
+    const rea = (fromMe: boolean) => upsert('REA-0000000000000009', { reactionMessage: { key: { remoteJid: `${CLIENT}@s.whatsapp.net`, fromMe: !fromMe, id: 'DOC-1' }, text: '👍' } }, {}, { fromMe });
+    expect(parseEvolutionWebhook(rea(true), NOW)).toMatchObject({ events: [], ignored: 1 });
+    expect(parseEvolutionWebhook(rea(false), NOW).events[0]!.event.reactions).toHaveLength(1);
+  });
+
+  it('un tipo que no reconocemos queda como unsupported (se registra, sin contenido)', () => {
+    expect(parseEvolutionWebhook(mine('PH-UNS-000000000001', { pollCreationMessage: { name: '¿?' } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'unsupported', text: null, origin: 'device' });
   });
 });
