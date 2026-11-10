@@ -155,9 +155,26 @@ describe('Inbox · lista móvil (< 768 px)', () => {
     await userEvent.click(sheet.getByRole('button', { name: 'Ver conversaciones' }));
     expect(await screen.findByRole('button', { name: 'Filtros (1 activos)' })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Filtros (1 activos)' }));
-    const fav = within(await screen.findByRole('dialog', { name: 'Filtros' })).getByRole('button', { name: /Destacadas/ });
-    expect(fav).toBeDisabled();
-    expect(fav).toHaveTextContent('Próximamente');
+    const dlg = within(await screen.findByRole('dialog', { name: 'Filtros' }));
+    const fav = dlg.getByRole('button', { name: 'Destacadas' });
+    expect(fav).toBeEnabled();
+    expect(fav).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('«Destacadas» se pide al servidor (favorite=1), se marca y se cuenta; las filas destacadas muestran la estrella', async () => {
+    stubWidth(390);
+    const w = routes([conv({ id: 'c1', favorite: true }), conv({ id: 'c2', contact: { id: 'k2', name: 'Beto Luna', phone: null } })]);
+    mockApi(w.routes);
+    renderApp('/inbox');
+    expect(await screen.findByRole('link', { name: 'Ana Torres, destacada' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Beto Luna' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Filtros' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Filtros' }));
+    await userEvent.click(dlg.getByRole('button', { name: 'Destacadas' }));
+    await waitFor(() => expect(w.listCalls.some((q) => q.get('favorite') === '1')).toBe(true));
+    expect(dlg.getByRole('button', { name: 'Destacadas' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(dlg.getByRole('button', { name: 'Ver conversaciones' }));
+    expect(await screen.findByRole('button', { name: 'Filtros (1 activos)' })).toBeInTheDocument();
   });
 
   it('«Recientes» deja solo las conversaciones con un mensaje en las últimas 24 h', async () => {

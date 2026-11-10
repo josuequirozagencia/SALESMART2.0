@@ -28,10 +28,10 @@ export function useInboxUnread(enabled: boolean): number {
   return q.data ?? 0;
 }
 
-export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, recent: false, sla: '' };
+export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, recent: false, favorite: false, sla: '' };
 
 /** Cuántos filtros (además de la pestaña) están puestos. */
-export const activeFilterCount = (f: InboxFilters): number => [f.owner, f.queue, f.channel, f.tag, f.sla].filter(Boolean).length + (f.unread ? 1 : 0) + (f.recent ? 1 : 0);
+export const activeFilterCount = (f: InboxFilters): number => [f.owner, f.queue, f.channel, f.tag, f.sla].filter(Boolean).length + (f.unread ? 1 : 0) + (f.recent ? 1 : 0) + (f.favorite ? 1 : 0);
 
 function listQuery(f: InboxFilters, cursor: string | undefined): string {
   const p = new URLSearchParams({ tab: f.tab });
@@ -39,6 +39,7 @@ function listQuery(f: InboxFilters, cursor: string | undefined): string {
   for (const k of ['owner', 'queue', 'channel', 'tag'] as const) if (f[k]) p.set(k, f[k]);
   if (f.sla) p.set('sla', f.sla);
   if (f.unread) p.set('unread', '1');
+  if (f.favorite) p.set('favorite', '1');
   if (cursor) p.set('cursor', cursor);
   p.set('limit', '30');
   return `?${p.toString()}`;
@@ -54,6 +55,18 @@ export function useConversations(f: InboxFilters) {
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     refetchInterval: poll.list,
     placeholderData: keepPreviousData,
+  });
+}
+
+/** Pone o quita la estrella de la persona en una conversación (personal; el servidor devuelve la conversación ya actualizada). */
+export function useFavorite(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => api<Conversation>(`/conversations/${id}/favorite`, { method: on ? 'PUT' : 'DELETE' }),
+    onSuccess: (c) => {
+      qc.setQueryData(['conversation', id], c);
+      void qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
   });
 }
 

@@ -189,6 +189,50 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     expect(chat.queryByRole('button', { name: 'Reanudar agente' })).not.toBeInTheDocument();
   });
 
+  it('«Destacar» está en el panel: pone la estrella (PUT) y la tarjeta pasa a «Quitar de destacadas» (DELETE)', async () => {
+    stubWidth(390);
+    const calls: string[] = [];
+    let fav = false;
+    const w = server(conv(), {
+      'GET /conversations/c1': () => ({ body: conv({ favorite: fav }) }),
+      'PUT /conversations/c1/favorite': () => { calls.push('PUT'); fav = true; return { body: conv({ favorite: true }) }; },
+      'DELETE /conversations/c1/favorite': () => { calls.push('DELETE'); fav = false; return { body: conv({ favorite: false }) }; },
+    });
+    mockApi(w.routes);
+    renderApp('/inbox/c1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Datos del contacto' }));
+    await userEvent.click(dlg.getByRole('button', { name: 'Destacar' }));
+    await waitFor(() => expect(calls).toEqual(['PUT']));
+    await userEvent.click(await dlg.findByRole('button', { name: 'Quitar de destacadas' }));
+    await waitFor(() => expect(calls).toEqual(['PUT', 'DELETE']));
+  });
+
+  it('la cabecera móvil ya no lleva la fila de estado cuando todo va bien; el estado y el cronómetro están en el panel', async () => {
+    stubWidth(390);
+    const c = conv({ sla: { kind: 'followup', state: 'ok', started_at: ago(MIN), due_at: new Date(Date.now() + 30 * MIN).toISOString(), response_seconds: null } });
+    mockApi(server(c).routes);
+    renderApp('/inbox/c1');
+    const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
+    await chat.findByRole('button', { name: 'Ver los datos de Ana Torres' });
+    expect(chat.queryByText('Trabajando')).not.toBeInTheDocument();
+    expect(chat.queryByText(/Responder en/)).not.toBeInTheDocument();
+    expect(chat.queryByText(/Puedes escribir libremente/)).not.toBeInTheDocument();
+    await userEvent.click(chat.getByRole('button', { name: 'Más acciones' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Datos del contacto' }));
+    expect(dlg.getByText('Trabajando')).toBeInTheDocument();
+    expect(dlg.getByText(/Responder en/)).toBeInTheDocument();
+  });
+
+  it('un cronómetro VENCIDO sí sigue a la vista en la cabecera móvil (pide acción)', async () => {
+    stubWidth(390);
+    const c = conv({ sla: { kind: 'followup', state: 'late', started_at: ago(2 * 60 * MIN), due_at: ago(30 * MIN), response_seconds: null } });
+    mockApi(server(c).routes);
+    renderApp('/inbox/c1');
+    const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
+    expect(await chat.findByText(/Vencida hace/)).toBeInTheDocument();
+  });
+
   it('un autor cuyo nombre es un correo se muestra como «Asesor»; el correo no aparece en ningún lado de la bandeja', async () => {
     stubWidth(390);
     const mail = 'josuequirozagencia@gmail.com';

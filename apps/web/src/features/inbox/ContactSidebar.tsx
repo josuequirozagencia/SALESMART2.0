@@ -14,6 +14,8 @@ import { ConversationTags } from './ConversationTags';
 import { AgentPanelBlock } from './AgentBanner';
 import { ActionTiles, DangerRows, PrimaryActions } from './ConversationActions';
 import { personName } from './inboxFormat';
+import { SlaPill } from './SlaPill';
+import { useNow } from '../../lib/useNow';
 import { Tile } from './SheetButton';
 import { Pill } from '../../ui/Pill';
 import { AttributionSection } from '../contacts/AttributionSection';
@@ -147,6 +149,7 @@ const STATUS_LABEL: Record<string, string> = { unassigned: 'Sin asignar', pendin
  */
 export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClose: () => void; actions?: { meId: string; onError: (m: string | undefined) => void } }) {
   const photos = usePhotos([c.contact.id], []);
+  const now = useNow(30_000);
   const q = useContactDetail(c.contact.id);
   const fields = useCustomFields();
   const appt = useNextAppointment(c.contact.id);
@@ -174,6 +177,7 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
         <div className="flex flex-wrap justify-center gap-1.5">
           <Pill kind="accent">{c.channel.name}</Pill>
           <Pill kind={c.status === 'closed' ? 'muted' : c.status === 'pending' || c.status === 'unassigned' ? 'warn' : 'ok'}>{STATUS_LABEL[c.status] ?? c.status}</Pill>
+          {actions ? <SlaPill sla={c.sla} now={now} /> : null}
         </div>
       </div>
 

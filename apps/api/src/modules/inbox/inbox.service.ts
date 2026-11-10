@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { channelAccounts, contactPhones, contactTags, contacts, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queues, responseTimers, type TenantTx } from '../../db';
+import { channelAccounts, contactPhones, contactTags, contacts, conversationFavorites, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queues, responseTimers, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
@@ -263,6 +263,20 @@ export class InboxService {
     return { id, deleted: true };
   }
 
+  /**
+   * Pone o quita la estrella de ESTA persona en una conversación (v10b, ADR-66). Es personal: no cambia nada de la conversación ni lo ve nadie más; basta con poder verla (si no, 404 como
+   * lo inexistente). Repetirlo no cambia nada (poner una estrella que ya está, o quitar una que no está).
+   */
+  async setFavorite(access: InboxAccess, id: string, on: boolean): Promise<ConversationView> {
+    const scope = scopeOf(access);
+    await this.db.withTenant(async (tx) => {
+      await loadConversation(tx, scope, id);
+      if (on) await tx.insert(conversationFavorites).values({ conversationId: id, userId: scope.userId }).onConflictDoNothing();
+      else await tx.delete(conversationFavorites).where(and(eq(conversationFavorites.conversationId, id), eq(conversationFavorites.userId, scope.userId)));
+    });
+    return this.get(access, id);
+  }
+
   /** Pone en cero los no leídos. Solo cuenta si quien la abre es su dueño: un administrador que la mira no borra los pendientes del asesor. */
   async markRead(access: InboxAccess, id: string): Promise<ConversationView> {
     const scope = scopeOf(access);
@@ -289,6 +303,8 @@ export class InboxService {
     if (q.queue) where.push(eq(conversations.queueId, q.queue));
     if (q.channel) where.push(eq(conversations.channelAccountId, q.channel));
     if (q.sla) where.push(slaCondition(q.sla, sla.now, sla.riskMinutes));
+    // La estrella es personal: solo las que quien consulta destacó (y que además puede ver)
+    if (q.favorite) where.push(exists(tx.select({ one: sql`1` }).from(conversationFavorites).where(and(eq(conversationFavorites.conversationId, conversations.id), eq(conversationFavorites.userId, scope.userId)))));
     if (q.tag) where.push(exists(tx.select({ one: sql`1` }).from(contactTags).where(and(eq(contactTags.contactId, conversations.contactId), eq(contactTags.tagId, q.tag)))));
     if (q.q) {
       const like = `%${likeEscape(q.q)}%`;
@@ -353,6 +369,7 @@ export class InboxService {
       .where(and(inArray(conversationParticipants.conversationId, convIds), isNull(conversationParticipants.revokedAt)))
       .orderBy(asc(conversationParticipants.addedAt), asc(conversationParticipants.id));
     const slaViews = await this.sla.views(tx, rows.map((r) => ({ id: r.c.id, queueId: r.c.queueId })), ctx);
+    const starred = new Set((await tx.select({ id: conversationFavorites.conversationId }).from(conversationFavorites).where(and(eq(conversationFavorites.userId, scope.userId), inArray(conversationFavorites.conversationId, convIds)))).map((f) => f.id));
     const participants = new Map<string, Hydrated['participantRows']>();
     for (const p of partRows) participants.set(p.conversationId, [...(participants.get(p.conversationId) ?? []), { userId: p.userId, permission: p.permission, addedBy: p.addedBy, addedAt: p.addedAt }]);
     return rows.map((r) => ({
@@ -365,6 +382,7 @@ export class InboxService {
       qrState: r.qrState,
       queue: r.c.queueId && r.queueName !== null ? { id: r.c.queueId, name: r.queueName, color: r.queueColor ?? '#7c5cfa' } : null,
       tags: tagsByContact.get(r.c.contactId) ?? [],
+      favorite: starred.has(r.c.id),
       last: last.get(r.c.id) ?? null,
       sla: slaViews.get(r.c.id) ?? null,
       collab: r.c.ownerId === scope.userId ? null : r.collab,

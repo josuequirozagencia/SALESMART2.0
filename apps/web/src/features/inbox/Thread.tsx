@@ -22,16 +22,18 @@ import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, personName, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
 import { TransferDialog } from './TransferDialog';
-import { useConversation, useConversationAction, useMarkRead, useMessages, useReact, useRetryMessage, useRevoke, useScheduledMessages } from './useInbox';
+import { useConversation, useConversationAction, useFavorite, useMarkRead, useMessages, useReact, useRetryMessage, useRevoke, useScheduledMessages } from './useInbox';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 
 /** Aviso de la ventana de 24 h de WhatsApp oficial: cuánto queda para escribir libremente, o que ya pasó. */
-function WindowNote({ c }: { c: Conversation }) {
+function WindowNote({ c, onlyWarn = false }: { c: Conversation; onlyWarn?: boolean }) {
   const now = useNow(60_000);
   if (c.status === 'closed' || !c.can.reply || !c.window.expires_at) return null;
   const left = Date.parse(c.window.expires_at) - now;
   if (left <= 0) return <Pill kind="warn">Ventana de 24 h cerrada</Pill>;
+  // En el chat móvil (v10b) solo se avisa cuando la ventana está por cerrarse: lo demás ocupaba una fila entera
+  if (onlyWarn && left >= 3 * 3_600_000) return null;
   return <Pill kind={left < 3 * 3_600_000 ? 'warn' : 'muted'}>Puedes escribir libremente: quedan {timeLeft(left)}</Pill>;
 }
 
@@ -58,6 +60,24 @@ function useGoBack(): (e: MouseEvent) => void {
       navigate(-1);
     }
   };
+}
+
+/** La estrella de la persona: «Destacar» / «Quitar de destacadas» (personal; nadie más la ve). */
+export function FavoriteButton({ c }: { c: Conversation }) {
+  const fav = useFavorite(c.id);
+  return (
+    <button
+      type="button"
+      aria-label={c.favorite ? 'Quitar de destacadas' : 'Destacar la conversación'}
+      aria-pressed={c.favorite === true}
+      title={c.favorite ? 'Quitar de tus destacadas' : 'Destacarla (solo tú ves tus estrellas)'}
+      disabled={fav.isPending}
+      onClick={() => fav.mutate(!c.favorite)}
+      className={`grid size-11 place-items-center rounded-full border transition disabled:opacity-60 ${c.favorite ? 'border-warn bg-warn-soft text-warn' : 'border-transparent text-muted hover:bg-surface2 hover:text-fg'}`}
+    >
+      <Icon name="star" fill={c.favorite ? 'currentColor' : 'none'} />
+    </button>
+  );
 }
 
 function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: string; onBackError: (m: string | undefined) => void; layout: ThreadLayout }) {
@@ -121,10 +141,10 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
           </button>
         </div>
         {c.channel.kind === 'qr' && c.channel.session === 'down' ? <p role="alert" className="mx-3 mb-2 rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[12.5px] font-semibold text-crit">La sesión de WhatsApp por QR está caída. Lo que escribas queda en espera y sale cuando el administrador vuelva a escanear el QR en Configuración › Conexiones.</p> : null}
-        <div className="flex items-center gap-2 overflow-x-auto px-3 pb-2 [scrollbar-width:none]">
-          <Pill kind={status.kind}>{status.label}</Pill>
-          <SlaPill sla={c.sla} now={now} />
-          <WindowNote c={c} />
+        {/* v10b: el estado y el cronómetro al día viven en el panel del contacto; aquí solo lo que pide acción (cronómetro en riesgo o vencido, ventana de 24 h por cerrar o cerrada). Sin nada, la fila no existe */}
+        <div className="flex items-center gap-2 overflow-x-auto px-3 pb-2 [scrollbar-width:none] empty:hidden">
+          {c.sla && (c.sla.state === 'late' || c.sla.state === 'risk') ? <SlaPill sla={c.sla} now={now} /> : null}
+          <WindowNote c={c} onlyWarn />
         </div>
       </header>
     );
@@ -156,6 +176,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
               <Icon name="reset" />
             </button>
           ) : null}
+          <FavoriteButton c={c} />
           <ScheduledButton conversationId={c.id} />
           <button
             type="button"

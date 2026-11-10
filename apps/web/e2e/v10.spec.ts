@@ -97,8 +97,7 @@ for (const size of SIZES) {
       const quick = sheet.getByRole('group', { name: 'Accesos rápidos' });
       await expect(quick.getByRole('button', { name: /^No leídas/ })).toBeVisible();
       await expect(quick.getByRole('button', { name: 'Recientes' })).toBeVisible();
-      await expect(quick.getByRole('button', { name: /Destacadas/ })).toBeDisabled();
-      await expect(quick.getByRole('button', { name: /Destacadas/ })).toContainText('Próximamente');
+      await expect(quick.getByRole('button', { name: 'Destacadas' })).toBeEnabled();
     });
 
     test('chat: «Reanudar agente» en la cabecera y sin banner; el nombre y el ⋮ abren el panel; áreas táctiles de 44 px; sin correos y con icono de teléfono', async ({ page, request }) => {
@@ -149,6 +148,19 @@ for (const size of SIZES) {
       await expect(page.getByRole('dialog', { name: 'Acciones de la conversación' })).toHaveCount(0);
       await page.keyboard.press('Escape');
       await expect(page.getByRole('dialog', { name: 'Datos del contacto' })).toHaveCount(0);
+
+      // Destacar (v10b): la tarjeta del panel pone MI estrella; la lista la muestra y el filtro «Destacadas» la encuentra
+      await more.click();
+      await page.getByRole('dialog', { name: 'Datos del contacto' }).getByRole('button', { name: 'Destacar', exact: true }).click();
+      await expect(page.getByRole('dialog', { name: 'Datos del contacto' }).getByRole('button', { name: 'Quitar de destacadas' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await page.goto('/inbox');
+      await expect(page.getByRole('link', { name: /Cliente V10, destacada/ })).toBeVisible();
+      await page.getByRole('button', { name: 'Filtros' }).click();
+      await page.getByRole('dialog', { name: 'Filtros' }).getByRole('button', { name: 'Destacadas' }).click();
+      await page.getByRole('dialog', { name: 'Filtros' }).getByRole('button', { name: 'Ver conversaciones' }).click();
+      await expect(page.getByRole('link', { name: /Cliente V10/ })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Filtros (1 activos)' })).toBeVisible();
     });
   });
 }

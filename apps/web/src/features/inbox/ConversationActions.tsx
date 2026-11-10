@@ -7,7 +7,7 @@ import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { ScheduledDialog } from './ScheduledList';
 import { SheetButton, Tile } from './SheetButton';
 import { TransferDialog } from './TransferDialog';
-import { useConversationAction, useRevoke, useScheduledMessages } from './useInbox';
+import { useConversationAction, useFavorite, useRevoke, useScheduledMessages } from './useInbox';
 
 /**
  * Las acciones de la conversación en el panel del contacto del chat móvil (v10): antes vivían en la hoja del ⋮; ahora el ⋮ y el nombre abren el MISMO panel, que las trae en su estilo de tarjeta.
@@ -38,9 +38,11 @@ export function ActionTiles({ c, onClose }: { c: Conversation; onClose: () => vo
   const [transfer, setTransfer] = useState(false);
   const [scheduledOpen, setScheduledOpen] = useState(false);
   const scheduled = useScheduledMessages(c.id);
+  const fav = useFavorite(c.id);
   const pending = (scheduled.data?.items ?? []).filter((m) => m.status === 'scheduled').length;
   return (
     <>
+      <Tile icon="star" label={c.favorite ? 'Quitar de destacadas' : 'Destacar'} onClick={() => fav.mutate(!c.favorite)} />
       {c.can.transfer || c.can.share ? <Tile icon="swap" label="Transferir o compartir" onClick={() => setTransfer(true)} /> : null}
       <Tile icon="clock" label={pending > 0 ? `Mensajes programados (${pending})` : 'Mensajes programados'} onClick={() => setScheduledOpen(true)} />
       {transfer ? <TransferDialog c={c} onClose={() => setTransfer(false)} onTransferred={(r) => { setTransfer(false); if (!r.still_visible) navigate('/inbox'); else onClose(); }} /> : null}
