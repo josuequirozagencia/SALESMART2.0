@@ -56,13 +56,14 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
       <Link
         to={`/inbox/${c.id}`}
         aria-current={active ? 'true' : undefined}
-        aria-label={`${c.contact.name}${unread ? `, ${c.unread_count} sin leer` : ''}`}
+        aria-label={`${c.contact.name}${unread ? `, ${c.unread_count} sin leer` : ''}${c.favorite ? ', destacada' : ''}`}
         className={`grid gap-2.5 border-b border-line px-3 hover:bg-surface2 ${mobile ? 'min-h-[72px] grid-cols-[48px_minmax(0,1fr)] gap-3 py-3 active:bg-accent-soft' : 'grid-cols-[42px_minmax(0,1fr)] py-2.5'} ${active ? 'bg-accent-soft' : ''}`}
       >
         <Avatar name={c.contact.name} src={photo} size={mobile ? 48 : 42} className="self-start" />
         <span className="grid min-w-0 gap-0.5">
           <span className="flex items-baseline gap-2">
             <b className={`min-w-0 flex-1 truncate text-[14px] ${mobile && !unread ? 'font-semibold' : ''}`}>{c.contact.name}</b>
+            {c.favorite ? <Icon name="star" size={14} fill="currentColor" className="shrink-0 text-warn" aria-hidden="true" /> : null}
             <time dateTime={c.last_message_at ?? undefined} className={`shrink-0 text-[11px] ${unread ? 'font-semibold text-ok' : 'text-muted'}`}>{chatTime(c.last_message_at, now)}</time>
           </span>
           <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">
@@ -111,7 +112,7 @@ function FilterFields({ filters, set, opts, filtered, onClear, unreadCount }: { 
       <div role="group" aria-label="Accesos rápidos" className="flex flex-wrap items-center gap-2">
         <QuickChip on={filters.unread} onClick={() => set({ unread: !filters.unread })}>No leídas{unreadCount > 0 ? ` · ${unreadCount}` : ''}</QuickChip>
         <QuickChip on={filters.recent} onClick={() => set({ recent: !filters.recent })} hint="Las que tuvieron un mensaje en las últimas 24 horas">Recientes</QuickChip>
-        <QuickChip on={false} disabled hint="Aún no está disponible">Destacadas <span className="text-[11px] font-normal">· Próximamente</span></QuickChip>
+        <QuickChip on={filters.favorite} onClick={() => set({ favorite: !filters.favorite })} hint="Las que marcaste con la estrella">Destacadas</QuickChip>
       </div>
       {opts && opts.owners.length > 0 ? (
         <label className="grid gap-1 text-[12px] font-semibold">Responsable

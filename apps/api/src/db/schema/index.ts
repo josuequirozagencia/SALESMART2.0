@@ -8,7 +8,7 @@ export { contacts, contactPhones, tags, contactTags, contactTouchEvents, metaEve
 export { customFieldDefinitions, customFieldValues } from './custom-fields';
 export { pipelines, pipelineStages, opportunities, stageHistory } from './pipelines';
 export { channelAccounts, whatsappAccounts, qrAccounts, channelRoutes } from './channels';
-export { webhookEvents, conversations, messages, conversationParticipants } from './conversations';
+export { webhookEvents, conversations, messages, conversationParticipants, conversationFavorites } from './conversations';
 export { messageTemplates } from './templates';
 export { quickReplies } from './quick-replies';
 export { scheduledMessages } from './scheduled-messages';

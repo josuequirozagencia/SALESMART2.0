@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { check, foreignKey, index, integer, jsonb, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { channelAccounts } from './channels';
 import { contacts } from './crm';
@@ -181,5 +181,24 @@ export const conversationParticipants = tenantTable(
     uniqueIndex('conversation_participants_active_uq').on(t['organizationId']!, t['conversationId']!, t['userId']!).where(sql`${t['revokedAt']!} IS NULL`),
     // La visibilidad de una persona consulta «¿tiene un acceso vigente a esta conversación?»
     index('conversation_participants_user_idx').on(t['organizationId']!, t['userId']!, t['conversationId']!).where(sql`${t['revokedAt']!} IS NULL`),
+  ],
+);
+
+/**
+ * Conversaciones «destacadas» por persona (v10b, ADR-66): la estrella es PERSONAL —cada quien tiene las suyas; nadie ve las de otra persona, ni el administrador—. TABLA DE NEGOCIO (tenant), con RLS
+ * FORZADA. Es una tabla de enlace (como `contact_tags`): destacar inserta y quitar la estrella borra, así que `app_rw` tiene DELETE solo aquí. No guarda nada sensible; quitar la estrella no deja rastro.
+ */
+export const conversationFavorites = tenantTable(
+  'conversation_favorites',
+  {
+    conversationId: uuid('conversation_id').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'conversation_favorites_pk', columns: [t['organizationId']!, t['userId']!, t['conversationId']!] }),
+    foreignKey({ name: 'conversation_favorites_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
+    // «¿Esta conversación está destacada por mí?» y la lista de las mías
+    index('conversation_favorites_conversation_idx').on(t['organizationId']!, t['conversationId']!, t['userId']!),
   ],
 );

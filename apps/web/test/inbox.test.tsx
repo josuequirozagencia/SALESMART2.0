@@ -498,6 +498,28 @@ describe('Inbox · mensajes automáticos', () => {
   });
 });
 
+describe('Inbox · estrella por persona (v10b)', () => {
+  it('la cabecera trae la estrella: «Destacar la conversación» la pone (PUT) y «Quitar de destacadas» la quita (DELETE)', async () => {
+    const calls: string[] = [];
+    let fav = false;
+    const w = world({});
+    const routes = server(w);
+    routes['GET /conversations/c1'] = () => ({ body: conv({ favorite: fav }) });
+    routes['PUT /conversations/c1/favorite'] = () => { calls.push('PUT'); fav = true; return { body: conv({ favorite: true }) }; };
+    routes['DELETE /conversations/c1/favorite'] = () => { calls.push('DELETE'); fav = false; return { body: conv({ favorite: false }) }; };
+    mockApi(routes);
+    renderApp('/inbox/c1');
+    const star = await screen.findByRole('button', { name: 'Destacar la conversación' });
+    expect(star).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(star);
+    await waitFor(() => expect(calls).toEqual(['PUT']));
+    const off = await screen.findByRole('button', { name: 'Quitar de destacadas' });
+    expect(off).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(off);
+    await waitFor(() => expect(calls).toEqual(['PUT', 'DELETE']));
+  });
+});
+
 describe('Inbox · mensajes escritos desde el teléfono (v9)', () => {
   it('el mensaje que se escribió en el teléfono de la línea lleva «Desde el teléfono» (sin nombre de persona); los de la plataforma y los del cliente no', async () => {
     const w = world({

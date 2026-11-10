@@ -83,6 +83,8 @@ export const listConversationsQuerySchema = z
     channel: z.uuid().optional(),
     tag: z.uuid().optional(),
     unread: flag.optional(),
+    /** Solo las que ESTA persona destacó con la estrella (v10b, ADR-66; la estrella es personal). */
+    favorite: flag.optional(),
     /** Por el cronómetro de respuesta abierto: `late` vencido · `risk` en riesgo · `ok` al día (sin cronómetro o lejos de vencer). */
     sla: z.enum(['late', 'risk', 'ok']).optional(),
     /** Nombre o teléfono del contacto. */

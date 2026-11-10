@@ -41,6 +41,8 @@ export interface ConversationView {
   queue: { id: string; name: string; color: string } | null;
   channel: { id: string; name: string; state: ChannelState; kind: 'whatsapp' | 'ghl' | 'qr'; /** Solo WhatsApp por QR: `open` · `connecting` (no es una caída) · `down` (hay que volver a escanear el QR). */ session?: 'open' | 'connecting' | 'down' };
   tags: TagView[];
+  /** ¿La destacó con la estrella quien consulta? (personal: nunca se ve la de otra persona). */
+  favorite: boolean;
   /** El último mensaje real (las notas internas no cuentan). */
   last_message: LastMessageView | null;
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente. */
@@ -131,6 +133,8 @@ export interface ConversationParts {
   /** Si quien consulta no es la dueña, su permiso como colaboradora. */
   collab: Collab;
   tags: readonly TagView[];
+  /** ¿La destacó quien consulta? (la estrella es personal: nunca se ve la de otra persona). */
+  favorite: boolean;
   sla: SlaView | null;
   last: { direction: string; kind: string; body: string | null; status: string; sentAt: Date } | null;
 }
@@ -155,6 +159,7 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
     queue: p.queue,
     channel: { id: c.channelAccountId, name: p.channelName, state: p.channelState, kind: p.channelProvider === 'ghl' ? 'ghl' : p.channelProvider === 'evolution' ? 'qr' : 'whatsapp', ...(p.qrState === null ? {} : { session: p.qrState === 'open' ? ('open' as const) : p.qrState === 'connecting' || p.qrState === 'created' ? ('connecting' as const) : ('down' as const) }) },
     tags: [...p.tags],
+    favorite: p.favorite,
     last_message: p.last ? { direction: p.last.direction as 'in' | 'out', kind: p.last.kind, preview: previewOf(p.last.kind, p.last.body), status: p.last.status, at: p.last.sentAt.toISOString() } : null,
     window: windowOf(c.lastInboundAt, now, p.channelProvider),
     sla: p.sla,

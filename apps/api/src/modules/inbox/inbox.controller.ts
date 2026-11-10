@@ -69,6 +69,24 @@ export class InboxController {
     return this.inbox.messages(accessOf(req), id, q);
   }
 
+  /** Pone la estrella de la persona que consulta en esta conversación (personal; repetirlo no cambia nada). */
+  @RequirePermission('inbox.read')
+  @Put(':id/favorite')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  favorite(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.inbox.setFavorite(accessOf(req), id, true);
+  }
+
+  /** Quita la estrella de la persona que consulta. */
+  @RequirePermission('inbox.read')
+  @Delete(':id/favorite')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  unfavorite(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.inbox.setFavorite(accessOf(req), id, false);
+  }
+
   /** A quién se puede transferir o compartir, con su carga y si está en la cola. Solo para quien puede hacer alguna de las dos cosas con esa conversación. */
   @RequirePermission('inbox.read')
   @Get(':id/transfer-options')

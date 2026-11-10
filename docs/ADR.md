@@ -2413,3 +2413,34 @@ El Inbox solo avisaba con la pestaña abierta (aviso en vivo, campana «Avisos»
 - El cambio de permisos no existe hasta que se apruebe este ADR; el PR de la fase B no se fusiona antes.
 - Que una conexión movida tome el departamento nuevo con mensajes reales de WhatsApp oficial y de QR (Evolution) no se ha validado.
 - Sonido en iOS Safari (requiere gesto y depende del modo silencio).
+
+## ADR-66 — Conversaciones «destacadas»: una estrella por persona (v10b)
+
+**Estado:** PROPUESTO (el responsable eligió la opción «estrella por persona» el 2026-11-10; las precisiones de abajo esperan su aprobación al revisar el PR). **Incluye una migración (`0129`).**
+
+### Contexto
+El prompt v10 pedía un acceso rápido «Destacadas» en los filtros del Inbox y dejó abierto qué significa: (a) una estrella por persona, (b) una etiqueta «Destacada» que pone un administrador, o (c) quitarlo. El responsable eligió (a) el 2026-11-10. «Recientes» queda en 24 horas (ya construido) y la estrella no cambia nada de la conversación.
+
+### Decisión
+- **La estrella es personal.** Cada persona tiene las suyas; nadie más las ve, ni el administrador, ni una agencia en modo soporte. Destacar no cambia dueño, estado, cronómetros, etiquetas ni auditoría de la conversación.
+- **Tabla `conversation_favorites`** (negocio, `organization_id` + RLS forzada): clave `(organization_id, user_id, conversation_id)`, clave foránea compuesta a `conversations` (no admite una conversación de otra empresa) y a `users`. **Tabla de enlace como `contact_tags`: `app_rw` tiene `SELECT`, `INSERT` y `DELETE`** (quitar la estrella borra la fila y no deja rastro); sin `UPDATE` ni `TRUNCATE`; `app_platform` y `app_identity` sin acceso. Es la única tabla de negocio nueva de esta decisión.
+- **API** (`inbox.read`, sin permiso nuevo; basta con poder ver la conversación, si no, 404 igual que lo inexistente):
+  - `PUT /v1/conversations/:id/favorite` y `DELETE /v1/conversations/:id/favorite` (idempotentes; devuelven la conversación actualizada).
+  - `GET /v1/conversations?favorite=1` filtra a las destacadas por quien consulta (se combina con pestaña, búsqueda y demás filtros) y `favorite` viaja en cada conversación (`true` solo si la destacó quien consulta).
+- **Interfaz:** el chip «Destacadas» del panel de filtros (móvil y escritorio) deja de decir «Próximamente»; la fila muestra una estrella pequeña (y «destacada» en el nombre accesible); la cabecera de tablet y escritorio lleva el botón de la estrella y, en móvil, la tarjeta «Destacar» / «Quitar de destacadas» del panel del contacto.
+
+### Alternativas
+- **Etiqueta «Destacada» (b):** reutiliza las etiquetas, pero es compartida (la ve y la cambia cualquiera con permiso sobre ella) y mezcla un marcador personal con la clasificación del contacto. Descartada.
+- **Columna `starred_by uuid[]` en `conversations`:** sin tabla nueva, pero rompe la regla de «un dato, una tabla», complica el filtro y los índices y obliga a reescribir la fila de la conversación (que tocan los repartos y los cronómetros) cada vez que alguien da una estrella. Descartada.
+- **Estado del lado del navegador:** sin migración, pero no viaja entre dispositivos (justo lo que el responsable usa: móvil y escritorio). Descartada.
+
+### Ventajas / desventajas
+- (+) Personal, barata (una fila por estrella, índice por conversación), no toca la tabla caliente de conversaciones, aislada por RLS y por la clave foránea compuesta, y no requiere permisos nuevos.
+- (−) Una tabla más; las estrellas de conversaciones borradas o finalizadas quedan (no estorban: el filtro solo trae lo visible). Una persona desactivada conserva sus filas (no se usan).
+
+### Impacto
+- **Multi-tenancy:** `organization_id NOT NULL` por defecto `app_org()`, política `conversation_favorites_tenant_isolation` forzada, clave foránea compuesta. Pruebas A↔B de las dos rutas (`test/inbox/favorites.test.ts`).
+- **Seguridad:** sin datos sensibles; solo se puede destacar lo que se puede ver; el filtro nunca trae las estrellas de otra persona.
+- **Migración 0129** (solo hacia adelante): crea la tabla con su política, `FORCE ROW LEVEL SECURITY` y los permisos. El campo `when` del diario se fijó a mano (`1794500000000`) para que sea mayor que el de la 0128 (lección de la 0128).
+- **Sin validar:** navegador real con volumen real de estrellas; lector de pantalla.
+

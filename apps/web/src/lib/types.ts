@@ -831,6 +831,8 @@ export interface Conversation {
   /** `kind`: 'ghl' = canal de GoHighLevel (sin ventana de 24 h ni plantillas ni adjuntos); omitido o 'whatsapp' = WhatsApp. */
   channel: { id: string; name: string; state: 'active' | 'disabled' | 'removed'; kind?: 'whatsapp' | 'ghl' | 'qr'; /** Solo WhatsApp por QR: `open` · `connecting` (no es una caída) · `down` (hay que volver a escanear el QR). */ session?: 'open' | 'connecting' | 'down' };
   tags: ContactTag[];
+  /** ¿La destacó con la estrella quien consulta? (personal). */
+  favorite?: boolean;
   last_message: { direction: 'in' | 'out'; kind: string; preview: string; status: string; at: string } | null;
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */
   window: { open: boolean; expires_at: string | null };
@@ -1054,6 +1056,8 @@ export interface InboxFilters {
   unread: boolean;
   /** «Recientes» (v10): solo las de las últimas 24 h (por el último mensaje). Se aplica en el navegador sobre lo ya cargado: el servidor no tiene ese filtro. */
   recent: boolean;
+  /** «Destacadas» (v10b, ADR-66): solo las que ESTA persona marcó con la estrella (personal; lo filtra el servidor). */
+  favorite: boolean;
   /** Por el cronómetro de respuesta: `late` vencidas · `risk` en riesgo · `ok` al día; vacío = todas. */
   sla: '' | 'late' | 'risk' | 'ok';
 }
