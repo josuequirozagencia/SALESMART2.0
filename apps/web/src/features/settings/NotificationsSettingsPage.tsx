@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { currentSubscription, disablePush, enablePush, fetchPushConfig, fetchPushStatus, notificationPermission, pushSupport, updateShowText } from '../../lib/push';
+import { useCelebratePref } from '../../lib/celebrate';
 import { playIncomingSound, soundReady, useSoundPref } from '../../lib/notifySound';
 import { Alert, Button } from '../../ui/controls';
 import { SettingsNav } from '../app/SettingsNav';
@@ -79,6 +80,7 @@ function PushCard() {
  */
 export function NotificationsSettingsPage() {
   const sound = useSoundPref();
+  const celebrate = useCelebratePref();
   const [note, setNote] = useState<string>();
   return (
     <div className="grid gap-4">
@@ -97,6 +99,16 @@ export function NotificationsSettingsPage() {
           {note ? <span role="status" className="text-[12.5px] text-muted">{note}</span> : null}
         </div>
         <p className="text-[12px] text-muted">En un teléfono o con el navegador en segundo plano, algunos sistemas silencian las páginas: el aviso sonoro funciona con la aplicación abierta.</p>
+      </section>
+      <section aria-label="Celebrar las ventas" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+        <div>
+          <h2 className="text-[15px] font-bold">Celebrar las ventas</h2>
+          <p className="text-[12.5px] text-muted">Al registrar TÚ una venta suena una caja registradora y cae confeti. No se celebra lo que registran otras personas ni las ventas automáticas. Con «reducir movimiento» activado en tu sistema no hay confeti, y el sonido sigue solo si tienes activado el sonido de arriba. Se recuerda en este navegador.</p>
+        </div>
+        <label className="flex min-h-11 items-center gap-3 text-[13.5px] font-semibold">
+          <input type="checkbox" role="switch" checked={celebrate.enabled} onChange={(e) => celebrate.set(e.target.checked)} className="size-5 accent-[var(--accent)]" />
+          Celebrar las ventas
+        </label>
       </section>
       <PushCard />
     </div>
