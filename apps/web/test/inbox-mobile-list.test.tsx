@@ -123,18 +123,52 @@ describe('Inbox · lista móvil (< 768 px)', () => {
     expect(await screen.findByRole('button', { name: 'Filtros (1 activos)' })).toBeInTheDocument();
   });
 
-  it('el atajo «No leídas» usa el filtro que ya existía y se puede quitar', async () => {
+  it('«No leídas» ya no está en la barra de pestañas: queda solo con Trabajando, Esperando y Finalizadas', async () => {
+    stubWidth(390);
+    mockApi(routes([conv()]).routes);
+    renderApp('/inbox');
+    const tabs = within(await screen.findByRole('tablist', { name: 'Estado de las conversaciones' }));
+    expect(tabs.getAllByRole('tab').map((t) => t.textContent?.replace(/\d+$/, ''))).toEqual(['Trabajando', 'Esperando', 'Finalizadas']);
+    expect(screen.queryByRole('button', { name: /No leídas/ })).not.toBeInTheDocument();
+  });
+
+  it('los accesos rápidos del panel de filtros: «No leídas» cambia el mismo estado que el checkbox, «Recientes» se marca y se cuenta, y «Destacadas» espera su decisión', async () => {
     stubWidth(390);
     const w = routes([conv()]);
     mockApi(w.routes);
     renderApp('/inbox');
-    const chip = await screen.findByRole('button', { name: /No leídas/ });
-    expect(chip).toHaveAttribute('aria-pressed', 'false');
-    await userEvent.click(chip);
+    await userEvent.click(await screen.findByRole('button', { name: 'Filtros' }));
+    const sheet = within(await screen.findByRole('dialog', { name: 'Filtros' }));
+    const quick = within(sheet.getByRole('group', { name: 'Accesos rápidos' }));
+    const unread = quick.getByRole('button', { name: /No leídas/ });
+    expect(unread).toHaveAttribute('aria-pressed', 'false');
+    expect(sheet.getByRole('checkbox', { name: 'Solo no leídas' })).not.toBeChecked();
+    await userEvent.click(unread);
     await waitFor(() => expect(w.listCalls.some((q) => q.get('unread') === '1')).toBe(true));
-    expect(screen.getByRole('button', { name: /No leídas/ })).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(screen.getByRole('button', { name: /No leídas/ }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /No leídas/ })).toHaveAttribute('aria-pressed', 'false'));
+    expect(quick.getByRole('button', { name: /No leídas/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(sheet.getByRole('checkbox', { name: 'Solo no leídas' })).toBeChecked();
+    await userEvent.click(sheet.getByRole('checkbox', { name: 'Solo no leídas' }));
+    await waitFor(() => expect(quick.getByRole('button', { name: /No leídas/ })).toHaveAttribute('aria-pressed', 'false'));
+    const recent = quick.getByRole('button', { name: 'Recientes' });
+    await userEvent.click(recent);
+    expect(quick.getByRole('button', { name: 'Recientes' })).toHaveAttribute('aria-pressed', 'true');
+    await userEvent.click(sheet.getByRole('button', { name: 'Ver conversaciones' }));
+    expect(await screen.findByRole('button', { name: 'Filtros (1 activos)' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Filtros (1 activos)' }));
+    const fav = within(await screen.findByRole('dialog', { name: 'Filtros' })).getByRole('button', { name: /Destacadas/ });
+    expect(fav).toBeDisabled();
+    expect(fav).toHaveTextContent('Próximamente');
+  });
+
+  it('«Recientes» deja solo las conversaciones con un mensaje en las últimas 24 h', async () => {
+    stubWidth(390);
+    mockApi(routes([conv({ id: 'c1' }), conv({ id: 'c2', contact: { id: 'k2', name: 'Vieja Díaz', phone: null }, last_message_at: ago(30 * 60 * MIN) })]).routes);
+    renderApp('/inbox');
+    await screen.findByRole('link', { name: 'Vieja Díaz' });
+    await userEvent.click(screen.getByRole('button', { name: 'Filtros' }));
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Filtros' })).getByRole('button', { name: 'Recientes' }));
+    await waitFor(() => expect(screen.queryByRole('link', { name: 'Vieja Díaz' })).not.toBeInTheDocument());
+    expect(screen.getByRole('link', { name: 'Ana Torres' })).toBeInTheDocument();
   });
 
   it('filas: no leída con su conteo, estado de entrega con texto, máximo 2 etiquetas más «+n», y marcas de QR y de GoHighLevel', async () => {
@@ -147,7 +181,8 @@ describe('Inbox · lista móvil (< 768 px)', () => {
     mockApi(routes(items).routes);
     renderApp('/inbox');
     const ana = await screen.findByRole('link', { name: 'Ana Torres, 3 sin leer' });
-    expect(within(ana).getByText('QR · no oficial')).toBeInTheDocument();
+    expect(within(ana).getByText('QR')).toBeInTheDocument();
+    expect(screen.queryByText(/no oficial/)).not.toBeInTheDocument();
     expect(within(ana).getByText('Lead')).toBeInTheDocument();
     expect(within(ana).getByText('VIP')).toBeInTheDocument();
     expect(within(ana).queryByText('Moroso')).not.toBeInTheDocument();

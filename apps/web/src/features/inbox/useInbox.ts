@@ -28,10 +28,10 @@ export function useInboxUnread(enabled: boolean): number {
   return q.data ?? 0;
 }
 
-export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, sla: '' };
+export const DEFAULT_INBOX_FILTERS: InboxFilters = { tab: 'working', q: '', owner: '', queue: '', channel: '', tag: '', unread: false, recent: false, sla: '' };
 
 /** Cuántos filtros (además de la pestaña) están puestos. */
-export const activeFilterCount = (f: InboxFilters): number => [f.owner, f.queue, f.channel, f.tag, f.sla].filter(Boolean).length + (f.unread ? 1 : 0);
+export const activeFilterCount = (f: InboxFilters): number => [f.owner, f.queue, f.channel, f.tag, f.sla].filter(Boolean).length + (f.unread ? 1 : 0) + (f.recent ? 1 : 0);
 
 function listQuery(f: InboxFilters, cursor: string | undefined): string {
   const p = new URLSearchParams({ tab: f.tab });

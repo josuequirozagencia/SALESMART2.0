@@ -1052,6 +1052,8 @@ export interface InboxFilters {
   channel: string;
   tag: string;
   unread: boolean;
+  /** «Recientes» (v10): solo las de las últimas 24 h (por el último mensaje). Se aplica en el navegador sobre lo ya cargado: el servidor no tiene ese filtro. */
+  recent: boolean;
   /** Por el cronómetro de respuesta: `late` vencidas · `risk` en riesgo · `ok` al día; vacío = todas. */
   sla: '' | 'late' | 'risk' | 'ok';
 }

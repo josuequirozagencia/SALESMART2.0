@@ -102,7 +102,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
           <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
           <div className="min-w-0 flex-1 px-1">
             <h2 className="truncate text-[15px] font-bold">{c.contact.name}</h2>
-            <p className="truncate text-[12.5px] text-muted">{c.channel.name} · {c.owner ? c.owner.name : 'Sin asesor'}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn">QR · no oficial</span> : null}</p>
+            <p className="truncate text-[12.5px] text-muted">{c.channel.name} · {c.owner ? c.owner.name : 'Sin asesor'}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn">QR</span> : null}</p>
           </div>
           <button type="button" aria-label="Más acciones" aria-haspopup="dialog" onClick={() => setSheet(true)} className="relative grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2">
             <Icon name="more" size={22} strokeWidth={3.2} />
@@ -160,7 +160,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
         <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
         <div className="min-w-0 flex-1">
           <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
-          <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR · no oficial</span> : null}</p>
+          <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR</span> : null}</p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           {onToggleList ? (
