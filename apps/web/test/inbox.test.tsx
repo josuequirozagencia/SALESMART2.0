@@ -498,6 +498,37 @@ describe('Inbox · mensajes automáticos', () => {
   });
 });
 
+describe('Inbox · mensajes escritos desde el teléfono (v9)', () => {
+  it('el mensaje que se escribió en el teléfono de la línea lleva «Desde el teléfono» (sin nombre de persona); los de la plataforma y los del cliente no', async () => {
+    const w = world({
+      messages: {
+        c1: [
+          msg({ id: 'm1', text: 'Hola, ¿hay turno?' }),
+          out('m2', 'Respuesta desde la plataforma', 'sent'),
+          msg({ id: 'm3', direction: 'out', sender_type: 'human', author: null, text: 'Te confirmo desde el celular', status: 'sent', extra: { origin: 'device' } }),
+        ],
+      },
+    });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const log = within(await screen.findByRole('log', { name: 'Mensajes' }));
+    expect(await log.findByText('Te confirmo desde el celular')).toBeInTheDocument();
+    expect(log.getAllByText(/Desde el teléfono/)).toHaveLength(1);
+    expect(log.getByText('Te confirmo desde el celular').closest('div')!.textContent).toMatch(/Desde el teléfono/);
+    expect(log.getByText('Respuesta desde la plataforma').closest('div')!.textContent).not.toMatch(/Desde el teléfono/);
+  });
+
+  it('la burbuja usa la sombra mínima del chat, no la de los paneles', async () => {
+    const w = world({ messages: { c1: [msg({ id: 'm1', text: 'Hola, ¿hay turno?' })] } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const log = within(await screen.findByRole('log', { name: 'Mensajes' }));
+    const bubble = (await log.findByText('Hola, ¿hay turno?')).closest('div.relative')!;
+    expect(bubble.className).toContain('[box-shadow:var(--bubble-shadow)]');
+    expect(bubble.className).not.toContain('shadow-sm');
+  });
+});
+
 describe('Inbox · SLA', () => {
   const sla = (state: NonNullable<Conversation['sla']>['state'], dueInMs: number | null, over: Partial<NonNullable<Conversation['sla']>> = {}): NonNullable<Conversation['sla']> => ({
     kind: 'first',

@@ -61,6 +61,12 @@
   :root[data-brand="red"]:not([data-theme="light"]) { --bg: #12070a; --surface: #1d0d12; --surface2: #29131a; --line: #45222c; --fg: #fbeaee; --muted: #c79aa6; --accent: #ff5c7a; --accent-soft: #4a1320; --accent-ink: #1a0409; }
 }
 :root { --glow: rgba(79, 70, 229, 0.32); }
+/* Sombra de las burbujas del chat: casi invisible (no es la de los paneles y ventanas, `--shadow`); la burbuja se separa del fondo por su color y su borde */
+:root { --bubble-shadow: 0 1px 1px rgba(0, 0, 0, 0.04); }
+:root[data-theme="dark"] { --bubble-shadow: 0 1px 1px rgba(0, 0, 0, 0.12); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bubble-shadow: 0 1px 1px rgba(0, 0, 0, 0.12); }
+}
 /* Burbujas y fondo del chat: por omisión siguen al tema; el tema WhatsApp los cambia */
 :root { --chat-bg: var(--bg); --bubble-out: var(--accent-soft); --bubble-in: var(--surface); }
 /*
