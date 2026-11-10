@@ -5,12 +5,16 @@ import { useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { useSession } from '../../lib/session';
-import { Icon, type IconName } from '../../ui/Icon';
+import { Icon } from '../../ui/Icon';
 import { friendlyError } from '../../lib/errors';
 import { money, shortDateTime } from '../../lib/format';
 import type { Contact, Conversation } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
-import { RemovableTags } from './ConversationTags';
+import { ConversationTags } from './ConversationTags';
+import { AgentPanelBlock } from './AgentBanner';
+import { ActionTiles, DangerRows, PrimaryActions } from './ConversationActions';
+import { personName } from './inboxFormat';
+import { Tile } from './SheetButton';
 import { Pill } from '../../ui/Pill';
 import { AttributionSection } from '../contacts/AttributionSection';
 import { customText } from '../contacts/columns';
@@ -106,33 +110,25 @@ function Block({ id, title, st, byDefault = true, children }: { id: string; titl
   );
 }
 
-/** Una acción rápida de la cabecera: ícono y nombre debajo (44 px de alto como mínimo). */
-function Tile({ icon, label, onClick }: { icon: IconName; label: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-line bg-surface px-1 py-2 text-[12px] font-semibold text-fg hover:bg-surface2">
-      <Icon name={icon} size={18} className="shrink-0 text-accent" />
-      {label}
-    </button>
-  );
-}
-
 /**
  * Acciones rápidas de la cabecera. «Registrar venta» y «Agendar» (y el flujo de GoHighLevel) las pide quien atiende la conversación (su dueño o quien ve todo) —las mismas reglas
  * que tenían en la cabecera—; el servidor vuelve a verificarlas. «Editar», «Notas» y «Tareas» abren el diálogo o el bloque que ya existe en esta columna (sin llamadas: la telefonía aún no está construida).
  */
-function QuickActions({ c, onEdit, onGoto, canEdit }: { c: Conversation; onEdit: () => void; onGoto: (block: string) => void; canEdit: boolean }) {
+function QuickActions({ c, onEdit, onGoto, canEdit, lead, extraTiles }: { c: Conversation; onEdit: () => void; onGoto: (block: string) => void; canEdit: boolean; lead?: ReactNode; extraTiles?: ReactNode }) {
   const [sale, setSale] = useState(false);
   const [appointment, setAppointment] = useState(false);
   const [flows, setFlows] = useState(false);
   const can = c.owner !== null && (c.my_access === 'owner' || c.my_access === 'supervisor');
   return (
     <div className="grid gap-2 border-b border-line px-4 py-3">
+      {lead}
       {can ? <Button variant="primary" className="w-full justify-center" onClick={() => setSale(true)}>Registrar venta</Button> : null}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {can ? <Tile icon="calendar" label="Agendar" onClick={() => setAppointment(true)} /> : null}
         {canEdit ? <Tile icon="pen" label="Editar" onClick={onEdit} /> : null}
         <Tile icon="list" label="Ir a notas" onClick={() => onGoto('notes')} />
         <Tile icon="check" label="Ir a tareas" onClick={() => onGoto('tasks')} />
+        {extraTiles}
       </div>
       {can && c.channel.kind === 'ghl' ? <Button className="w-full justify-center !px-3 !py-1.5 !text-[12.5px]" onClick={() => setFlows(true)}>Inscribir en un flujo</Button> : null}
       {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
@@ -149,7 +145,7 @@ const STATUS_LABEL: Record<string, string> = { unassigned: 'Sin asignar', pendin
  * —Datos, Etiquetas, Origen, Campos personalizados, Próxima cita, Oportunidades, Últimas ventas, Notas y Tareas— cuyo estado plegado se recuerda por persona. SIN pedir nada nuevo al
  * servidor: cada bloque usa la misma API (y los mismos permisos) que su pantalla; lo que la persona no puede ver, el servidor no lo devuelve y el bloque lo dice o no aparece.
  */
-export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () => void }) {
+export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClose: () => void; actions?: { meId: string; onError: (m: string | undefined) => void } }) {
   const photos = usePhotos([c.contact.id], []);
   const q = useContactDetail(c.contact.id);
   const fields = useCustomFields();
@@ -171,7 +167,7 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
   return (
     <aside aria-label="Datos del contacto" className="flex min-h-0 w-full flex-col overflow-y-auto border-l border-line bg-surface">
       <div className="relative grid justify-items-center gap-1 border-b border-line px-4 pb-3 pt-4 text-center">
-        <button type="button" onClick={onClose} aria-label="Cerrar los datos del contacto" className="absolute right-2 top-2 grid size-11 place-items-center rounded-full text-muted hover:bg-surface2">✕</button>
+        <button type="button" onClick={onClose} aria-label="Cerrar los datos del contacto" className="absolute right-2 top-2 grid size-12 place-items-center rounded-full bg-surface2 text-fg hover:bg-line"><Icon name="close" size={26} strokeWidth={2.4} /></button>
         <Avatar name={c.contact.name} src={photos.contact(c.contact.id)} size={64} />
         <h2 className="max-w-full truncate text-[15px] font-bold">{c.contact.name}</h2>
         <p className="max-w-full truncate font-mono text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'}</p>
@@ -181,7 +177,15 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
         </div>
       </div>
 
-      <QuickActions c={c} canEdit={contact !== undefined} onEdit={() => setEditing(true)} onGoto={goto} />
+      {actions ? <AgentPanelBlock c={c} /> : null}
+
+      <QuickActions
+        c={c}
+        canEdit={contact !== undefined}
+        onEdit={() => setEditing(true)}
+        onGoto={goto}
+        {...(actions ? { lead: <PrimaryActions c={c} onClose={onClose} onError={actions.onError} />, extraTiles: <ActionTiles c={c} onClose={onClose} /> } : {})}
+      />
 
       {q.isPending ? <div className="grid place-items-center py-8 text-muted"><Spinner label="Cargando el contacto" /></div> : null}
       {q.isError ? <div className="p-4"><Alert>{friendlyError(q.error, 'No pudimos cargar los datos del contacto.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert></div> : null}
@@ -192,7 +196,7 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
             <dl className="grid gap-1.5 text-[13px]">
               <div><dt className="text-[12px] text-muted">Teléfonos</dt><dd>{contact.phones.length > 0 ? contact.phones.map((p) => p.e164 + (p.primary && contact.phones.length > 1 ? ' (principal)' : '')).join(' · ') : '—'}</dd></div>
               {contact.email ? <div><dt className="text-[12px] text-muted">Correo</dt><dd className="break-all">{contact.email}</dd></div> : null}
-              <div><dt className="text-[12px] text-muted">Responsable</dt><dd>{contact.owner?.name ?? 'Sin responsable'}</dd></div>
+              <div><dt className="text-[12px] text-muted">Responsable</dt><dd>{contact.owner ? personName(contact.owner.name) : 'Sin responsable'}</dd></div>
               <div><dt className="text-[12px] text-muted">Consentimiento</dt><dd>{CONSENT[contact.consent]}</dd></div>
               {contact.companies.length > 0 ? <div><dt className="text-[12px] text-muted">Empresas</dt><dd>{contact.companies.map((x) => x.name).join(', ')}</dd></div> : null}
             </dl>
@@ -200,7 +204,7 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
           </Block>
 
           <Block id="tags" title="Etiquetas" st={st}>
-            <div className="flex flex-wrap gap-1.5"><RemovableTags c={c} /></div>
+            <div className="flex flex-wrap items-center gap-1.5"><ConversationTags c={c} /></div>
           </Block>
 
           {contact.attribution ? <Block id="origin" title="Origen del lead" st={st}><AttributionSection contact={contact} /></Block> : null}
@@ -239,6 +243,7 @@ export function ContactSidebar({ c, onClose }: { c: Conversation; onClose: () =>
           {editing ? <ContactDialog contact={contact} owners={owners.data ?? []} canAssign={canAssign} canDelete={false} readOnly={false} onClose={() => { setEditing(false); void q.refetch(); }} /> : null}
         </>
       ) : null}
+      {actions ? <DangerRows c={c} meId={actions.meId} onClose={onClose} onError={actions.onError} /> : null}
     </aside>
   );
 }

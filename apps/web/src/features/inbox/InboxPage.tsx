@@ -29,9 +29,9 @@ function useElementWidth<T extends HTMLElement>(): [RefObject<T | null>, number]
 }
 
 /** El panel de contacto de la conversación abierta (los mismos datos que ya traía el hilo; sin pedir nada nuevo). */
-function ContactPanel({ id, onClose }: { id: string; onClose: () => void }) {
+function ContactPanel({ id, onClose, actions }: { id: string; onClose: () => void; actions?: { meId: string; onError: (m: string | undefined) => void } }) {
   const q = useConversation(id);
-  return q.data ? <ContactSidebar c={q.data} onClose={onClose} /> : <aside aria-label="Datos del contacto" className="w-full border-l border-line bg-surface" />;
+  return q.data ? <ContactSidebar c={q.data} onClose={onClose} {...(actions ? { actions } : {})} /> : <aside aria-label="Datos del contacto" className="w-full border-l border-line bg-surface" />;
 }
 
 /**
@@ -70,6 +70,7 @@ export function InboxPage() {
   // Cajón del contacto (tablet y móvil): transitorio, ligado a la conversación abierta; no se guarda
   const [drawerFor, setDrawerFor] = useState<string | null>(null);
   const drawerOpen = !desktop && id !== undefined && drawerFor === id;
+  const [panelError, setPanelError] = useState<string>();
 
   // Mientras se arrastra, el ancho va a una variable CSS de la caja (sin re-renderizar el hilo); al soltar se guarda
   const preview = useCallback(
@@ -160,7 +161,9 @@ export function InboxPage() {
       ) : null}
       {drawerOpen && id ? (
         <Drawer label="Datos del contacto" placement={bp === 'mobile' ? 'full' : 'right'} onClose={() => setDrawerFor(null)}>
-          <ContactPanel id={id} onClose={() => setDrawerFor(null)} />
+          {/* Móvil (v10): el panel trae también las acciones de la conversación (antes en la hoja del ⋮). Un fallo de una acción se dice aquí, encima de todo */}
+          <ContactPanel id={id} onClose={() => setDrawerFor(null)} {...(bp === 'mobile' ? { actions: { meId, onError: setPanelError } } : {})} />
+          {panelError ? <p role="alert" className="absolute inset-x-3 bottom-3 rounded-lg border border-crit bg-crit-soft px-3 py-2 text-[12.5px] font-semibold text-crit">{panelError}</p> : null}
         </Drawer>
       ) : null}
     </div>

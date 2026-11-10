@@ -6,7 +6,7 @@ import type { ChatMessage } from '../../lib/types';
 import { Button } from '../../ui/controls';
 import { QUICK_REACTIONS } from './emoji';
 import { fileSize } from '../../lib/format';
-import { attachmentTypeLabel, bubbleTime, describeExtra, kindLabel } from './inboxFormat';
+import { attachmentTypeLabel, bubbleTime, describeExtra, firstName, kindLabel, personName } from './inboxFormat';
 import { splitMentions } from './mentions';
 
 const TICK: Record<string, { text: string; label: string; cls: string }> = {
@@ -110,7 +110,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar 
     return (
       <li className="flex justify-center">
         <div className={`max-w-[82%] rounded-lg px-3 py-2 text-[13.5px] ${auto ? 'bg-surface2 text-muted' : 'bg-warn-soft text-warn'}`}>
-          <b className="mr-1">{auto ? 'Aviso automático' : `Nota interna${m.author ? ` · ${m.author.name}` : ''}`}</b>
+          <b className="mr-1">{auto ? 'Aviso automático' : `Nota interna${m.author ? ` · ${personName(m.author.name)}` : ''}`}</b>
           <Body m={m} />
           <time dateTime={m.sent_at} className="mt-0.5 block text-right text-[11px] opacity-70">{bubbleTime(m.sent_at)}</time>
         </div>
@@ -125,7 +125,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar 
       <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className={`flex w-full min-w-0 items-start gap-1 ${out ? 'justify-end' : ''}`}>
       <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg px-3 py-2 text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
-        {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{m.author.name.split(' ')[0]}</span> : null}
+        {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{firstName(m.author.name)}</span> : null}
         {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Agente de IA</span> : null}
         {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}
         {m.template ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Plantilla · <span className="font-mono">{m.template.name}</span></span> : null}

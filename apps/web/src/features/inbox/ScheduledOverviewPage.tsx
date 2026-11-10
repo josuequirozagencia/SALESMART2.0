@@ -5,6 +5,7 @@ import { shortDateTime } from '../../lib/format';
 import type { ScheduledListItem } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
+import { personName } from './inboxFormat';
 import { REASON_TEXT } from './ScheduledList';
 import { useAllScheduled, useCancelScheduledAny } from './useInbox';
 
@@ -20,7 +21,7 @@ function Row({ s }: { s: ScheduledListItem }) {
           <Pill kind={pending ? 'info' : s.status === 'failed' ? 'crit' : 'muted'}>{pending ? 'Programado' : s.status === 'failed' ? 'No salió' : 'Cancelado'}</Pill>
           <b>{shortDateTime(s.send_at)}</b>
           <Link to={`/inbox/${s.conversation.id}`} className="min-w-0 truncate font-semibold text-accent hover:underline" aria-label={`Abrir la conversación con ${s.conversation.contact.name}`}>{s.conversation.contact.name}</Link>
-          <span className="text-muted">· {s.conversation.channel_name}{s.mine ? '' : ` · ${s.author.name}`}</span>
+          <span className="text-muted">· {s.conversation.channel_name}{s.mine ? '' : ` · ${personName(s.author.name)}`}</span>
         </span>
         {s.can_cancel ? (
           <Button className="!px-3 !py-1 !text-[12px]" aria-label={`Cancelar el mensaje programado para ${s.conversation.contact.name}`} loading={cancel.isPending} onClick={() => cancel.mutate({ conversationId: s.conversation.id, id: s.id })}>Cancelar</Button>

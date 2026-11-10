@@ -1,4 +1,4 @@
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import type { Conversation, InboxFilters, InboxOptions, InboxTab } from '../../lib/types';
@@ -15,7 +15,7 @@ import { ThemeToggle } from '../../ui/ThemeToggle';
 import { AppNavContext } from '../app/AppNav';
 import { ViewAsMenu } from '../context/ViewAs';
 import { NotificationsBell } from '../notifications/NotificationsBell';
-import { chatTime, listPreview, STATUS_PILL } from './inboxFormat';
+import { chatTime, firstName, listPreview, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
 import { usePhotos } from '../photos/usePhotos';
 import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
@@ -37,9 +37,9 @@ const DELIVERY: Record<string, { mark: string; text: string }> = {
   failed: { mark: '⚠', text: 'no se pudo enviar' },
 };
 
-/** «QR · no oficial» y «GoHighLevel»: de dónde viene la conversación, cuando no es WhatsApp oficial. */
+/** «QR» y «GoHighLevel»: de dónde viene la conversación, cuando no es WhatsApp oficial (v10: en la bandeja no se escribe «no oficial»; el aviso de riesgo vive en Configuración › Conexiones). */
 function ChannelMark({ kind }: { kind: Conversation['channel']['kind'] }) {
-  if (kind === 'qr') return <span className="rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn">QR · no oficial</span>;
+  if (kind === 'qr') return <span className="rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn" title="WhatsApp por QR">QR</span>;
   if (kind === 'ghl') return <span className="rounded-full bg-info-soft px-1.5 py-px text-[11px] font-semibold text-info">GoHighLevel</span>;
   return null;
 }
@@ -72,12 +72,12 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
             </span>
             {unread ? <span aria-hidden="true" className="grid min-w-[19px] place-items-center rounded-full bg-ok px-1.5 text-[11px] font-bold text-white">{c.unread_count}</span> : null}
           </span>
-          <span className="mt-1 flex flex-wrap items-center gap-1">
+          <span className={mobile ? 'mt-1 flex h-5 min-w-0 flex-nowrap items-center gap-1 overflow-hidden [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap [&>*]:leading-[18px]' : 'mt-1 flex flex-wrap items-center gap-1'}>
             {mobile ? null : <Pill kind={status.kind}>{status.label}</Pill>}
             <SlaPill sla={c.sla} now={now} hideDone />
             <ChannelMark kind={c.channel.kind} />
             {mobile ? null : c.queue ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{c.queue.name}</span> : null}
-            {mobile ? null : c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{c.owner.name.split(' ')[0]}</span> : null}
+            {mobile ? null : c.owner ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted">{firstName(c.owner.name)}</span> : null}
             {c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view' ? <span className="rounded bg-info-soft px-1.5 py-0.5 text-[11px] font-semibold text-info" title="Te la compartieron: la ves como colaborador">Compartida</span> : null}
             {shown.map((t) => <TagBadge key={t.id} name={t.name} color={t.color} />)}
             {more > 0 ? <span className="rounded bg-surface2 px-1.5 py-0.5 text-[11px] font-semibold text-muted" title={c.tags.slice(2).map((t) => t.name).join(', ')}>+{more}</span> : null}
@@ -89,9 +89,30 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
 }
 
 /** Los filtros de la lista (los mismos en el panel de escritorio y en la hoja del móvil). */
-function FilterFields({ filters, set, opts, filtered, onClear }: { filters: InboxFilters; set: (patch: Partial<InboxFilters>) => void; opts: InboxOptions | undefined; filtered: number; onClear: () => void }) {
+/** Chip de acceso rápido del panel de filtros: activo en color de acento; `aria-pressed` para quien no ve el color. */
+function QuickChip({ on, onClick, disabled = false, hint, children }: { on: boolean; onClick?: () => void; disabled?: boolean; hint?: string; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={disabled ? undefined : on}
+      disabled={disabled}
+      title={hint}
+      onClick={onClick}
+      className={`inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-[12.5px] font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${on ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FilterFields({ filters, set, opts, filtered, onClear, unreadCount }: { filters: InboxFilters; set: (patch: Partial<InboxFilters>) => void; opts: InboxOptions | undefined; filtered: number; onClear: () => void; unreadCount: number }) {
   return (
     <>
+      <div role="group" aria-label="Accesos rápidos" className="flex flex-wrap items-center gap-2">
+        <QuickChip on={filters.unread} onClick={() => set({ unread: !filters.unread })}>No leídas{unreadCount > 0 ? ` · ${unreadCount}` : ''}</QuickChip>
+        <QuickChip on={filters.recent} onClick={() => set({ recent: !filters.recent })} hint="Las que tuvieron un mensaje en las últimas 24 horas">Recientes</QuickChip>
+        <QuickChip on={false} disabled hint="Aún no está disponible">Destacadas <span className="text-[11px] font-normal">· Próximamente</span></QuickChip>
+      </div>
       {opts && opts.owners.length > 0 ? (
         <label className="grid gap-1 text-[12px] font-semibold">Responsable
           <select aria-label="Responsable" value={filters.owner} onChange={(e) => set({ owner: e.target.value })} className={`${selectCls} font-normal`}>
@@ -157,12 +178,14 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
   const [search, setSearch] = useState(filters.q);
   const [panel, setPanel] = useState(false);
   const [sheet, setSheet] = useState(false);
-  const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
-  const photos = usePhotos(items.map((c) => c.contact.id), []);
+  const loaded = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
+  const photos = usePhotos(loaded.map((c) => c.contact.id), []);
   const counts = q.data?.pages[0]?.counts ?? null;
   const filtered = activeFilterCount(filters);
   // Las horas relativas («hace 5 min», «Vence en 2 min») se cuentan desde el último dato que llegó: así un listado recién consultado nunca muestra un cronómetro «de hace un minuto»
   const now = Math.max(useNow(60_000), q.dataUpdatedAt);
+  // «Recientes»: las de las últimas 24 h por su último mensaje (el servidor no tiene este filtro: se aplica a lo ya cargado)
+  const items = useMemo(() => (filters.recent ? loaded.filter((c) => c.last_message_at !== null && now - Date.parse(c.last_message_at) <= 24 * 3_600_000) : loaded), [loaded, filters.recent, now]);
   const set = (patch: Partial<InboxFilters>) => onFilters({ ...filters, ...patch });
   const clear = () => onFilters({ ...DEFAULT_INBOX_FILTERS, tab: filters.tab, q: filters.q });
 
@@ -217,11 +240,6 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
             </button>
           </div>
           {tabs}
-          <div className="-mt-px flex items-center gap-2 pb-2 pt-1">
-            <button type="button" aria-pressed={filters.unread} onClick={() => set({ unread: !filters.unread })} className={`min-h-11 rounded-full border px-4 text-[12px] font-semibold ${filters.unread ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>
-              No leídas{counts && counts.unread > 0 ? ` · ${counts.unread}` : ''}
-            </button>
-          </div>
         </div>
       ) : (
         <div className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line p-3 pb-0">
@@ -242,7 +260,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
           </div>
           {panel ? (
             <div id="inbox-filters" className="grid gap-2 rounded-xl border border-line bg-bg p-2.5">
-              <FilterFields filters={filters} set={set} opts={opts} filtered={filtered} onClear={clear} />
+              <FilterFields filters={filters} set={set} opts={opts} filtered={filtered} onClear={clear} unreadCount={counts?.unread ?? 0} />
             </div>
           ) : null}
           {tabs}
@@ -267,7 +285,7 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
               <h2 className="text-[15px] font-bold">Filtros</h2>
               <button type="button" aria-label="Cerrar los filtros" onClick={() => setSheet(false)} className="grid size-11 place-items-center rounded-full text-muted hover:bg-surface2"><Icon name="close" /></button>
             </div>
-            <FilterFields filters={filters} set={set} opts={opts} filtered={filtered} onClear={clear} />
+            <FilterFields filters={filters} set={set} opts={opts} filtered={filtered} onClear={clear} unreadCount={counts?.unread ?? 0} />
             <Button variant="primary" block onClick={() => setSheet(false)}>Ver conversaciones</Button>
           </div>
         </Drawer>

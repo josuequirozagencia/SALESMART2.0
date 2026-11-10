@@ -5,6 +5,7 @@ import type { Conversation, PersonOption, TransferResult } from '../../lib/types
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
+import { personName } from './inboxFormat';
 import { useRevoke, useShare, useTransfer, useTransferOptions } from './useInbox';
 
 type Mode = 'transfer' | 'share';
@@ -16,9 +17,9 @@ const KEEP_LABEL: Record<'none' | Permission, string> = { none: 'Dejar de partic
 function Person({ p, checked, disabled, hint, onPick, name }: { p: PersonOption; checked: boolean; disabled: boolean; hint: string | null; onPick: () => void; name: string }) {
   return (
     <label className={`flex items-center gap-2.5 rounded-xl border px-3 py-2 ${checked ? 'border-accent bg-accent-soft' : 'border-line'} ${disabled ? 'opacity-55' : 'cursor-pointer hover:bg-surface2'}`}>
-      <input type="radio" name={name} checked={checked} disabled={disabled} onChange={onPick} aria-label={p.name} />
+      <input type="radio" name={name} checked={checked} disabled={disabled} onChange={onPick} aria-label={personName(p.name)} />
       <span className="grid min-w-0 flex-1 gap-0.5">
-        <span className="truncate text-[13.5px] font-semibold">{p.name}{p.is_self ? ' (tú)' : ''}</span>
+        <span className="truncate text-[13.5px] font-semibold">{personName(p.name)}{p.is_self ? ' (tú)' : ''}</span>
         <span className="text-[12px] text-muted">{ROLE_LABEL[p.role] ?? p.role} · {p.open_count === 1 ? '1 conversación abierta' : `${p.open_count} conversaciones abiertas`}</span>
       </span>
       {p.in_queue === true ? <Pill kind="ok">En el departamento</Pill> : null}
@@ -110,7 +111,7 @@ export function TransferDialog({ c, onClose, onTransferred }: { c: Conversation;
           <h3 className="text-[12.5px] font-semibold">Ya tienen acceso</h3>
           {c.participants.map((p) => (
             <div key={p.user.id} className="flex items-center gap-2 text-[13px]">
-              <span className="min-w-0 flex-1 truncate">{p.user.name} · <span className="text-muted">{PERMISSION_LABEL[p.permission]}</span></span>
+              <span className="min-w-0 flex-1 truncate">{personName(p.user.name)} · <span className="text-muted">{PERMISSION_LABEL[p.permission]}</span></span>
               {c.can.share ? <Button variant="link" className="text-[12.5px]" aria-label={`Quitar el acceso de ${p.user.name}`} loading={revoke.isPending && revoke.variables === p.user.id} onClick={() => { setError(undefined); revoke.mutate(p.user.id, { onError: fail('No pudimos quitar el acceso.') }); }}>Quitar</Button> : null}
             </div>
           ))}
