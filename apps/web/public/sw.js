@@ -17,9 +17,11 @@ self.addEventListener('push', function (event) {
   }
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (wins) {
-      // Con la aplicación a la vista ya suena y se ve en la bandeja: no se repite como notificación del sistema
-      for (var i = 0; i < wins.length; i++) {
-        if (wins[i].visibilityState === 'visible' && wins[i].focused) return undefined;
+      // Con la aplicación a la vista ya suena y se ve en la bandeja: no se repite como notificación del sistema (salvo la de prueba, que lleva `force`)
+      if (data.force !== true) {
+        for (var i = 0; i < wins.length; i++) {
+          if (wins[i].visibilityState === 'visible' && wins[i].focused) return undefined;
+        }
       }
       return self.registration.showNotification(typeof data.title === 'string' && data.title ? data.title : 'Sales Smart', {
         body: typeof data.body === 'string' && data.body ? data.body : 'Mensaje nuevo',

@@ -160,6 +160,32 @@ describe('Configuración › Notificaciones', () => {
     expect(await screen.findByText('Desactivadas en este navegador.')).toBeInTheDocument();
   });
 
+  it('«Enviar notificación de prueba» llama al servidor y explica el resultado (enviada, navegador dado de baja, rechazada)', async () => {
+    push.sub = { endpoint: 'https://fcm.googleapis.com/fcm/send/x' };
+    let result = { sent: 1, gone: 0, failed: 0 };
+    let calls = 0;
+    mockApi({ ...cfg(true), 'POST /push/status': () => ({ body: { subscribed: true, show_text: false } }), 'POST /push/test': () => { calls += 1; return { body: result }; } });
+    renderApp('/settings/notifications');
+    const btn = await screen.findByRole('button', { name: 'Enviar notificación de prueba' });
+    expect(calls).toBe(0); // nada se manda al entrar
+    await userEvent.click(btn);
+    expect(await screen.findByText(/Enviada\. Debería aparecer como notificación del sistema/)).toBeInTheDocument();
+    result = { sent: 0, gone: 1, failed: 0 };
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar notificación de prueba' }));
+    expect(await screen.findByText(/ya no estaba suscrito/)).toBeInTheDocument();
+    result = { sent: 0, gone: 0, failed: 1 };
+    await userEvent.click(screen.getByRole('button', { name: 'Enviar notificación de prueba' }));
+    expect(await screen.findByText(/no aceptó el aviso/)).toBeInTheDocument();
+    expect(calls).toBe(3);
+  });
+
+  it('sin suscripción en este navegador no se ofrece la prueba', async () => {
+    mockApi({ ...cfg(true), 'POST /push/status': () => ({ body: { subscribed: false, show_text: false } }) });
+    renderApp('/settings/notifications');
+    await screen.findByRole('button', { name: 'Activar notificaciones' });
+    expect(screen.queryByRole('button', { name: 'Enviar notificación de prueba' })).toBeNull();
+  });
+
   it('si el navegador niega el permiso, el mensaje de error se muestra', async () => {
     push.enable.mockRejectedValue(new Error('El navegador bloqueó las notificaciones. Actívalas desde el candado de la barra de direcciones.'));
     mockApi({ ...cfg(true), 'POST /push/status': () => ({ body: { subscribed: false, show_text: false } }) });

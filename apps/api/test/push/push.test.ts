@@ -3,12 +3,13 @@
 //   POST /v1/push/status
 //   POST /v1/push/subscribe
 //   POST /v1/push/unsubscribe
+//   POST /v1/push/test
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Client } from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
@@ -155,7 +156,7 @@ const arrives = (conv: string, msg: string): void => app.get(RealtimeService, { 
 
 describe('acceso, permisos y aislamiento', () => {
   it('sin sesión 401 y la plataforma 403 en todas las rutas', async () => {
-    const routes: Array<[string, string, unknown?]> = [['GET', '/push/config'], ['POST', '/push/status', { endpoint: EP_A }], ['POST', '/push/subscribe', { endpoint: EP_A, keys }], ['POST', '/push/unsubscribe', { endpoint: EP_A }]];
+    const routes: Array<[string, string, unknown?]> = [['GET', '/push/config'], ['POST', '/push/status', { endpoint: EP_A }], ['POST', '/push/subscribe', { endpoint: EP_A, keys }], ['POST', '/push/unsubscribe', { endpoint: EP_A }], ['POST', '/push/test']];
     for (const [m, p, b] of routes) {
       expect((await call(m, p, undefined, b)).status, `${m} ${p}`).toBe(401);
       expect((await call(m, p, T.root, b)).status, `${m} ${p} plataforma`).toBe(403);
@@ -285,5 +286,42 @@ describe('aviso de un mensaje entrante', () => {
     arrives(conv, await mkInbound(conv));
     await new Promise((r) => setTimeout(r, 800));
     expect(sender().sent).toHaveLength(0);
+  });
+});
+
+describe('notificación de prueba', () => {
+  // El límite (una cada 10 s) vive en memoria del servicio: cada prueba corre «11 s más tarde» que la anterior para no heredarlo
+  let skew = 0;
+  beforeEach(() => {
+    skew += 11_000;
+    const real = Date.now.bind(Date);
+    vi.spyOn(Date, 'now').mockImplementation(() => real() + skew);
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it('manda el aviso (con «force») solo a los navegadores de quien la pide, en esta empresa; sin suscripción dice 0 enviados', async () => {
+    expect(await ok<{ sent: number; gone: number; failed: number }>(await call('POST', '/push/test', T.alice))).toEqual({ sent: 0, gone: 0, failed: 0 }); // sin suscripción: 0 enviados
+    await ok(await sub(T.carol, EP_C));
+    await ok(await sub(T.eve, EP_E)); // otra persona: no recibe la de Carolina
+    await ok(await sub(T.bob, EP_A)); // otra empresa: tampoco
+    expect(await ok<{ sent: number }>(await call('POST', '/push/test', T.carol))).toEqual({ sent: 1, gone: 0, failed: 0 });
+    expect(sender().sent.map((x) => x.endpoint)).toEqual([EP_C]);
+    expect(JSON.parse(sender().sent[0]!.payload)).toMatchObject({ title: 'Notificación de prueba', force: true, url: '/settings/notifications' });
+  });
+
+  it('una prueba cada 10 s por persona (429 con espera), y otra persona no se ve afectada', async () => {
+    await ok(await sub(T.carol, EP_C));
+    await ok(await call('POST', '/push/test', T.carol));
+    const r = await call('POST', '/push/test', T.carol);
+    expect(r.status).toBe(429);
+    expect(Number(r.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect((await call('POST', '/push/test', T.eve)).status).toBe(200);
+  });
+
+  it('un navegador que ya no existe (410) se da de baja y se cuenta', async () => {
+    await ok(await sub(T.carol, EP_C));
+    sender().results.set(EP_C, 'gone');
+    expect(await ok<{ gone: number }>(await call('POST', '/push/test', T.carol))).toMatchObject({ sent: 0, gone: 1 });
+    expect(await status(T.carol, EP_C)).toEqual({ subscribed: false, show_text: false });
   });
 });

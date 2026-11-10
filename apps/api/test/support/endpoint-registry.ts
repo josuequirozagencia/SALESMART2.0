@@ -346,6 +346,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/push/status', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
   { route: 'POST /v1/push/subscribe', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
   { route: 'POST /v1/push/unsubscribe', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
+  { route: 'POST /v1/push/test', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
   // Fotos de perfil (v5). Pruebas: test/photos/photos.test.ts (A↔B, visibilidad por persona, validación del contenido, tarea de contactos por QR)
   { route: 'GET /v1/photos', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
   { route: 'GET /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },

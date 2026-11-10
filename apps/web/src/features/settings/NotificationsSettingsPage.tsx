@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
-import { currentSubscription, disablePush, enablePush, fetchPushConfig, fetchPushStatus, notificationPermission, pushSupport, updateShowText } from '../../lib/push';
+import { currentSubscription, disablePush, enablePush, fetchPushConfig, fetchPushStatus, notificationPermission, pushSupport, sendPushTest, updateShowText } from '../../lib/push';
 import { useCelebratePref } from '../../lib/celebrate';
 import { playIncomingSound, soundReady, useSoundPref } from '../../lib/notifySound';
 import { Alert, Button } from '../../ui/controls';
@@ -23,6 +23,7 @@ function PushCard() {
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [testNote, setTestNote] = useState<string>();
   const run = async (fn: () => Promise<unknown>, fallback: string): Promise<void> => {
     setBusy(true);
     setError(undefined);
@@ -62,11 +63,32 @@ function PushCard() {
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             {subscribed ? (
-              <Button loading={busy} onClick={() => void run(disablePush, 'No pudimos desactivar las notificaciones.')}>Desactivar en este navegador</Button>
+              <>
+                <Button
+                  loading={busy}
+                  onClick={() => {
+                    setTestNote(undefined);
+                    void run(async () => {
+                      const r = await sendPushTest();
+                      setTestNote(
+                        r.sent > 0
+                          ? 'Enviada. Debería aparecer como notificación del sistema; si no la ves, revisa que tu sistema permita las notificaciones de este navegador.'
+                          : r.gone > 0
+                            ? 'El navegador ya no estaba suscrito: vuelve a activar las notificaciones.'
+                            : 'El servicio de notificaciones no aceptó el aviso. Inténtalo de nuevo en unos minutos.',
+                      );
+                    }, 'No pudimos enviar la notificación de prueba.');
+                  }}
+                >
+                  Enviar notificación de prueba
+                </Button>
+                <Button loading={busy} onClick={() => void run(disablePush, 'No pudimos desactivar las notificaciones.')}>Desactivar en este navegador</Button>
+              </>
             ) : (
               <Button variant="primary" loading={busy} disabled={permission === 'denied'} onClick={() => void run(() => enablePush(cfg.data?.public_key ?? '', false), 'No pudimos activar las notificaciones.')}>Activar notificaciones</Button>
             )}
           </div>
+          {testNote ? <p role="status" className="text-[12.5px] text-muted">{testNote}</p> : null}
           {error ? <Alert>{error}</Alert> : null}
         </>
       ) : null}
