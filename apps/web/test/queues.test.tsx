@@ -95,7 +95,7 @@ describe('Departamentos', () => {
   });
 
   it('cada cola es una tarjeta: reparto activo o manual, asesores, modo, conexiones y los «sin asignar»', async () => {
-    const q1 = queue({ distribution_on: true, mode: 'weighted', members: [member('u1', 'Alicia Torres', { active: true }), member('u2', 'Carolina Vera', { active: true }), member('u3', 'Eva Mora')], channels: [{ id: 'c1', name: 'Ventas WhatsApp' }], unassigned_count: 3 });
+    const q1 = queue({ distribution_on: true, mode: 'weighted', members: [member('u1', 'Alicia Torres', { active: true }), member('u2', 'Carolina Vera', { active: true }), member('u3', 'Eva Mora')], channels: [{ id: 'c1', name: 'Ventas WhatsApp', kind: 'channel' as const }], unassigned_count: 3 });
     const q2 = queue({ id: 'q2', name: 'Soporte' });
     mockApi(server([q1, q2]).routes);
     renderApp('/departments');
@@ -550,7 +550,7 @@ describe('Archivar y permisos', () => {
   });
 
   it('si una conexión la usa, el motivo se explica y el departamento sigue ahí', async () => {
-    const s = server([queue({ channels: [{ id: 'c1', name: 'Ventas WhatsApp' }] })], { del: () => err(409, 'QUEUE_IN_USE', 'Hay conexiones que usan este departamento. Cámbialas de cola en «Conexiones» antes de archivarla') });
+    const s = server([queue({ channels: [{ id: 'c1', name: 'Ventas WhatsApp', kind: 'channel' as const }] })], { del: () => err(409, 'QUEUE_IN_USE', 'Hay conexiones que usan este departamento. Cámbialas de cola en «Conexiones» antes de archivarla') });
     mockApi(s.routes);
     renderApp('/departments');
     const d = await open('Ventas');
@@ -566,5 +566,129 @@ describe('Archivar y permisos', () => {
     renderApp('/departments');
     expect(await screen.findByRole('alert')).toHaveTextContent('Solo el administrador de la empresa puede ver y cambiar los departamentos.');
     expect(screen.queryByRole('button', { name: 'Nuevo departamento' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Departamentos · «Conexiones que usan este departamento» (v7 fase B, ADR-65)', () => {
+  const official = (id: string, name: string, queue_id: string | null) => ({ id, provider: 'meta_cloud', is_official: true, name, status: 'active', queue_id, waba_id: '1', phone_number_id: '2', display_phone: null, verified_name: null, token_last4: '1234', last_error: null, created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z' });
+  const qrConn = (id: string, name: string, queue_id: string | null) => ({ id, provider: 'evolution', is_official: false, name, state: 'open', phone: null, profile_name: null, queue_id, connected_at: null, last_event_at: null, down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, created_at: '2026-10-18T15:00:00.000Z' });
+
+  /** Dos departamentos (Ventas q1 usa «Ventas WhatsApp»; Soporte q2 usa el chip QR «Chip soporte») y una conexión libre. */
+  function setup(opts: { denied?: boolean; put?: (b: unknown) => ReturnType<Handler> } = {}) {
+    const puts: unknown[] = [];
+    const q1 = queue({ id: 'q1', name: 'Ventas', channels: [{ id: 'c1', name: 'Ventas WhatsApp', kind: 'channel' }] });
+    const q2 = queue({ id: 'q2', name: 'Soporte', channels: [{ id: 'k1', name: 'Chip soporte', kind: 'qr' }] });
+    const s = server([q1, q2]);
+    const deny = (): ReturnType<Handler> => err(403, 'FORBIDDEN', 'No tienes permiso');
+    mockApi({
+      ...s.routes,
+      'GET /channels': opts.denied ? deny : () => ({ body: { items: [official('c1', 'Ventas WhatsApp', 'q1'), official('c2', 'Número libre', null)], vault: { available: true } } }),
+      'GET /qr-channels': opts.denied ? deny : () => ({ body: { items: [qrConn('k1', 'Chip soporte', 'q2')], available: true, limits: { max_channels: 5 } } }),
+      'PUT /queues/q1/connections': (c) => {
+        puts.push(c.body);
+        if (opts.put) return opts.put(c.body);
+        const b = c.body as { connections: Array<{ kind: 'channel' | 'qr'; id: string }> };
+        const names: Record<string, string> = { c1: 'Ventas WhatsApp', c2: 'Número libre', k1: 'Chip soporte' };
+        s.st.items = s.st.items.map((q) => (q.id === 'q1' ? { ...q, channels: b.connections.map((x) => ({ id: x.id, name: names[x.id]!, kind: x.kind })) } : q));
+        return { body: s.st.items.find((q) => q.id === 'q1') };
+      },
+    });
+    return { puts };
+  }
+  const section = (d: ReturnType<typeof within>) => within(d.getByRole('region', { name: 'Conexiones del departamento' }));
+
+  it('lista las conexiones oficiales y QR con su departamento actual; usar una que está en otro departamento avisa que se mueve', async () => {
+    setup();
+    renderApp('/departments');
+    const d = await open('Ventas');
+    const c = section(d);
+    expect(await c.findByText('Ventas WhatsApp')).toBeInTheDocument();
+    expect(c.getByText('Número libre')).toBeInTheDocument();
+    expect(c.getByText(/Chip soporte/)).toBeInTheDocument();
+    expect(c.getByText(/WhatsApp por QR · no oficial/)).toBeInTheDocument();
+    expect(c.getByText('Está en este departamento')).toBeInTheDocument();
+    expect(c.getByText('Está en Soporte')).toBeInTheDocument();
+    expect(c.getByText('Sin departamento')).toBeInTheDocument();
+    expect(c.getByRole('button', { name: 'Guardar conexiones' })).toBeDisabled(); // sin cambios
+    await userEvent.click(c.getByRole('switch', { name: 'Usar «Chip soporte» en este departamento' }));
+    expect(c.getByText('Está en Soporte · al usarla aquí se mueve')).toBeInTheDocument();
+    expect(c.getByText(/Las conversaciones nuevas de Chip soporte irán a este departamento\. Las conversaciones que ya existen siguen en el departamento que tenían\./)).toBeInTheDocument();
+  });
+
+  it('agregar conexiones (sin quitar ninguna) guarda el conjunto completo sin pedir destino', async () => {
+    const { puts } = setup();
+    renderApp('/departments');
+    const c = section(await open('Ventas'));
+    await userEvent.click(await c.findByRole('switch', { name: 'Usar «Número libre» en este departamento' }));
+    await userEvent.click(c.getByRole('switch', { name: 'Usar «Chip soporte» en este departamento' }));
+    await userEvent.click(c.getByRole('button', { name: 'Guardar conexiones' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({ connections: [{ kind: 'channel', id: 'c1' }, { kind: 'channel', id: 'c2' }, { kind: 'qr', id: 'k1' }], move_removed_to: null, allow_unassigned: false });
+    expect(await c.findByText('Conexiones guardadas.')).toBeInTheDocument();
+  });
+
+  it('quitar una conexión pide el departamento destino (obligatorio), explica lo que pasa y manda el destino elegido', async () => {
+    const { puts } = setup();
+    renderApp('/departments');
+    const c = section(await open('Ventas'));
+    await userEvent.click(await c.findByRole('switch', { name: 'Usar «Ventas WhatsApp» en este departamento' }));
+    await userEvent.click(c.getByRole('button', { name: 'Guardar conexiones' }));
+    expect(puts).toHaveLength(0); // todavía no: falta el destino
+    const ask = within(c.getByRole('group', { name: 'Destino de las conexiones que quitas' }));
+    expect(ask.getByText('¿A qué departamento pasan «Ventas WhatsApp»?')).toBeInTheDocument();
+    expect(ask.getByRole('button', { name: 'Confirmar y guardar' })).toBeDisabled();
+    await userEvent.selectOptions(ask.getByRole('combobox', { name: 'Departamento de destino' }), 'q2');
+    expect(ask.getByText(/Las conversaciones nuevas de Ventas WhatsApp irán a Soporte\. Las conversaciones que ya existen siguen en el departamento que tenían\./)).toBeInTheDocument();
+    await userEvent.click(ask.getByRole('button', { name: 'Confirmar y guardar' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({ connections: [], move_removed_to: 'q2', allow_unassigned: false });
+    expect(await c.findByText('Ninguna todavía. Activa una conexión arriba.')).toBeInTheDocument();
+  });
+
+  it('dejarlas sin departamento es una opción explícita que manda allow_unassigned y avisa que no se repartirán solas', async () => {
+    const { puts } = setup();
+    renderApp('/departments');
+    const c = section(await open('Ventas'));
+    await userEvent.click(await c.findByRole('switch', { name: 'Usar «Ventas WhatsApp» en este departamento' }));
+    await userEvent.click(c.getByRole('button', { name: 'Guardar conexiones' }));
+    const ask = within(c.getByRole('group', { name: 'Destino de las conexiones que quitas' }));
+    await userEvent.selectOptions(ask.getByRole('combobox', { name: 'Departamento de destino' }), '__none');
+    expect(ask.getByText(/quedarán sin asignar y no se repartirán solas/)).toBeInTheDocument();
+    await userEvent.click(ask.getByRole('button', { name: 'Confirmar y guardar' }));
+    await waitFor(() => expect(puts).toHaveLength(1));
+    expect(puts[0]).toEqual({ connections: [], move_removed_to: null, allow_unassigned: true });
+  });
+
+  it('cancelar el destino no guarda nada; descartar cambios vuelve al estado del servidor', async () => {
+    const { puts } = setup();
+    renderApp('/departments');
+    const c = section(await open('Ventas'));
+    const sw = await c.findByRole('switch', { name: 'Usar «Ventas WhatsApp» en este departamento' });
+    await userEvent.click(sw);
+    await userEvent.click(c.getByRole('button', { name: 'Guardar conexiones' }));
+    await userEvent.click(c.getByRole('button', { name: 'Cancelar' }));
+    expect(c.queryByRole('group', { name: 'Destino de las conexiones que quitas' })).toBeNull();
+    await userEvent.click(c.getByRole('button', { name: 'Descartar cambios' }));
+    expect(sw).toBeChecked();
+    expect(puts).toHaveLength(0);
+  });
+
+  it('un error del servidor se muestra en español y las conexiones elegidas no se pierden', async () => {
+    setup({ put: () => err(400, 'DESTINATION_REQUIRED', 'Elige a qué departamento pasan las conexiones que quitas') });
+    renderApp('/departments');
+    const c = section(await open('Ventas'));
+    await userEvent.click(await c.findByRole('switch', { name: 'Usar «Número libre» en este departamento' }));
+    await userEvent.click(c.getByRole('button', { name: 'Guardar conexiones' }));
+    expect(await c.findByRole('alert')).toHaveTextContent(/Elige a qué departamento pasan/);
+    expect(c.getByRole('switch', { name: 'Usar «Número libre» en este departamento' })).toBeChecked();
+  });
+
+  it('sin permiso para ver las conexiones se muestra, de solo lectura, lo que ya usa el departamento', async () => {
+    setup({ denied: true });
+    renderApp('/departments');
+    const c = section(await open('Ventas'));
+    expect(await c.findByText('Ventas WhatsApp')).toBeInTheDocument();
+    expect(c.queryByRole('switch')).toBeNull();
+    expect(c.queryByRole('button', { name: 'Guardar conexiones' })).toBeNull();
   });
 });

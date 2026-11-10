@@ -720,8 +720,8 @@ export interface Queue {
   open_now: boolean;
   /** Todas las personas que pueden recibir trabajo, con su estado en ESTA cola. */
   members: QueueMember[];
-  /** Conexiones cuya cola por defecto es esta. */
-  channels: Array<{ id: string; name: string }>;
+  /** Conexiones (oficiales y por QR) cuyo departamento es este; se eligen en «Conexiones que usan este departamento». */
+  channels: Array<{ id: string; name: string; kind: 'channel' | 'qr' }>;
   unassigned_count: number;
   created_at: string;
   updated_at: string;

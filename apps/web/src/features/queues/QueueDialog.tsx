@@ -9,6 +9,7 @@ import { cloneWeek, defaultWeek, sameWeek, summarizeWeek, validateWeek } from '.
 import { HoursEditor } from '../sla/HoursEditor';
 import { useSaveQueueHours } from '../sla/useSla';
 import { ColorPicker } from './ColorPicker';
+import { ConnectionsSection } from './ConnectionsSection';
 import { ProductsSection } from './ProductsSection';
 import { useArchiveQueue, useDistributeQueue, useSetQueueMembers, useSimulateQueue, useUpdateQueue } from './useQueues';
 
@@ -291,10 +292,7 @@ export function QueueDialog({ queue, onClose }: { queue: Queue; onClose: () => v
           </div>
         </section>
 
-        <section className="grid gap-1" aria-label="Conexiones del departamento">
-          <span className="text-[12.5px] font-semibold">Conexiones que usan este departamento</span>
-          {queue.channels.length === 0 ? <p className="text-[12.5px] text-muted">Ninguna todavía. Se elige en Configuración › Conexiones.</p> : <p className="text-[13px]">{queue.channels.map((c) => c.name).join(', ')}</p>}
-        </section>
+        <ConnectionsSection queue={queue} />
       </div>
 
       {error ? <Alert>{error}</Alert> : null}
