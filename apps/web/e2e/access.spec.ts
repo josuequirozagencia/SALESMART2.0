@@ -1813,7 +1813,7 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     await page.getByRole('button', { name: 'Configurar Ventas' }).click();
     const cfg = page.getByRole('dialog', { name: 'Configurar Ventas' });
     await cfg.getByLabel('Reasignar si nadie responde en (minutos)').fill('1');
-    await cfg.getByRole('button', { name: 'Guardar' }).click();
+    await cfg.getByRole('button', { name: 'Guardar', exact: true }).click();
     await expect(cfg.getByText('Cambios guardados.')).toBeVisible();
     expect((await db.query(`SELECT reassign_minutes, max_rotations, respect_hours FROM queues WHERE id = $1`, [queue.id])).rows).toEqual([{ reassign_minutes: 1, max_rotations: 3, respect_hours: false }]);
 
@@ -1901,7 +1901,7 @@ test('mensajes automáticos de la cola: el administrador escribe el saludo, el a
     await auto.getByLabel('Saludo').fill(GREETING);
     await auto.getByLabel('Mensaje fuera de horario').fill(OOH);
     await auto.getByLabel('Finalizar por inactividad (horas)').fill('24');
-    await cfg.getByRole('button', { name: 'Guardar' }).click();
+    await cfg.getByRole('button', { name: 'Guardar', exact: true }).click();
     await expect(cfg.getByText('Cambios guardados.')).toBeVisible();
     expect((await db.query(`SELECT greeting_text, out_of_hours_text, auto_close_hours FROM queues WHERE id = $1`, [queue.id])).rows).toEqual([{ greeting_text: GREETING, out_of_hours_text: OOH, auto_close_hours: 24 }]);
 
