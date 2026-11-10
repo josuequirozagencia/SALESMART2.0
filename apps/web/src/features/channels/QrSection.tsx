@@ -131,9 +131,15 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
-function QrCard({ c, queueName, onPair, onError }: { c: QrChannel; queueName: string | null; onPair: () => void; onError: (m: string | undefined) => void }) {
+/** Lo que de verdad hace el cambio de departamento de una conexión (v7, ADR-65): afecta a las conversaciones NUEVAS; las que ya existen siguen en el departamento que tenían. */
+export const MOVE_NOTICE = 'Las conversaciones nuevas de este número irán al departamento elegido. Las conversaciones que ya existen siguen en el departamento que tenían.';
+
+function QrCard({ c, queueName, queues, onPair, onError }: { c: QrChannel; queueName: string | null; queues: ReadonlyArray<{ id: string; name: string }>; onPair: () => void; onError: (m: string | undefined) => void }) {
   const m = useQrMutations();
   const [confirm, setConfirm] = useState<'disconnect' | 'remove' | null>(null);
+  // «Cambiar departamento»: selector y Guardar (usa el PATCH de siempre; funciona también con la sesión caída)
+  const [moving, setMoving] = useState(false);
+  const [target, setTarget] = useState(c.queue_id ?? '');
   const pill = QR_STATE[c.state];
   const down = c.state === 'logged_out' || c.state === 'closed';
   const fail = (fallback: string) => (e: unknown) => { setConfirm(null); onError(friendlyError(e, fallback)); };
@@ -152,6 +158,22 @@ function QrCard({ c, queueName, onPair, onError }: { c: QrChannel; queueName: st
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Calentamiento</dt><dd>Día {c.warmup.day}: hasta {c.warmup.daily_limit} mensajes al día</dd></div>
       </dl>
+      {moving ? (
+        <div className="grid gap-2 rounded-xl border border-line bg-surface2 p-3">
+          <label className="grid gap-1 text-[13px] font-semibold">
+            Departamento de «{c.name}»
+            <select className={selectCls} value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">Sin departamento</option>
+              {queues.map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
+            </select>
+          </label>
+          <p className="text-[12.5px] text-muted">{target === '' ? 'Sin departamento, las conversaciones nuevas quedarán sin asignar y no se repartirán solas. Las que ya existen siguen en el departamento que tenían.' : MOVE_NOTICE}</p>
+          <div className="flex flex-wrap gap-2">
+            <Button variant="primary" className={SMALL} loading={m.update.isPending} disabled={target === (c.queue_id ?? '')} onClick={() => { onError(undefined); m.update.mutate({ id: c.id, patch: { queue_id: target === '' ? null : target } }, { onSuccess: () => setMoving(false), onError: fail('No pudimos cambiar el departamento.') }); }}>Guardar</Button>
+            <Button className={SMALL} onClick={() => { setMoving(false); setTarget(c.queue_id ?? ''); }}>Cancelar</Button>
+          </div>
+        </div>
+      ) : null}
       {confirm ? (
         <div className="flex flex-wrap items-center gap-2 text-[13px]">
           <span>{confirm === 'remove' ? `¿Borrar «${c.name}»? Se cierra la sesión y se borra la instancia; las conversaciones se conservan.` : `¿Cerrar la sesión de «${c.name}»? El teléfono queda desvinculado.`}</span>
@@ -161,6 +183,7 @@ function QrCard({ c, queueName, onPair, onError }: { c: QrChannel; queueName: st
       ) : (
         <div className="flex flex-wrap gap-2">
           <Button className={SMALL} variant={down || c.state === 'created' ? 'primary' : 'secondary'} aria-label={`${c.state === 'open' ? 'Ver' : 'Vincular'} ${c.name}`} onClick={onPair}>{c.state === 'open' ? 'Ver estado' : 'Vincular con QR'}</Button>
+          <Button className={SMALL} aria-label={`Cambiar departamento de ${c.name}`} onClick={() => { setTarget(c.queue_id ?? ''); setMoving(true); }}>Cambiar departamento</Button>
           {c.state === 'open' ? <Button className={SMALL} aria-label={`Cerrar sesión de ${c.name}`} onClick={() => setConfirm('disconnect')}>Cerrar sesión</Button> : null}
           <Button className={SMALL} aria-label={`Borrar ${c.name}`} onClick={() => setConfirm('remove')}>Borrar</Button>
         </div>
@@ -192,7 +215,7 @@ export function QrSection() {
       {q.isSuccess && !q.data.available ? <Alert kind="info">WhatsApp por QR no está disponible: el administrador de la plataforma debe configurar Evolution en Proveedores.</Alert> : null}
       {error ? <Alert>{error}</Alert> : null}
       {q.isSuccess && q.data.available && items.length === 0 ? <p className="text-[13px] text-muted">Aún no hay conexiones por QR.</p> : null}
-      {items.length > 0 ? <ul aria-label="Conexiones por QR" className="grid gap-3">{items.map((c) => <QrCard key={c.id} c={c} queueName={queueName(c.queue_id)} onPair={() => setPairing(c)} onError={setError} />)}</ul> : null}
+      {items.length > 0 ? <ul aria-label="Conexiones por QR" className="grid gap-3">{items.map((c) => <QrCard key={c.id} c={c} queueName={queueName(c.queue_id)} queues={queues.data?.items ?? []} onPair={() => setPairing(c)} onError={setError} />)}</ul> : null}
       {creating ? <CreateDialog onClose={() => setCreating(false)} onCreated={(c) => { setCreating(false); setPairing(c); }} /> : null}
       {pairing ? <PairDialog channel={pairing} onClose={() => setPairing(null)} /> : null}
     </section>
