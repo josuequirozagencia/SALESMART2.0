@@ -31,7 +31,7 @@ export function asksForPerson(text: string): boolean {
 export const HANDOFF_MESSAGE = 'Claro, te comunico con una persona del equipo. En breve te atenderán.';
 
 /** Texto de la nota interna que ve el equipo cuando el agente deja la conversación. */
-export function handoffNote(agent: string, reason: HandoffReason | 'human_message' | 'human_took' | 'manual' | 'no_credits'): string {
+export function handoffNote(agent: string, reason: HandoffReason | 'human_message' | 'human_took' | 'manual' | 'no_credits', viaDevice = false): string {
   switch (reason) {
     case 'requested': return `El agente ${agent} pasó la conversación a una persona: el cliente pidió hablar con alguien del equipo.`;
     case 'turn_limit': return `El agente ${agent} pasó la conversación a una persona: llegó al máximo de respuestas seguidas.`;
@@ -41,7 +41,7 @@ export function handoffNote(agent: string, reason: HandoffReason | 'human_messag
     case 'agent_decision': return `El agente ${agent} pasó la conversación a una persona: lo decidió con su herramienta de transferencia.`;
     case 'empty_reply': return `El agente ${agent} pasó la conversación a una persona: el modelo no generó respuesta dos veces seguidas.`;
     case 'no_credits': return `El agente ${agent} dejó de atender esta conversación: la empresa se quedó sin créditos de IA.`;
-    case 'human_message': return `El agente ${agent} dejó de atender: una persona escribió en la conversación.`;
+    case 'human_message': return viaDevice ? `El agente ${agent} dejó de atender: alguien del equipo escribió desde el teléfono de la línea (no sabemos quién).` : `El agente ${agent} dejó de atender: una persona escribió en la conversación.`;
     case 'human_took': return `El agente ${agent} dejó de atender: una persona tomó la conversación.`;
     case 'manual': return `El agente ${agent} fue pausado por una persona.`;
   }

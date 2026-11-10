@@ -49,6 +49,11 @@ export interface NormalizedMessage {
   readonly sentAt: Date;
   /** Si el mensaje llegó por un clic a un anuncio (M6.6). */
   readonly referral?: NormalizedReferral | null;
+  /**
+   * Quién lo escribió. Ausente o `contact`: el cliente (entra). `device` (v9, WhatsApp por QR): lo escribió la persona dueña de la línea desde su TELÉFONO; en ese caso `from` sigue siendo el CLIENTE
+   * (el destinatario) y el mensaje se guarda como de salida, sin autor de la plataforma.
+   */
+  readonly origin?: 'contact' | 'device';
 }
 
 /** Estado de un mensaje que SALIÓ, según el proveedor. */

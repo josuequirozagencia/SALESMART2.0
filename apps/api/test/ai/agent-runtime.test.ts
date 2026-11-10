@@ -296,6 +296,22 @@ describe('cuando una persona interviene', () => {
     expect(audit.length).toBeGreaterThan(0);
   });
 
+  it('un mensaje escrito desde el teléfono de la línea (sin autor) pausa al agente, la nota lo dice y el siguiente mensaje del cliente no lo reactiva', async () => {
+    await liveAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'Hola');
+    await tick();
+    expect(await aiMessages(c.id)).toHaveLength(1);
+    await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, external_id, direction, sender_type, kind, body, status, sent_at, attempts, meta) VALUES (gen_random_uuid(), $1, $2, $3, 'wamid.PHONE1', 'out', 'human', 'text', 'Te escribo desde el celular', 'sent', now(), 0, '{"origin":"device"}'::jsonb)`, [ORG_A, c.id, channelA]);
+    await inbound(c.id, 'Gracias');
+    expect(await tick(new Date(Date.now() + 5000))).toBe(0);
+    expect(await state(c.id)).toMatchObject({ status: 'paused', reason: 'human_message' });
+    expect((await notes(c.id)).join('|')).toMatch(/desde el teléfono de la línea/);
+    await inbound(c.id, '¿Sigues ahí?', { at: new Date(Date.now() + 10_000) });
+    expect(await tick(new Date(Date.now() + 15_000))).toBe(0);
+    expect(await aiMessages(c.id)).toHaveLength(1);
+  });
+
   it('aceptar/tomar la conversación (deja de estar sin asignar o pendiente) también pausa al agente', async () => {
     await liveAgent();
     const c = await mkConv();

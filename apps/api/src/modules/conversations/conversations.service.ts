@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit, type AuditSource } from '../audit';
 import { DomainEventBus } from '../events';
@@ -109,21 +109,7 @@ export class ConversationsService {
     await this.events?.emit(tx, { type: 'message_received', contactId: contact.id, key: `message_received:${inserted[0]!.id}`, channelId: channelAccountId, conversationId: conv.id, kind: m.kind });
 
     // Adjunto entrante (M5.6d): el mensaje queda, y aparte el archivo en `message_attachments` para que la tarea `attachments` lo descargue y lo revise (no bloquea la ingesta)
-    if (m.media && FILE_KINDS.has(m.kind)) {
-      await tx.insert(messageAttachments).values({
-        conversationId: conv.id,
-        messageId: inserted[0]!.id,
-        direction: 'in',
-        kind: m.kind,
-        // Lo que manda el cliente se acota ANTES de guardarlo: una restricción de la base que falle aquí tumbaría la ingesta de todo el mensaje
-        mimeType: clean((m.media.mimeType ?? '').split(';')[0], 127)?.toLowerCase() ?? 'application/octet-stream',
-        filename: clean(m.media.filename, 200),
-        sourceMediaId: clean(m.media.id, 200),
-        state: 'pending',
-        scanStatus: 'pending',
-        nextAttemptAt: new Date(),
-      });
-    }
+    await this.queueMediaDownload(tx, conv.id, inserted[0]!.id, m);
 
     const at = m.sentAt.toISOString();
     await tx
@@ -145,6 +131,74 @@ export class ConversationsService {
     // Saludo o aviso de fuera de horario de la cola (M5.5c): salen al cliente como mensaje automático, que no es una respuesta humana
     await this.autoMessages.afterInbound(tx, { conversationId: conv.id, channelAccountId, queueId: a.queueId, created: conv.created, receivedAt: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, inboundAt: m.sentAt, now: assign.now, timeZone: assign.timeZone });
     return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
+  }
+
+  /** El archivo de un mensaje que entra, aparte en `message_attachments`: la tarea `attachments` lo descarga y lo revisa. */
+  private async queueMediaDownload(tx: TenantTx, conversationId: string, messageId: string, m: NormalizedMessage): Promise<void> {
+    if (!m.media || !FILE_KINDS.has(m.kind)) return;
+    await tx.insert(messageAttachments).values({
+      conversationId,
+      messageId,
+      direction: 'in',
+      kind: m.kind,
+      // Lo que manda el cliente se acota ANTES de guardarlo: una restricción de la base que falle aquí tumbaría la ingesta de todo el mensaje
+      mimeType: clean((m.media.mimeType ?? '').split(';')[0], 127)?.toLowerCase() ?? 'application/octet-stream',
+      filename: clean(m.media.filename, 200),
+      sourceMediaId: clean(m.media.id, 200),
+      state: 'pending',
+      scanStatus: 'pending',
+      nextAttemptAt: new Date(),
+    });
+  }
+
+  /**
+   * Registra un mensaje que la persona escribió desde su TELÉFONO con la línea de WhatsApp por QR vinculada (v9, ADR-54). Es de SALIDA: lo escribió una persona del equipo (no se sabe cuál), así que se guarda
+   * `human` sin autor y con `meta.origin = 'device'`, y se trata como una respuesta humana (detiene el cronómetro de SLA; el agente de IA se pausa solo, ver `pauseForHumans`). NO es un mensaje del cliente: no
+   * suma no leídos, no toca `last_inbound_at` (no abre ninguna ventana), no reparte, no etiqueta Lead, no arranca el cronómetro de seguimiento ni dispara el saludo; tampoco cambia el dueño, el departamento ni el estado.
+   * Idempotente por `(canal, externalId)`: el eco de lo que envió la plataforma ya existe y no se duplica. `m.from` es el CLIENTE (el destinatario).
+   *
+   * Carrera con el eco: el `external_id` de un envío nuestro se guarda DESPUÉS de que Evolution responde, así que el aviso del teléfono puede llegar antes. Mientras haya un envío nuestro en vuelo en la conexión y
+   * `mayWait`, devuelve `wait` (quien llama reintenta sin gastar intentos, como con los estados que llegan antes que su mensaje); pasada la ventana (`mayWait` falso) se registra igual.
+   */
+  async ingestDeviceMessage(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, ctx: { now: Date; timeZone: string; mayWait: boolean }): Promise<'created' | 'duplicate' | 'wait'> {
+    const [seen] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId))).limit(1);
+    if (seen) return 'duplicate';
+    if (ctx.mayWait) {
+      const [inFlight] = await tx
+        .select({ id: messages.id })
+        .from(messages)
+        .where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.direction, 'out'), eq(messages.status, 'queued'), isNull(messages.externalId), gt(messages.attempts, 0), ne(messages.kind, 'note')))
+        .limit(1);
+      if (inFlight) return 'wait';
+    }
+    const contact = await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', null);
+    const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw, 'meta');
+    const inserted = await tx
+      .insert(messages)
+      .values({
+        conversationId: conv.id,
+        channelAccountId,
+        externalId: m.externalId,
+        direction: 'out',
+        senderType: 'human',
+        kind: m.kind,
+        body: m.text,
+        media: m.media ? { id: m.media.id, mime_type: m.media.mimeType, filename: m.media.filename } : null,
+        meta: { wa_id: m.fromRaw, ...m.extra, origin: 'device' },
+        status: 'sent',
+        sentAt: m.sentAt,
+      })
+      .onConflictDoNothing({ target: [messages.organizationId, messages.channelAccountId, messages.externalId], where: sql`external_id IS NOT NULL` })
+      .returning({ id: messages.id });
+    if (inserted.length === 0) return 'duplicate';
+    const messageId = inserted[0]!.id;
+    await this.queueMediaDownload(tx, conv.id, messageId, m);
+    const at = m.sentAt.toISOString();
+    await tx.update(conversations).set({ lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${at}::timestamptz), ${at}::timestamptz)`, updatedAt: new Date() }).where(eq(conversations.id, conv.id));
+    // Una respuesta humana: el cronómetro de la conversación se detiene (si no hay uno abierto, no hace nada)
+    await this.sla.stopOnReply(tx, conv.id, messageId, { now: ctx.now, timeZone: ctx.timeZone });
+    this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: messageId, kind: 'created' } });
+    return 'created';
   }
 
   /**

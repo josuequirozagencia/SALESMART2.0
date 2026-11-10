@@ -97,6 +97,8 @@ const open = async (id: string): Promise<void> => {
   fake().setState(inst, 'open'); // en WhatsApp la sesión quedó abierta: Evolution responde «open» cuando se le pregunta
   expect((await post(id, evt(inst, 'connection.update', { instance: 'x', wuid: '593990000001@s.whatsapp.net', profileName: 'Negocio', state: 'open', statusReason: 200 }))).status).toBe(200);
 };
+/** Procesa los avisos como si hubieran pasado `ms` milisegundos (los reintentos de espera y la ventana del eco dependen de la hora). */
+const runEventsAt = (ms: number, org = ORG_A) => inOrg(org, async () => app.get(WebhookEventsService).runDue(new Date(Date.now() + ms), await app.get(OrgDirectoryService).current()));
 const runEvents = (org = ORG_A) => inOrg(org, async () => app.get(WebhookEventsService).runDue(new Date(Date.now() + 1000), await app.get(OrgDirectoryService).current()));
 const qrRow = async (id: string) => (await admin.query(`SELECT * FROM qr_accounts WHERE channel_account_id = $1`, [id])).rows[0] as Record<string, unknown>;
 const convOf = async (id: string) => (await admin.query(`SELECT * FROM conversations WHERE channel_account_id = $1`, [id])).rows[0] as Record<string, unknown> | undefined;
@@ -273,13 +275,12 @@ describe('webhook de Evolution', () => {
     expect((await admin.query(`SELECT count(*)::int AS n FROM messages`)).rows[0].n).toBe(1);
   });
 
-  it('los avisos de grupos, de otra instancia y los del propio chip no crean nada', async () => {
+  it('los avisos de grupos y de otra instancia no crean nada', async () => {
     const v = await mk(T.alice);
     const inst = await instanceOf(v.id);
     await post(v.id, upsert(inst, 'G-0000000000000001', { conversation: 'grupo' }, '120363424375113025'));
     await post(v.id, { ...upsert(inst, 'G-0000000000000002', { conversation: 'grupo' }), data: { key: { remoteJid: '120363424375113025@g.us', fromMe: false, id: 'G-0000000000000002' }, message: { conversation: 'x' } } });
     await post(v.id, upsert('ss-otra-instancia-0000', 'O-0000000000000001', { conversation: 'ajeno' }));
-    await post(v.id, { ...upsert(inst, 'P-0000000000000001', { conversation: 'mio' }), data: { key: { remoteJid: '593990000002@s.whatsapp.net', fromMe: true, id: 'P-0000000000000001' }, message: { conversation: 'mio' } } });
     await runEvents();
     expect((await admin.query(`SELECT count(*)::int AS n FROM contacts`)).rows[0].n).toBe(0);
     expect((await admin.query(`SELECT count(*)::int AS n FROM messages`)).rows[0].n).toBe(0);
@@ -481,5 +482,151 @@ describe('latido de la sesión', () => {
     const spy = vi.spyOn(fake(), 'state');
     expect(await beat()).toBe(0);
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════ mensajes escritos desde el teléfono (v9)
+
+/** Un aviso de Evolution de un mensaje que escribió la PERSONA desde el teléfono de la línea (`fromMe: true`); el cliente es el destinatario. */
+const sent = (instance: string, id: string, message: Record<string, unknown>, who = '593990000002', key: Record<string, unknown> = {}) =>
+  evt(instance, 'messages.upsert', { key: { remoteJid: `${who}@s.whatsapp.net`, remoteJidAlt: `${who}@s.whatsapp.net`, fromMe: true, id, participant: '', ...key }, pushName: 'Negocio', status: 'SERVER_ACK', message, messageType: Object.keys(message)[0], messageTimestamp: Math.floor(Date.now() / 1000), instanceId: 'i-1', source: 'android' });
+const countOf = async (table: string, where = 'true'): Promise<number> => (await admin.query(`SELECT count(*)::int AS n FROM ${table} WHERE ${where}`)).rows[0].n as number;
+
+describe('mensajes escritos desde el teléfono (v9)', () => {
+  it('un aviso nuevo crea un mensaje de salida humano sin autor, con su origen; no es del cliente (sin no leídos, ventana, reparto, Lead ni saludo)', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, sent(inst, 'PH-0000000000000001', { conversation: 'Te espero mañana' }));
+    await runEvents();
+    const rows = (await admin.query(`SELECT direction, sender_type, kind, body, status, created_by, meta, external_id FROM messages`)).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ direction: 'out', sender_type: 'human', kind: 'text', body: 'Te espero mañana', status: 'sent', created_by: null, external_id: 'PH-0000000000000001' });
+    expect(rows[0].meta).toMatchObject({ origin: 'device' });
+    expect(await convOf(v.id)).toMatchObject({ status: 'unassigned', unread_count: 0, last_inbound_at: null, owner_id: null });
+    expect(await countOf('contacts')).toBe(1);
+    expect(await countOf('contact_tags')).toBe(0);
+    expect(await countOf('messages', `sender_type = 'automation'`)).toBe(0);
+  });
+
+  it('repetir el aviso, o recibirlo otra vez con otro cuerpo pero el mismo id, no duplica', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    const e = sent(inst, 'PH-0000000000000002', { conversation: 'Hola' });
+    await post(v.id, e);
+    await post(v.id, e);
+    await runEvents();
+    await post(v.id, { ...sent(inst, 'PH-0000000000000002', { conversation: 'Hola' }), data: { ...(e.data as object), status: 'DELIVERY_ACK', messageTimestamp: Math.floor(Date.now() / 1000) + 1 } });
+    await runEvents();
+    expect(await countOf('messages')).toBe(1);
+    expect(await countOf('conversations')).toBe(1);
+  });
+
+  it('el eco de un mensaje que envió la plataforma (mismo id) no se duplica', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    await post(v.id, upsert(inst, 'IN-0000000000000001', { conversation: 'Hola' }));
+    await runEvents();
+    const conv = (await convOf(v.id))!.id as string;
+    const id = await queueOut(conv, v.id, 'Te atiendo ahora');
+    expect(await dispatch(id)).toMatchObject({ outcome: 'sent' });
+    const ext = (await msg(id))['external_id'] as string;
+    await post(v.id, sent(inst, ext, { conversation: 'Te atiendo ahora' }));
+    await runEvents();
+    expect(await countOf('messages')).toBe(2);
+    expect((await msg(id))['meta']).not.toMatchObject({ origin: 'device' });
+  });
+
+  it('el eco que llega ANTES de que se anote el id del envío espera y, cuando el id queda anotado, no duplica', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, upsert(inst, 'IN-0000000000000002', { conversation: 'Hola' }));
+    await runEvents();
+    const conv = (await convOf(v.id))!.id as string;
+    const id = await queueOut(conv, v.id, 'Respuesta en vuelo');
+    await admin.query(`UPDATE messages SET attempts = 1 WHERE id = $1`, [id]); // el envío está en curso: Evolution aún no respondió
+    await post(v.id, sent(inst, 'RACE-0000000000000001', { conversation: 'Respuesta en vuelo' }));
+    await runEvents();
+    expect(await countOf('messages')).toBe(2); // no se creó nada: el aviso espera
+    expect((await admin.query(`SELECT status FROM webhook_events ORDER BY received_at DESC LIMIT 1`)).rows[0].status).toBe('pending');
+    await admin.query(`UPDATE messages SET status = 'sent', external_id = 'RACE-0000000000000001', next_attempt_at = NULL WHERE id = $1`, [id]); // llegó la respuesta de Evolution
+    await runEventsAt(30_000);
+    expect(await countOf('messages')).toBe(2);
+    expect((await admin.query(`SELECT status FROM webhook_events ORDER BY received_at DESC LIMIT 1`)).rows[0].status).toBe('done');
+  });
+
+  it('si el envío en vuelo nunca anota su id, pasada la ventana el aviso se registra como del teléfono', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, upsert(inst, 'IN-0000000000000003', { conversation: 'Hola' }));
+    await runEvents();
+    const conv = (await convOf(v.id))!.id as string;
+    const id = await queueOut(conv, v.id, 'Nunca sale');
+    await admin.query(`UPDATE messages SET attempts = 1 WHERE id = $1`, [id]);
+    await post(v.id, sent(inst, 'LATE-0000000000000001', { conversation: 'Lo escribí en el teléfono' }));
+    await runEvents();
+    expect(await countOf('messages', `external_id = 'LATE-0000000000000001'`)).toBe(0);
+    await runEventsAt(3 * 60_000);
+    expect(await countOf('messages', `external_id = 'LATE-0000000000000001'`)).toBe(1);
+  });
+
+  it('es una respuesta humana: detiene el cronómetro de SLA y NO cambia el dueño, el estado ni los no leídos; reutiliza al contacto y la conversación', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, upsert(inst, 'IN-0000000000000004', { conversation: 'Hola' }));
+    await runEvents();
+    const conv = (await convOf(v.id))!.id as string;
+    await admin.query(`UPDATE conversations SET owner_id = $1, status = 'working', assigned_at = now() WHERE id = $2`, [IDS.alice, conv]);
+    await admin.query(`INSERT INTO response_timers(id, organization_id, conversation_id, kind, owner_id, started_at, due_at) VALUES (gen_random_uuid(), $1, $2, 'followup', $3, now() - interval '5 minutes', now() + interval '10 minutes')`, [ORG_A, conv, IDS.alice]);
+    const before = (await convOf(v.id))!;
+    await post(v.id, sent(inst, 'PH-0000000000000003', { conversation: 'Ya te escribo' }));
+    await runEvents();
+    const after = (await convOf(v.id))!;
+    expect(after).toMatchObject({ id: conv, owner_id: IDS.alice, status: 'working', unread_count: before['unread_count'], queue_id: before['queue_id'] });
+    expect(after['last_inbound_at']).toEqual(before['last_inbound_at']);
+    const timer = (await admin.query(`SELECT stop_reason, replied_message_id, stopped_at FROM response_timers WHERE conversation_id = $1`, [conv])).rows[0];
+    expect(timer.stop_reason).toBe('human_reply');
+    expect(timer.replied_message_id).toBe((await admin.query(`SELECT id FROM messages WHERE external_id = 'PH-0000000000000003'`)).rows[0].id);
+    expect(await countOf('contacts')).toBe(1);
+    expect(await countOf('conversations')).toBe(1);
+  });
+
+  it('una imagen escrita desde el teléfono queda como mensaje de salida con su adjunto por descargar', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63fcffff3f0300050001a5f645400000000049454e44ae426082', 'hex');
+    await post(v.id, sent(inst, 'PH-IMG-0000000001', { imageMessage: { mimetype: 'image/png', caption: 'tu cotización' }, base64: png.toString('base64') } as never));
+    await runEvents();
+    expect((await admin.query(`SELECT direction, sender_type, kind, body FROM messages`)).rows).toEqual([{ direction: 'out', sender_type: 'human', kind: 'image', body: 'tu cotización' }]);
+    expect((await admin.query(`SELECT state, source_media_id FROM message_attachments`)).rows[0]).toMatchObject({ state: 'pending' });
+  });
+
+  it('grupos, estados de WhatsApp y reacciones escritos desde el teléfono siguen sin entrar', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, sent(inst, 'G-PH-0000000000001', { conversation: 'grupo' }, '120363424375113025', { remoteJid: '120363424375113025@g.us' }));
+    await post(v.id, evt(inst, 'messages.upsert', { key: { remoteJid: 'status@broadcast', fromMe: true, id: 'S-PH-000000000001' }, message: { conversation: 'estado' }, messageTimestamp: Math.floor(Date.now() / 1000) }));
+    await post(v.id, sent(inst, 'R-PH-0000000000001', { reactionMessage: { key: { remoteJid: '593990000002@s.whatsapp.net', fromMe: false, id: 'X' }, text: '👍' } }));
+    await runEvents();
+    expect(await countOf('messages')).toBe(0);
+    expect(await countOf('contacts')).toBe(0);
+  });
+
+  it('aislamiento A↔B: el mensaje de una empresa no entra en otra, ni siquiera con el mismo id ni por la dirección de la otra', async () => {
+    const a = await mk(T.alice);
+    const b = await mk(T.bob, 'Chip de Luna');
+    const instA = await instanceOf(a.id);
+    const instB = await instanceOf(b.id);
+    await post(a.id, sent(instA, 'SAME-0000000000001', { conversation: 'de A' }));
+    await post(b.id, sent(instA, 'CROSS-000000000001', { conversation: 'a la dirección de B con la instancia de A' })); // la instancia no es de esta conexión
+    await runEvents(ORG_A);
+    await runEvents(ORG_B);
+    expect(await countOf('messages', `organization_id = '${ORG_B}'`)).toBe(0);
+    expect(await countOf('contacts', `organization_id = '${ORG_B}'`)).toBe(0);
+    await post(b.id, sent(instB, 'SAME-0000000000001', { conversation: 'de B' })); // el mismo id en otra empresa es otro mensaje
+    await runEvents(ORG_B);
+    expect(await countOf('messages', `organization_id = '${ORG_A}'`)).toBe(1);
+    expect(await countOf('messages', `organization_id = '${ORG_B}'`)).toBe(1);
+    expect((await admin.query(`SELECT body FROM messages WHERE organization_id = $1`, [ORG_A])).rows[0].body).toBe('de A');
   });
 });
