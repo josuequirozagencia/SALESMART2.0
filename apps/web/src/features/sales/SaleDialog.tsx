@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { celebrationPlan, playCashRegister, prefersReducedMotion, primeCelebrationAudio } from '../../lib/celebrate';
+import { useSession } from '../../lib/session';
+import { Confetti } from '../../ui/Confetti';
 import { friendlyError } from '../../lib/errors';
 import { money } from '../../lib/format';
 import type { Conversation } from '../../lib/types';
@@ -25,6 +28,8 @@ const BLOCKED: Record<NonNullable<ReturnType<typeof useSaleOptions>['data']>['bl
 export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
   const options = useSaleOptions(c.id, true);
   const create = useCreateSale();
+  const { state } = useSession();
+  const [confetti, setConfetti] = useState(false);
   const idem = useIdempotencyKey();
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('1');
@@ -47,6 +52,8 @@ export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => voi
   const balance = MONEY.test(shownTotal.trim()) ? Math.max(cents(shownTotal) - (MONEY.test(down.trim()) ? cents(down) : 0), 0) : null;
 
   const submit = (): void => {
+    // El audio se prepara AQUÍ, dentro del clic de la persona: así el navegador deja sonar cuando el servidor responda
+    primeCelebrationAudio();
     const e: typeof errors = {};
     if (!product) e.product = 'Elige el producto o servicio';
     if (qty < 1 || qty > 9999) e.quantity = 'Una cantidad entre 1 y 9999';
@@ -72,7 +79,15 @@ export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => voi
         input,
       },
       {
-        onSuccess: (s) => setDone({ amount: s.amount, balance: s.balance, currency: s.currency }),
+        onSuccess: (s) => {
+          setDone({ amount: s.amount, balance: s.balance, currency: s.currency });
+          // Solo a quien registró la venta y solo si el servidor respondió bien (nunca al ver ventas ajenas ni al cargar las antiguas)
+          if (state.status === 'authed') {
+            const plan = celebrationPlan(state.me.user.id, state.me.organization.id, prefersReducedMotion());
+            if (plan.sound) playCashRegister();
+            if (plan.confetti) setConfetti(true);
+          }
+        },
         onError: (err) => setError(friendlyError(err, 'No se pudo registrar la venta')),
       },
     );
@@ -81,7 +96,8 @@ export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => voi
   if (done) {
     return (
       <Modal title="Venta registrada" onClose={onClose}>
-        <Alert kind="ok">Venta de {money(done.amount, done.currency)} registrada. {Number(done.balance) > 0 ? `Saldo por cobrar: ${money(done.balance, done.currency)}.` : 'Queda cobrada por completo.'}</Alert>
+        {confetti ? <Confetti /> : null}
+        <div role="status" aria-live="polite"><Alert kind="ok">Venta de {money(done.amount, done.currency)} registrada. {Number(done.balance) > 0 ? `Saldo por cobrar: ${money(done.balance, done.currency)}.` : 'Queda cobrada por completo.'}</Alert></div>
         <p className="text-[12.5px] text-muted">El contacto recibió la etiqueta «Venta» y su oportunidad pasó a ganada. Los abonos siguientes se registran desde Ventas.</p>
         <div className="flex justify-end"><Button variant="primary" onClick={onClose}>Listo</Button></div>
       </Modal>

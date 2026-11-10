@@ -2381,7 +2381,7 @@ El Inbox solo avisaba con la pestaña abierta (aviso en vivo, campana «Avisos»
 
 
 ## ADR-65 — El departamento elige sus conexiones (`PUT /v1/queues/:id/connections`) y celebración de ventas (v7)
-**Estado:** **PROPUESTO** (2026-11-09). El prompt v7 lo llama «ADR-60», pero ese número ya lo usa el rediseño del Inbox y la navegación: aquí se numera ADR-65. **No se construye la fase B (ni su cambio de permisos) hasta que el responsable lo apruebe.**
+**Estado:** **APROBADO «tal cual» por el responsable el 2026-11-09** (el cambio de permisos de `queues.manage` incluido; la fase B queda autorizada). El prompt v7 lo llama «ADR-60», pero ese número ya lo usa el rediseño del Inbox y la navegación: aquí se numera ADR-65. Construidas: **fase C** (PR #56) y **fase D** (celebración de ventas); pendiente la **fase B**.
 
 ### Contexto (hallazgos de la fase A, con archivo y línea)
 1. **Dónde vive el departamento de una conexión.** En una sola columna, `channel_accounts.queue_id` (`apps/api/src/db/schema/channels.ts:33`, clave foránea compuesta `channel_accounts_queue_fk` en `:45`). Las conexiones **QR no tienen columna propia**: `qr_accounts` no guarda departamento; la QR es una fila de `channel_accounts` con `provider = 'evolution'` (`qr-connections.service.ts:121`, `:200–202`). Es decir, «una conexión tiene un departamento por defecto» (ADR-07) ya es el modelo y **no hace falta migración**.

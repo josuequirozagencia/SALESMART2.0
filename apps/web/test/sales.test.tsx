@@ -5,7 +5,18 @@ import type { ChatMessage, Conversation, ConversationList } from '../src/lib/typ
 import type { ChangeRequest, RequestRow, SaleDetail, SaleOptions } from '../src/features/sales/useSales';
 import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
-beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
+const cel = vi.hoisted(() => ({ play: vi.fn(() => true), prime: vi.fn(), cancel: vi.fn(), run: vi.fn() }));
+vi.mock('../src/lib/celebrate', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/celebrate')>()),
+  playCashRegister: cel.play,
+  primeCelebrationAudio: cel.prime,
+  runConfetti: (...a: unknown[]) => {
+    cel.run(...a);
+    return cel.cancel;
+  },
+}));
+
+beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); cel.play.mockClear(); cel.prime.mockClear(); cel.cancel.mockClear(); cel.run.mockClear(); window.localStorage.clear(); });
 
 const NOW = new Date().toISOString();
 const conv = (over: Partial<Conversation> = {}): Conversation =>
@@ -77,6 +88,67 @@ const openDialog = async () => {
   await userEvent.click(await screen.findByRole('button', { name: 'Registrar venta' }));
   return within(await screen.findByRole('dialog', { name: 'Registrar venta' }));
 };
+
+const fillAndRegister = async (w: ReturnType<typeof world>) => {
+  mockApi(server(w));
+  renderApp('/inbox/c1');
+  const d = await openDialog();
+  await userEvent.selectOptions(await d.findByLabelText('Producto o servicio'), 'p1');
+  await userEvent.click(d.getByRole('button', { name: 'Registrar venta' }));
+  return d;
+};
+
+describe('Celebrar la venta (v7 fase D)', () => {
+  it('al registrar la venta: el audio se prepara en el clic, suena la caja registradora, cae el confeti y el mensaje «Venta registrada» sigue anunciándose', async () => {
+    await fillAndRegister(world());
+    expect(cel.prime).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText(/Venta de .* registrada/)).toBeInTheDocument();
+    expect(screen.getAllByRole('status').some((e) => /registrada/.test(e.textContent ?? ''))).toBe(true);
+    expect(cel.play).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('confetti')).toHaveAttribute('aria-hidden', 'true');
+    expect(screen.getByTestId('confetti')).toHaveStyle({ pointerEvents: 'none' });
+    expect(cel.run).toHaveBeenCalledTimes(1);
+    // al cerrar el diálogo (cambiar de pantalla) el confeti se cancela
+    await userEvent.click(screen.getByRole('button', { name: 'Listo' }));
+    await waitFor(() => expect(cel.cancel).toHaveBeenCalled());
+    expect(screen.queryByTestId('confetti')).toBeNull();
+  });
+
+  it('con «Celebrar las ventas» apagado no hay confeti ni sonido, pero la confirmación sí', async () => {
+    window.localStorage.setItem('ss.celebrate.v1:u2:o1', 'off');
+    await fillAndRegister(world());
+    expect(await screen.findByText(/Venta de .* registrada/)).toBeInTheDocument();
+    expect(cel.play).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('confetti')).toBeNull();
+  });
+
+  it('con el sonido de Notificaciones apagado no suena, pero el confeti sigue', async () => {
+    window.localStorage.setItem('ss.sound.v1:u2:o1', 'off');
+    await fillAndRegister(world());
+    expect(await screen.findByTestId('confetti')).toBeInTheDocument();
+    expect(cel.play).not.toHaveBeenCalled();
+  });
+
+  it('con «reducir movimiento» no hay confeti y el sonido sigue', async () => {
+    vi.stubGlobal('matchMedia', (q: string) => ({ matches: q.includes('prefers-reduced-motion'), media: q, addEventListener: () => undefined, removeEventListener: () => undefined, addListener: () => undefined, removeListener: () => undefined, onchange: null, dispatchEvent: () => false }));
+    await fillAndRegister(world());
+    expect(await screen.findByText(/Venta de .* registrada/)).toBeInTheDocument();
+    expect(cel.play).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('confetti')).toBeNull();
+  });
+
+  it('si el servidor rechaza la venta no se celebra nada', async () => {
+    const w = world();
+    mockApi({ ...server(w), 'POST /sales': () => err(409, 'X', 'No se pudo registrar') });
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    await userEvent.selectOptions(await d.findByLabelText('Producto o servicio'), 'p1');
+    await userEvent.click(d.getByRole('button', { name: 'Registrar venta' }));
+    expect(await d.findByText(/No se pudo registrar/)).toBeInTheDocument();
+    expect(cel.play).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('confetti')).toBeNull();
+  });
+});
 
 describe('Registrar venta desde el chat', () => {
   it('el producto sugiere el total (precio × cantidad), el abono baja el saldo y el envío lleva una llave de idempotencia', async () => {
