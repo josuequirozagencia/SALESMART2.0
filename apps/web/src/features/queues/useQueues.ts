@@ -10,7 +10,7 @@ export function useQueues() {
 function useDone() {
   const qc = useQueryClient();
   // Las conexiones muestran el nombre de su cola
-  return () => Promise.all([qc.invalidateQueries({ queryKey: ['queues'] }), qc.invalidateQueries({ queryKey: ['channels'] })]);
+  return () => Promise.all([qc.invalidateQueries({ queryKey: ['queues'] }), qc.invalidateQueries({ queryKey: ['channels'] }), qc.invalidateQueries({ queryKey: ['qr-channels'] })]);
 }
 
 export function useCreateQueue() {
@@ -26,6 +26,15 @@ export function useUpdateQueue() {
 export function useSetQueueMembers() {
   const done = useDone();
   return useMutation({ mutationFn: ({ id, members }: { id: string; members: QueueMemberInput[] }) => api<Queue>(`/queues/${id}/members`, { method: 'PUT', body: { members } }), onSettled: done });
+}
+
+/** El departamento elige sus conexiones (v7, ADR-65): el conjunto completo; las que salen pasan a `move_removed_to` (o quedan sin departamento con `allow_unassigned`). */
+export function useSetQueueConnections() {
+  const done = useDone();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: string; connections: Array<{ kind: 'channel' | 'qr'; id: string }>; move_removed_to: string | null; allow_unassigned: boolean }) => api<Queue>(`/queues/${id}/connections`, { method: 'PUT', body }),
+    onSettled: done,
+  });
 }
 
 export function useArchiveQueue() {
