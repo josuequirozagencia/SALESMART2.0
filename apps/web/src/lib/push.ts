@@ -93,6 +93,14 @@ export async function updateShowText(showText: boolean): Promise<PushStatus> {
   return api<PushStatus>('/push/subscribe', { method: 'POST', body: body(sub, showText) });
 }
 
+export interface PushTestResult {
+  sent: number;
+  gone: number;
+  failed: number;
+}
+/** Manda una notificación de prueba a los navegadores suscritos de esta persona. */
+export const sendPushTest = (): Promise<PushTestResult> => api<PushTestResult>('/push/test', { method: 'POST' });
+
 /** Desactiva las notificaciones de este navegador: baja en el servidor y cancela la suscripción. */
 export async function disablePush(): Promise<void> {
   const sub = await currentSubscription();

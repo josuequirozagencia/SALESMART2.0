@@ -39,6 +39,15 @@ export class PushController {
     return this.push.subscribe(body, typeof ua === 'string' ? ua : undefined);
   }
 
+  /** Manda una notificación de prueba a los navegadores suscritos de la persona que la pide (una cada 10 s). */
+  @RequirePermission('notifications.write')
+  @Post('test')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  test() {
+    return this.push.sendTest();
+  }
+
   @RequirePermission('notifications.write')
   @Post('unsubscribe')
   @HttpCode(200)

@@ -2,7 +2,8 @@ import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
 import { contacts, conversations, Database, messages, pushSubscriptions } from '../../db';
-import { ForbiddenError, ValidationError } from '../../errors';
+import { ForbiddenError, TooManyAttemptsError, ValidationError } from '../../errors';
+import { WindowLimiter } from '../../http';
 import type { AppLogger } from '../../logger';
 import { TenantContext } from '../../tenant';
 import { APP_LOGGER, APP_CONFIG } from '../../tokens';
@@ -18,6 +19,14 @@ export interface PushConfigView {
   enabled: boolean;
   /** Clave pública VAPID (no es secreta) para que el navegador se suscriba. */
   public_key: string | null;
+}
+export interface PushTestView {
+  /** Navegadores a los que el servicio de push aceptó el aviso. */
+  sent: number;
+  /** Navegadores que ya no existen (se dieron de baja). */
+  gone: number;
+  /** Rechazos o errores del servicio de push. */
+  failed: number;
 }
 export interface PushStatusView {
   subscribed: boolean;
@@ -37,6 +46,9 @@ export class PushService {
     @Inject(PUSH_SENDER) private readonly sender: PushSender,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
+
+  /** Una prueba cada 10 s por persona: sirve para verificar la cadena, no para llenar el navegador. */
+  private readonly testLimiter = new WindowLimiter(1, 10_000);
 
   config(): PushConfigView {
     return { enabled: this.cfg.push.enabled, public_key: this.cfg.push.enabled ? (this.cfg.push.vapidPublicKey ?? null) : null };
@@ -69,6 +81,31 @@ export class PushService {
         .onConflictDoUpdate({ target: [pushSubscriptions.organizationId, pushSubscriptions.endpoint], set: { userId, p256dh: input.keys.p256dh, auth: input.keys.auth, showText: input.show_text, userAgent: ua, revokedAt: null } }),
     );
     return { subscribed: true, show_text: input.show_text };
+  }
+
+  /**
+   * «Enviar notificación de prueba»: manda un aviso a TODOS los navegadores vigentes de esta persona en esta empresa, sin depender de conversaciones. Lleva `force` para que el service worker la
+   * muestre aunque la aplicación esté a la vista. Solo a quien la pide (nunca a otra persona).
+   */
+  async sendTest(): Promise<PushTestView> {
+    if (!this.cfg.push.enabled) throw new ValidationError([{ path: 'push', code: 'push_disabled', message: 'Las notificaciones push no están activadas en este servidor' }]);
+    const userId = this.me();
+    const taken = this.testLimiter.take(`${TenantContext.current().organizationId}:${userId}`);
+    if (!taken.ok) throw new TooManyAttemptsError(taken.retryAfterSeconds);
+    const subs = await this.db.withTenant((tx) => tx.select().from(pushSubscriptions).where(and(eq(pushSubscriptions.userId, userId), isNull(pushSubscriptions.revokedAt))));
+    const payload = JSON.stringify({ title: 'Notificación de prueba', body: 'Si ves esto, las notificaciones de Sales Smart funcionan en este navegador.', url: '/settings/notifications', tag: 'push-test', force: true });
+    const out: PushTestView = { sent: 0, gone: 0, failed: 0 };
+    const goneIds: string[] = [];
+    for (const s of subs) {
+      const r = await this.sender.send({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload);
+      if (r === 'sent') out.sent += 1;
+      else if (r === 'gone') {
+        out.gone += 1;
+        goneIds.push(s.id);
+      } else out.failed += 1;
+    }
+    if (goneIds.length > 0) await this.db.withTenant((tx) => tx.update(pushSubscriptions).set({ revokedAt: new Date() }).where(inArray(pushSubscriptions.id, goneIds)));
+    return out;
   }
 
   /** Da de baja este navegador para la persona (solo el suyo: el de otra persona no se toca). */
