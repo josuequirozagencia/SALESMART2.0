@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { hoursSchema, type HoursDto } from '../sla';
-import { createQueueSchema, setMembersSchema, simulateSchema, updateQueueSchema, type CreateQueueDto, type SetMembersDto, type SimulateDto, type UpdateQueueDto } from './queues.dto';
+import { createQueueSchema, setConnectionsSchema, setMembersSchema, simulateSchema, updateQueueSchema, type CreateQueueDto, type SetConnectionsDto, type SetMembersDto, type SimulateDto, type UpdateQueueDto } from './queues.dto';
 import { QueuesService } from './queues.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -51,6 +51,17 @@ export class QueuesController {
   @Header('Cache-Control', 'no-store')
   setMembers(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(setMembersSchema)) b: SetMembersDto) {
     return this.queues.setMembers(id, b);
+  }
+
+  /**
+   * Qué conexiones (oficiales y QR) usan este departamento (v7, ADR-65): el conjunto completo; las que salen pasan al destino elegido. `queues.manage` solo cambia el DEPARTAMENTO de conexiones
+   * de la empresa; no da acceso a credenciales ni a los demás campos de la conexión (siguen en `channels.manage`).
+   */
+  @RequirePermission('queues.manage')
+  @Put(':id/connections')
+  @Header('Cache-Control', 'no-store')
+  setConnections(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(setConnectionsSchema)) b: SetConnectionsDto) {
+    return this.queues.setConnections(id, b);
   }
 
   /** Archiva la cola. */

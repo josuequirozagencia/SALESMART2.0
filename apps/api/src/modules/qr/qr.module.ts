@@ -3,6 +3,7 @@ import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { AttachmentsModule } from '../attachments';
 import { ChannelsModule } from '../channels';
+import { ConnectionQueueModule } from '../connection-queue';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import { ContactPhotosJob } from './contact-photos.job';
@@ -22,7 +23,7 @@ import { QrController } from './qr.controller';
  * El adaptador es `evolution` (con la URL y la clave que el Súper Admin guarda en Proveedores) o `fake` (desarrollo y pruebas). Módulo aparte para no cruzar canales con adjuntos.
  */
 @Module({
-  imports: [OrganizationsModule, PlatformModule, ChannelsModule, AttachmentsModule],
+  imports: [OrganizationsModule, PlatformModule, ChannelsModule, AttachmentsModule, ConnectionQueueModule],
   controllers: [QrController, QrWebhookController],
   providers: [
     QrConnectionsService,

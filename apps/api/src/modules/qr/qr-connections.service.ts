@@ -3,11 +3,12 @@ import { Inject, Injectable } from '@nestjs/common';
 import { uuidv7 } from '@sales-smart/shared';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { channelAccounts, Database, qrAccounts, queues, type TenantTx } from '../../db';
+import { channelAccounts, Database, qrAccounts, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ServiceUnavailableError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_CONFIG, APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
+import { ConnectionQueueService } from '../connection-queue';
 import { QrRoutesService } from '../organizations';
 import { PlatformCredentialsReader } from '../platform';
 import type { EvolutionConnection } from '../channels';
@@ -62,6 +63,7 @@ export class QrConnectionsService {
     @Inject(PlatformCredentialsReader) private readonly platform: PlatformCredentialsReader,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Inject(ConnectionQueueService) private readonly queueRules: ConnectionQueueService,
   ) {}
 
   /** Las credenciales de Evolution que la plataforma tiene en uso; null si no hay (o el QR está apagado). */
@@ -285,8 +287,7 @@ export class QrConnectionsService {
   }
 
   private async requireQueue(tx: TenantTx, id: string): Promise<void> {
-    const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, id), isNull(queues.deletedAt))).limit(1);
-    if (!q) throw new NotFoundError();
+    if (!(await this.queueRules.queueExists(tx, id))) throw new NotFoundError();
   }
 
   private view(r: Row, now: Date): QrChannelView {
