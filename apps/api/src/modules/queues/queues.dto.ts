@@ -46,3 +46,19 @@ export type MemberInput = z.infer<typeof member>;
 /** Simulación sin guardar nada: por omisión usa lo guardado; cualquier campo que se mande lo sustituye (sirve para probar antes de guardar). */
 export const simulateSchema = z.object({ count: z.number().int().min(1).max(MAX_SIMULATION).optional(), mode: mode.optional(), batch: batch.optional(), daily_cap: dailyCap.optional(), members: members.optional() }).strict();
 export type SimulateDto = z.infer<typeof simulateSchema>;
+
+/** Tope de conexiones por departamento en una sola operación (las empresas tienen pocas: 5 QR y los números oficiales). */
+export const MAX_QUEUE_CONNECTIONS = 100;
+
+/**
+ * El conjunto COMPLETO de conexiones que debe quedar en el departamento (v7, ADR-65). Las que estaban y ya no están pasan a `move_removed_to`; `null` solo se acepta con `allow_unassigned: true`
+ * (dejarlas sin departamento). Oficiales (`channel`) y por QR (`qr`).
+ */
+export const setConnectionsSchema = z
+  .object({
+    connections: z.array(z.object({ kind: z.enum(['channel', 'qr']), id: z.uuid() }).strict()).max(MAX_QUEUE_CONNECTIONS),
+    move_removed_to: z.uuid().nullable().default(null),
+    allow_unassigned: z.boolean().default(false),
+  })
+  .strict();
+export type SetConnectionsDto = z.infer<typeof setConnectionsSchema>;

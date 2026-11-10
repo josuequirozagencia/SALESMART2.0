@@ -1,16 +1,17 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gte, inArray, isNull, or, sql } from 'drizzle-orm';
 import { channelAccounts, conversations, Database, queueMembers, queues, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
+import { ConnectionQueueService, planConnectionMoves } from '../connection-queue';
 import { OrgDirectoryService, OrgMembersService, type OrgPerson } from '../organizations';
 import { isOpenAt, SlaConfigService, SlaService, type HoursDto, type WeekView } from '../sla';
 import { AssignmentService } from './assignment.service';
 import { simulate as runSimulation, type DistMode } from './distribution';
 import { DistributionService, OPEN_STATUSES } from './distribution.service';
 import { startOfLocalDay } from './local-day';
-import { MAX_QUEUES, type CreateQueueDto, type SetMembersDto, type SimulateDto, type UpdateQueueDto } from './queues.dto';
+import { MAX_QUEUES, type CreateQueueDto, type SetConnectionsDto, type SetMembersDto, type SimulateDto, type UpdateQueueDto } from './queues.dto';
 import type { AssignmentContext } from './queues.types';
 
 export interface QueueMemberView {
@@ -53,7 +54,7 @@ export interface QueueView {
   /** Todas las personas que pueden recibir trabajo, con su estado en ESTA cola (`active: false` y peso 1 si no participan). */
   members: QueueMemberView[];
   /** Conexiones cuya cola por defecto es esta (se cambia en «Conexiones»). */
-  channels: Array<{ id: string; name: string }>;
+  channels: Array<{ id: string; name: string; kind: 'channel' | 'qr' }>;
   /** Conversaciones sin asignar que le corresponden. */
   unassigned_count: number;
   /** Dato de ejemplo creado por el sistema (M10.6): la interfaz lo marca «Ejemplo». */
@@ -117,6 +118,7 @@ export class QueuesService {
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(SlaConfigService) private readonly slaConfig: SlaConfigService,
+    @Inject(ConnectionQueueService) private readonly connectionQueue: ConnectionQueueService,
   ) {}
 
   async list(): Promise<QueueList> {
@@ -277,6 +279,30 @@ export class QueuesService {
   }
 
   /** Archiva la cola (borrado lógico). No se puede mientras una conexión la use como cola por defecto. */
+  /**
+   * El departamento elige sus conexiones (v7, ADR-65). `connections` es el conjunto completo que debe quedar; las que estaban y ya no están se mueven a `move_removed_to` (obligatorio si las hay; `null`
+   * solo con `allow_unassigned`). Una transacción: bloquea el departamento, las conexiones pedidas y las actuales (en orden de id, para que dos cambios simultáneos se esperen en vez de cruzarse), valida
+   * y aplica con una auditoría por conexión. Una conexión que no existe, es de otra empresa, está eliminada o no es del tipo indicado responde 404 uniforme. Las conversaciones que ya existen NO se tocan.
+   */
+  async setConnections(id: string, input: SetConnectionsDto): Promise<QueueView> {
+    await this.db.withTenant(async (tx) => {
+      await this.mustGet(tx, id, true);
+      const wanted = new Map(input.connections.map((c) => [c.id, c.kind]));
+      const ids = [...wanted.keys()];
+      const rows = await tx
+        .select({ id: channelAccounts.id, provider: channelAccounts.provider, queueId: channelAccounts.queueId })
+        .from(channelAccounts)
+        .where(and(isNull(channelAccounts.deletedAt), or(eq(channelAccounts.queueId, id), ids.length > 0 ? inArray(channelAccounts.id, ids) : sql`false`)))
+        .orderBy(asc(channelAccounts.id))
+        .for('update');
+      const plan = planConnectionMoves({ queueId: id, wanted, rows, moveTo: input.move_removed_to, allowUnassigned: input.allow_unassigned });
+      if (plan.destination !== null) await this.connectionQueue.requireQueue(tx, plan.destination, { lock: 'share' });
+      await this.connectionQueue.applyMoves(tx, plan.moves);
+    });
+    const [updated] = await this.load([id]);
+    return updated!;
+  }
+
   async archive(id: string): Promise<{ id: string; archived: true }> {
     await this.db.withTenant(async (tx) => {
       await this.mustGet(tx, id, true);
@@ -365,7 +391,7 @@ export class QueuesService {
       if (rows.length === 0) return [];
       const ids = rows.map((r) => r.id);
       const memberRows = await tx.select().from(queueMembers).where(inArray(queueMembers.queueId, ids));
-      const chans = await tx.select({ id: channelAccounts.id, name: channelAccounts.name, queueId: channelAccounts.queueId }).from(channelAccounts).where(and(inArray(channelAccounts.queueId, ids), isNull(channelAccounts.deletedAt))).orderBy(asc(channelAccounts.createdAt));
+      const chans = await tx.select({ id: channelAccounts.id, name: channelAccounts.name, queueId: channelAccounts.queueId, provider: channelAccounts.provider }).from(channelAccounts).where(and(inArray(channelAccounts.queueId, ids), isNull(channelAccounts.deletedAt))).orderBy(asc(channelAccounts.createdAt));
       const personIds = people.map((p) => p.id);
       const ownHours = await this.slaConfig.queueHours(tx, ids);
       const cals = await this.sla.calendars(tx, dir.timeZone);
@@ -401,7 +427,7 @@ export class QueuesService {
           const m = mine.get(p.id);
           return { user_id: p.id, name: p.name, role: p.role, active: m?.active ?? false, weight: m?.weight ?? 1, open_count: open.get(p.id) ?? 0, today_count: today.get(`${q.id}|${p.id}`) ?? 0 };
         });
-        return view(q, members, chans.filter((c) => c.queueId === q.id).map((c) => ({ id: c.id, name: c.name })), unassigned.get(q.id) ?? 0, ownHours.get(q.id) ?? null, isOpenAt(cals.forQueue(q.id), now));
+        return view(q, members, chans.filter((c) => c.queueId === q.id).map((c) => ({ id: c.id, name: c.name, kind: c.provider === 'evolution' ? ('qr' as const) : ('channel' as const) })), unassigned.get(q.id) ?? 0, ownHours.get(q.id) ?? null, isOpenAt(cals.forQueue(q.id), now));
       });
     });
   }

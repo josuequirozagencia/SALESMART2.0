@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { ConversationsModule } from '../conversations';
+import { ConnectionQueueModule } from '../connection-queue';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import { ChannelVault } from './channel-vault.service';
@@ -20,7 +21,7 @@ import { WHATSAPP_PROVIDER } from './whatsapp.port';
  * avisos por el webhook de Meta (M5.2).
  */
 @Module({
-  imports: [OrganizationsModule, PlatformModule, ConversationsModule],
+  imports: [OrganizationsModule, PlatformModule, ConversationsModule, ConnectionQueueModule],
   controllers: [ChannelsController, MetaWebhookController],
   providers: [
     ChannelVault,

@@ -247,7 +247,7 @@ describe('colas', () => {
     const busy = await call('DELETE', `/queues/${q.id}`, T.alice);
     expect(busy.status).toBe(409);
     expect(await code(busy)).toBe('QUEUE_IN_USE');
-    expect((await getQueues())[0]!.channels).toEqual([{ id: channelA, name: 'Ventas' }]);
+    expect((await getQueues())[0]!.channels).toEqual([{ id: channelA, name: 'Ventas', kind: 'channel' }]);
     await link(channelA, null);
     expect(await ok(await call('DELETE', `/queues/${q.id}`, T.alice))).toEqual({ id: q.id, archived: true });
     expect(await getQueues()).toEqual([]);
@@ -300,7 +300,7 @@ describe('conexiones y colas', () => {
     const q = await mkQueue('Ventas');
     const c = await ok<{ queue_id: string | null }>(await call('PATCH', `/channels/${channelA}`, T.alice, { queue_id: q.id }));
     expect(c.queue_id).toBe(q.id);
-    expect((await getQueues())[0]!.channels).toEqual([{ id: channelA, name: 'Ventas' }]);
+    expect((await getQueues())[0]!.channels).toEqual([{ id: channelA, name: 'Ventas', kind: 'channel' }]);
     const created = await ok<{ id: string; queue_id: string | null }>(await call('POST', '/channels', T.alice, { name: 'Segunda', waba_id: '1234567890123', phone_number_id: '1090123456711', access_token: FAKE_WHATSAPP_TOKEN, queue_id: q.id }), 201);
     expect(created.queue_id).toBe(q.id);
     expect((await ok<{ items: Array<{ id: string; queue_id: string | null }> }>(await call('GET', '/channels', T.alice))).items.map((x) => x.queue_id)).toEqual([q.id, q.id]);

@@ -162,6 +162,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/queues', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'PATCH /v1/queues/:id', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'PUT /v1/queues/:id/members', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
+  { route: 'PUT /v1/queues/:id/connections', kind: 'tenant', isolationTest: '../../queues/connections.test.ts' },
   { route: 'DELETE /v1/queues/:id', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'POST /v1/queues/:id/simulate', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },
   { route: 'POST /v1/queues/:id/distribute', kind: 'tenant', isolationTest: '../../queues/queues.test.ts' },

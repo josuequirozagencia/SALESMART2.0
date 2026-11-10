@@ -1,13 +1,14 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { uuidv7 } from '@sales-smart/shared';
 import { and, asc, eq, isNull, sql } from 'drizzle-orm';
-import { channelAccounts, Database, queues, whatsappAccounts, type TenantTx } from '../../db';
+import { channelAccounts, Database, whatsappAccounts, type TenantTx } from '../../db';
 import { AppError, ConflictError, NotFoundError, ServiceUnavailableError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { TenantContext } from '../../tenant';
 import { APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
 import { ChannelRoutesService } from '../organizations';
+import { ConnectionQueueService } from '../connection-queue';
 import { ChannelVault } from './channel-vault.service';
 import { MAX_CHANNELS, type CreateChannelDto, type UpdateChannelDto } from './channels.dto';
 import { WHATSAPP_PROVIDER, WhatsAppProviderError, type NumberInfo, type WhatsAppProvider } from './whatsapp.port';
@@ -72,6 +73,7 @@ export class ConnectionsService {
     @Inject(ChannelVault) private readonly vault: ChannelVault,
     @Inject(ChannelRoutesService) private readonly routes: ChannelRoutesService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Inject(ConnectionQueueService) private readonly queueRules: ConnectionQueueService,
   ) {}
 
   async list(): Promise<{ items: ChannelView[]; vault: { available: boolean } }> {
@@ -259,8 +261,7 @@ export class ConnectionsService {
 
   /** La cola existe en la empresa y no está archivada (la clave foránea compuesta ya impide una de otra empresa). */
   private async requireQueue(tx: TenantTx, id: string): Promise<void> {
-    const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, id), isNull(queues.deletedAt))).limit(1);
-    if (!q) throw new AppError(400, 'CHANNEL_QUEUE_NOT_FOUND', 'Ese departamento no existe o está archivado');
+    if (!(await this.queueRules.queueExists(tx, id))) throw new AppError(400, 'CHANNEL_QUEUE_NOT_FOUND', 'Ese departamento no existe o está archivado');
   }
 
   private nameTaken(e: unknown): ConflictError | undefined {
