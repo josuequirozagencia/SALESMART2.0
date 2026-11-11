@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
-export type LedgerKind = 'welcome' | 'grant' | 'use' | 'test';
-export const KIND_LABEL: Record<LedgerKind, string> = { welcome: 'Bienvenida', grant: 'Regalo', use: 'Uso', test: 'Prueba' };
+export type LedgerKind = 'welcome' | 'grant' | 'use' | 'test' | 'suggest';
+export const KIND_LABEL: Record<LedgerKind, string> = { welcome: 'Bienvenida', grant: 'Regalo', use: 'Uso', test: 'Prueba', suggest: 'Sugerencia' };
 
 /** Lo que ve el CLIENTE de un movimiento: créditos y a qué corresponde. Nunca el costo ni el margen. */
 export interface LedgerItem {
@@ -83,6 +83,15 @@ export interface AiModelPrice { model: string; kind: 'embedding' | 'chat'; usd_p
 
 export function useAiModels() {
   return useQuery({ queryKey: ['platform', 'ai', 'models'], retry: false, queryFn: () => api<AiModelPrice[]>('/platform/ai/models') });
+}
+
+/** Da de alta un modelo de chat nuevo (v11 S4): su nombre exacto en OpenAI y su precio. Los agentes podrán elegirlo. */
+export function useAddModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { model: string; usd_per_1m_input: string; usd_per_1m_output: string }) => api<AiModelPrice>('/platform/ai/models', { method: 'POST', body: b }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
+  });
 }
 
 export function useSetModelPrice() {

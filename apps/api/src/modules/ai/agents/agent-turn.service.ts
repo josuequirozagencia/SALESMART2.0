@@ -23,8 +23,8 @@ export interface TurnRequest {
   readonly history: ReadonlyArray<{ role: 'user' | 'assistant'; text: string }>;
   /** El contacto con cuyos datos se llenan las variables; sin él, un ejemplo. */
   readonly contactId: string | null;
-  /** `test` (simulador) o `use` (conversación real): así se anota en el libro de créditos. */
-  readonly kind: 'use' | 'test';
+  /** `test` (simulador), `use` (conversación real) o `suggest` (borrador para la persona, v11 S4): así se anota en el libro de créditos. */
+  readonly kind: 'use' | 'test' | 'suggest';
   /** Herramientas del agente (M8.5b): qué se le ofrece al modelo y cómo se ejecuta cada llamada que pida. Sin esto, el modelo solo responde texto. */
   readonly tools?: { readonly config: ToolConfig; readonly execute: (call: ToolCall) => Promise<ToolResult> };
 }
@@ -77,7 +77,7 @@ ${guidance}` : prompt.system, fragments, history: req.history, message });
     const price = await this.gateway.chatPrice(settings.model);
     if (!price) throw this.unavailable(new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado'));
     const rate = await this.pricing.resolve(TenantContext.current().organizationId);
-    const ref = `${req.kind === 'test' ? 'Prueba del agente' : 'Agente'} ${settings.name}`.slice(0, 200);
+    const ref = `${req.kind === 'test' ? 'Prueba del agente' : req.kind === 'suggest' ? 'Sugerencia de respuesta' : 'Agente'} ${settings.name}`.slice(0, 200);
     const defsChars = JSON.stringify(defs).length;
     // Una vuelta de chat: reserva (el peor caso), llamada y cobro de lo realmente usado; un fallo libera la reserva
     const round = async (withTools: boolean): Promise<{ out: ChatOutcome; credits: number }> => {

@@ -918,6 +918,13 @@
       "when": 1794600000000,
       "tag": "0130_v11_s3_platform_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "7",
+      "when": 1794700000000,
+      "tag": "0131_v11_s4_ai_suggestions",
+      "breakpoints": true
     }
   ]
 }

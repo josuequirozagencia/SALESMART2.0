@@ -5,7 +5,7 @@ import { PlatformOnly, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { AiAdminService } from './ai-admin.service';
 import { AiCreditsService } from './ai-credits.service';
-import { adminOrganizationsQuerySchema, creditsQuerySchema, grantSchema, idempotencyKeySchema, marginSchema, modelParamSchema, modelPriceSchema, pricingSchema, type AdminOrganizationsQuery, type CreditsQuery, type GrantDto, type MarginDto, type ModelPriceDto, type PricingDto } from './ai.dto';
+import { adminOrganizationsQuerySchema, createModelSchema, creditsQuerySchema, grantSchema, idempotencyKeySchema, marginSchema, modelParamSchema, modelPriceSchema, pricingSchema, type AdminOrganizationsQuery, type CreateModelDto, type CreditsQuery, type GrantDto, type MarginDto, type ModelPriceDto, type PricingDto } from './ai.dto';
 
 const orgParam = new ZodValidationPipe(z.uuid());
 
@@ -56,6 +56,12 @@ export class AiAdminController {
   @Header('Cache-Control', 'no-store')
   models() {
     return this.admin.listModels();
+  }
+
+  @Post('models')
+  @Header('Cache-Control', 'no-store')
+  addModel(@Body(new ZodValidationPipe(createModelSchema)) b: CreateModelDto) {
+    return this.admin.addModel(b);
   }
 
   @Put('models/:model')

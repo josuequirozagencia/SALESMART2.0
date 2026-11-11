@@ -225,6 +225,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
   const [always, setAlways] = useState(a.always_on);
   const [capture, setCapture] = useState<string[]>(a.capture_fields ?? []);
   const [tasks, setTasks] = useState(a.tasks_enabled ?? false);
+  const [suggestions, setSuggestions] = useState(a.suggestions_enabled ?? false);
   const [channels, setChannels] = useState<string[]>(a.channel_ids);
   const [error, setError] = useState<string>();
   const [ok, setOk] = useState(false);
@@ -235,7 +236,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
     setOk(false);
     setError(undefined);
     try {
-      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks } });
+      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions } });
       await m.setChannels.mutateAsync({ id: a.id, ids: channels });
       setOk(true);
     } catch (e) {
@@ -274,6 +275,13 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
           </ul>
         )}
         <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={tasks} onChange={(e) => setTasks(e.target.checked)} />Puede crear tareas de seguimiento para el responsable de la conversación</label>
+      </section>
+      <section aria-label="Sugerencias para el equipo" className="grid gap-2">
+        <h3 className="text-[13.5px] font-bold">Ayuda para las personas del equipo</h3>
+        <label className="flex items-start gap-2 text-[13.5px] font-semibold">
+          <input type="checkbox" role="switch" checked={suggestions} onChange={(e) => setSuggestions(e.target.checked)} className="mt-1" />
+          <span>Sugerir respuestas a los asesores<span className="block text-[12.5px] font-normal text-muted">En el Inbox aparece el botón «Sugerir»: la IA prepara un borrador que la persona revisa, edita y envía; nunca se envía solo, ni siquiera con el agente pausado. Cada sugerencia gasta créditos de IA (hasta 50 por día en la empresa).</span></span>
+        </label>
       </section>
       <section aria-label="Conexiones" className="grid gap-2">
         <h3 className="text-[13.5px] font-bold">Conexiones donde responde</h3>

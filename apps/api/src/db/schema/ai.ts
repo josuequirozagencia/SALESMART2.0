@@ -44,8 +44,8 @@ export const aiLedger = tenantTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
-    check('ai_ledger_kind_valid', sql`${t['kind']!} IN ('welcome', 'grant', 'use', 'test')`),
-    check('ai_ledger_sign_by_kind', sql`(${t['kind']!} IN ('welcome', 'grant') AND ${t['credits']!} > 0) OR (${t['kind']!} IN ('use', 'test') AND ${t['credits']!} < 0)`),
+    check('ai_ledger_kind_valid', sql`${t['kind']!} IN ('welcome', 'grant', 'use', 'test', 'suggest')`),
+    check('ai_ledger_sign_by_kind', sql`(${t['kind']!} IN ('welcome', 'grant') AND ${t['credits']!} > 0) OR (${t['kind']!} IN ('use', 'test', 'suggest') AND ${t['credits']!} < 0)`),
     check('ai_ledger_balance_valid', sql`${t['balanceAfter']!} >= 0`),
     check('ai_ledger_ref_len', sql`${t['ref']!} IS NULL OR length(${t['ref']!}) <= 200`),
     check('ai_ledger_key_shape', sql`${t['idempotencyKey']!} IS NULL OR length(${t['idempotencyKey']!}) BETWEEN 8 AND 100`),
@@ -71,7 +71,7 @@ export const aiHolds = tenantTable(
   },
   (t) => [
     check('ai_holds_credits_valid', sql`${t['credits']!} > 0`),
-    check('ai_holds_kind_valid', sql`${t['kind']!} IN ('use', 'test')`),
+    check('ai_holds_kind_valid', sql`${t['kind']!} IN ('use', 'test', 'suggest')`),
     check('ai_holds_status_valid', sql`${t['status']!} IN ('active', 'settled', 'released', 'expired')`),
     check('ai_holds_ref_len', sql`${t['ref']!} IS NULL OR length(${t['ref']!}) <= 200`),
     index('ai_holds_active_idx').on(t['organizationId']!, t['createdAt']!).where(sql`${t['status']!} = 'active'`),

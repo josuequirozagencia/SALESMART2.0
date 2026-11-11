@@ -30,6 +30,7 @@ import { OpenAiProvider } from './openai.provider';
 import { AgentRuntimeJob } from './runtime/agent-runtime.job';
 import { AgentRuntimeService } from './runtime/agent-runtime.service';
 import { ConversationAiController } from './runtime/conversation-ai.controller';
+import { ReplySuggestionService } from './runtime/reply-suggestion.service';
 
 /** El adaptador de IA que dice la configuración (las pruebas registran el suyo sobreescribiendo `AI_PROVIDER`). */
 export function buildAiProvider(cfg: AppConfig): AIProvider {
@@ -50,6 +51,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     AgentTurnService,
     AgentToolsService,
     AgentRuntimeService,
+    ReplySuggestionService,
     AgentRuntimeJob,
     KnowledgeProcessorService,
     KnowledgeJob,
