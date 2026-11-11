@@ -237,6 +237,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/knowledge/documents/:id', kind: 'tenant', isolationTest: '../../ai/knowledge.test.ts' },
   { route: 'POST /v1/knowledge/search', kind: 'tenant', isolationTest: '../../ai/knowledge.test.ts' },
   { route: 'GET /v1/platform/ai/models', kind: 'platform', test: '../../ai/knowledge.test.ts' },
+  { route: 'POST /v1/platform/ai/models', kind: 'platform', test: '../../ai/knowledge.test.ts' },
   { route: 'PUT /v1/platform/ai/models/:model', kind: 'platform', test: '../../ai/knowledge.test.ts' },
   // Agentes de IA (M8.3, ADR-20/53). Pruebas: test/ai/agents.test.ts (A↔B, una conexión un agente, foto, variables, vista previa)
   { route: 'GET /v1/agents', kind: 'tenant', isolationTest: '../../ai/agents.test.ts' },
@@ -291,6 +292,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/conversations/:id/ai', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
   { route: 'POST /v1/conversations/:id/ai/pause', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
   { route: 'POST /v1/conversations/:id/ai/resume', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
+  { route: 'POST /v1/conversations/:id/ai/suggest', kind: 'tenant', isolationTest: '../../ai/reply-suggestions.test.ts' },
   { route: 'GET /v1/ghl/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'POST /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'GET /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },

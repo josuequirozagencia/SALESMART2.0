@@ -4,7 +4,7 @@ import { PlatformContext, TenantContext } from '../../tenant';
 import { CompaniesService, OrgDirectoryService } from '../organizations';
 import { AiModelPricesService, AiPricingService, PlatformAuditService, type AiPricingView, type ModelPriceView } from '../platform';
 import { AiCreditsService, type CreditsView, type LedgerItemPlatformView, type LedgerItemView } from './ai-credits.service';
-import type { AdminOrganizationsQuery, GrantDto, MarginDto, ModelPriceDto, PricingDto } from './ai.dto';
+import type { AdminOrganizationsQuery, CreateModelDto, GrantDto, MarginDto, ModelPriceDto, PricingDto } from './ai.dto';
 
 export interface AdminOrganizationItem {
   id: string;
@@ -52,6 +52,10 @@ export class AiAdminService {
 
   setModelPrice(model: string, b: ModelPriceDto): Promise<ModelPriceView> {
     return this.models.set(model, b);
+  }
+
+  addModel(b: CreateModelDto): Promise<ModelPriceView> {
+    return this.models.create(b.model, b);
   }
 
   setPricing(b: PricingDto): Promise<AiPricingView> {

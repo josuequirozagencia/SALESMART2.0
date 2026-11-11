@@ -10,6 +10,7 @@ import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
 import { AttachmentPicker } from './AttachmentPicker';
 import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
 import { readDraft, writeDraft } from './draftStore';
+import { SuggestButton, SuggestionCard, useReplySuggestion } from './ReplySuggestion';
 import { EmojiPicker } from './EmojiPicker';
 import { mentionAt, mentionIdsIn, suggestMentions, type Picked } from './mentions';
 import { kindLabel } from './inboxFormat';
@@ -56,6 +57,7 @@ export function suggest(items: readonly ResolvedQuickReply[], query: string): Re
  * Cuando no se puede escribir al cliente explica por qué; las notas siguen disponibles para quien tenga permiso.
  */
 export function Composer({ c }: { c: Conversation }) {
+  const suggestion = useReplySuggestion(c);
   const reply = useSendReply(c.id);
   const note = useSendNote(c.id);
   const media = useSendMedia(c.id);
@@ -109,6 +111,13 @@ export function Composer({ c }: { c: Conversation }) {
   const canWrite = noteMode ? c.can.note : true;
   const send = noteMode ? note : pendingAttachment ? (media as unknown as typeof reply) : reply;
   const trimmed = text.trim();
+  // v11 S4: el borrador de la IA nunca se envía solo; «Usar» lo pone en el redactor (reemplaza o se agrega al final) y la persona lo revisa
+  const useDraft = (draft: string, how: 'replace' | 'append'): void => {
+    const next = how === 'append' && text.trim() !== '' ? [text.trimEnd(), draft].join(String.fromCharCode(10, 10)) : draft;
+    setText(next);
+    setCaret(next.length);
+    ref.current?.focus();
+  };
   const quick = useConversationQuickReplies(c.id, c.can.reply && !noteMode);
   const slash = !noteMode && c.can.reply ? slashAt(text, caret) : null;
   const options = useMemo(() => (slash && quick.data ? suggest(quick.data.items, slash.query) : []), [slash, quick.data]);
@@ -288,6 +297,7 @@ export function Composer({ c }: { c: Conversation }) {
       ) : null}
       {upload.isPending ? <p role="status" className="text-[12.5px] text-muted">Subiendo la nota de voz…</p> : null}
       {voice.error || voiceError ? <Alert>{voice.error ?? voiceError}</Alert> : null}
+      {!noteMode ? <SuggestionCard s={suggestion} hasText={trimmed !== ''} onUse={useDraft} /> : null}
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : pendingAttachment ? 'No pudimos enviar el archivo.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
       <div className="relative flex items-end gap-2">
@@ -384,6 +394,7 @@ export function Composer({ c }: { c: Conversation }) {
           </div>
           {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
           {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
+          {!noteMode && !pendingAttachment ? <SuggestButton s={suggestion} /> : null}
           {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
           <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
 
@@ -405,6 +416,7 @@ export function Composer({ c }: { c: Conversation }) {
               </>
             ) : null}
             {c.can.reply && c.channel.kind !== 'ghl' && c.channel.kind !== 'qr' ? <SheetButton icon="form" {...(c.window.open ? {} : { primary: true, hint: 'La ventana de 24 h está cerrada: solo puedes escribir con una plantilla' })} onClick={() => { setSheet(false); setPicker(true); }}>Plantillas</SheetButton> : null}
+            {!noteMode && !pendingAttachment && suggestion.available ? <SheetButton icon="bot" disabled={suggestion.pending} hint="La IA prepara un borrador que tú revisas y envías" onClick={() => { setSheet(false); suggestion.run(); }}>Sugerir respuesta</SheetButton> : null}
             {c.can.reply ? <SheetButton icon="bolt" onClick={() => { setSheet(false); setManage(true); }}>Respuestas rápidas</SheetButton> : null}
             {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <SheetButton icon="clock" disabled={!trimmed || pending.length > 0} hint={trimmed ? undefined : 'Escribe el mensaje primero'} onClick={() => { setSheet(false); setScheduling(true); }}>Programar mensaje</SheetButton> : null}
             {c.can.note ? (

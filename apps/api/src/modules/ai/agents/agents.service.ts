@@ -57,6 +57,7 @@ export interface AgentDetail extends AgentCard {
   always_on: boolean;
   capture_fields: string[];
   tasks_enabled: boolean;
+  suggestions_enabled: boolean;
   document_ids: string[];
   channel_ids: string[];
   /** Qué le falta para poder responder (la pantalla lo muestra como lista de pendientes). */
@@ -230,6 +231,7 @@ export class AgentsService {
           }
         }
         if (patch.tasks_enabled !== undefined) note('tasks_enabled', cur.tasksEnabled, patch.tasks_enabled, () => (set.tasksEnabled = patch.tasks_enabled!));
+        if (patch.suggestions_enabled !== undefined) note('suggestions_enabled', cur.suggestionsEnabled, patch.suggestions_enabled, () => (set.suggestionsEnabled = patch.suggestions_enabled!));
         if (changes.length === 0) return;
         await tx.update(agents).set(set).where(eq(agents.id, id));
         for (const c of changes) await writeAudit(tx, { entityType: 'agent', entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
@@ -389,9 +391,9 @@ export class AgentsService {
   }
 
   /** Los ajustes que necesita el simulador (y, después, el agente en vivo): modelo, límites y cómo dividir. 404 si no existe. */
-  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; transferQueueId: string | null }> {
+  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; suggestionsEnabled: boolean; transferQueueId: string | null }> {
     const r = await this.db.withTenant((tx) => this.byId(tx, id, false));
-    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, transferQueueId: r.transferQueueId };
+    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, suggestionsEnabled: r.suggestionsEnabled, transferQueueId: r.transferQueueId };
   }
 
   // ------------------------------------------------------------------ interno
@@ -430,6 +432,7 @@ export class AgentsService {
       always_on: r.alwaysOn,
       capture_fields: r.captureFields,
       tasks_enabled: r.tasksEnabled,
+      suggestions_enabled: r.suggestionsEnabled,
       document_ids: rel.documentIds,
       channel_ids: rel.channels.map((c) => c.id),
       readiness: { instructions: r.personality.trim() !== '' || r.objective.trim() !== '', documents: rel.documentIds.length > 0, channel: rel.channels.length > 0 },

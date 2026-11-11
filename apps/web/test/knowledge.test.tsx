@@ -235,4 +235,30 @@ describe('Plataforma › Modelos de IA', () => {
     await waitFor(() => expect(w.puts).toEqual([{ usd_per_1m_input: '0.2', usd_per_1m_output: '0.6' }]));
     expect(await form.findByText('Precio guardado.')).toBeInTheDocument();
   });
+
+  it('«Agregar un modelo de chat»: valida el nombre y los precios, lo manda al servidor y avisa que los agentes ya pueden elegirlo (v11 S4)', async () => {
+    const w = pw();
+    const posts: unknown[] = [];
+    mockApi({ ...srv(w), 'POST /platform/ai/models': (c) => { posts.push(c.body); const b = c.body as { model: string; usd_per_1m_input: string; usd_per_1m_output: string }; w.models.push({ model: b.model, kind: 'chat', usd_per_1m_input: b.usd_per_1m_input, usd_per_1m_output: b.usd_per_1m_output, updated_at: AT }); return { status: 201, body: w.models[w.models.length - 1] }; } });
+    renderApp('/platform/ai');
+    const form = within(await screen.findByRole('form', { name: 'Agregar un modelo de chat' }));
+    await userEvent.type(form.getByLabelText('Nombre del modelo'), 'modelo con espacios');
+    await userEvent.type(form.getByLabelText('Entrada (USD por millón de tokens)'), '0.4');
+    await userEvent.type(form.getByLabelText('Salida (USD por millón de tokens)'), '1.6');
+    await userEvent.click(form.getByRole('button', { name: 'Agregar modelo' }));
+    expect(await form.findByRole('alert')).toHaveTextContent(/nombre exacto del modelo/);
+    expect(posts).toHaveLength(0);
+    await userEvent.clear(form.getByLabelText('Nombre del modelo'));
+    await userEvent.type(form.getByLabelText('Nombre del modelo'), 'gpt-4.1-mini');
+    await userEvent.clear(form.getByLabelText('Salida (USD por millón de tokens)'));
+    await userEvent.type(form.getByLabelText('Salida (USD por millón de tokens)'), '99999');
+    await userEvent.click(form.getByRole('button', { name: 'Agregar modelo' }));
+    expect(await form.findByRole('alert')).toHaveTextContent(/0 a 10000/);
+    await userEvent.clear(form.getByLabelText('Salida (USD por millón de tokens)'));
+    await userEvent.type(form.getByLabelText('Salida (USD por millón de tokens)'), '1.6');
+    await userEvent.click(form.getByRole('button', { name: 'Agregar modelo' }));
+    await waitFor(() => expect(posts).toEqual([{ model: 'gpt-4.1-mini', usd_per_1m_input: '0.4', usd_per_1m_output: '1.6' }]));
+    expect(await form.findByText(/Modelo gpt-4.1-mini agregado/)).toBeInTheDocument();
+    expect(await screen.findByRole('form', { name: 'Precio de gpt-4.1-mini' })).toBeInTheDocument();
+  });
 });

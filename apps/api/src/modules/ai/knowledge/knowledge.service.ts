@@ -188,7 +188,7 @@ export class KnowledgeService {
    * Busca los fragmentos más parecidos a una pregunta. Cuesta créditos (vectorizar la pregunta, apenas uno) y por eso falla con 409 `AI_NO_CREDITS` sin saldo. `documentIds` limita la búsqueda a esos
    * documentos (los del agente, en M8.3); sin él, todos los activos y listos de la empresa. Los documentos de OTRA empresa nunca aparecen: la transacción es de la empresa del contexto.
    */
-  async search(input: { query: string; limit?: number | undefined; documentIds?: readonly string[] | undefined; agentId?: string | undefined; kind?: 'use' | 'test' }): Promise<SearchView> {
+  async search(input: { query: string; limit?: number | undefined; documentIds?: readonly string[] | undefined; agentId?: string | undefined; kind?: 'use' | 'test' | 'suggest' }): Promise<SearchView> {
     const query = input.query.trim();
     if (query.length === 0) throw new ValidationError([{ path: 'query', code: 'required', message: 'Escribe la pregunta' }]);
     const limit = Math.min(Math.max(input.limit ?? 5, 1), SEARCH_LIMIT_MAX);

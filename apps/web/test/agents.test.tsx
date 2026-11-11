@@ -24,6 +24,7 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   always_on: true,
   capture_fields: [],
   tasks_enabled: false,
+  suggestions_enabled: false,
   document_ids: [],
   channel_ids: [],
   readiness: { instructions: true, documents: false, channel: false },
@@ -314,7 +315,7 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(d.getByLabelText(/Responder a toda hora/));
     await userEvent.click(conns.getByRole('checkbox', { name: 'Atender «WhatsApp Norte»' }));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false }));
     await waitFor(() => expect(w.calls['channels']![0]!.body).toEqual({ channel_ids: ['c1'] }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
   });

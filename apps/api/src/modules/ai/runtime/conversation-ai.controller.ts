@@ -5,6 +5,7 @@ import type { AuthedRequest } from '../../../http/access.guard';
 import { RequirePermission } from '../../../rbac';
 import type { InboxAccess } from '../../inbox';
 import { AgentRuntimeService } from './agent-runtime.service';
+import { ReplySuggestionService } from './reply-suggestion.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
 
@@ -22,7 +23,10 @@ const accessOf = (req: AuthedRequest): InboxAccess => ({
  */
 @Controller('conversations')
 export class ConversationAiController {
-  constructor(@Inject(AgentRuntimeService) private readonly runtime: AgentRuntimeService) {}
+  constructor(
+    @Inject(AgentRuntimeService) private readonly runtime: AgentRuntimeService,
+    @Inject(ReplySuggestionService) private readonly suggestions: ReplySuggestionService,
+  ) {}
 
   @RequirePermission('inbox.read')
   @Get(':id/ai')
@@ -45,5 +49,14 @@ export class ConversationAiController {
   @Header('Cache-Control', 'no-store')
   resume(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
     return this.runtime.resumeByPerson(accessOf(req), id);
+  }
+
+  /** Un borrador de respuesta para quien atiende (v11 S4, ADR-61): NO envía nada ni toca al agente; la persona lo edita y lo envía. `inbox.reply`; gasta créditos de IA. */
+  @RequirePermission('inbox.reply')
+  @Post(':id/ai/suggest')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  suggest(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.suggestions.suggest(accessOf(req), id);
   }
 }

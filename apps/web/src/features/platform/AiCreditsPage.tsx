@@ -4,7 +4,7 @@ import { useIdempotencyKey } from '../../lib/idempotency';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
-import { KIND_LABEL, useAiLedger, useAiModels, useAiOrgs, useAiPlatformMutations, useSetModelPrice, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
+import { KIND_LABEL, useAiLedger, useAiModels, useAiOrgs, useAddModel, useAiPlatformMutations, useSetModelPrice, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
 
 const n = (v: number): string => v.toLocaleString('es-EC');
 const when = (iso: string): string => new Date(iso).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' });
@@ -70,6 +70,41 @@ function ModelRow({ m }: { m: AiModelPrice }) {
   );
 }
 
+/** «Agregar un modelo de chat»: el nombre exacto que usa OpenAI (por ejemplo, gpt-4.1-mini) y lo que cobra por millón de tokens. Después, cada agente puede elegirlo en su pestaña General. */
+function AddModelForm() {
+  const add = useAddModel();
+  const [model, setModel] = useState('');
+  const [input, setInput] = useState('');
+  const [output, setOutput] = useState('');
+  const [error, setError] = useState<string>();
+  const [done, setDone] = useState<string>();
+  const submit = (e: FormEvent): void => {
+    e.preventDefault();
+    setDone(undefined);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model.trim())) return setError('Escribe el nombre exacto del modelo, sin espacios (por ejemplo, gpt-4.1-mini).');
+    if (!DECIMAL.test(input.trim()) || Number(input) > 10000 || !DECIMAL.test(output.trim()) || Number(output) > 10000) return setError('Los precios son dos números de 0 a 10000.');
+    setError(undefined);
+    add.mutate({ model: model.trim(), usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim() }, {
+      onSuccess: (m) => { setDone(`Modelo ${m.model} agregado: ya lo pueden elegir los agentes.`); setModel(''); setInput(''); setOutput(''); },
+      onError: (e2) => setError(friendlyError(e2, 'No pudimos agregar el modelo.')),
+    });
+  };
+  return (
+    <form onSubmit={submit} noValidate aria-label="Agregar un modelo de chat" className="grid gap-2 rounded-xl border border-dashed border-line p-3">
+      <h3 className="text-[13.5px] font-bold">Agregar un modelo de chat</h3>
+      <p className="text-[12.5px] text-muted">Escribe el nombre exacto del modelo en OpenAI y su precio (están en la página de precios de OpenAI). Sin precio no se puede usar. Los modelos de razonamiento más nuevos pueden exigir ajustes: pruébalo en el simulador del agente antes de activarlo.</p>
+      <div className="grid grid-cols-1 gap-2 min-[640px]:grid-cols-4 min-[640px]:items-end">
+        <Field label="Nombre del modelo">{(f) => <Input {...f} value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-4.1-mini" autoComplete="off" />}</Field>
+        <Field label="Entrada (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} />}</Field>
+        <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
+        <div><Button type="submit" variant="primary" loading={add.isPending}>Agregar modelo</Button></div>
+      </div>
+      {error ? <Alert>{error}</Alert> : null}
+      {done ? <Alert kind="ok">{done}</Alert> : null}
+    </form>
+  );
+}
+
 function ModelPrices() {
   const q = useAiModels();
   return (
@@ -79,6 +114,7 @@ function ModelPrices() {
       {q.isLoading ? <Spinner label="Cargando modelos" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los modelos.')}</Alert> : null}
       {q.data ? <ul className="divide-y divide-line">{q.data.map((m) => <ModelRow key={m.model} m={m} />)}</ul> : null}
+      <AddModelForm />
     </section>
   );
 }

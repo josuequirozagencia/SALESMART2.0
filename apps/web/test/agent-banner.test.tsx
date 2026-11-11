@@ -20,7 +20,7 @@ const conv = (over: Partial<Conversation> = {}): Conversation => ({
 });
 const msg = (over: Partial<ChatMessage> = {}): ChatMessage => ({ id: 'm1', direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola, ¿qué horario tienen?', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: ago(10 * MIN), delivered_at: null, read_at: null, is_note: false, template: null, attachment: null, ...over });
 
-const STATUS = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: { id: 'a1', name: 'Sofía' }, state: 'active', reason: null, can_control: true, ...over });
+const STATUS = (over: Partial<AgentStatus> = {}): AgentStatus => ({ agent: { id: 'a1', name: 'Sofía', suggestions_enabled: false }, state: 'active', reason: null, can_control: true, ...over });
 
 function server(w: { status: AgentStatus | 'error'; posts: string[]; messages?: ChatMessage[]; conv?: Conversation }) {
   const routes: Record<string, Handler> = {

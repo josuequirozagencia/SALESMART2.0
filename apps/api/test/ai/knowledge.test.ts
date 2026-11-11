@@ -6,12 +6,13 @@
 //   DELETE /v1/knowledge/documents/:id
 //   POST /v1/knowledge/search
 //   GET /v1/platform/ai/models
+//   POST /v1/platform/ai/models
 //   PUT /v1/platform/ai/models/:model
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Client } from 'pg';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
@@ -645,5 +646,30 @@ describe('permisos de la base de datos y restricciones', () => {
     await expect(admin.query(`UPDATE ai_model_prices SET usd_per_1m_input = 10001`)).rejects.toThrow(/ai_model_prices_price_valid/);
     await expect(admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input) VALUES ('../x', 'chat', 1)`)).rejects.toThrow(/ai_model_prices_model_shape/);
     await expect(admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input) VALUES ('ok-model', 'video', 1)`)).rejects.toThrow(/ai_model_prices_kind_valid/);
+  });
+});
+
+describe('Súper Admin: dar de alta un modelo de chat (v11 S4)', () => {
+  afterEach(async () => { await admin.query(`DELETE FROM ai_model_prices WHERE model = 'gpt-4.1-mini'`); app.get(AiModelPricesService).invalidate(); }); // la tabla de plataforma no se trunca: no se deja el modelo para otras pruebas
+  it('POST /platform/ai/models: solo el Súper Admin; crea modelos de CHAT con su precio, 409 si ya existe, valida y audita', async () => {
+    const body = { model: 'gpt-4.1-mini', usd_per_1m_input: '0.4', usd_per_1m_output: '1.6' };
+    for (const t of [T.alice, T.carol]) expect((await call('POST', '/platform/ai/models', t, body)).status).toBe(403);
+    expect((await call('POST', '/platform/ai/models', undefined, body)).status).toBe(401);
+    const ok = await call('POST', '/platform/ai/models', T.root, body);
+    expect(ok.status).toBe(201);
+    expect(await json(ok)).toMatchObject({ model: 'gpt-4.1-mini', kind: 'chat', usd_per_1m_input: '0.400000', usd_per_1m_output: '1.600000' });
+    const list = await call('GET', '/platform/ai/models', T.root).then((r) => json<Array<Row>>(r));
+    expect(list.map((m) => m['model'])).toEqual(['gpt-4.1-mini', 'gpt-4o-mini', 'text-embedding-3-small']);
+    expect((await call('POST', '/platform/ai/models', T.root, body)).status).toBe(409);
+    for (const bad of [{ ...body, model: '../x' }, { ...body, model: '' }, { ...body, usd_per_1m_input: '10001' }, { model: 'sin-precio' }, { ...body, model: 'otro', kind: 'embedding' }]) {
+      expect((await call('POST', '/platform/ai/models', T.root, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    const audit = (await admin.query(`SELECT details FROM platform_audit WHERE action = 'ai.model_price.create'`)).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].details).toMatchObject({ model: 'gpt-4.1-mini', kind: 'chat', input: '0.4', output: '1.6' });
+    // los agentes ya pueden elegirlo
+    const opts = await call('GET', '/agents/options', T.alice).then((r) => json<{ models: string[] }>(r));
+    expect(opts.models).toContain('gpt-4.1-mini');
+    expect(opts.models).not.toContain('text-embedding-3-small');
   });
 });

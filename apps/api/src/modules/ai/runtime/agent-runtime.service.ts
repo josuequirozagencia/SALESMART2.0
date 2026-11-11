@@ -44,7 +44,7 @@ interface Claimed {
 }
 
 export interface AgentStatusView {
-  agent: { id: string; name: string } | null;
+  agent: { id: string; name: string; suggestions_enabled: boolean } | null;
   /** `idle`: el agente no ha intervenido (una persona la lleva); `active` contesta; `paused` lo detuvo una persona o faltan créditos; `handed_off` pasó a una persona. */
   state: 'idle' | 'active' | 'paused' | 'handed_off';
   reason: string | null;
@@ -309,7 +309,7 @@ export class AgentRuntimeService {
       const { c } = await loadConversation(tx, scope, conversationId);
       const agentId = await this.channelAgent(tx, conversationId);
       const [state] = await tx.select({ status: aiConversationState.status, reason: aiConversationState.reason, outcome: aiConversationState.lastOutcome }).from(aiConversationState).where(eq(aiConversationState.conversationId, conversationId)).limit(1);
-      const agent = agentId ? ((await tx.select({ id: agents.id, name: agents.name }).from(agents).where(eq(agents.id, agentId)).limit(1))[0] ?? null) : null;
+      const agent = agentId ? ((await tx.select({ id: agents.id, name: agents.name, suggestions_enabled: agents.suggestionsEnabled }).from(agents).where(eq(agents.id, agentId)).limit(1))[0] ?? null) : null;
       if (!agent) return { agent: null, state: 'idle', reason: null, outcome: null, resume_blocked: null, can_control: false };
       const open = c.status !== 'closed';
       const unattended = c.status === 'unassigned' || c.status === 'pending';

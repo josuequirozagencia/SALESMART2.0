@@ -42,3 +42,6 @@ export const modelPriceSchema = z.strictObject({
 });
 export type ModelPriceDto = z.infer<typeof modelPriceSchema>;
 export const modelParamSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
+/** Dar de alta un modelo de chat (v11 S4): su nombre exacto en el proveedor y su precio. */
+export const createModelSchema = modelPriceSchema.extend({ model: modelParamSchema });
+export type CreateModelDto = z.infer<typeof createModelSchema>;

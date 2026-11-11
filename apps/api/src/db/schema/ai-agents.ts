@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { boolean, check, foreignKey, index, integer, numeric, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { channelAccounts } from './channels';
+import { conversations } from './conversations';
 import { tenantTable } from './helpers';
 import { users } from './identity';
 import { knowledgeDocuments } from './ai-knowledge';
@@ -47,6 +48,8 @@ export const agents = tenantTable(
     captureFields: text('capture_fields').array().notNull().default(sql`'{}'::text[]`),
     /** El agente puede crear tareas de seguimiento para el responsable de la conversación (M8.5b). */
     tasksEnabled: boolean('tasks_enabled').notNull().default(false),
+    /** Las personas del equipo pueden pedirle un borrador de respuesta en el Inbox (v11 S4, ADR-61): el agente no envía nada, solo sugiere. Por omisión apagado (cada sugerencia gasta créditos). */
+    suggestionsEnabled: boolean('suggestions_enabled').notNull().default(false),
     /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
     isSample: boolean('is_sample').notNull().default(false),
     /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
@@ -128,5 +131,32 @@ export const agentTestRuns = tenantTable(
     foreignKey({ name: 'agent_test_runs_agent_fk', columns: [t['organizationId']!, t['agentId']!], foreignColumns: [agents.organizationId, agents.id] }),
     check('agent_test_runs_counts_valid', sql`${t['hits']!} >= 0 AND ${t['tokensIn']!} >= 0 AND ${t['tokensOut']!} >= 0 AND ${t['credits']!} >= 0`),
     index('agent_test_runs_recent_idx').on(t['organizationId']!, t['createdAt']!),
+  ],
+);
+
+/**
+ * Metadatos de cada SUGERENCIA de respuesta pedida por una persona en el Inbox (v11 S4, ADR-61): quién, sobre qué conversación y con qué agente, cuántos créditos y tokens costó. **Nunca el texto** (ni de la
+ * sugerencia ni de lo que escribió el cliente). Sirve para el tope diario por empresa y para saber cuánto cuestan. Solo de inserción.
+ */
+export const aiSuggestionRuns = tenantTable(
+  'ai_suggestion_runs',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    agentId: uuid('agent_id').notNull(),
+    conversationId: uuid('conversation_id').notNull(),
+    userId: uuid('user_id').references(() => users.id),
+    /** ¿Se encontraron fragmentos de los documentos para esa pregunta? */
+    grounded: boolean('grounded').notNull(),
+    hits: integer('hits').notNull().default(0),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    credits: integer('credits').notNull().default(0),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'ai_suggestion_runs_agent_fk', columns: [t['organizationId']!, t['agentId']!], foreignColumns: [agents.organizationId, agents.id] }),
+    foreignKey({ name: 'ai_suggestion_runs_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
+    check('ai_suggestion_runs_counts_valid', sql`${t['hits']!} >= 0 AND ${t['tokensIn']!} >= 0 AND ${t['tokensOut']!} >= 0 AND ${t['credits']!} >= 0`),
+    index('ai_suggestion_runs_recent_idx').on(t['organizationId']!, t['createdAt']!),
   ],
 );

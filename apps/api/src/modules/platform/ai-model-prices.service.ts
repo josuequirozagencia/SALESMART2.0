@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { eq } from 'drizzle-orm';
 import { aiModelPrices, Database } from '../../db';
-import { NotFoundError } from '../../errors';
+import { ConflictError, NotFoundError } from '../../errors';
 import { PlatformContext, TenantContext } from '../../tenant';
 import { PlatformAuditService } from './platform-audit.service';
 
@@ -61,7 +61,22 @@ export class AiModelPricesService {
     return rows.map((r) => ({ model: r.model, kind: r.kind as ModelPrice['kind'], usd_per_1m_input: r.usdPer1mInput, usd_per_1m_output: r.usdPer1mOutput, updated_at: r.updatedAt.toISOString() }));
   }
 
-  /** Cambia el precio de un modelo que YA existe (los modelos nuevos se dan de alta con una migración, junto con el código que los usa). */
+  /**
+   * Da de alta un modelo de CHAT nuevo (v11 S4: cada agente puede elegir entre los que el Súper Admin cargó). Los de embeddings no se agregan aquí: cambiarlos obliga a revectorizar las bibliotecas.
+   * 409 si ya existe. El precio es el que el Súper Admin teclea (sale de la página de precios del proveedor); sin precio no se puede usar el modelo.
+   */
+  async create(model: string, input: { usd_per_1m_input: string; usd_per_1m_output: string }): Promise<ModelPriceView> {
+    const actor = PlatformContext.current().actorUserId;
+    const [exists] = await this.db.withPlatform((tx) => tx.select({ model: aiModelPrices.model }).from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1));
+    if (exists) throw new ConflictError('MODEL_EXISTS', 'Ese modelo ya está cargado: cambia su precio en la lista');
+    await this.db.withPlatform((tx) => tx.insert(aiModelPrices).values({ model, kind: 'chat', usdPer1mInput: input.usd_per_1m_input, usdPer1mOutput: input.usd_per_1m_output, updatedBy: actor }));
+    this.cache = null;
+    await this.audit.record({ action: 'ai.model_price.create', entityType: 'ai_model', details: { model, kind: 'chat', input: input.usd_per_1m_input, output: input.usd_per_1m_output } });
+    const [row] = await this.db.withPlatform((tx) => tx.select().from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1));
+    return { model, kind: 'chat', usd_per_1m_input: row!.usdPer1mInput, usd_per_1m_output: row!.usdPer1mOutput, updated_at: row!.updatedAt.toISOString() };
+  }
+
+  /** Cambia el precio de un modelo que YA existe. */
   async set(model: string, input: { usd_per_1m_input: string; usd_per_1m_output: string }): Promise<ModelPriceView> {
     const actor = PlatformContext.current().actorUserId;
     const [before] = await this.db.withPlatform((tx) => tx.select().from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1));

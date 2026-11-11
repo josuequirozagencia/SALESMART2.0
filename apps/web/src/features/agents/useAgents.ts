@@ -36,6 +36,8 @@ export interface Agent extends AgentCard {
   /** Variables de campos del contacto que el agente puede rellenar (M8.5b). */
   capture_fields: string[];
   tasks_enabled: boolean;
+  /** Las personas del equipo pueden pedirle un borrador de respuesta en el Inbox (v11 S4). */
+  suggestions_enabled: boolean;
   document_ids: string[];
   channel_ids: string[];
   readiness: { instructions: boolean; documents: boolean; channel: boolean };
@@ -93,6 +95,7 @@ export type AgentPatch = Partial<{
   always_on: boolean;
   capture_fields: string[];
   tasks_enabled: boolean;
+  suggestions_enabled: boolean;
 }>;
 
 export function useAgents() {
