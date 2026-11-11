@@ -4,6 +4,7 @@ export { tenantTable, platformTable, identityTable } from './helpers';
 export { users, organizations, organizationMembers, sessions, authThrottle, emailVerifications, signupAttempts, disposableDomains, passwordResets, roles, permissions, rolePermissions, trials, trialConfig, plans, invitations, organizationOwnershipHistory, organizationDeletions, companyExports, accessSessions, viewAsLog, attributionEndpoints, ghlRoutes, formRoutes, qrRoutes, memberPermissions, memberHistory } from './identity';
 export { auditLogs, platformAudit } from './audit';
 export { providerCredentials, providerSelection } from './providers';
+export { platformBranding } from './branding';
 export { contacts, contactPhones, tags, contactTags, contactTouchEvents, metaEvents, contactLists, contactListMembers, contactImports, contactImportRows, companies, contactCompanies, notes, tasks, taskRecurrences } from './crm';
 export { customFieldDefinitions, customFieldValues } from './custom-fields';
 export { pipelines, pipelineStages, opportunities, stageHistory } from './pipelines';

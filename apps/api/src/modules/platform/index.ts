@@ -6,3 +6,5 @@ export { PlatformCredentialsReader, type ActiveCredentials } from './providers/c
 export { CredentialVault, VaultOpenError } from './providers/credential-vault';
 export { AiPricingService, type AiPrice, type AiPricingView } from './ai-pricing.service';
 export { AiModelPricesService, type ModelPrice, type ModelPriceView } from './ai-model-prices.service';
+export { BrandingStore, type FaviconRef } from './branding/branding.store';
+export { checkFavicon, FAVICON_MAX_BYTES, FAVICON_MIN_PX, FAVICON_MAX_PX, type FaviconCheck, type FaviconType } from './branding/favicon-image';
