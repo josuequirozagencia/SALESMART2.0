@@ -131,7 +131,7 @@ describe('Agendar desde el chat', () => {
     const d = await openDialog();
     await userEvent.click(await d.findByRole('button', { name: 'Agendar' }));
     expect(await d.findByText('Elige el día y la hora')).toBeInTheDocument();
-    await fillWhen(d, todayIn(TZ), '00:01');
+    await fillWhen(d, addDays(todayIn(TZ), -1), '12:00'); // ayer: siempre es pasado (con «hoy 00:01» la prueba fallaba en el primer minuto del día de la empresa)
     await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
     expect(await d.findByText('La cita debe ser en el futuro')).toBeInTheDocument();
     expect(w.posts).toEqual([]);

@@ -1434,7 +1434,8 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     // 6) Otra empresa no ve la cola ni puede tocarla
     const other = { authorization: `Bearer ${await apiLogin(request, await createAccount(request, uniqueEmail('colas-otra')))}` };
     // Otra empresa solo ve su propio departamento de ejemplo (M10.6), nunca los de esta
-    expect(((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: Array<{ is_sample: boolean }> }).items.filter((q) => !q.is_sample)).toEqual([]);
+    // El departamento de ejemplo se crea y DESPUÉS se marca como ejemplo (dos transacciones): un instante después del alta puede verse sin la marca. Se espera a que termine; lo que importa es que no haya departamentos de la otra empresa.
+    await expect.poll(async () => ((await (await request.get(`${apiBase}/v1/queues`, { headers: other })).json()) as { items: Array<{ is_sample: boolean }> }).items.filter((q) => !q.is_sample), { timeout: 10_000 }).toEqual([]);
     const mine = { authorization: `Bearer ${await apiLogin(request, email)}` };
     const qid = ((await (await request.get(`${apiBase}/v1/queues`, { headers: mine })).json()) as { items: Array<{ id: string }> }).items[0]!.id;
     expect((await request.patch(`${apiBase}/v1/queues/${qid}`, { headers: { ...other, 'content-type': 'application/json' }, data: { name: 'Robada' } })).status()).toBe(404);
