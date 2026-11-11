@@ -138,6 +138,16 @@ function contentOf(id: string, message: Record<string, unknown>): Content | 'rea
   }
   const reply = isObj(message['buttonsResponseMessage']) ? message['buttonsResponseMessage'] : isObj(message['listResponseMessage']) ? message['listResponseMessage'] : null;
   if (reply) return { kind: 'interactive', text: str(reply['selectedDisplayText']) ?? str(reply['title']), media: null, extra: {}, inline: null };
+  // El cliente pulsó un botón de una plantilla: lo que dice el botón
+  const tplReply = isObj(message['templateButtonReplyMessage']) ? message['templateButtonReplyMessage'] : null;
+  if (tplReply) return { kind: 'interactive', text: str(tplReply['selectedDisplayText']), media: null, extra: {}, inline: null };
+  // Mensaje con botones o lista (lo manda otra herramienta o la app de la línea): se muestra el texto que ve el cliente
+  const inter = isObj(message['interactiveMessage']) ? message['interactiveMessage'] : null;
+  if (inter) {
+    const part = (k: string, f: string): string | null => (isObj(inter[k]) ? str(inter[k][f]) : null);
+    const text = [part('header', 'title'), part('body', 'text'), part('footer', 'text')].filter((x): x is string => x !== null).join('\n');
+    return { kind: 'interactive', text: text !== '' ? text : null, media: null, extra: {}, inline: null };
+  }
   return { kind: 'unsupported', text: null, media: null, extra: {}, inline: null };
 }
 
