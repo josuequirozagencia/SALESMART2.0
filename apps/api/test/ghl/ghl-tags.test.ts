@@ -588,7 +588,7 @@ describe('panel, permisos y base de datos', () => {
     expect(body.counts).toEqual({ done: 3, skipped: 1 });
     expect(body.items.find((i) => i['status'] === 'skipped')).toMatchObject({ tag: 'A', contact: { name: 'Sin datos' }, can_retry: false });
     // Sin ids ni fechas (un uuid o los milisegundos de una hora pueden contener «593» por azar): lo que no debe aparecer son teléfonos ni correos
-    expect(JSON.stringify(body).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').replace(/d{4}-d{2}-d{2}T[d:.]+Z/g, '')).not.toMatch(/593|@/);
+    expect(JSON.stringify(body).replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '').replace(/\d{4}-\d{2}-\d{2}T[0-9:.]+Z/g, '')).not.toMatch(/593|@/);
     const skipped = await call('GET', '/ghl/outbox?status=skipped', T.alice).then((x) => json<{ items: unknown[] }>(x));
     expect(skipped.items).toHaveLength(1);
     const p1 = await call('GET', '/ghl/outbox?limit=3', T.alice).then((x) => json<{ items: Array<{ id: string }>; next_cursor: string | null }>(x));

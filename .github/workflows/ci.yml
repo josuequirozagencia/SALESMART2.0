@@ -28,7 +28,13 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version-file: .nvmrc, cache: pnpm }
       - name: Instalar PgBouncer (prueba de compatibilidad en modo transacción)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pgbouncer && sudo systemctl stop pgbouncer || true
+        run: |
+          # El espejo de Ubuntu a veces no resuelve el DNS: se reintenta antes de dar la prueba por perdida (REQUIRE_PGBOUNCER=1 la exige).
+          for i in 1 2 3 4; do
+            if sudo apt-get update && sudo apt-get install -y --no-install-recommends pgbouncer; then break; fi
+            echo "apt falló (intento $i); espero y reintento"; sleep $((i * 15))
+          done
+          sudo systemctl stop pgbouncer || true
       - run: pnpm install --frozen-lockfile
       - name: Vulnerabilidades (moderadas o superiores)
         run: pnpm audit --audit-level moderate

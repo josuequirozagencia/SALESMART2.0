@@ -4,12 +4,13 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { Tabs } from '../crm/Tabs';
+import { FollowUpTab } from './FollowUpTab';
 import { Avatar, COVER_CLASS, COVER_LABEL } from './agentUi';
 import { useAgent, useAgentMutations, useAgentOptions, useContactSearch, type Agent, type AgentOptions, type AgentPatch, type Cover, type TestTurn } from './useAgents';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const areaCls = 'min-h-[96px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] font-normal text-fg';
-type TabKey = 'general' | 'instructions' | 'knowledge' | 'behavior' | 'test';
+type TabKey = 'general' | 'instructions' | 'knowledge' | 'behavior' | 'followup' | 'test';
 
 /** El resultado de guardar: «Cambios guardados.» o el motivo del servidor. */
 function Result({ ok, error }: { ok: boolean; error: string | undefined }) {
@@ -412,12 +413,13 @@ export function AgentDialog({ id, justCreated, onClose }: { id: string; justCrea
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar el agente.')}</Alert> : null}
       {a && o ? (
         <>
-          <Tabs label="Secciones del agente" active={tab} onChange={setTab} tabs={[['general', 'General'], ['instructions', 'Instrucciones'], ['knowledge', 'Conocimiento'], ['behavior', 'Comportamiento'], ['test', 'Probar']]} />
+          <Tabs label="Secciones del agente" active={tab} onChange={setTab} tabs={[['general', 'General'], ['instructions', 'Instrucciones'], ['knowledge', 'Conocimiento'], ['behavior', 'Comportamiento'], ['followup', 'Seguimiento'], ['test', 'Probar']]} />
           <div className="max-h-[65vh] overflow-y-auto pr-1">
             {tab === 'general' ? <GeneralTab a={a} o={o} /> : null}
             {tab === 'instructions' ? <InstructionsTab a={a} o={o} /> : null}
             {tab === 'knowledge' ? <KnowledgeTab a={a} o={o} /> : null}
             {tab === 'behavior' ? <BehaviorTab a={a} o={o} /> : null}
+            {tab === 'followup' ? <FollowUpTab agentId={a.id} /> : null}
             {tab === 'test' ? <TestTab a={a} /> : null}
           </div>
           {error ? <Alert>{error}</Alert> : null}

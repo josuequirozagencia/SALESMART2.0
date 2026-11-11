@@ -12,7 +12,7 @@ import { creditsFor } from './credits';
 export const AI_HOLD_TTL_MS = 15 * 60_000;
 export const MAX_GRANT_CREDITS = 1_000_000;
 
-export type LedgerKind = 'welcome' | 'grant' | 'use' | 'test' | 'suggest';
+export type LedgerKind = 'welcome' | 'grant' | 'use' | 'test' | 'suggest' | 'follow_up';
 
 /** Lo que ve el CLIENTE de un movimiento: créditos y a qué corresponde. Nunca el costo ni el margen. */
 export interface LedgerItemView {
@@ -126,7 +126,7 @@ export class AiCreditsService {
    * Aparta `credits` ANTES de llamar al modelo. Falla con 409 `AI_NO_CREDITS` si el saldo disponible (saldo menos lo apartado por otras llamadas) no alcanza; así, con cualquier cantidad de llamadas a la
    * vez, la suma de lo apartado nunca supera el saldo. Devuelve el id de la reserva para liquidarla o liberarla.
    */
-  async reserve(input: { credits: number; kind: 'use' | 'test' | 'suggest'; ref?: string }): Promise<{ holdId: string }> {
+  async reserve(input: { credits: number; kind: 'use' | 'test' | 'suggest' | 'follow_up'; ref?: string }): Promise<{ holdId: string }> {
     if (!Number.isInteger(input.credits) || input.credits < 1) throw new ValidationError([{ path: 'credits', code: 'invalid', message: 'Un número entero mayor que cero' }]);
     const welcome = await this.directory.welcomeCredits();
     return this.db.withTenant(async (tx) => {

@@ -925,6 +925,13 @@
       "when": 1794700000000,
       "tag": "0131_v11_s4_ai_suggestions",
       "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "7",
+      "when": 1794800000000,
+      "tag": "0132_v11_s5_agent_follow_ups",
+      "breakpoints": true
     }
   ]
 }

@@ -293,6 +293,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/conversations/:id/ai/pause', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
   { route: 'POST /v1/conversations/:id/ai/resume', kind: 'tenant', isolationTest: '../../ai/agent-runtime.test.ts' },
   { route: 'POST /v1/conversations/:id/ai/suggest', kind: 'tenant', isolationTest: '../../ai/reply-suggestions.test.ts' },
+  { route: 'GET /v1/agents/:id/follow-ups', kind: 'tenant', isolationTest: '../../follow-ups/follow-ups.test.ts' },
+  { route: 'PUT /v1/agents/:id/follow-ups', kind: 'tenant', isolationTest: '../../follow-ups/follow-ups.test.ts' },
   { route: 'GET /v1/ghl/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'POST /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
   { route: 'GET /v1/ghl/contacts/:contactId/workflows', kind: 'tenant', isolationTest: '../../ghl/ghl-workflows.test.ts' },
