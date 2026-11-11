@@ -42,6 +42,8 @@ export interface ServiceView {
   active: string | null;
   /** Dirección que hay que pegar en el panel del proveedor para que nos avise (webhook); null si el servicio no la usa o falta la URL pública del servidor. */
   webhook_url: string | null;
+  /** Dirección de retorno que hay que autorizar en la consola del proveedor (OAuth); null si el servicio no la usa o falta la URL pública del servidor. */
+  redirect_url: string | null;
   /** Solo en los servicios gestionados por variables de entorno: el modo actual (none, console, resend…). */
   mode: string | null;
   providers: ProviderView[];
@@ -58,6 +60,8 @@ const VALUE_RE = /^[\x21-\x7E]{1,1000}$/; // ASCII imprimible sin espacios (van 
 const iso = (d: Date): string => d.toISOString();
 /** Servicios con webhook de entrada y su ruta (M5.2): la URL pública sale de la configuración del servidor, nunca de la petición. */
 const WEBHOOK_PATHS: Readonly<Record<string, string>> = { whatsapp_official: '/v1/channels/meta/webhook' };
+/** Servicios con autorización OAuth y su dirección de retorno (v11 Pista G, ADR-67): la que se registra TAL CUAL en la consola de Google Cloud. */
+const REDIRECT_PATHS: Readonly<Record<string, string>> = { calendar: '/v1/integrations/google-calendar/callback' };
 const aadOf = (service: string, provider: string): string => `${service}/${provider}`;
 const hintOf = (v: string): string | null => (v.length >= 8 ? v.slice(-4) : null);
 
@@ -278,7 +282,9 @@ export class ProvidersService {
   private serviceView(svc: ServiceDef, rows: Map<string, Row>, active: Map<string, string | null>): ServiceView {
     const path = WEBHOOK_PATHS[svc.key];
     const webhookUrl = path && this.cfg.frontend.baseUrl ? `${this.cfg.frontend.baseUrl}${path}` : null;
-    const base = { key: svc.key, label: svc.label, adapter: svc.adapter, managed: svc.managed, note: svc.note, webhook_url: webhookUrl };
+    const redirectPath = REDIRECT_PATHS[svc.key];
+    const redirectUrl = redirectPath && this.cfg.frontend.baseUrl ? `${new URL(this.cfg.frontend.baseUrl).origin}${redirectPath}` : null;
+    const base = { key: svc.key, label: svc.label, adapter: svc.adapter, managed: svc.managed, note: svc.note, webhook_url: webhookUrl, redirect_url: redirectUrl };
     if (svc.managed === 'platform') {
       const sel = active.get(svc.key) ?? null;
       return { ...base, active: sel, mode: null, providers: svc.providers.map((p) => this.providerView(p, rows.get(aadOf(svc.key, p.key)))) };

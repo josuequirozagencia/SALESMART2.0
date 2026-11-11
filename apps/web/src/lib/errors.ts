@@ -51,6 +51,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'DESTINATION_REQUIRED': case 'DESTINATION_SAME': return e.message;
     // GoHighLevel (ADR-52): el servidor ya redacta el motivo (sin tokens ni datos del cliente)
     case 'GHL_NOT_CONNECTED': case 'GHL_REJECTED': case 'GHL_UNAVAILABLE': case 'GHL_ALREADY_ENROLLED': case 'GHL_TEXT_ONLY': case 'GHL_SCHEDULE_UNSUPPORTED': case 'GHL_OUTBOX_NOT_FAILED': return e.message;
+    // Google Calendar (ADR-67): el servidor ya redacta el motivo (sin tokens ni datos de la cuenta)
+    case 'CALENDAR_UNAVAILABLE': case 'CALENDAR_NEEDS_RECONNECT': case 'CALENDAR_UNREACHABLE': return e.message;
     // Créditos IA (ADR-53): el servidor ya redacta el motivo
     case 'AI_NO_CREDITS': case 'AI_HOLD_CLOSED': case 'AI_NOT_CONFIGURED': case 'AI_BUSY': case 'AI_UNAVAILABLE': return e.message;
     // Agentes (ADR-53): el servidor ya redacta el motivo

@@ -205,6 +205,13 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/analytics/exports', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/settings', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'PUT /v1/analytics/settings', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
+  // Google Calendar (v11 Pista G, 67a, ADR-67). Pruebas: test/calendar/calendar.test.ts (A↔B, token jamás devuelto, `state` manipulado o vencido, alcances incompletos)
+  { route: 'GET /v1/calendar/connection', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
+  { route: 'POST /v1/calendar/connection/start', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
+  { route: 'GET /v1/calendar/calendars', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
+  { route: 'PUT /v1/calendar/connection/calendar', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
+  { route: 'POST /v1/calendar/connection/disconnect', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
+  { route: 'GET /v1/integrations/google-calendar/callback', kind: 'public' },
   // GoHighLevel (M7.1, ADR-52). Pruebas: test/ghl/ghl.test.ts (A↔B, token jamás devuelto, secreto del webhook)
   { route: 'GET /v1/ghl/connection', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
   { route: 'PUT /v1/ghl/connection', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },

@@ -275,6 +275,8 @@ export interface ProviderService {
   mode: string | null;
   /** Dirección que se pega en el panel del proveedor para que nos avise (webhook); null si el servicio no la usa. */
   webhook_url: string | null;
+  /** Dirección de retorno que se autoriza en la consola del proveedor (OAuth); null si no aplica. */
+  redirect_url?: string | null;
   providers: ProviderItem[];
 }
 /** El resultado de «Probar conexión» del almacenamiento (ADR-42): cada paso con su mensaje y, si falló, qué respondió el almacenamiento (sin claves) y qué revisar. */

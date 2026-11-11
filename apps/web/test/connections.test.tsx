@@ -328,6 +328,7 @@ describe('Configuración › Conexiones como tarjetas (M5.9)', () => {
   const full = (s: ReturnType<typeof server>, over: Record<string, Handler> = {}): Record<string, Handler> => ({
     ...s.routes,
     'GET /ghl/connection': () => ({ body: ghlOk }),
+    'GET /calendar/connection': () => ({ body: { configured: true, available: true, unavailable_reason: null, status: 'connected', mode: 'own', calendar_name: 'Sales Smart · Mi Empresa', account: 'a***@example.com', scopes: [], last_error: null, connected_at: '2026-11-11T15:00:00.000Z' } }),
     'GET /meta/settings': () => ({ body: metaOff }),
     ...over,
   });
@@ -344,7 +345,8 @@ describe('Configuración › Conexiones como tarjetas (M5.9)', () => {
     const integ = within(screen.getByRole('region', { name: 'Integraciones' }));
     expect(within(integ.getByRole('listitem', { name: 'GoHighLevel' })).getByText('Conectada')).toBeInTheDocument();
     expect(within(integ.getByRole('listitem', { name: 'API de Conversiones de Meta' })).getByText('No conectada')).toBeInTheDocument();
-    expect(within(integ.getByRole('listitem', { name: 'Calendario de Google' })).getByText('Próximamente')).toBeInTheDocument();
+    expect(within(integ.getByRole('listitem', { name: 'Calendario de Google' })).getByText('Conectada')).toBeInTheDocument();
+    expect(integ.getByRole('link', { name: 'Configurar Google Calendar' })).toHaveAttribute('href', '/settings/calendar');
     expect(integ.getByRole('link', { name: 'Configurar GoHighLevel' })).toHaveAttribute('href', '/settings/ghl');
     expect(integ.getByRole('link', { name: 'Configurar la API de Conversiones' })).toHaveAttribute('href', '/settings/meta');
   });

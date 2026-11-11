@@ -103,6 +103,24 @@ export const PROVIDER_CATALOG: readonly ServiceDef[] = [
     providers: [{ key: 'private_token', label: 'Token privado por empresa', maturity: 'planned', fields: [] }],
   },
   {
+    key: 'calendar',
+    label: 'Calendario',
+    adapter: 'CalendarProvider',
+    managed: 'platform',
+    note: 'Aplicación OAuth de Google de la plataforma (proyecto de Google Cloud). Cada empresa autoriza su propia cuenta desde Configuración › Conexiones; aquí solo va el ID y el secreto de cliente. La dirección de retorno autorizada en Google debe ser exactamente la que se muestra abajo.',
+    providers: [
+      {
+        key: 'google',
+        label: 'Google Calendar',
+        maturity: 'planned',
+        fields: [
+          { key: 'client_id', label: 'ID de cliente de OAuth', masked: false, required: true, hint: 'Termina en .apps.googleusercontent.com' },
+          { key: 'client_secret', label: 'Secreto de cliente de OAuth', masked: true, required: true },
+        ],
+      },
+    ],
+  },
+  {
     key: 'telephony',
     label: 'Telefonía',
     adapter: 'TelephonyProvider',

@@ -17,6 +17,7 @@ import { FormsPage } from './features/forms/FormsPage';
 import { CreditsPage } from './features/ai/CreditsPage';
 import { KnowledgePage } from './features/knowledge/KnowledgePage';
 import { AiCreditsPage } from './features/platform/AiCreditsPage';
+import { CalendarPage } from './features/calendar/CalendarPage';
 import { GhlPage } from './features/ghl/GhlPage';
 import { SalesPage } from './features/sales/SalesPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
@@ -139,6 +140,7 @@ export function App() {
         <Route path="/settings/attribution" element={<AttributionPage />} />
         <Route path="/settings/meta" element={<MetaPage />} />
         <Route path="/settings/ghl" element={<GhlPage />} />
+        <Route path="/settings/calendar" element={<CalendarPage />} />
         <Route path="/settings/credits" element={<CreditsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/forms" element={<FormsPage />} />

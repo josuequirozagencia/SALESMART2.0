@@ -57,6 +57,8 @@ export const envSchema = z.object({
   /** WhatsApp por QR (M9.6, ADR-54): `evolution` = Evolution API con la URL y la clave que el Súper Admin guarda en Proveedores › WhatsApp por QR; `none` = sin QR; `fake` solo desarrollo y pruebas (no se permite en producción). */
   QR_PROVIDER: z.enum(['evolution', 'none', 'fake']).default('evolution'),
   GHL_PROVIDER: z.enum(['ghl', 'none', 'fake']).default('ghl'),
+  /** Calendario de la empresa (v11 Pista G, ADR-67). `google` por omisión; `fake` solo para pruebas. */
+  CALENDAR_PROVIDER: z.enum(['google', 'none', 'fake']).default('google'),
   /** Notificaciones push del navegador (v6 fase E, ADR-64): `webpush` = Web Push con las claves VAPID (si faltan, el push queda apagado y la pantalla lo dice); `none` = apagado; `fake` solo desarrollo y pruebas (no se permite en producción). */
   PUSH_PROVIDER: z.enum(['webpush', 'none', 'fake']).default('webpush'),
   /** Claves VAPID del servidor (par de curva P-256 en base64url) y un contacto (`mailto:` o `https:`). Se generan una vez con `pnpm push:vapid`; la privada es un secreto. Las tres juntas o ninguna. */

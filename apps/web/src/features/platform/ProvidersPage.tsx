@@ -98,6 +98,12 @@ function ServiceCard({ s, vault, onConfigure, onToggle, busyKey }: { s: Provider
           <span className="text-[12px] text-muted">Pégala como URL de devolución de llamada del webhook de WhatsApp en tu app de Meta, junto con el token de verificación que guardes aquí, y suscribe el campo «messages».</span>
         </div>
       ) : null}
+      {s.redirect_url ? (
+        <div className="grid gap-1 rounded-xl bg-surface2 p-3">
+          <CopyField label="Dirección de retorno autorizada" value={s.redirect_url} />
+          <span className="text-[12px] text-muted">Pégala EXACTAMENTE como «URI de redireccionamiento autorizado» del cliente OAuth en la consola de Google Cloud (Credenciales). Si no coincide, Google rechaza la conexión.</span>
+        </div>
+      ) : null}
       {s.key === 'storage' && s.active ? <StorageProbePanel /> : null}
       {s.managed === 'platform' ? (
         s.providers.length === 0 ? (
