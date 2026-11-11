@@ -308,6 +308,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/conversations/:id', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   { route: 'GET /v1/attribution/ad-performance', kind: 'tenant', isolationTest: '../../attribution/touches.test.ts' },
   { route: 'POST /v1/conversations/:id/read', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
+  { route: 'GET /v1/contacts/:contactId/conversation', kind: 'tenant', isolationTest: '../../inbox/contact-conversation.test.ts' },
   { route: 'PUT /v1/conversations/:id/favorite', kind: 'tenant', isolationTest: '../../inbox/favorites.test.ts' },
   { route: 'DELETE /v1/conversations/:id/favorite', kind: 'tenant', isolationTest: '../../inbox/favorites.test.ts' },
   { route: 'POST /v1/messages/:id/retry', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },

@@ -1,6 +1,7 @@
 import { initials, money, sourceLabel } from '../../lib/format';
 import { formatPhone } from '../../lib/phone';
 import type { Opportunity, PipelineStage } from '../../lib/types';
+import { ContactQuickActions, type ContactTab } from '../contacts/ContactQuickActions';
 
 /**
  * Tarjeta de una oportunidad en el tablero (M4.2): contacto, monto, origen y responsable. Se arrastra a otra columna o, sin ratón, se mueve con el selector
@@ -14,6 +15,7 @@ export function OpportunityCard({
   onMove,
   onDragStart,
   onDragEnd,
+  onContactTab,
 }: {
   opp: Opportunity;
   targets: PipelineStage[];
@@ -22,6 +24,8 @@ export function OpportunityCard({
   onMove: (o: Opportunity, stageId: string) => void;
   onDragStart: (o: Opportunity) => void;
   onDragEnd: () => void;
+  /** Abre la ficha del contacto en una sección (acciones rápidas). */
+  onContactTab: (contactId: string, tab: ContactTab) => void;
 }) {
   const c = opp.contact;
   return (
@@ -42,6 +46,7 @@ export function OpportunityCard({
         {c.phone ? <span>{formatPhone(c.phone)}</span> : null}
         {c.tags.length > 0 ? <span title={c.tags.map((t) => t.name).join(', ')}>{c.tags.length} etiqueta{c.tags.length === 1 ? '' : 's'}</span> : null}
       </div>
+      <div className="-mx-1 border-t border-line pt-1.5"><ContactQuickActions contact={c} onOpenTab={(tab) => onContactTab(c.id, tab)} /></div>
       {canWrite && targets.length > 0 ? (
         <select aria-label={`Mover a ${c.name}`} value="" onChange={(e) => { if (e.target.value) onMove(opp, e.target.value); }} className="rounded-lg border border-line bg-surface px-2 py-1 text-[12px]">
           <option value="">Mover a…</option>

@@ -73,7 +73,7 @@ describe('Contactos · columnas', () => {
     mockApi(world().routes);
     const a = renderApp('/contacts');
     const table = await screen.findByRole('table', { name: 'Contactos' });
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Nombre', 'Teléfono', 'Responsable', 'Consentimiento', 'Etiquetas', 'Creado']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Nombre', 'Teléfono', 'Responsable', 'Consentimiento', 'Etiquetas', 'Creado', 'Acciones']);
     expect(within(tableRow('Ana Torres').getByRole('list', { name: 'Etiquetas' })).getByText('VIP')).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'Columnas · 6' }));
@@ -83,7 +83,7 @@ describe('Contactos · columnas', () => {
     await userEvent.click(menu.getByLabelText('Ciudad')); // un campo personalizado también es una columna
     await userEvent.click(menu.getByLabelText('Creado')); // quitar
     await userEvent.click(menu.getByRole('button', { name: 'Subir Ciudad' }));
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Nombre', 'Teléfono', 'Responsable', 'Consentimiento', 'Etiquetas', 'Ciudad', 'Correo']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Nombre', 'Teléfono', 'Responsable', 'Consentimiento', 'Etiquetas', 'Ciudad', 'Correo', 'Acciones']);
     expect(tableRow('Ana Torres').getByText('Quito')).toBeInTheDocument();
     expect(tableRow('Ana Torres').getByText('c1@correo.test')).toBeInTheDocument();
     expect(JSON.parse(window.localStorage.getItem('ss:contacts:columns')!)).toEqual(['name', 'phone', 'owner', 'consent', 'tags', 'cf:ciudad', 'email']);
@@ -105,7 +105,7 @@ describe('Contactos · columnas', () => {
     mockApi(world().routes);
     renderApp('/contacts');
     const table = await screen.findByRole('table', { name: 'Contactos' });
-    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Nombre', 'Correo', 'Edad', 'Interés']);
+    expect(within(table).getAllByRole('columnheader').map((h) => h.textContent)).toEqual(['', 'Nombre', 'Correo', 'Edad', 'Interés', 'Acciones']);
     expect(tableRow('Ana Torres').getByText('34')).toBeInTheDocument();
     expect(tableRow('Ana Torres').getByText('Uñas')).toBeInTheDocument();
     window.localStorage.setItem('ss:contacts:columns', '{rota');

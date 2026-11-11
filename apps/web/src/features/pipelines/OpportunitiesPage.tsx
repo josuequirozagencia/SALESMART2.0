@@ -10,6 +10,8 @@ import { NewOpportunityDialog } from './NewOpportunityDialog';
 import { NewPipelineDialog } from './NewPipelineDialog';
 import { OpportunityDrawer } from './OpportunityDrawer';
 import { OpportunityFilterPanel } from './OpportunityFilterPanel';
+import { ContactDialogHost } from '../contacts/ContactDialogHost';
+import type { ContactTab } from '../contacts/ContactQuickActions';
 import { StageColumn } from './StageColumn';
 import { StagesDialog } from './StagesDialog';
 import { countOppFilters, NO_OPP_FILTERS, useMoveOpportunity, usePipelineSummary, type OpportunityFilters } from './useOpportunities';
@@ -45,6 +47,8 @@ export function OpportunitiesPage() {
   const [showHidden, setShowHidden] = useState(false);
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const [dialog, setDialog] = useState<'new' | 'stages' | 'opportunity' | null>(null);
+  // Acciones rápidas de la tarjeta (v11 S2): la ficha del contacto en la sección elegida
+  const [contactTab, setContactTab] = useState<{ id: string; tab: ContactTab } | null>(null);
   const [filters, setFilters] = useState<OpportunityFilters>(NO_OPP_FILTERS);
   const [text, setText] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -153,6 +157,7 @@ export function OpportunitiesPage() {
               dragging={dragging}
               onToggleFold={() => toggleFold(s.id)}
               onOpen={(o) => setOpenId(o.id)}
+              onContactTab={(id, tab) => setContactTab({ id, tab })}
               onMove={(o, stageId) => requestMove(o, stageId)}
               onDragStart={(o) => { dragRef.current = o; setDragging(o); }}
               onDragEnd={() => { dragRef.current = null; setDragging(null); }}
@@ -162,6 +167,7 @@ export function OpportunitiesPage() {
         </div>
       ) : null}
 
+      {contactTab ? <ContactDialogHost contactId={contactTab.id} tab={contactTab.tab} onClose={() => setContactTab(null)} /> : null}
       {dialog === 'new' ? <NewPipelineDialog onClose={() => setDialog(null)} onCreated={(p) => { pick(p.id); setDialog('stages'); }} /> : null}
       {dialog === 'stages' && current ? <StagesDialog pipeline={current} isLast={pipelines.length <= 1} onClose={() => setDialog(null)} onDeleted={() => { setDialog(null); setChoice(null); }} /> : null}
       {dialog === 'opportunity' && current ? (

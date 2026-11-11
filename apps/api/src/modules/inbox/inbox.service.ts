@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { channelAccounts, contactPhones, contactTags, contacts, conversationFavorites, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queues, responseTimers, type TenantTx } from '../../db';
-import { ConflictError, ForbiddenError, NotFoundError } from '../../errors';
+import { AppError, ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
 import { ContactsService } from '../contacts';
@@ -275,6 +275,27 @@ export class InboxService {
       else await tx.delete(conversationFavorites).where(and(eq(conversationFavorites.conversationId, id), eq(conversationFavorites.userId, scope.userId)));
     });
     return this.get(access, id);
+  }
+
+  /**
+   * La conversación a la que lleva el icono «Mensaje» de un contacto (v11, S2): la abierta más reciente de cualquier canal que la persona pueda ver; si no hay abierta, la más
+   * reciente; si no hay ninguna, 404 `NO_CONVERSATION`. La visibilidad por persona se aplica en la consulta y un contacto inexistente, de otra empresa, borrado o sin
+   * conversaciones visibles responden IGUAL (no se distingue). Una conversación eliminada (ADR-63) nunca sale.
+   */
+  async conversationOfContact(access: InboxAccess, contactId: string): Promise<{ conversation_id: string }> {
+    const scope = scopeOf(access);
+    const row = await this.db.withTenant(async (tx) => {
+      const [r] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
+        .where(and(eq(conversations.contactId, contactId), visibleTo(scope), isNull(contacts.deletedAt)))
+        .orderBy(sql`(${conversations.status} = 'closed')`, sql`${conversations.lastMessageAt} DESC NULLS LAST`, desc(conversations.createdAt), desc(conversations.id))
+        .limit(1);
+      return r;
+    });
+    if (!row) throw new AppError(404, 'NO_CONVERSATION', 'El contacto no tiene conversaciones');
+    return { conversation_id: row.id };
   }
 
   /** Pone en cero los no leídos. Solo cuenta si quien la abre es su dueño: un administrador que la mira no borra los pendientes del asesor. */
