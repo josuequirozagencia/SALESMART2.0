@@ -23,8 +23,8 @@ export interface CalendarConnection {
 export interface CalendarChoice { id: string; name: string; primary: boolean }
 
 /** El resultado con que el servidor devuelve a la persona desde Google (`?calendar=…`). */
-export type CalendarOutcome = 'connected' | 'pick' | 'denied' | 'invalid' | 'scopes' | 'unavailable' | 'error';
-export const OUTCOMES: readonly CalendarOutcome[] = ['connected', 'pick', 'denied', 'invalid', 'scopes', 'unavailable', 'error'];
+export type CalendarOutcome = 'connected' | 'pick' | 'denied' | 'invalid' | 'scopes' | 'unavailable' | 'api' | 'error';
+export const OUTCOMES: readonly CalendarOutcome[] = ['connected', 'pick', 'denied', 'invalid', 'scopes', 'unavailable', 'api', 'error'];
 
 export function useCalendarConnection() {
   return useQuery({ queryKey: ['calendar-connection'], retry: false, queryFn: () => api<CalendarConnection>('/calendar/connection') });

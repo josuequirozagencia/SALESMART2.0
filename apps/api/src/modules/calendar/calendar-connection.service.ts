@@ -21,7 +21,7 @@ export const CALLBACK_PATH = '/v1/integrations/google-calendar/callback';
 const RETURN_PATH = '/settings/calendar';
 
 export type CalendarStatus = 'pending_calendar' | 'connected' | 'needs_reconnect' | 'disconnected';
-export type CalendarOutcome = 'connected' | 'pick' | 'denied' | 'invalid' | 'scopes' | 'unavailable' | 'error';
+export type CalendarOutcome = 'connected' | 'pick' | 'denied' | 'invalid' | 'scopes' | 'unavailable' | 'api' | 'error';
 export type Unavailable = 'provider' | 'encryption' | 'base_url' | 'platform_credentials';
 
 export interface CalendarConnectionView {
@@ -116,33 +116,42 @@ export class CalendarConnectionService {
    */
   async callback(q: { code?: string | undefined; state?: string | undefined; error?: string | undefined }): Promise<string> {
     const outcome = await this.handleCallback(q).catch((e: unknown): CalendarOutcome => {
-      this.log.error({ err: e instanceof Error ? e.name : 'desconocido' }, 'falló el regreso de Google Calendar');
+      this.log.error({ err: e instanceof Error ? e.name : 'desconocido', why: 'excepcion_al_guardar' }, 'falló el regreso de Google Calendar');
       return 'error';
     });
     return this.returnUrl(outcome);
   }
 
   private async handleCallback(q: { code?: string | undefined; state?: string | undefined; error?: string | undefined }): Promise<CalendarOutcome> {
-    if (!this.stateKey || !this.pkceKey || !this.vault) return 'unavailable';
+    if (!this.stateKey || !this.pkceKey || !this.vault) return this.end('unavailable', 'sin_cifrado');
     const st = q.state ? verifyState(this.stateKey, q.state) : null;
-    if (!st) return 'invalid';
-    if (q.error) return 'denied'; // la persona canceló o rechazó en Google: no hay nada que guardar
-    if (!q.code || q.code.length > 2048) return 'invalid';
+    if (!st) return this.end('invalid', q.state ? 'state_invalido_o_vencido' : 'sin_state');
+    if (q.error) return this.end('denied', 'google_devolvio_error'); // la persona canceló o rechazó en Google: no hay nada que guardar
+    if (!q.code || q.code.length > 2048) return this.end('invalid', 'sin_codigo');
     const client = await this.client();
-    if (!client || !this.redirectUri) return 'unavailable';
+    if (!client || !this.redirectUri) return this.end('unavailable', 'sin_credenciales_de_plataforma');
     let tokens;
     try {
       tokens = await this.provider.exchangeCode({ client, redirectUri: this.redirectUri, code: q.code, codeVerifier: pkceFor(this.pkceKey, st.n).verifier });
     } catch (e) {
-      if (e instanceof CalendarError && !e.credentials && !e.retryable) return 'unavailable'; // ID/secreto de la plataforma mal configurados
-      return e instanceof CalendarError && e.credentials ? 'denied' : 'error';
+      if (e instanceof CalendarError && !e.credentials && !e.retryable) return this.end('unavailable', 'canje_cliente_oauth_mal_configurado');
+      if (e instanceof CalendarError && e.credentials) return this.end('denied', 'canje_rechazado_por_google');
+      return this.end('error', 'canje_google_no_respondio');
     }
     // La persona pudo desmarcar permisos en la pantalla de Google: sin TODOS los pedidos no sirve (y no dejamos una autorización a medias)
     if (!MODE_SCOPES[st.m].every((s) => tokens.scopes.includes(s))) {
       await this.provider.revoke({ token: tokens.refreshToken }).catch(() => undefined);
-      return 'scopes';
+      return this.end('scopes', 'permisos_incompletos');
     }
     return TenantContext.run({ organizationId: st.o, userId: st.u }, () => this.store(st.m, tokens.refreshToken, tokens.accessToken, tokens.scopes, st.u));
+  }
+
+  /** Deja constancia del resultado en el registro estructurado (sin códigos, tokens ni datos de la cuenta): el motivo que ve el servidor, para poder diagnosticar. */
+  private end(outcome: CalendarOutcome, why: string): CalendarOutcome {
+    const fields = { outcome, why };
+    if (outcome === 'connected' || outcome === 'pick') this.log.info(fields, 'regreso de Google Calendar');
+    else this.log.warn(fields, 'regreso de Google Calendar');
+    return outcome;
   }
 
   /** Guarda la autorización: en `own` crea el calendario propio y queda conectada; en `existing` queda esperando que se elija uno. */
@@ -157,7 +166,9 @@ export class CalendarConnectionService {
         calendar = await this.provider.createCalendar({ accessToken, name: `Sales Smart · ${orgName}`.slice(0, 200), timeZone: dir.timeZone });
       } catch (e) {
         await this.provider.revoke({ token: refreshToken }).catch(() => undefined);
-        return e instanceof CalendarError && e.credentials ? 'scopes' : 'error';
+        if (e instanceof CalendarError && e.kind === 'api_disabled') return this.end('api', 'api_de_calendar_no_habilitada');
+        if (e instanceof CalendarError && e.credentials) return this.end('scopes', 'crear_calendario_sin_permiso');
+        return this.end('error', e instanceof CalendarError && e.retryable ? 'crear_calendario_google_no_respondio' : 'crear_calendario_rechazado');
       }
     }
     const sealed = this.vault!.seal({ refresh_token: refreshToken }, aadOf(org));
@@ -193,7 +204,7 @@ export class CalendarConnectionService {
       const old = this.openRefreshToken(previous.credentialsSealed, org);
       if (old && old !== refreshToken) await this.provider.revoke({ token: old }).catch(() => undefined);
     }
-    return mode === 'own' ? 'connected' : 'pick';
+    return mode === 'own' ? this.end('connected', 'calendario_propio_creado') : this.end('pick', 'falta_elegir_calendario');
   }
 
   // ------------------------------------------------------------------ elegir calendario (modo existing)

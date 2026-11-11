@@ -276,6 +276,25 @@ describe('Google Calendar · el regreso de Google (público)', () => {
     expect(await row(ORG_A)).toBeUndefined();
   });
 
+  it('si la API de Google Calendar no está habilitada en el proyecto: avisa con su propio resultado (`api`), revoca y no guarda nada', async () => {
+    await configurePlatform();
+    const { state } = await start(T.alice, 'own');
+    fake.failNext(new CalendarError('La API de Google Calendar no está habilitada en el proyecto de Google Cloud', false, false, 'api_disabled'), 'createCalendar');
+    expect((await back({ code: 'good', state })).location).toBe(`${RETURN}?calendar=api`);
+    expect(fake.calls.some((c) => c.kind === 'revoke')).toBe(true);
+    expect(await row(ORG_A)).toBeUndefined();
+  });
+
+  it('un permiso que falta al crear el calendario sigue siendo «scopes»; otro fallo de Google, «error»', async () => {
+    await configurePlatform();
+    const { state } = await start(T.alice, 'own');
+    fake.failNext(new CalendarError('Falta un permiso', false, true), 'createCalendar');
+    expect((await back({ code: 'good', state })).location).toBe(`${RETURN}?calendar=scopes`);
+    fake.failNext(new CalendarError('Google rechazó la solicitud', false), 'createCalendar');
+    expect((await back({ code: 'good', state })).location).toBe(`${RETURN}?calendar=error`);
+    expect(await row(ORG_A)).toBeUndefined();
+  });
+
   it('el `state` ata la conexión a SU empresa: el de A guarda en A y no aparece en B', async () => {
     await configurePlatform();
     const { state } = await start(T.alice, 'own');

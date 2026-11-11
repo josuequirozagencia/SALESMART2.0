@@ -32,6 +32,8 @@ export class CalendarError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly credentials = false,
+    /** Causa conocida que no es culpa de la persona: `api_disabled` = la API de Google Calendar no está habilitada en el proyecto de Google Cloud. */
+    readonly kind?: 'api_disabled',
   ) {
     super(message);
     this.name = 'CalendarError';
