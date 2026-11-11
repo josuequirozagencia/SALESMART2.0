@@ -24,7 +24,11 @@ export interface TurnRequest {
   /** El contacto con cuyos datos se llenan las variables; sin él, un ejemplo. */
   readonly contactId: string | null;
   /** `test` (simulador), `use` (conversación real) o `suggest` (borrador para la persona, v11 S4): así se anota en el libro de créditos. */
-  readonly kind: 'use' | 'test' | 'suggest';
+  readonly kind: 'use' | 'test' | 'suggest' | 'follow_up';
+  /** Una orden de sistema extra para este turno (v11 S5: «el cliente no ha respondido, retoma la conversación»). Va con las instrucciones del agente, nunca como mensaje del cliente. */
+  readonly guidance?: string;
+  /** Con qué se busca en la base de conocimiento; sin esto, el mensaje. */
+  readonly searchQuery?: string;
   /** Herramientas del agente (M8.5b): qué se le ofrece al modelo y cómo se ejecuta cada llamada que pida. Sin esto, el modelo solo responde texto. */
   readonly tools?: { readonly config: ToolConfig; readonly execute: (call: ToolCall) => Promise<ToolResult> };
 }
@@ -67,17 +71,17 @@ export class AgentTurnService {
     const settings = await this.agents.runtimeSettings(req.agentId); // 404 antes de gastar nada
     const message = req.message.trim();
     const prompt = await this.agents.preview({ agent_id: req.agentId, ...(req.contactId ? { contact_id: req.contactId } : {}) });
-    const found = await this.knowledge.search({ query: message, limit: FRAGMENTS_PER_TURN, agentId: req.agentId, kind: req.kind });
+    const found = await this.knowledge.search({ query: (req.searchQuery ?? message).trim() || message, limit: FRAGMENTS_PER_TURN, agentId: req.agentId, kind: req.kind });
     const fragments = found.hits.map((h) => ({ document: h.document.name, content: h.content }));
     const defs = req.tools ? toolDefinitions(req.tools.config) : [];
-    const guidance = req.tools ? toolGuidance(req.tools.config) : '';
+    const guidance = [req.guidance?.trim() ?? '', req.tools ? toolGuidance(req.tools.config) : ''].filter((x) => x !== '').join('\n\n');
     const messages: ChatMessage[] = buildChatMessages({ system: guidance ? `${prompt.system}
 
 ${guidance}` : prompt.system, fragments, history: req.history, message });
     const price = await this.gateway.chatPrice(settings.model);
     if (!price) throw this.unavailable(new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado'));
     const rate = await this.pricing.resolve(TenantContext.current().organizationId);
-    const ref = `${req.kind === 'test' ? 'Prueba del agente' : req.kind === 'suggest' ? 'Sugerencia de respuesta' : 'Agente'} ${settings.name}`.slice(0, 200);
+    const ref = `${req.kind === 'test' ? 'Prueba del agente' : req.kind === 'suggest' ? 'Sugerencia de respuesta' : req.kind === 'follow_up' ? 'Seguimiento' : 'Agente'} ${settings.name}`.slice(0, 200);
     const defsChars = JSON.stringify(defs).length;
     // Una vuelta de chat: reserva (el peor caso), llamada y cobro de lo realmente usado; un fallo libera la reserva
     const round = async (withTools: boolean): Promise<{ out: ChatOutcome; credits: number }> => {

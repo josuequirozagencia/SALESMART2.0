@@ -27,6 +27,6 @@ import { AutomationsService } from './automations.service';
   imports: [AiModule, ContactsModule, CustomFieldsModule, EventsModule, OpportunitiesModule, OrganizationsModule, OutreachModule, QueuesModule, TagsModule, TaskNoticesModule, TemplatesModule],
   controllers: [AutomationsController],
   providers: [AutomationsService, AutomationEnqueueService, AutomationActionsService, AutomationRunnerService, AutomationDryRunService, AutomationSettingsService, { provide: OUTBOUND_HTTP, useFactory: (cfg: AppConfig): OutboundHttp => (cfg.automations.httpProvider === 'fake' ? new FakeOutboundHttp() : new SafeHttpClient()), inject: [APP_CONFIG] }, AutomationsJob],
-  exports: [AutomationsJob, AutomationsService],
+  exports: [AutomationsJob, AutomationsService, AutomationEnqueueService],
 })
 export class AutomationsModule {}

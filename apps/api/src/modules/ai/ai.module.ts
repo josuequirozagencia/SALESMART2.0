@@ -29,6 +29,7 @@ import { PgArrayVectorStore, VECTOR_STORE } from './knowledge/vector-store';
 import { OpenAiProvider } from './openai.provider';
 import { AgentRuntimeJob } from './runtime/agent-runtime.job';
 import { AgentRuntimeService } from './runtime/agent-runtime.service';
+import { AgentReplyBus } from './runtime/agent-reply.bus';
 import { ConversationAiController } from './runtime/conversation-ai.controller';
 import { ReplySuggestionService } from './runtime/reply-suggestion.service';
 
@@ -52,12 +53,13 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     AgentToolsService,
     AgentRuntimeService,
     ReplySuggestionService,
+    AgentReplyBus,
     AgentRuntimeJob,
     KnowledgeProcessorService,
     KnowledgeJob,
     { provide: AI_PROVIDER, useFactory: buildAiProvider, inject: [APP_CONFIG] },
     { provide: VECTOR_STORE, useFactory: () => new PgArrayVectorStore() },
   ],
-  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, KnowledgeJob, AgentRuntimeJob, AgentRuntimeService],
+  exports: [AiCreditsService, AiGateway, KnowledgeService, AgentsService, AgentTurnService, KnowledgeJob, AgentRuntimeJob, AgentRuntimeService, AgentReplyBus],
 })
 export class AiModule {}

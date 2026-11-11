@@ -1,8 +1,8 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
 
-export type LedgerKind = 'welcome' | 'grant' | 'use' | 'test' | 'suggest';
-export const KIND_LABEL: Record<LedgerKind, string> = { welcome: 'Bienvenida', grant: 'Regalo', use: 'Uso', test: 'Prueba', suggest: 'Sugerencia' };
+export type LedgerKind = 'welcome' | 'grant' | 'use' | 'test' | 'suggest' | 'follow_up';
+export const KIND_LABEL: Record<LedgerKind, string> = { welcome: 'Bienvenida', grant: 'Regalo', use: 'Uso', test: 'Prueba', suggest: 'Sugerencia', follow_up: 'Seguimiento' };
 
 /** Lo que ve el CLIENTE de un movimiento: créditos y a qué corresponde. Nunca el costo ni el margen. */
 export interface LedgerItem {

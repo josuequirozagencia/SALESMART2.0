@@ -15,6 +15,7 @@ import { isOpenAt, SlaService } from '../../sla';
 import { AgentTurnService } from '../agents/agent-turn.service';
 import { AgentsService } from '../agents/agents.service';
 import { AgentToolsService } from '../tools/agent-tools.service';
+import { AgentReplyBus } from './agent-reply.bus';
 import { hasTools } from '../tools/tool-defs';
 import { asksForPerson, HANDOFF_MESSAGE, handoffNote, MAX_AGENT_TURNS, MAX_UNSUPPORTED_STREAK, type HandoffReason } from './handoff';
 
@@ -85,6 +86,7 @@ export class AgentRuntimeService {
     @Inject(AiCreditsService) private readonly credits: AiCreditsService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
+    @Inject(AgentReplyBus) private readonly replyBus: AgentReplyBus,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -244,6 +246,8 @@ export class AgentRuntimeService {
         await this.routeToQueue(tx, job, route, now);
         return 'handed_off' as const;
       }
+      // v11 S5 (ADR-68): el agente respondió y sigue atendiendo: quien lo necesite (los seguimientos) arma lo suyo en esta misma transacción
+      if (toSend && toSend.length > 0) await this.replyBus.publish(tx, { conversationId: job.conversationId, agentId: job.agentId, channelAccountId: job.channelAccountId, contactId: job.contactId, sentAt: new Date(Math.max(now.getTime(), newest.getTime() + 1) + toSend.length - 1) });
       return replies ? ('replied' as const) : ('skipped' as const);
     });
   }
