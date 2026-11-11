@@ -32,6 +32,10 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   // Pruebas gratuitas (M1.5). Pruebas: test/trials/trials.test.ts (A↔B, una sola extensión, concurrencia, pausa, job SKIP LOCKED)
   { route: 'GET /v1/trials/me', kind: 'self', test: '../../trials/trials.test.ts' },
   { route: 'POST /v1/trials/me/extension', kind: 'tenant', isolationTest: '../../trials/trials.test.ts' },
+  { route: 'GET /v1/platform/branding', kind: 'platform', test: '../../platform/branding.test.ts' },
+  { route: 'PUT /v1/platform/branding/favicon', kind: 'platform', test: '../../platform/branding.test.ts' },
+  { route: 'DELETE /v1/platform/branding/favicon', kind: 'platform', test: '../../platform/branding.test.ts' },
+  { route: 'GET /v1/branding/favicon', kind: 'public' },
   { route: 'GET /v1/platform/trials', kind: 'platform', test: '../../trials/trials.test.ts' },
   { route: 'POST /v1/platform/trials/:id/approve', kind: 'platform', test: '../../trials/trials.test.ts' },
   { route: 'POST /v1/platform/trials/:id/deny', kind: 'platform', test: '../../trials/trials.test.ts' },

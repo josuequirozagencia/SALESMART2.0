@@ -2445,3 +2445,34 @@ El prompt v10 pedía un acceso rápido «Destacadas» en los filtros del Inbox y
 - **Migración 0129** (solo hacia adelante): crea la tabla con su política, `FORCE ROW LEVEL SECURITY` y los permisos. El campo `when` del diario se fijó a mano (`1794500000000`) para que sea mayor que el de la 0128 (lección de la 0128).
 - **Sin validar:** navegador real con volumen real de estrellas; lector de pantalla.
 
+
+## ADR-69 — Marca de la plataforma: el favicon lo sube el Súper Admin (v11 S3)
+**Estado:** PROPUESTO (2026-11-11; el responsable pidió construir el S3 del prompt v11 y las precisiones esperan su aprobación al revisar el PR). **Incluye una migración (`0130`).** (Los números 67 y 68 quedan reservados para Google Calendar y los seguimientos de agente del mismo prompt.)
+
+### Contexto
+La aplicación no tiene favicon propio: la pestaña del navegador muestra el icono por omisión del navegador. El prompt v11 (punto 9) pide que el Súper Admin lo cambie desde Plataforma sin tocar el código, sin que una empresa pueda influir y sin abrir un hueco de seguridad (un SVG puede llevar scripts).
+
+### Decisión
+- **Dónde se guarda.** El archivo, en el almacenamiento (puerto `StorageAdapter`, el mismo de los adjuntos) bajo `platform/branding/favicon-<uuid>`, **nunca bajo una organización**. La referencia, en la tabla de plataforma `platform_branding` (una sola fila, `id = 1`; clave, tipo, bytes, lado en px, versión y quién lo cambió). Solo `app_platform` la toca: `app_rw` y `app_identity` no tienen ni lectura. Quitar el favicon pone todo en NULL (no se borra la fila). La tabla se registra en el catálogo de plataforma de `db:audit`.
+- **Qué se acepta.** PNG, ICO o WebP, **cuadrado**, de **32 a 512 px** de lado, hasta **256 KB**. Se valida por el **contenido real** (firma y cabecera: dimensiones de PNG, ICO y los tres tipos de WebP), nunca por la extensión ni por el tipo que declare el navegador. **SVG y cualquier otro formato se rechazan.** Función pura y probada (`favicon-image.ts`).
+- **Quién.** Permiso nuevo `platform.branding.manage`, solo `super_admin` (migración + `rbac/catalog.ts`). Rutas `GET /v1/platform/branding`, `PUT /v1/platform/branding/favicon` (el cuerpo es la imagen; se lee después de autenticar y con tope) y `DELETE …/favicon`. Auditoría de plataforma (`branding.favicon.set|cleared`) **en la misma transacción** que el cambio, sin el contenido de la imagen.
+- **Entrega.** `GET /v1/branding/favicon` es **pública** (el navegador la pide sin sesión) y solo entrega la imagen, con `ETag` (la versión), `Cache-Control: public, max-age=300` y `nosniff`; no revela nada de ninguna empresa. **La sirve la API** (lee del almacenamiento y la guarda en memoria por versión) y no una URL firmada del almacenamiento: así es cacheable y no expone el origen del almacenamiento. Sin favicon subido —o con el almacenamiento caído— entrega un **icono por omisión propio** (SVG nuestro, de confianza), así la pestaña nunca recibe un 404.
+- **Dónde se pide.** `index.html` lleva `<link rel="icon" href="/v1/branding/favicon">`. Como el HTML es estático, no lleva parámetro de versión: el cambio llega a las demás pestañas en cuanto el navegador renueve su copia (hasta 5 minutos); en la pestaña del Súper Admin se actualiza al instante.
+- **Interfaz.** Plataforma › «Marca»: vista previa del icono y de una pestaña de ejemplo, requisitos, «Subir / Cambiar favicon» y «Quitar favicon» con confirmación.
+- **Módulos.** La referencia vive en `modules/platform` (único con `withPlatform`, lint P10); el servicio que une almacenamiento y referencia y los controladores viven en `modules/branding` (necesita `AttachmentsModule`, que ya depende de plataforma).
+
+### Alternativas
+- **Archivo estático en el repositorio (sin base de datos):** cero migración, pero cambiarlo exige un despliegue y no lo puede hacer el Súper Admin. Descartada.
+- **Guardar la imagen dentro de la base de datos (`bytea`):** sin almacenamiento externo, pero mezcla binarios con datos y no reutiliza el puerto. Descartada (el almacenamiento ya existe y es lo que el prompt pide).
+- **Aceptar SVG:** más nítido, pero puede llevar scripts. Descartada.
+- **URL firmada del almacenamiento en la etiqueta del icono:** caduca y expone el origen. Descartada.
+
+### Ventajas / desventajas
+- (+) Sin despliegue para cambiarlo, aislado de las empresas, validado por contenido, con auditoría, y el icono por omisión mejora la pestaña desde hoy.
+- (−) Una tabla más. Sin almacenamiento configurado (Proveedores › Almacenamiento) no se puede subir (503 con el motivo); mientras tanto sigue el icono por omisión. Los navegadores guardan los favicons con terquedad: puede tardar en cambiar.
+
+### Impacto
+- **Multi-tenancy:** tabla de plataforma (sin `organization_id`: no es de negocio), `REVOKE` a `app_rw` y `app_identity`, prueba de que `app_rw` no la lee ni escribe.
+- **Seguridad:** ruta de escritura solo `super_admin` (agencia, administrador de empresa y asesor reciben 403, probado); el contenido se valida antes de guardar; el cuerpo se lee con tope de 256 KB; la ruta pública no devuelve datos de nadie.
+- **Migración 0130** (solo hacia adelante): crea la tabla con sus restricciones, los permisos y el permiso nuevo. El campo `when` del diario se fijó a mano (`1794600000000`) para que sea mayor que el de la 0129.
+- **Sin validar:** el almacenamiento real (R2) con esta ruta, el comportamiento de caché de los navegadores reales y la legibilidad del icono en pestañas a 16 px.

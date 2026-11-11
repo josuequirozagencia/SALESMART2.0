@@ -84,6 +84,8 @@ export const PERMISSIONS = {
   'platform.access_log.read': 'platform',
   // M8.1 (ADR-53): precio y margen de los créditos IA, regalos de créditos y saldos de todas las empresas.
   'platform.ai.manage': 'platform',
+  // v11 S3: el favicon de la plataforma. Solo el Súper Admin.
+  'platform.branding.manage': 'platform',
 } as const satisfies Record<string, PermissionScope>;
 
 export type PermissionKey = keyof typeof PERMISSIONS;

@@ -26,6 +26,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'AGENCY_NOT_FOUND': case 'AGENCY_SUSPENDED': case 'NO_AGENCY': return e.message;
     // Proveedores (ADR-42): el servidor ya redacta el motivo para el Súper Admin (sin datos secretos)
     case 'PROVIDER_NOT_CONFIGURED': case 'PROVIDER_ACTIVE': case 'PROVIDER_VAULT_UNAVAILABLE': case 'PROVIDER_VAULT_MISMATCH': case 'SERVICE_NOT_CONFIGURABLE': return e.message;
+    // Marca de la plataforma (ADR-69): el servidor ya redacta el motivo del favicon
+    case 'FAVICON_EMPTY': case 'FAVICON_TOO_LARGE': case 'FAVICON_UNSUPPORTED': case 'FAVICON_CORRUPT': case 'FAVICON_NOT_SQUARE': case 'FAVICON_BAD_SIZE': case 'FAVICON_UPLOAD_FAILED': case 'STORAGE_NOT_CONFIGURED': case 'STORAGE_UNAVAILABLE': return e.message;
     // Contactos (ADR-43): el servidor ya redacta el motivo para la persona
     case 'PHONE_TAKEN': return 'Uno de los teléfonos ya pertenece a otro contacto de tu empresa.';
     case 'OWNER_NOT_ALLOWED': return e.message;
