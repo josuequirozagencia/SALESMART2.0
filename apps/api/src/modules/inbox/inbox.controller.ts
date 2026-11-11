@@ -289,3 +289,19 @@ export class MessagesController {
     return this.outbound.retry(accessOf(req), id);
   }
 }
+
+/**
+ * `GET /v1/contacts/:contactId/conversation` (v11, S2): a qué conversación lleva el icono «Mensaje» de las tarjetas y filas de contactos. Vive en el módulo del Inbox porque la regla
+ * (qué conversación y cuáles puede ver la persona) es suya. `inbox.read`; sin conversación visible, 404 `NO_CONVERSATION` igual que un contacto inexistente.
+ */
+@Controller('contacts')
+export class ContactConversationController {
+  constructor(@Inject(InboxService) private readonly inbox: InboxService) {}
+
+  @RequirePermission('inbox.read')
+  @Get(':contactId/conversation')
+  @Header('Cache-Control', 'no-store')
+  conversation(@Req() req: AuthedRequest, @Param('contactId', idParam) contactId: string) {
+    return this.inbox.conversationOfContact(accessOf(req), contactId);
+  }
+}

@@ -4,6 +4,7 @@ import { money } from '../../lib/format';
 import type { Opportunity, Pipeline, PipelineStage, StageSummary } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
+import type { ContactTab } from '../contacts/ContactQuickActions';
 import { OpportunityCard } from './OpportunityCard';
 import { stageStyle } from './stageColors';
 import { useStageOpportunities, type OpportunityFilters } from './useOpportunities';
@@ -25,6 +26,7 @@ export function StageColumn({
   onMove,
   onDragStart,
   onDragEnd,
+  onContactTab,
   onDropHere,
 }: {
   pipeline: Pipeline;
@@ -39,6 +41,7 @@ export function StageColumn({
   onMove: (o: Opportunity, stageId: string) => void;
   onDragStart: (o: Opportunity) => void;
   onDragEnd: () => void;
+  onContactTab: (contactId: string, tab: ContactTab) => void;
   onDropHere: () => void;
 }) {
   const q = useStageOpportunities(pipeline.id, stage.id, filters, !folded);
@@ -81,7 +84,7 @@ export function StageColumn({
           {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar esta etapa.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
           {q.isSuccess && items.length === 0 ? <p className="px-2 py-3 text-center text-[12.5px] text-muted">{droppable ? 'Suelta aquí' : 'Sin oportunidades'}</p> : null}
           {items.map((o) => (
-            <OpportunityCard key={o.id} opp={o} targets={targets} canWrite={canWrite} onOpen={onOpen} onMove={onMove} onDragStart={onDragStart} onDragEnd={onDragEnd} />
+            <OpportunityCard key={o.id} opp={o} targets={targets} canWrite={canWrite} onOpen={onOpen} onMove={onMove} onDragStart={onDragStart} onDragEnd={onDragEnd} onContactTab={onContactTab} />
           ))}
           {q.hasNextPage ? <Button className="!py-1.5 !text-[12.5px]" loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button> : null}
         </div>

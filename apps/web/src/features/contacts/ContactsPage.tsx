@@ -8,6 +8,7 @@ import { ColumnMenu } from './ColumnMenu';
 import { ContactsTabs } from './ContactsTabs';
 import { catalogOf, loadColumns, normalizeColumns, saveColumns } from './columns';
 import { ContactDialog } from './ContactDialog';
+import type { ContactTab } from './ContactQuickActions';
 import { ContactsTable } from './ContactsTable';
 import { ExportDialog } from './ExportDialog';
 import { FilterBar } from './FilterBar';
@@ -51,7 +52,7 @@ export function ContactsPage() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [cols, setCols] = useState<string[] | null>(null);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [dialog, setDialog] = useState<{ contact?: Contact } | null>(null);
+  const [dialog, setDialog] = useState<{ contact?: Contact; tab?: ContactTab } | null>(null);
   const [listDialog, setListDialog] = useState<ListMode | null>(null);
   const [importing, setImporting] = useState(false);
   const [exporting, setExporting] = useState(false);
@@ -240,6 +241,7 @@ export function ContactsPage() {
           onToggle={toggle}
           onToggleAll={(all) => setSelected(all ? new Set(items.map((c) => c.id)) : new Set())}
           onOpen={(c) => setDialog({ contact: c })}
+          onQuickOpen={(c, tab) => setDialog({ contact: c, tab })}
         />
       ) : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
@@ -264,6 +266,7 @@ export function ContactsPage() {
           canAssign={access.view_all}
           canDelete={access.delete}
           readOnly={readOnly}
+          initialTab={dialog.tab ?? 'data'}
           onClose={() => setDialog(null)}
         />
       ) : null}

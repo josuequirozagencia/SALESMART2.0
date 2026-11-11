@@ -16,6 +16,8 @@ import { Tabs } from '../crm/Tabs';
 import { ContactOpportunitiesPanel } from '../pipelines/ContactOpportunitiesPanel';
 import { TasksPanel } from '../crm/TasksPanel';
 import { GhlFlowsPanel } from '../ghl/GhlFlowsPanel';
+import { ContactAppointmentsPanel } from './ContactAppointmentsPanel';
+import type { ContactTab } from './ContactQuickActions';
 import { TouchesPanel } from './TouchesPanel';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { useTags } from '../tags/useTags';
@@ -39,7 +41,7 @@ interface Errors {
  * elegido. El primero es el principal. `canAssign` (quien puede ver todos los contactos) habilita elegir el responsable; sin él, el servidor asigna el
  * contacto a quien lo crea. `canDelete` y `readOnly` solo muestran u ocultan botones: el servidor decide qué se permite.
  */
-export function ContactDialog({ contact: contactProp, owners, canAssign, canDelete, readOnly, onClose }: { contact?: Contact; owners: OwnerOption[]; canAssign: boolean; canDelete: boolean; readOnly: boolean; onClose: () => void }) {
+export function ContactDialog({ contact: contactProp, owners, canAssign, canDelete, readOnly, onClose, initialTab = 'data' }: { contact?: Contact; owners: OwnerOption[]; canAssign: boolean; canDelete: boolean; readOnly: boolean; onClose: () => void; initialTab?: ContactTab }) {
   // Un contacto recién creado cuya empresa no se pudo vincular sigue abierto como contacto existente (ahí la empresa se agrega al instante)
   const [made, setMade] = useState<Contact | null>(null);
   const contact = contactProp ?? made ?? undefined;
@@ -62,7 +64,7 @@ export function ContactDialog({ contact: contactProp, owners, canAssign, canDele
   const [tagIds, setTagIds] = useState<string[]>(initialTags);
   const [formError, setFormError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [tab, setTab] = useState<'data' | 'notes' | 'tasks' | 'opportunities' | 'activity' | 'ghl'>('data');
+  const [tab, setTab] = useState<ContactTab>(contactProp || initialTab === 'data' ? initialTab : 'data');
   const create = useCreateContact();
   const update = useUpdateContact();
   const remove = useDeleteContact();
@@ -166,10 +168,11 @@ export function ContactDialog({ contact: contactProp, owners, canAssign, canDele
     <Modal title={editing ? 'Contacto' : 'Nuevo contacto'} onClose={onClose} wide>
       {readOnly ? <Alert kind="info">Estás en modo solo lectura: puedes ver este contacto, no cambiarlo.</Alert> : null}
       {contact ? <TagBadges tags={contact.tags} /> : null}
-      {contact ? <Tabs label="Secciones del contacto" active={tab} onChange={setTab} tabs={[['data', 'Datos'], ['notes', 'Notas'], ['tasks', 'Tareas'], ['opportunities', 'Oportunidades'], ['activity', 'Actividad'], ['ghl', 'GoHighLevel']]} /> : null}
+      {contact ? <Tabs label="Secciones del contacto" active={tab} onChange={setTab} tabs={[['data', 'Datos'], ['notes', 'Notas'], ['tasks', 'Tareas'], ['opportunities', 'Oportunidades'], ['agenda', 'Citas'], ['activity', 'Actividad'], ['ghl', 'GoHighLevel']]} /> : null}
       {contact && tab === 'notes' ? <NotesPanel target={{ kind: 'contact', id: contact.id }} canWrite={!readOnly} /> : null}
       {contact && tab === 'tasks' ? <TasksPanel link={{ contact: { id: contact.id, name: contact.name } }} canWrite={!readOnly} viewAll={canAssign} owners={owners} /> : null}
       {contact && tab === 'opportunities' ? <ContactOpportunitiesPanel contact={contact} canWrite={!readOnly} viewAll={canAssign} owners={owners} /> : null}
+      {contact && tab === 'agenda' ? <ContactAppointmentsPanel contactId={contact.id} /> : null}
       {contact && tab === 'activity' ? <TouchesPanel contactId={contact.id} /> : null}
       {contact && tab === 'ghl' ? <GhlFlowsPanel contactId={contact.id} canWrite={!readOnly} /> : null}
       <form onSubmit={submit} noValidate className={`grid gap-3 ${tab === 'data' ? '' : 'hidden'}`} aria-label={editing ? 'Contacto' : 'Nuevo contacto'}>

@@ -5,6 +5,7 @@ import { ChannelBadge } from '../../ui/ChannelBadge';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { TagBadges } from './AttributionSection';
 import { customText, type ColumnDef } from './columns';
+import { ContactQuickActions, type ContactTab } from './ContactQuickActions';
 
 const CONSENT: Record<Consent, [PillKind, string]> = { granted: ['ok', 'Con consentimiento'], revoked: ['crit', 'Sin consentimiento'], unknown: ['muted', 'Sin definir'] };
 
@@ -59,6 +60,7 @@ export function ContactsTable({
   onToggle,
   onToggleAll,
   onOpen,
+  onQuickOpen,
 }: {
   items: readonly Contact[];
   columns: readonly string[];
@@ -69,6 +71,8 @@ export function ContactsTable({
   onToggle: (id: string) => void;
   onToggleAll: (all: boolean) => void;
   onOpen: (c: Contact) => void;
+  /** Abre la ficha del contacto en la sección elegida (acciones rápidas). */
+  onQuickOpen: (c: Contact, tab: ContactTab) => void;
 }) {
   const label = new Map(catalog.map((c) => [c.key, c.label]));
   const byKey = new Map(fields.map((f) => [`cf:${f.key}`, f]));
@@ -84,6 +88,7 @@ export function ContactsTable({
               </th>
             ) : null}
             {columns.map((k) => <th key={k} scope="col" className="whitespace-nowrap px-3 py-2.5 font-semibold">{label.get(k) ?? k}</th>)}
+            <th scope="col" className="sticky right-0 whitespace-nowrap bg-surface px-3 py-2.5 font-semibold">Acciones</th>
           </tr>
         </thead>
         <tbody>
@@ -95,6 +100,7 @@ export function ContactsTable({
                 </td>
               ) : null}
               {columns.map((k) => <td key={k} className="px-3 py-2.5 align-middle"><Cell c={c} col={k} field={byKey.get(k)} onOpen={onOpen} /></td>)}
+              <td className={`sticky right-0 px-2 py-1.5 align-middle ${selected.has(c.id) ? 'bg-accent-soft' : 'bg-surface'}`}><ContactQuickActions contact={c} onOpenTab={(tab) => onQuickOpen(c, tab)} /></td>
             </tr>
           ))}
         </tbody>
