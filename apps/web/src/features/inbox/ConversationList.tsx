@@ -1,5 +1,5 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import type { Conversation, InboxFilters, InboxOptions, InboxTab } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
@@ -18,7 +18,8 @@ import { NotificationsBell } from '../notifications/NotificationsBell';
 import { chatTime, firstName, listPreview, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
 import { usePhotos } from '../photos/usePhotos';
-import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useInboxOptions } from './useInbox';
+import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useFavorite, useInboxOptions } from './useInbox';
+import { SWIPE_ACTION_W, useRowGestures } from './useRowGestures';
 
 const TABS: Array<{ id: InboxTab; label: string; hint: string }> = [
   { id: 'working', label: 'Trabajando', hint: 'Conversaciones en curso, incluso las que esperan respuesta del cliente' },
@@ -51,13 +52,29 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
   const delivery = last?.direction === 'out' ? (DELIVERY[last.status] ?? DELIVERY['sent']) : null;
   const shown = c.tags.slice(0, 2);
   const more = c.tags.length - shown.length;
+  // v11 S4: la estrella por persona (ADR-66) también se pone desde la fila. En pantallas táctiles: mantener pulsado abre las acciones y deslizar a la izquierda deja ver «Destacar»; con ratón, un botón al pasar el cursor.
+  const fav = useFavorite(c.id);
+  const [sheet, setSheet] = useState(false);
+  const g = useRowGestures({ enabled: mobile, onLongPress: () => setSheet(true) });
+  const toggle = (): void => fav.mutate(!c.favorite);
+  const starLabel = c.favorite ? `Quitar de destacadas la conversación de ${c.contact.name}` : `Destacar la conversación de ${c.contact.name}`;
   return (
-    <li>
+    <li className="group relative overflow-hidden">
+      {mobile ? (
+        <div aria-hidden={!g.open} className="absolute inset-y-0 right-0 flex" style={{ width: SWIPE_ACTION_W }}>
+          <button type="button" tabIndex={g.open ? 0 : -1} aria-label={starLabel} onClick={() => { toggle(); g.close(); }} className="flex w-full flex-col items-center justify-center gap-1 bg-accent text-[12px] font-semibold text-accent-ink">
+            <Icon name="star" size={20} fill={c.favorite ? 'none' : 'currentColor'} aria-hidden="true" />
+            {c.favorite ? 'Quitar' : 'Destacar'}
+          </button>
+        </div>
+      ) : null}
       <Link
         to={`/inbox/${c.id}`}
+        style={g.style}
+        {...g.handlers}
         aria-current={active ? 'true' : undefined}
         aria-label={`${c.contact.name}${unread ? `, ${c.unread_count} sin leer` : ''}${c.favorite ? ', destacada' : ''}`}
-        className={`grid gap-2.5 border-b border-line px-3 hover:bg-surface2 ${mobile ? 'min-h-[72px] grid-cols-[48px_minmax(0,1fr)] gap-3 py-3 active:bg-accent-soft' : 'grid-cols-[42px_minmax(0,1fr)] py-2.5'} ${active ? 'bg-accent-soft' : ''}`}
+        className={`grid gap-2.5 border-b border-line px-3 hover:bg-surface2 ${mobile ? 'min-h-[72px] grid-cols-[48px_minmax(0,1fr)] gap-3 py-3 active:bg-accent-soft' : 'grid-cols-[42px_minmax(0,1fr)] py-2.5'} ${active ? 'bg-accent-soft' : mobile ? 'relative bg-surface' : ''}`}
       >
         <Avatar name={c.contact.name} src={photo} size={mobile ? 48 : 42} className="self-start" />
         <span className="grid min-w-0 gap-0.5">
@@ -85,7 +102,43 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
           </span>
         </span>
       </Link>
+      {mobile ? null : (
+        <button
+          type="button"
+          aria-label={starLabel}
+          aria-pressed={c.favorite === true}
+          title={c.favorite ? 'Quitar de destacadas' : 'Destacar'}
+          disabled={fav.isPending}
+          onClick={toggle}
+          className="absolute right-2 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full border border-line bg-surface text-muted opacity-0 shadow-sm transition-opacity hover:text-warn focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100"
+        >
+          <Icon name="star" size={16} fill={c.favorite ? 'currentColor' : 'none'} aria-hidden="true" />
+        </button>
+      )}
+      {sheet ? <RowActionsSheet c={c} onClose={() => setSheet(false)} onToggle={toggle} /> : null}
     </li>
+  );
+}
+
+/** Las acciones de una conversación al mantener pulsada su fila (móvil): destacarla o quitarle la estrella, y abrirla. Hoja inferior accesible (foco atrapado, Esc, tocar fuera). */
+function RowActionsSheet({ c, onClose, onToggle }: { c: Conversation; onClose: () => void; onToggle: () => void }) {
+  const navigate = useNavigate();
+  const item = 'flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-[14px] font-semibold hover:bg-surface2';
+  return (
+    <Drawer label={`Acciones de ${c.contact.name}`} onClose={onClose} placement="bottom">
+      <div className="grid gap-1 p-3 pb-[max(12px,env(safe-area-inset-bottom))]">
+        <p className="truncate px-3 pb-1 text-[13px] text-muted">{c.contact.name}</p>
+        <button type="button" className={item} onClick={() => { onToggle(); onClose(); }}>
+          <Icon name="star" size={20} fill={c.favorite ? 'currentColor' : 'none'} aria-hidden="true" />
+          {c.favorite ? 'Quitar de destacadas' : 'Destacar'}
+        </button>
+        <button type="button" className={item} onClick={() => { onClose(); navigate(`/inbox/${c.id}`); }}>
+          <Icon name="chat" size={20} aria-hidden="true" />
+          Abrir la conversación
+        </button>
+        <button type="button" className={`${item} text-muted`} onClick={onClose}>Cancelar</button>
+      </div>
+    </Drawer>
   );
 }
 
