@@ -37,13 +37,44 @@ function line(s: AgentStatus): ReactNode {
   return active ? (s.outcome === 'out_of_hours' ? <>El agente espera el horario de atención.</> : <>Agente de IA atendiendo · <b>{name}</b></>) : whole ? <>{whole}</> : <>El agente <b>{name}</b> {s.state === 'handed_off' ? 'pasó la conversación a una persona.' : 'está en pausa.'} {s.reason ? REASONS[s.reason] ?? '' : ''}</>;
 }
 
-/** ¿Está el agente detenido y esta persona puede reanudarlo? (para el botón «Reanudar agente» de la cabecera móvil). */
-export function useAgentPaused(c: Conversation): { paused: boolean; blocked: boolean; pending: boolean; resume: (onError: (m: string) => void) => void } {
+/**
+ * Interruptor del agente de IA en la cabecera del chat (v11, punto 10; reemplaza al botón «Reanudar agente»). Encendido = el agente atiende; apagado = pausado por una persona (misma acción
+ * que el servidor ya registra con origen `manual`). Solo una persona puede encenderlo. Sin agente en la conexión queda apagado y deshabilitado con su motivo; sin créditos no se puede
+ * encender. En una conversación finalizada no se muestra. `compact` deja solo «IA» (cabecera móvil, donde el espacio es poco).
+ */
+export function AgentSwitch({ c, compact = false, onError }: { c: Conversation; compact?: boolean; onError: (message: string | undefined) => void }) {
   const q = useAgentStatus(c.id);
   const control = useAgentControl(c.id);
   const s = q.data;
-  const paused = !!s && !!s.agent && s.state !== 'idle' && s.state !== 'active' && c.status !== 'closed' && s.can_control;
-  return { paused, blocked: !!s?.resume_blocked, pending: control.isPending, resume: (onError) => control.mutate('resume', { onError: (e) => onError(friendlyError(e, 'No pudimos reanudar al agente.')) }) };
+  if (!s || c.status === 'closed') return null;
+  const hasAgent = !!s.agent;
+  const on = hasAgent && (s.state === 'active' || s.state === 'idle');
+  const blocked = !on && s.resume_blocked === 'no_credits';
+  const reason = !hasAgent ? 'Sin agente en esta conversación' : !s.can_control ? 'Solo quien atiende la conversación puede controlar al agente' : blocked ? NO_CREDITS_HINT : on ? 'Pausar al agente de IA en esta conversación' : 'Reanudar al agente de IA en esta conversación';
+  const disabled = !hasAgent || !s.can_control || blocked || control.isPending;
+  const toggle = (): void => {
+    onError(undefined);
+    control.mutate(on ? 'pause' : 'resume', { onError: (e) => onError(friendlyError(e, on ? 'No pudimos pausar al agente.' : 'No pudimos reanudar al agente.')) });
+  };
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Agente de IA"
+      title={reason}
+      disabled={disabled}
+      onClick={toggle}
+      className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full px-2 text-[12.5px] font-semibold text-fg hover:bg-surface2 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <Icon name="bot" size={16} aria-hidden="true" />
+      <span className={compact ? '' : 'hidden min-[1500px]:inline'}>{compact ? 'IA' : 'Agente de IA'}</span>
+      <span aria-hidden="true" className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-line'}`}>
+        <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-[left] duration-150 ${on ? 'left-[18px]' : 'left-0.5'}`} />
+      </span>
+      {!hasAgent ? <span className="sr-only">Sin agente en esta conversación</span> : null}
+    </button>
+  );
 }
 
 /**

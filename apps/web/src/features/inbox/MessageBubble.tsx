@@ -19,7 +19,7 @@ const TICK: Record<string, { text: string; label: string; cls: string }> = {
 
 function Ticks({ status }: { status: ChatMessage['status'] }) {
   const t = TICK[status];
-  return t ? <span role="img" aria-label={t.label} title={t.label} className={`ml-1 tracking-[-2px] ${t.cls}`}>{t.text}</span> : null;
+  return t ? <span role="img" aria-label={t.label} title={t.label} className={`ml-1 tracking-[-0.34em] ${t.cls}`}>{t.text}</span> : null;
 }
 
 /** Una imagen del hilo. En móvil se toca para verla ampliada a pantalla completa (con botón de cerrar); en escritorio es un enlace a otra pestaña, como siempre. */
@@ -104,11 +104,11 @@ function ReactMenu({ m, onReact }: { m: ChatMessage; onReact: (id: string, emoji
 }
 
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
-export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar }: { m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode }) {
+export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '' }: { spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode }) {
   if (m.is_note) {
     const auto = m.sender_type === 'system';
     return (
-      <li className="flex justify-center">
+      <li className={`flex justify-center ${spacing}`}>
         <div className={`max-w-[82%] rounded-lg px-3 py-2 text-[13.5px] ${auto ? 'bg-surface2 text-muted' : 'bg-warn-soft text-warn'}`}>
           <b className="mr-1">{auto ? 'Aviso automático' : `Nota interna${m.author ? ` · ${personName(m.author.name)}` : ''}`}</b>
           <Body m={m} />
@@ -120,7 +120,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar 
   const out = m.direction === 'out';
   const canReact = !out && onReact !== undefined;
   return (
-    <li className={`flex gap-2 ${out ? 'flex-row-reverse' : ''}`}>
+    <li className={`flex gap-2 ${out ? 'flex-row-reverse' : ''} ${spacing}`}>
       {avatar !== undefined ? <span className="w-7 shrink-0 self-start">{avatar}</span> : null}
       <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className={`flex w-full min-w-0 items-start gap-1 ${out ? 'justify-end' : ''}`}>

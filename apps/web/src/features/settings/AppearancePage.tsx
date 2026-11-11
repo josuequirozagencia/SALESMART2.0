@@ -7,6 +7,7 @@ import { CHAT_BG_COLORS, CHAT_BG_GALLERY, CHAT_BG_KINDS, MAX_CHAT_IMAGE_CHARS, c
 import { fileToChatBackground } from '../../ui/chatBackgroundImage';
 import { Alert, Button } from '../../ui/controls';
 import { ThemeSwitch } from '../../ui/ThemeSwitch';
+import { useTextSize } from '../../ui/textSize';
 import { useMyPhoto } from '../photos/usePhotos';
 import { SettingsNav } from '../app/SettingsNav';
 
@@ -93,6 +94,7 @@ function MyPhoto() {
 /** Configuración › Apariencia: el tema (índigo, verde, rojo o WhatsApp), el modo claro/oscuro/sistema y el fondo del chat. Son preferencias de este navegador (no cambian lo que ven los demás). */
 export function AppearancePage() {
   const [brand, setBrand] = useBrand();
+  const [textSize, setTextSize] = useTextSize();
   const bg = useChatBackground();
   return (
     <div className="grid gap-4">
@@ -116,6 +118,17 @@ export function AppearancePage() {
       <section aria-label="Modo" className="grid gap-2 rounded-2xl border border-line bg-surface p-4">
         <h2 className="text-[15px] font-bold">Modo</h2>
         <div className="max-w-xs"><ThemeSwitch /></div>
+      </section>
+      <section aria-label="Tamaño del texto" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+        <div>
+          <h2 className="text-[15px] font-bold">Tamaño del texto</h2>
+          <p className="text-[12.5px] text-muted">Solo en pantallas grandes (escritorio). «Compacto» muestra más información; «Cómodo» usa letra un poco más grande. En el celular no cambia.</p>
+        </div>
+        <div role="radiogroup" aria-label="Tamaño del texto" className="grid gap-2 sm:grid-cols-2">
+          {([['compact', 'Compacto'], ['comfortable', 'Cómodo']] as const).map(([id, label]) => (
+            <button key={id} type="button" role="radio" aria-checked={textSize === id} onClick={() => setTextSize(id)} className={choice(textSize === id)}>{label}</button>
+          ))}
+        </div>
       </section>
       <section aria-label="Fondo del chat" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
         <div>

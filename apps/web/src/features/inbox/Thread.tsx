@@ -14,7 +14,7 @@ import { Menu, type MenuItem } from '../../ui/Menu';
 import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { Pill } from '../../ui/Pill';
 import { usePhotos } from '../photos/usePhotos';
-import { AgentBanner, useAgentPaused } from './AgentBanner';
+import { AgentBanner, AgentSwitch } from './AgentBanner';
 import { Composer } from './Composer';
 import { ConversationTags } from './ConversationTags';
 import { ScheduledButton } from './ScheduledList';
@@ -92,7 +92,6 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
   const goBack = useGoBack();
-  const agent = useAgentPaused(c);
   const scheduled = useScheduledMessages(c.id);
   const scheduledPending = (scheduled.data?.items ?? []).filter((m) => m.status === 'scheduled').length;
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
@@ -121,20 +120,8 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
               <span className="block truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}</span>
             </span>
           </button>
-          {c.channel.kind === 'qr' ? <span className="shrink-0 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn" title="WhatsApp por QR">QR</span> : null}
-          {agent.paused ? (
-            <button
-              type="button"
-              aria-label="Reanudar agente"
-              disabled={agent.pending || agent.blocked}
-              title={agent.blocked ? 'No puedes reanudarlo todavía: la empresa no tiene créditos de IA disponibles.' : 'Reanudar al agente de IA en esta conversación'}
-              onClick={() => { onBackError(undefined); agent.resume((m) => onBackError(m)); }}
-              className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-full border border-warn bg-warn-soft px-3 text-[12.5px] font-semibold text-warn disabled:opacity-50"
-            >
-              <Icon name="bot" size={16} />
-              Reanudar
-            </button>
-          ) : null}
+          {c.channel.kind === 'qr' ? <span className="shrink-0 rounded-full border border-accent bg-accent-soft px-1.5 py-px text-[11px] font-semibold text-accent" title="WhatsApp por QR">QR</span> : null}
+          <AgentSwitch c={c} compact onError={onBackError} />
           <button type="button" aria-label="Más acciones" aria-haspopup="dialog" onClick={onToggleContact} className="relative grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2">
             <Icon name="more" size={22} strokeWidth={3.2} />
             {scheduledPending > 0 ? <span aria-hidden="true" className="absolute right-1 top-1 size-2.5 rounded-full bg-accent" /> : null}
@@ -176,6 +163,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
               <Icon name="reset" />
             </button>
           ) : null}
+          <AgentSwitch c={c} onError={onBackError} />
           <FavoriteButton c={c} />
           <ScheduledButton conversationId={c.id} />
           <button
@@ -298,19 +286,20 @@ function Messages({ c }: { c: Conversation }) {
         if (stick.current) setNewCount((n) => (n === 0 ? n : 0));
       }}
       style={chatBg.style}
-      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-[4%] py-3 ${chatBg.className}`}
+      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 md:px-4 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden ${chatBg.className}`}
     >
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando mensajes" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los mensajes.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
       {q.hasNextPage ? <div className="grid place-items-center pb-3"><Button className={SMALL} loading={q.isFetchingNextPage} onClick={() => { stick.current = false; void q.fetchNextPage(); }}>Cargar mensajes anteriores</Button></div> : null}
       {q.isSuccess && items.length === 0 ? <p className="py-10 text-center text-[13px] text-muted">Todavía no hay mensajes en esta conversación.</p> : null}
       {retryError ? <div className="pb-2"><Alert>{retryError}</Alert></div> : null}
-      <ul className="grid gap-1.5">
+      <ul className="grid">
         {items.map((m, i) => (
           <Fragment key={m.id}>
             {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-surface2 px-3 py-0.5 shadow-sm text-[11.5px] font-semibold text-muted">{dayLabel(m.sent_at, now)}</span></li> : null}
             <MessageBubble
               m={m}
+              spacing={i === 0 ? '' : senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? 'mt-2.5' : 'mt-1'}
               avatar={m.is_note ? undefined : avatarFor(m, i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at), c.contact.name, photos, c.contact.id)}
               canRetry={c.can.reply}
               retrying={retry.isPending && retry.variables === m.id}

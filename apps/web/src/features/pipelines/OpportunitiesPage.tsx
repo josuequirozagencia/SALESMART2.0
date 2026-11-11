@@ -140,7 +140,7 @@ export function OpportunitiesPage() {
       ) : null}
 
       {current ? (
-        <div role="list" aria-label={`Etapas del pipeline ${current.name}`} className="flex gap-3 overflow-x-auto pb-2">
+        <div role="list" aria-label={`Etapas del pipeline ${current.name}`} className="flex min-h-[calc(100dvh-17rem)] gap-3 overflow-x-auto pb-2">
           {stages.map((s) => (
             <StageColumn
               key={s.id}
