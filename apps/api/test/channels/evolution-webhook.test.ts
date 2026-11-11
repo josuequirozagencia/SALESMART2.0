@@ -63,6 +63,11 @@ describe('mensajes entrantes (messages.upsert)', () => {
     expect(loc.events[0]!.event.messages[0]).toMatchObject({ kind: 'location', extra: { location: { latitude: -2.17, longitude: -79.92, name: 'Oficina', address: null } } });
     expect(parseEvolutionWebhook(upsert('CON-0000000000000001', { contactsArrayMessage: { contacts: [{}, {}] } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'contacts', extra: { contacts_count: 2 } });
     expect(parseEvolutionWebhook(upsert('BTN-0000000000000001', { buttonsResponseMessage: { selectedDisplayText: 'Sí' } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'interactive', text: 'Sí' });
+    expect(parseEvolutionWebhook(upsert('TPL-0000000000000001', { templateButtonReplyMessage: { selectedId: 'x', selectedDisplayText: 'Quiero info' } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'interactive', text: 'Quiero info' });
+    const msg = parseEvolutionWebhook(upsert('INT-0000000000000001', { interactiveMessage: { header: { title: 'Hola' }, body: { text: 'Elige una opción' }, footer: { text: 'Gracias' }, nativeFlowMessage: { buttons: [{ name: 'quick_reply' }] } } }), NOW).events[0]!.event.messages[0];
+    expect(msg).toMatchObject({ kind: 'interactive', text: 'Hola\nElige una opción\nGracias' });
+    // Sin ningún texto no inventa nada: queda un mensaje interactivo vacío, que la bandeja rotula
+    expect(parseEvolutionWebhook(upsert('INT-0000000000000002', { interactiveMessage: { nativeFlowMessage: {} } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'interactive', text: null });
     expect(parseEvolutionWebhook(upsert('UNK-0000000000000001', { pollCreationMessage: { name: '¿?' } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'unsupported', text: null });
   });
 
