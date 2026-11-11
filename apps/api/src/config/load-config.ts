@@ -44,6 +44,8 @@ export interface AppConfig {
     readonly whatsappProvider: 'meta' | 'fake';
     readonly capiProvider: 'meta' | 'none' | 'fake';
     readonly ghlProvider: 'ghl' | 'none' | 'fake';
+    /** Calendario de la empresa (v11 Pista G, ADR-67). */
+    readonly calendarProvider: 'google' | 'none' | 'fake';
     /** WhatsApp por QR (M9.6, ADR-54). */
     readonly qrProvider: 'evolution' | 'none' | 'fake';
   };
@@ -186,6 +188,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     if (e.MAIL_PROVIDER === 'console' || e.MAIL_PROVIDER === 'memory') issues.push(`MAIL_PROVIDER: "${e.MAIL_PROVIDER}" es solo para desarrollo/pruebas y no se permite en producción`);
     if (e.CAPTCHA_PROVIDER === 'fake') issues.push('CAPTCHA_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.CAPI_PROVIDER === 'fake') issues.push('CAPI_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
+    if (e.CALENDAR_PROVIDER === 'fake') issues.push('CALENDAR_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.GHL_PROVIDER === 'fake') issues.push('GHL_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.HTTP_OUT_PROVIDER === 'fake') issues.push('HTTP_OUT_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
     if (e.PUSH_PROVIDER === 'fake') issues.push('PUSH_PROVIDER: "fake" es solo para desarrollo/pruebas y no se permite en producción');
@@ -248,7 +251,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       passwordMinLength: e.SIGNUP_PASSWORD_MIN_LENGTH,
     },
     providers: { resendApiKey: e.RESEND_API_KEY, mailFrom: e.MAIL_FROM, turnstileSecret: e.TURNSTILE_SECRET_KEY, turnstileSiteKey: e.TURNSTILE_SITE_KEY, credentialsKeys },
-    channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER, qrProvider: e.QR_PROVIDER },
+    channels: { whatsappProvider: e.WHATSAPP_PROVIDER, capiProvider: e.CAPI_PROVIDER, ghlProvider: e.GHL_PROVIDER, calendarProvider: e.CALENDAR_PROVIDER, qrProvider: e.QR_PROVIDER },
     push: { provider: e.PUSH_PROVIDER, enabled: pushEnabled, vapidPublicKey: e.VAPID_PUBLIC_KEY, vapidPrivateKey: e.VAPID_PRIVATE_KEY, vapidSubject: e.VAPID_SUBJECT },
     automations: { httpProvider: e.HTTP_OUT_PROVIDER },
     ai: { provider: e.AI_PROVIDER },

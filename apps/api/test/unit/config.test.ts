@@ -43,7 +43,7 @@ describe('configuración validada', () => {
     expect(loadConfig({ ...good, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', FRONTEND_BASE_URL: 'http://localhost:5173' }).signup.mailProvider).toBe('console');
   });
   it('WhatsApp (ADR-50): por defecto el adaptador de Meta; el fake solo fuera de producción; un valor desconocido se rechaza', () => {
-    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta', capiProvider: 'meta', ghlProvider: 'ghl', qrProvider: 'evolution' });
+    expect(loadConfig(good).channels).toEqual({ whatsappProvider: 'meta', capiProvider: 'meta', ghlProvider: 'ghl', calendarProvider: 'google', qrProvider: 'evolution' });
     expect(loadConfig({ ...good, WHATSAPP_PROVIDER: 'fake' }).channels.whatsappProvider).toBe('fake');
     expect(loadConfig({ ...good, NODE_ENV: 'production' }).channels.whatsappProvider).toBe('meta');
     expect(() => loadConfig({ ...good, NODE_ENV: 'production', WHATSAPP_PROVIDER: 'fake' })).toThrow(/WHATSAPP_PROVIDER/);

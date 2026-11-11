@@ -6,6 +6,7 @@ import { Alert, Button, Input, Spinner } from '../../ui/controls';
 import { Link } from 'react-router-dom';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { SettingsNav } from '../app/SettingsNav';
+import { useCalendarConnection } from '../calendar/useCalendar';
 import { useGhlConnection } from '../ghl/useGhl';
 import { useMetaSettings } from '../meta/useMeta';
 import { useQueues } from '../queues/useQueues';
@@ -86,6 +87,7 @@ export function ConnectionsPage() {
   const qr = useQrChannels();
   const ghl = useGhlConnection();
   const meta = useMetaSettings();
+  const calendar = useCalendarConnection();
   const queueName = (id: string | null): string | null => (id ? (queues.data?.items.find((x) => x.id === id)?.name ?? null) : null);
   const [dialog, setDialog] = useState<{ channel?: Channel } | null>(null);
   const [templatesOf, setTemplatesOf] = useState<Channel | null>(null);
@@ -99,6 +101,7 @@ export function ConnectionsPage() {
   const qrItems = qr.data?.items ?? [];
   const qrStatus: ConnectionStatus = qrItems.some((c) => c.state === 'closed' || c.state === 'logged_out' || c.last_error) ? 'attention' : qrItems.some((c) => c.state === 'open') ? 'connected' : 'disconnected';
   const ghlStatus: ConnectionStatus = ghl.data?.status === 'needs_reconnect' || ghl.data?.last_error ? 'attention' : ghl.data?.configured && ghl.data.status === 'active' ? 'connected' : 'disconnected';
+  const calendarStatus: ConnectionStatus = calendar.data?.status === 'needs_reconnect' || calendar.data?.last_error ? 'attention' : calendar.data?.status === 'connected' ? 'connected' : 'disconnected';
   const metaStatus: ConnectionStatus = meta.data?.last_error ? 'attention' : meta.data?.configured && meta.data.enabled ? 'connected' : 'disconnected';
 
   const shownNumbers = items.filter((c) => match(c.name, c.display_phone, c.verified_name, 'whatsapp oficial'));
@@ -166,7 +169,11 @@ export function ConnectionsPage() {
                     <Link to="/settings/meta" aria-label="Configurar la API de Conversiones" className={linkBtn}>Configurar</Link>
                   </ConnectionCard>
                 ) : null}
-                {showCalendar ? <ConnectionCard name="Calendario de Google" description="Sincroniza tus citas con Google Calendar." status="soon" /> : null}
+                {showCalendar ? (
+                  <ConnectionCard name="Calendario de Google" description="Cada cita aparece como un evento en tu Google Calendar." status={calendar.isSuccess ? calendarStatus : 'disconnected'} note={calendar.data?.last_error ? <span className="text-crit">{calendar.data.last_error}</span> : undefined}>
+                    <Link to="/settings/calendar" aria-label="Configurar Google Calendar" className={linkBtn}>Configurar</Link>
+                  </ConnectionCard>
+                ) : null}
               </ul>
             )}
           </section>

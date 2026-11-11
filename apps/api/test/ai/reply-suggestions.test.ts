@@ -224,7 +224,7 @@ describe('sugerir una respuesta (v11 S4)', () => {
     await inbound(c.id, 'Primera pregunta', { at: new Date(Date.now() - 5 * MIN) });
     await humanReply(c.id, 'Respuesta de una persona');
     await internalNote(c.id, 'SECRETO-INTERNO no debe salir');
-    await inbound(c.id, '¿Y el precio del corte?');
+    await inbound(c.id, '¿Y el precio del corte?', { at: new Date(Date.now() + 2000) }); // la respuesta humana se fecha con el reloj de la base: la pregunta va claramente después
     expect((await suggest(T.carol, c.id)).status).toBe(200);
     const req = chats()[0]!.kind === 'chat' ? chats()[0]!.request : null;
     const all = JSON.stringify(req?.messages ?? []);

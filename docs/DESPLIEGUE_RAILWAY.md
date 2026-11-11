@@ -126,6 +126,14 @@ Mientras no haya clave de IA, los documentos subidos quedan «Esperando a la IA�
 
 **A validar la primera vez con tu clave real:** (1) subir un PDF, un Word y una tabla y ver que llegan a «Listo»; (2) «Probar la búsqueda» con preguntas que sí y que no están en los documentos (el umbral de parecido, `MIN_SCORE = 0,30`, es **provisional** y se calibra aquí); (3) que el costo cobrado en Créditos IA > Movimientos coincide con lo que muestra el panel de OpenAI; (4) un PDF escaneado (debe fallar con un mensaje claro) y uno protegido con contraseña. La base vectorial funciona **sin extensión** (hasta 5 000 fragmentos por empresa); pasar a pgvector requiere verificar la extensión en Railway y en CI.
 
+## 4f. Google Calendar (v11 Pista G, 67a, ADR-67)
+La aplicación de Google es **de la plataforma** (una sola para todas las empresas); cada empresa autoriza su propia cuenta desde Configuración › Google Calendar.
+1. **Requisitos del servidor:** `PROVIDER_CREDENTIALS_KEY` y `FRONTEND_BASE_URL` definidos (con el dominio público, sin barra final). `CALENDAR_PROVIDER` queda en `google` por omisión.
+2. **Google Cloud** (proyecto «sales smart Google Calendar», cuenta de la agencia): habilita **Google Calendar API**; crea un **ID de cliente de OAuth de tipo «Aplicación web»**; en «URI de redireccionamiento autorizados» registra EXACTAMENTE `<FRONTEND_BASE_URL>/v1/integrations/google-calendar/callback` (la pantalla Plataforma › Proveedores › Calendario la muestra y se copia con un clic; sin «orígenes de JavaScript»).
+3. **Pantalla de consentimiento** (Audiencia «Externo»; en modo de prueba agrega a los usuarios de prueba, y recuerda que **la autorización vence a los 7 días** mientras esté en prueba): nombre, correo de soporte y dominio autorizado. En «Acceso a los datos» declara `…/auth/userinfo.email` y `…/auth/calendar.app.created` (no sensibles; modo «calendario propio») y, **solo si se ofrece el modo «elegir uno existente»**, `…/auth/calendar.events` y `…/auth/calendar.calendarlist.readonly` (sensibles: piden verificación de Google; ver ADR-67).
+4. **En la aplicación:** el Súper Admin abre Plataforma › Proveedores › Calendario › Google, pega el **ID de cliente** y el **secreto de cliente** (nunca por chat ni archivos) y lo pone «en uso».
+5. **Validar la primera vez (nada de esto está probado contra Google real):** con un administrador de una empresa de prueba, Configuración › Google Calendar › «Conectar con Google» (modo propio): llega a Google, aceptas y vuelves con «Google Calendar quedó conectado»; en Google aparece el calendario «Sales Smart · <empresa>». Prueba también cancelar en Google, desmarcar un permiso y desconectar (debe quedar revocado en myaccount.google.com › Seguridad).
+
 ## 5. Lista de comprobación posterior al despliegue
 1. `GET https://<dominio>/health/ready` → `{"status":"ok"}`.
 2. Cabeceras de `GET /` (CSP, HSTS, `X-Frame-Options`) y que `/login` abra la pantalla.

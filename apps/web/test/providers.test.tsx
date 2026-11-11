@@ -286,6 +286,20 @@ describe('WhatsApp oficial · dirección del webhook (M5.2)', () => {
   });
 });
 
+describe('Dirección de retorno de OAuth (Google Calendar, ADR-67)', () => {
+  it('muestra la dirección que hay que autorizar en Google Cloud y se puede copiar; los servicios sin ella no la muestran', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const w = world();
+    w.services.push(svc('calendar', 'Calendario', [prov('google', 'Google Calendar', [fld('client_id', 'ID de cliente de OAuth'), fld('client_secret', 'Secreto de cliente de OAuth')])], { redirect_url: 'https://app.ejemplo.test/v1/integrations/google-calendar/callback' }));
+    mockApi(routed(w, newCalls()));
+    renderApp('/platform/providers');
+    await userEvent.click(await screen.findByRole('button', { name: 'Copiar Dirección de retorno autorizada' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('https://app.ejemplo.test/v1/integrations/google-calendar/callback'));
+    expect(screen.getAllByText(/URI de redireccionamiento autorizado/)).toHaveLength(1);
+  });
+});
+
 describe('Probar conexión del almacenamiento (ADR-42)', () => {
   const withStorageInUse = (): ProvidersList => {
     const w = world();
