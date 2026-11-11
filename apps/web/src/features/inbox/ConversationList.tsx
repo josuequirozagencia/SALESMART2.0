@@ -39,7 +39,7 @@ const DELIVERY: Record<string, { mark: string; text: string }> = {
 
 /** «QR» y «GoHighLevel»: de dónde viene la conversación, cuando no es WhatsApp oficial (v10: en la bandeja no se escribe «no oficial»; el aviso de riesgo vive en Configuración › Conexiones). */
 function ChannelMark({ kind }: { kind: Conversation['channel']['kind'] }) {
-  if (kind === 'qr') return <span className="rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[11px] font-semibold text-warn" title="WhatsApp por QR">QR</span>;
+  if (kind === 'qr') return <span className="rounded-full border border-accent bg-accent-soft px-1.5 py-px text-[11px] font-semibold text-accent" title="WhatsApp por QR">QR</span>;
   if (kind === 'ghl') return <span className="rounded-full bg-info-soft px-1.5 py-px text-[11px] font-semibold text-info">GoHighLevel</span>;
   return null;
 }

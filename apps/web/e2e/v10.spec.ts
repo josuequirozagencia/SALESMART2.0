@@ -100,13 +100,14 @@ for (const size of SIZES) {
       await expect(quick.getByRole('button', { name: 'Destacadas' })).toBeEnabled();
     });
 
-    test('chat: «Reanudar agente» en la cabecera y sin banner; el nombre y el ⋮ abren el panel; áreas táctiles de 44 px; sin correos y con icono de teléfono', async ({ page, request }) => {
+    test('chat: interruptor de IA en la cabecera (apagado) y sin banner; el nombre y el ⋮ abren el panel; áreas táctiles de 44 px; sin correos y con icono de teléfono', async ({ page, request }) => {
       const { email, conversationId } = await fixture(request);
       await uiLogin(page, email);
       await page.goto(`/inbox/${conversationId}`);
       const chat = page.getByRole('region', { name: 'Conversación con Cliente V10' });
-      const resume = chat.getByRole('button', { name: 'Reanudar agente' });
+      const resume = chat.getByRole('switch', { name: 'Agente de IA' });
       await expect(resume).toBeVisible();
+      await expect(resume).toHaveAttribute('aria-checked', 'false');
       await expect(page.getByRole('status', { name: 'Agente de IA' })).toHaveCount(0);
       await expect(page.getByText(/Pausado: una persona intervino/)).toHaveCount(0);
       await expect(chat.getByText('QR', { exact: true })).toBeVisible();
@@ -115,7 +116,7 @@ for (const size of SIZES) {
       // Áreas táctiles de al menos 44 × 44 px
       const name = chat.getByRole('button', { name: 'Ver los datos de Cliente V10' });
       const more = chat.getByRole('button', { name: 'Más acciones' });
-      for (const [label, el] of [['nombre', name], ['⋮', more], ['Reanudar agente', resume]] as const) {
+      for (const [label, el] of [['nombre', name], ['⋮', more], ['interruptor de IA', resume]] as const) {
         const box = (await el.boundingBox())!;
         expect(box.height, `${label}: alto`).toBeGreaterThanOrEqual(43.5);
         expect(box.width, `${label}: ancho`).toBeGreaterThanOrEqual(43.5);

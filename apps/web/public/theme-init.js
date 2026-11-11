@@ -6,6 +6,7 @@
     if (m === 'light' || m === 'dark') document.documentElement.setAttribute('data-theme', m);
     var b = window.localStorage.getItem('ss.brand.v1');
     if (b === 'green' || b === 'red' || b === 'whatsapp') document.documentElement.setAttribute('data-brand', b);
+    if (window.localStorage.getItem('ss.textsize.v1') === 'comfortable') document.documentElement.setAttribute('data-text', 'comfortable');
   } catch (e) {
     /* sin almacenamiento: se usa el tema del sistema */
   }

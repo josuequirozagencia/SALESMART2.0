@@ -58,7 +58,7 @@ export function StageColumn({
       onDragOver={(e) => { if (accepts) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; if (droppable) setOver(true); } }}
       onDragLeave={() => setOver(false)}
       onDrop={(e) => { setOver(false); if (accepts) { e.preventDefault(); onDropHere(); } }}
-      className={`grid h-fit shrink-0 gap-2 rounded-2xl border bg-surface2 p-2 ${folded ? 'w-[64px]' : 'w-[260px]'} ${stage.is_hidden ? 'opacity-60' : ''} ${over ? 'border-accent ring-2 ring-accent' : 'border-line'}`}
+      className={`grid shrink-0 content-start gap-2 rounded-2xl border bg-surface2 p-2 ${folded ? 'w-[64px]' : 'w-[260px] flex-1 basis-[260px] max-w-[380px]'} ${stage.is_hidden ? 'opacity-60' : ''} ${over ? 'border-accent ring-2 ring-accent' : 'border-line'}`}
     >
       <header className="flex items-start justify-between gap-1 rounded-xl px-2.5 py-2 text-fg" style={stageStyle(stage.color)}>
         {folded ? null : (

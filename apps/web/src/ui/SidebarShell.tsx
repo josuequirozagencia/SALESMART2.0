@@ -53,6 +53,8 @@ type SidebarProps = {
   /** Lo que va entre las secciones y la persona (campana de avisos, «Ver como»). Si es función, recibe si la barra está plegada. */
   extra?: ReactNode | ((compact: boolean) => ReactNode);
   wide?: boolean;
+  /** Sin ancho máximo: la sección usa todo el ancho junto a la barra lateral, con 24 px de margen (16 px en móvil). Para las pantallas de datos (v11). */
+  fluid?: boolean;
   /**
    * Qué pasa con el menú en móvil (< 768 px). `bar` (por omisión; consola de plataforma y agencia): barra superior con ☰ y panel lateral. `bottom` (la empresa, ADR-60): no hay
    * barra superior ni panel; la navegación es la barra inferior y la página `/menu`, que pone el marco que lo usa.
@@ -73,7 +75,7 @@ type SidebarProps = {
  * desaparece (la reemplazan la barra inferior y `/menu`). Con `mobileNav = 'bar'` se comporta como siempre: en pantallas angostas se abre desde una barra superior (☰).
  * Es solo navegación: lo que cada persona puede hacer lo decide el servidor; los grupos que se pasan ya vienen filtrados por quien los arma.
  */
-export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, mobileNav = 'bar', reserveBottom = false, flush = false, photoUrl = null, children }: SidebarProps) {
+export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wide = false, fluid = false, mobileNav = 'bar', reserveBottom = false, flush = false, photoUrl = null, children }: SidebarProps) {
   const { pathname } = useLocation();
   const bottom = mobileNav === 'bottom';
   const bp = useBreakpoint();
@@ -181,7 +183,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
           </div>
         </aside>
         <div className={`min-w-0 ${scroller} ${flush ? `flex h-dvh flex-col ${bottom ? 'md:h-full' : 'lg:h-full'}` : ''}`}>
-          <div className={flush ? `flex min-h-0 min-w-0 flex-1 flex-col ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))]' : ''}` : `mx-auto grid ${wide ? 'max-w-[1500px]' : 'max-w-[1180px]'} grid-cols-[minmax(0,1fr)] gap-4 p-4 sm:p-5 ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom)+16px)]' : ''}`}>{children}</div>
+          <div className={flush ? `flex min-h-0 min-w-0 flex-1 flex-col ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom))]' : ''}` : `mx-auto grid ${fluid ? 'w-full p-4 sm:p-5 lg:p-6' : `${wide ? 'max-w-[1500px]' : 'max-w-[1180px]'} p-4 sm:p-5`} grid-cols-[minmax(0,1fr)] gap-4 ${bottom && reserveBottom ? 'max-md:pb-[calc(var(--bottom-nav-h)+env(safe-area-inset-bottom)+16px)]' : ''}`}>{children}</div>
         </div>
       </div>
     </div>

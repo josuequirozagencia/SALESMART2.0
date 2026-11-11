@@ -29,6 +29,8 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
   useInboxRealtime(me.user.id, me.organization.id, pathname);
   // El Inbox necesita más ancho que el resto de las secciones: lista y hilo, uno al lado del otro
   const inInbox = pathname.startsWith('/inbox');
+  // Las pantallas de datos usan todo el ancho (v11, punto 8); Configuración y los formularios conservan un ancho de lectura
+  const fluid = ['/contacts', '/opportunities', '/tasks', '/sales', '/agenda', '/analytics'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const unread = useInboxUnread(!inInbox);
   const mobile = useBreakpoint() === 'mobile';
   const keyboard = useKeyboardOpen();
@@ -48,6 +50,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
         onLogout={onLogout}
         banner={chat ? null : <><ContextBanner me={me} /><ViewAsBar me={me} /></>}
         wide={inInbox}
+        fluid={fluid}
         mobileNav="bottom"
         reserveBottom={showBottom}
         flush={flush}

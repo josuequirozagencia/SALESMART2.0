@@ -80,16 +80,19 @@ const AI = (over: Record<string, unknown> = {}) => ({ agent: { id: 'a1', name: '
 const qrChannel = { id: 'ch2', name: 'Chip de ventas', state: 'active', kind: 'qr', session: 'open' } as unknown as Conversation['channel'];
 
 describe('Chat móvil · cabecera y panel (v10)', () => {
-  it('cabecera: atrás, el bloque avatar+nombre, el ⋮; sin llamada ni «en línea», sin banner del agente y sin «Reanudar agente» si no hay agente', async () => {
+  it('cabecera: atrás, el bloque avatar+nombre, el ⋮; sin llamada ni «en línea», sin banner del agente y con el interruptor de IA deshabilitado si no hay agente', async () => {
     stubWidth(390);
-    mockApi(server().routes);
+    mockApi(server(conv(), { 'GET /conversations/c1/ai': () => ({ body: AI({ agent: null, state: 'idle', reason: null }) }) }).routes);
     renderApp('/inbox/c1');
     const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
     expect(chat.getByRole('button', { name: 'Ver los datos de Ana Torres' })).toHaveTextContent('Ana Torres');
     expect(chat.getByText(/\+593984217730 · Barbería WhatsApp · Ventas/)).toBeInTheDocument();
     expect(chat.getByRole('link', { name: 'Volver a las conversaciones' })).toHaveAttribute('href', '/inbox');
     expect(chat.getByRole('button', { name: 'Más acciones' })).toBeInTheDocument();
-    expect(chat.queryByRole('button', { name: 'Reanudar agente' })).not.toBeInTheDocument();
+    const sw = await chat.findByRole('switch', { name: 'Agente de IA' });
+    expect(sw).toBeDisabled();
+    expect(sw).toHaveAttribute('aria-checked', 'false');
+    expect(sw).toHaveAttribute('title', 'Sin agente en esta conversación');
     expect(chat.queryByRole('button', { name: /llam/i })).not.toBeInTheDocument();
     expect(chat.queryByText(/en línea/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Navegación principal' })).not.toBeInTheDocument();
@@ -149,13 +152,13 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     expect(screen.queryByText(/no oficial/)).not.toBeInTheDocument();
   });
 
-  it('agente PAUSADO: la cabecera trae «Reanudar agente», no hay banner amarillo sobre el chat y el texto de pausa vive en el panel', async () => {
+  it('agente PAUSADO: la cabecera trae el interruptor de IA apagado, no hay banner amarillo sobre el chat y el texto de pausa vive en el panel', async () => {
     stubWidth(390);
     const w = server(conv(), { 'GET /conversations/c1/ai': () => ({ body: AI() }) });
     mockApi(w.routes);
     renderApp('/inbox/c1');
     const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
-    expect(await chat.findByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
+    expect(await chat.findByRole('switch', { name: 'Agente de IA' })).toHaveAttribute('aria-checked', 'false');
     expect(screen.queryByRole('status', { name: 'Agente de IA' })).not.toBeInTheDocument();
     expect(screen.queryByText(/Pausado: una persona intervino/)).not.toBeInTheDocument();
     await userEvent.click(chat.getByRole('button', { name: 'Más acciones' }));
@@ -164,7 +167,7 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     expect(dlg.getByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
   });
 
-  it('«Reanudar agente» de la cabecera reanuda al agente', async () => {
+  it('el interruptor de IA de la cabecera reanuda al agente al encenderlo y lo pausa al apagarlo', async () => {
     stubWidth(390);
     const calls: string[] = [];
     let state = AI();
@@ -172,12 +175,37 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     mockApi(w.routes);
     renderApp('/inbox/c1');
     const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
-    await userEvent.click(await chat.findByRole('button', { name: 'Reanudar agente' }));
+    await userEvent.click(await chat.findByRole('switch', { name: 'Agente de IA' }));
     await waitFor(() => expect(calls).toEqual(['resume']));
-    await waitFor(() => expect(chat.queryByRole('button', { name: 'Reanudar agente' })).not.toBeInTheDocument());
+    await waitFor(() => expect(chat.getByRole('switch', { name: 'Agente de IA' })).toHaveAttribute('aria-checked', 'true'));
   });
 
-  it('agente ACTIVO: la cabecera no trae el botón y el panel dice quién atiende, con «Tomar control»', async () => {
+  it('apagar el interruptor de IA pausa al agente (POST pause) y queda apagado', async () => {
+    stubWidth(390);
+    const calls: string[] = [];
+    let state = AI({ state: 'active', reason: null });
+    const w = server(conv(), { 'GET /conversations/c1/ai': () => ({ body: state }), 'POST /conversations/c1/ai/pause': () => { calls.push('pause'); state = AI({ reason: 'manual' }); return { body: state }; } });
+    mockApi(w.routes);
+    renderApp('/inbox/c1');
+    const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
+    const sw = await chat.findByRole('switch', { name: 'Agente de IA' });
+    expect(sw).toHaveAttribute('aria-checked', 'true');
+    await userEvent.click(sw);
+    await waitFor(() => expect(calls).toEqual(['pause']));
+    await waitFor(() => expect(chat.getByRole('switch', { name: 'Agente de IA' })).toHaveAttribute('aria-checked', 'false'));
+  });
+
+  it('sin créditos de IA el interruptor apagado no se puede encender y dice por qué', async () => {
+    stubWidth(390);
+    mockApi(server(conv(), { 'GET /conversations/c1/ai': () => ({ body: AI({ reason: 'no_credits', resume_blocked: 'no_credits' }) }) }).routes);
+    renderApp('/inbox/c1');
+    const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
+    const sw = await chat.findByRole('switch', { name: 'Agente de IA' });
+    expect(sw).toBeDisabled();
+    expect(sw.getAttribute('title')).toMatch(/no tiene créditos de IA/);
+  });
+
+  it('agente ACTIVO: el interruptor de la cabecera está encendido y el panel dice quién atiende, con «Tomar control»', async () => {
     stubWidth(390);
     mockApi(server(conv(), { 'GET /conversations/c1/ai': () => ({ body: AI({ state: 'active', reason: null }) }) }).routes);
     renderApp('/inbox/c1');
@@ -186,7 +214,7 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     const dlg = within(await screen.findByRole('dialog', { name: 'Datos del contacto' }));
     expect(await dlg.findByRole('status', { name: 'Agente de IA' })).toHaveTextContent('Agente de IA atendiendo · MAR_IA');
     expect(dlg.getByRole('button', { name: 'Tomar control' })).toBeInTheDocument();
-    expect(chat.queryByRole('button', { name: 'Reanudar agente' })).not.toBeInTheDocument();
+    expect(chat.getByRole('switch', { name: 'Agente de IA' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('«Destacar» está en el panel: pone la estrella (PUT) y la tarjeta pasa a «Quitar de destacadas» (DELETE)', async () => {

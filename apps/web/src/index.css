@@ -144,47 +144,49 @@ body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--f-
  * Cambiar --fs-min / --fs-max / --fs-title-delta cambia TODA la interfaz. Va DENTRO de la capa `utilities` y con un selector más específico para ganarle a la utilidad original
  * (también a la variante con `!`).
  */
-:root { --fs-min: 11px; --fs-max: 13px; --fs-title-delta: 2pt; }
-body { font-size: min(var(--fs-max), max(var(--fs-min), 13.5px)); }
+:root { --fs-min: 11px; --fs-max: 13px; --fs-title-delta: 2pt; --fs-shift: 0px; }
+/* v11 · punto 1: en ESCRITORIO (≥ 1024 px) el texto de toda la aplicación baja 3 px y el piso pasa a 10 px («Compacto», por omisión). «Cómodo» (`data-text="comfortable"`, Apariencia) deja la escala de antes. En móvil y tablet no cambia. */
+@media (min-width: 1024px) { :root:not([data-text="comfortable"]) { --fs-min: 10px; --fs-shift: 3px; } }
+body { font-size: min(var(--fs-max), max(var(--fs-min), calc(13.5px - var(--fs-shift)))); }
 @layer utilities {
-  html .text-\[10px\] { font-size: min(var(--fs-max), max(var(--fs-min), 10px)); }
-  html .\!text-\[10px\] { font-size: min(var(--fs-max), max(var(--fs-min), 10px)) !important; }
-  html .text-\[10\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 10.5px)); }
-  html .\!text-\[10\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 10.5px)) !important; }
-  html .text-\[11px\] { font-size: min(var(--fs-max), max(var(--fs-min), 11px)); }
-  html .\!text-\[11px\] { font-size: min(var(--fs-max), max(var(--fs-min), 11px)) !important; }
-  html .text-\[11\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 11.5px)); }
-  html .\!text-\[11\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 11.5px)) !important; }
-  html .text-\[12px\] { font-size: min(var(--fs-max), max(var(--fs-min), 12px)); }
-  html .\!text-\[12px\] { font-size: min(var(--fs-max), max(var(--fs-min), 12px)) !important; }
-  html .text-\[12\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 12.5px)); }
-  html .\!text-\[12\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 12.5px)) !important; }
-  html .text-\[13px\] { font-size: min(var(--fs-max), max(var(--fs-min), 13px)); }
-  html .\!text-\[13px\] { font-size: min(var(--fs-max), max(var(--fs-min), 13px)) !important; }
-  html .text-\[13\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 13.5px)); }
-  html .\!text-\[13\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), 13.5px)) !important; }
-  html .text-\[14px\] { font-size: min(var(--fs-max), max(var(--fs-min), 14px)); }
-  html .\!text-\[14px\] { font-size: min(var(--fs-max), max(var(--fs-min), 14px)) !important; }
-  html .text-\[15px\] { font-size: min(var(--fs-max), max(var(--fs-min), 15px)); }
-  html .\!text-\[15px\] { font-size: min(var(--fs-max), max(var(--fs-min), 15px)) !important; }
-  html .text-\[16px\] { font-size: max(var(--fs-min), calc(16px - var(--fs-title-delta))); }
-  html .\!text-\[16px\] { font-size: max(var(--fs-min), calc(16px - var(--fs-title-delta))) !important; }
-  html .text-\[17px\] { font-size: max(var(--fs-min), calc(17px - var(--fs-title-delta))); }
-  html .\!text-\[17px\] { font-size: max(var(--fs-min), calc(17px - var(--fs-title-delta))) !important; }
-  html .text-\[18px\] { font-size: max(var(--fs-min), calc(18px - var(--fs-title-delta))); }
-  html .\!text-\[18px\] { font-size: max(var(--fs-min), calc(18px - var(--fs-title-delta))) !important; }
-  html .text-\[19px\] { font-size: max(var(--fs-min), calc(19px - var(--fs-title-delta))); }
-  html .\!text-\[19px\] { font-size: max(var(--fs-min), calc(19px - var(--fs-title-delta))) !important; }
-  html .text-\[20px\] { font-size: max(var(--fs-min), calc(20px - var(--fs-title-delta))); }
-  html .\!text-\[20px\] { font-size: max(var(--fs-min), calc(20px - var(--fs-title-delta))) !important; }
-  html .text-\[22px\] { font-size: max(var(--fs-min), calc(22px - var(--fs-title-delta))); }
-  html .\!text-\[22px\] { font-size: max(var(--fs-min), calc(22px - var(--fs-title-delta))) !important; }
-  html .text-\[25px\] { font-size: max(var(--fs-min), calc(25px - var(--fs-title-delta))); }
-  html .\!text-\[25px\] { font-size: max(var(--fs-min), calc(25px - var(--fs-title-delta))) !important; }
-  html .text-\[26px\] { font-size: max(var(--fs-min), calc(26px - var(--fs-title-delta))); }
-  html .\!text-\[26px\] { font-size: max(var(--fs-min), calc(26px - var(--fs-title-delta))) !important; }
-  html .text-\[30px\] { font-size: max(var(--fs-min), calc(30px - var(--fs-title-delta))); }
-  html .\!text-\[30px\] { font-size: max(var(--fs-min), calc(30px - var(--fs-title-delta))) !important; }
+  html .text-\[10px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(10px - var(--fs-shift)))); }
+  html .\!text-\[10px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(10px - var(--fs-shift)))) !important; }
+  html .text-\[10\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(10.5px - var(--fs-shift)))); }
+  html .\!text-\[10\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(10.5px - var(--fs-shift)))) !important; }
+  html .text-\[11px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(11px - var(--fs-shift)))); }
+  html .\!text-\[11px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(11px - var(--fs-shift)))) !important; }
+  html .text-\[11\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(11.5px - var(--fs-shift)))); }
+  html .\!text-\[11\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(11.5px - var(--fs-shift)))) !important; }
+  html .text-\[12px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(12px - var(--fs-shift)))); }
+  html .\!text-\[12px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(12px - var(--fs-shift)))) !important; }
+  html .text-\[12\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(12.5px - var(--fs-shift)))); }
+  html .\!text-\[12\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(12.5px - var(--fs-shift)))) !important; }
+  html .text-\[13px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(13px - var(--fs-shift)))); }
+  html .\!text-\[13px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(13px - var(--fs-shift)))) !important; }
+  html .text-\[13\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(13.5px - var(--fs-shift)))); }
+  html .\!text-\[13\.5px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(13.5px - var(--fs-shift)))) !important; }
+  html .text-\[14px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(14px - var(--fs-shift)))); }
+  html .\!text-\[14px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(14px - var(--fs-shift)))) !important; }
+  html .text-\[15px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(15px - var(--fs-shift)))); }
+  html .\!text-\[15px\] { font-size: min(var(--fs-max), max(var(--fs-min), calc(15px - var(--fs-shift)))) !important; }
+  html .text-\[16px\] { font-size: max(var(--fs-min), calc(16px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[16px\] { font-size: max(var(--fs-min), calc(16px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[17px\] { font-size: max(var(--fs-min), calc(17px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[17px\] { font-size: max(var(--fs-min), calc(17px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[18px\] { font-size: max(var(--fs-min), calc(18px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[18px\] { font-size: max(var(--fs-min), calc(18px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[19px\] { font-size: max(var(--fs-min), calc(19px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[19px\] { font-size: max(var(--fs-min), calc(19px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[20px\] { font-size: max(var(--fs-min), calc(20px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[20px\] { font-size: max(var(--fs-min), calc(20px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[22px\] { font-size: max(var(--fs-min), calc(22px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[22px\] { font-size: max(var(--fs-min), calc(22px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[25px\] { font-size: max(var(--fs-min), calc(25px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[25px\] { font-size: max(var(--fs-min), calc(25px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[26px\] { font-size: max(var(--fs-min), calc(26px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[26px\] { font-size: max(var(--fs-min), calc(26px - var(--fs-title-delta) - var(--fs-shift))) !important; }
+  html .text-\[30px\] { font-size: max(var(--fs-min), calc(30px - var(--fs-title-delta) - var(--fs-shift))); }
+  html .\!text-\[30px\] { font-size: max(var(--fs-min), calc(30px - var(--fs-title-delta) - var(--fs-shift))) !important; }
 }
 /* Campos de formulario en móvil: 16 px como mínimo para que iOS no haga zoom al enfocarlos (no se escalan con la regla anterior). */
 @media (max-width: 767px) {
