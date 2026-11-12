@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNull } from 'drizzle-orm';
-import { Database, organizationMembers, permissions, rolePermissions, roles, users } from '../../db';
+import { Database, organizationMembers, organizations, permissions, rolePermissions, roles, users } from '../../db';
 import { TenantContext } from '../../tenant';
 
 /** Persona aún sin nombre: dentro de una transacción de negocio no se pueden leer las tablas de identidad (ADR-25); `hydrate` los pone al terminar. */
@@ -12,6 +12,13 @@ export interface OrgPerson {
   name: string;
   email: string;
   role: string;
+}
+
+/** Una persona a quien se puede avisar por correo (administradores de una función de la empresa). */
+export interface OrgRecipient {
+  id: string;
+  email: string;
+  name: string;
 }
 
 /**
@@ -70,10 +77,24 @@ export class OrgMembersService {
 
   /** Miembros vigentes de la organización del CONTEXTO que tienen el permiso dado, por su rol (M5.7: a quién emitir un evento). Solo lectura. */
   async withPermission(permissionKey: string): Promise<string[]> {
+    return (await this.holders(permissionKey)).map((p) => p.id);
+  }
+
+  /**
+   * Lo mismo que `withPermission`, con el correo de cada persona y el nombre de la organización del contexto: para los avisos por correo (p. ej. Google Calendar a reconectar). Se llama ANTES de abrir
+   * una transacción de negocio (lee identidad). Los correos solo se usan para enviar: no se registran.
+   */
+  async recipientsWithPermission(permissionKey: string): Promise<{ organizationName: string; people: OrgRecipient[] }> {
+    const org = TenantContext.current().organizationId;
+    const [people, [row]] = await Promise.all([this.holders(permissionKey), this.db.withIdentity((tx) => tx.select({ name: organizations.name }).from(organizations).where(eq(organizations.id, org)).limit(1))]);
+    return { organizationName: row?.name ?? '', people };
+  }
+
+  private async holders(permissionKey: string): Promise<OrgRecipient[]> {
     const org = TenantContext.current().organizationId;
     const rows = await this.db.withIdentity((tx) =>
       tx
-        .select({ id: users.id })
+        .select({ id: users.id, email: users.email, fullName: users.fullName })
         .from(organizationMembers)
         .innerJoin(users, eq(users.id, organizationMembers.userId))
         .innerJoin(roles, eq(roles.key, organizationMembers.role))
@@ -81,7 +102,8 @@ export class OrgMembersService {
         .innerJoin(permissions, and(eq(permissions.key, rolePermissions.permissionKey), eq(permissions.key, permissionKey), eq(roles.scope, permissions.scope)))
         .where(and(eq(organizationMembers.organizationId, org), isNull(organizationMembers.revokedAt), eq(users.status, 'active'), isNull(users.deletedAt))),
     );
-    return [...new Set(rows.map((r) => r.id))];
+    const seen = new Set<string>();
+    return rows.filter((r) => !seen.has(r.id) && !!seen.add(r.id)).map((r) => ({ id: r.id, email: r.email, name: r.fullName ?? r.email }));
   }
 
   /** Nombre y correo para MOSTRAR (aunque la persona ya no sea miembro: un contacto puede seguir llevando su nombre). Solo de los ids pedidos. */

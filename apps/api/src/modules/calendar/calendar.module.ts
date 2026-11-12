@@ -1,5 +1,6 @@
 import { DynamicModule, Module } from '@nestjs/common';
 import type { AppConfig } from '../../config';
+import { MailModule } from '../../mail';
 import { APP_CONFIG } from '../../tokens';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
@@ -24,7 +25,7 @@ export class CalendarModule {
     const mod: DynamicModule = {
       module: CalendarModule,
       global: true,
-      imports: [OrganizationsModule, PlatformModule],
+      imports: [MailModule, OrganizationsModule, PlatformModule],
       controllers: [CalendarController, CalendarCallbackController],
       providers: [
         CalendarConnectionService,
