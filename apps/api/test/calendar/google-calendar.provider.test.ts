@@ -163,6 +163,19 @@ describe('GoogleCalendarProvider · errores', () => {
     }
   });
 
+  it('403 porque la API no está habilitada en el proyecto (accessNotConfigured / SERVICE_DISABLED) ≠ falta un permiso: es de la plataforma', async () => {
+    const p = make();
+    const t = await tokens(p);
+    for (const body of [{ error: { code: 403, errors: [{ reason: 'accessNotConfigured' }] } }, { error: { code: 403, status: 'PERMISSION_DENIED', details: [{ reason: 'SERVICE_DISABLED' }] } }]) {
+      sim.forced.push({ path: '/calendar/v3/calendars', status: 403, body });
+      const e = (await p.createCalendar({ accessToken: t.accessToken, name: 'X', timeZone: 'UTC' }).catch((x: unknown) => x)) as CalendarError;
+      expect(e).toBeInstanceOf(CalendarError);
+      expect(e).toMatchObject({ kind: 'api_disabled', credentials: false, retryable: false });
+    }
+    sim.forced.push({ path: '/calendar/v3/calendars', status: 403, body: { error: { code: 403, errors: [{ reason: 'insufficientPermissions' }] } } });
+    expect(await p.createCalendar({ accessToken: t.accessToken, name: 'X', timeZone: 'UTC' }).catch((x: unknown) => x)).toMatchObject({ credentials: true });
+  });
+
   it('los mensajes de error no llevan tokens, códigos ni la respuesta de Google', async () => {
     const p = make();
     const t = await tokens(p);

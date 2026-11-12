@@ -72,14 +72,14 @@ export class GoogleCalendarProvider implements CalendarProvider {
 
   async accountEmail(i: { accessToken: string }): Promise<string | null> {
     const res = await this.call(this.ep.userinfoUrl, { method: 'GET', headers: { authorization: `Bearer ${i.accessToken}` } });
-    this.assertOk(res);
+    await this.assertOk(res);
     const j = (await res.json().catch(() => ({}))) as { email?: unknown };
     return typeof j.email === 'string' && j.email.includes('@') ? j.email : null;
   }
 
   async createCalendar(i: { accessToken: string; name: string; timeZone: string }): Promise<CalendarInfo> {
     const res = await this.call(`${this.ep.apiBase}/calendars`, { method: 'POST', headers: { authorization: `Bearer ${i.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ summary: i.name, timeZone: i.timeZone }) });
-    this.assertOk(res);
+    await this.assertOk(res);
     const j = (await res.json().catch(() => ({}))) as { id?: unknown; summary?: unknown };
     if (typeof j.id !== 'string' || !j.id) throw new CalendarError('Google no devolvió el calendario creado', true);
     return { id: j.id, name: typeof j.summary === 'string' ? j.summary : i.name, primary: false, writable: true };
@@ -94,7 +94,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
       u.searchParams.set('minAccessRole', 'writer'); // solo donde se puede escribir
       if (pageToken) u.searchParams.set('pageToken', pageToken);
       const res = await this.call(u.toString(), { method: 'GET', headers: { authorization: `Bearer ${i.accessToken}` } });
-      this.assertOk(res);
+      await this.assertOk(res);
       const j = (await res.json().catch(() => ({}))) as { items?: Array<{ id?: unknown; summary?: unknown; summaryOverride?: unknown; primary?: unknown; accessRole?: unknown }>; nextPageToken?: unknown };
       for (const c of j.items ?? []) {
         if (typeof c.id !== 'string' || !c.id) continue;
@@ -111,7 +111,7 @@ export class GoogleCalendarProvider implements CalendarProvider {
     const res = await this.call(this.ep.revokeUrl, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ token: i.token }).toString() });
     // 400 «invalid_token»: ya estaba revocado o vencido; para quien desconecta es lo mismo
     if (res.ok || res.status === 400) return;
-    this.assertOk(res);
+    await this.assertOk(res);
   }
 
   // ------------------------------------------------------------------ internos
@@ -134,10 +134,16 @@ export class GoogleCalendarProvider implements CalendarProvider {
     }
   }
 
-  private assertOk(res: Response): void {
+  private async assertOk(res: Response): Promise<void> {
     if (res.ok) return;
     if (res.status === 401) throw new CalendarError('Google rechazó el acceso: vuelve a conectar', false, true);
-    if (res.status === 403) throw new CalendarError('Falta un permiso en la cuenta de Google. Vuelve a conectar y acepta todos los permisos', false, true);
+    if (res.status === 403) {
+      // «La API no está habilitada en el proyecto» no es un permiso que le falte a la persona: es de la plataforma (Google Cloud › APIs y servicios)
+      const j = (await res.clone().json().catch(() => ({}))) as { error?: { status?: unknown; errors?: Array<{ reason?: unknown }>; details?: Array<{ reason?: unknown }> } };
+      const reasons = [...(j.error?.errors ?? []), ...(j.error?.details ?? [])].map((x) => String(x.reason ?? ''));
+      if (reasons.some((r) => r === 'accessNotConfigured' || r === 'SERVICE_DISABLED')) throw new CalendarError('La API de Google Calendar no está habilitada en el proyecto de Google Cloud', false, false, 'api_disabled');
+      throw new CalendarError('Falta un permiso en la cuenta de Google. Vuelve a conectar y acepta todos los permisos', false, true);
+    }
     if (res.status === 404) throw new CalendarError('Google no encontró el calendario', false);
     if (res.status === 429 || res.status >= 500) throw new CalendarError('Google no respondió bien. Inténtalo de nuevo en unos minutos', true);
     throw new CalendarError('Google rechazó la solicitud', false);

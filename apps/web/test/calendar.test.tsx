@@ -133,6 +133,12 @@ describe('Configuración › Google Calendar', () => {
     expect(await screen.findByText(/desmarcaste algún permiso/)).toBeInTheDocument();
   });
 
+  it('si la API de Google Calendar no está habilitada en el proyecto, lo dice (es de la plataforma, no de la persona)', async () => {
+    mockApi(server({ c: conn(), calls: {} }));
+    renderApp('/settings/calendar?calendar=api');
+    expect(await screen.findByText(/la API de Google Calendar no está habilitada en el proyecto de Google Cloud/)).toBeInTheDocument();
+  });
+
   it('un valor desconocido en la dirección no muestra nada raro', async () => {
     mockApi(server({ c: conn(), calls: {} }));
     renderApp('/settings/calendar?calendar=<script>');

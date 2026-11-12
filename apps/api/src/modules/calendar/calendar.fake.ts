@@ -33,7 +33,7 @@ export class FakeCalendarProvider implements CalendarProvider {
   private issued = new Set<string>();
   private used = new Set<string>();
   private lastChallenge = '';
-  private failures: CalendarError[] = [];
+  private failures: Array<{ error: CalendarError; on: FakeCalendarCall['kind'] | null }> = [];
   private n = 0;
 
   /** Un código de autorización de un solo uso (lo que Google entrega a la persona al aprobar). */
@@ -44,14 +44,14 @@ export class FakeCalendarProvider implements CalendarProvider {
     return code;
   }
 
-  /** La próxima llamada a Google falla con este error. */
-  failNext(e: CalendarError): void {
-    this.failures.push(e);
+  /** La próxima llamada a Google (o la próxima de ese tipo, si se indica) falla con este error. */
+  failNext(e: CalendarError, on: FakeCalendarCall['kind'] | null = null): void {
+    this.failures.push({ error: e, on });
   }
 
-  private maybeFail(): void {
-    const f = this.failures.shift();
-    if (f) throw f;
+  private maybeFail(kind: FakeCalendarCall['kind']): void {
+    const i = this.failures.findIndex((f) => f.on === null || f.on === kind);
+    if (i >= 0) throw this.failures.splice(i, 1)[0]!.error;
   }
 
   authorizeUrl(i: { client: OAuthClient; redirectUri: string; scopes: readonly string[]; state: string; codeChallenge: string }): string {
@@ -73,7 +73,7 @@ export class FakeCalendarProvider implements CalendarProvider {
   async exchangeCode(i: { client: OAuthClient; redirectUri: string; code: string; codeVerifier: string }): Promise<TokenSet> {
     await Promise.resolve();
     this.calls.push({ kind: 'exchangeCode', code: i.code });
-    this.maybeFail();
+    this.maybeFail('exchangeCode');
     // `good` es un código siempre válido (comodidad para las pruebas); los de `issueCode()` valen UNA sola vez, como los de Google
     const valid = i.code === 'good' || (this.issued.has(i.code) && !this.used.has(i.code));
     this.used.add(i.code);
@@ -90,7 +90,7 @@ export class FakeCalendarProvider implements CalendarProvider {
   async accessToken(i: { client: OAuthClient; refreshToken: string }): Promise<{ accessToken: string; expiresInSeconds: number }> {
     await Promise.resolve();
     this.calls.push({ kind: 'accessToken' });
-    this.maybeFail();
+    this.maybeFail('accessToken');
     if (!this.liveRefreshTokens.has(i.refreshToken)) throw new CalendarError('Google rechazó la autorización. Vuelve a conectar', false, true);
     return { accessToken: `access-for-${i.refreshToken}`, expiresInSeconds: 3600 };
   }
@@ -98,14 +98,14 @@ export class FakeCalendarProvider implements CalendarProvider {
   async accountEmail(): Promise<string | null> {
     await Promise.resolve();
     this.calls.push({ kind: 'accountEmail' });
-    this.maybeFail();
+    this.maybeFail('accountEmail');
     return this.email;
   }
 
   async createCalendar(i: { accessToken: string; name: string; timeZone: string }): Promise<CalendarInfo> {
     await Promise.resolve();
     this.calls.push({ kind: 'createCalendar', name: i.name, timeZone: i.timeZone });
-    this.maybeFail();
+    this.maybeFail('createCalendar');
     this.n += 1;
     const cal = { id: `created-cal-${this.n}`, name: i.name, primary: false, writable: true };
     this.calendars.push(cal);
@@ -115,14 +115,14 @@ export class FakeCalendarProvider implements CalendarProvider {
   async listCalendars(): Promise<CalendarInfo[]> {
     await Promise.resolve();
     this.calls.push({ kind: 'listCalendars' });
-    this.maybeFail();
+    this.maybeFail('listCalendars');
     return this.calendars.map((c) => ({ ...c }));
   }
 
   async revoke(i: { token: string }): Promise<void> {
     await Promise.resolve();
     this.calls.push({ kind: 'revoke', token: i.token });
-    this.maybeFail();
+    this.maybeFail('revoke');
     this.liveRefreshTokens.delete(i.token);
   }
 }

@@ -26,6 +26,7 @@ const OUTCOME_TEXT: Record<CalendarOutcome, { kind: 'ok' | 'error' | 'info'; tex
   invalid: { kind: 'error', text: 'El enlace de regreso de Google venció o no es válido. Empieza la conexión otra vez.' },
   scopes: { kind: 'error', text: 'No se conectó: en la pantalla de Google desmarcaste algún permiso. Hacen falta todos para poder crear las citas.' },
   unavailable: { kind: 'error', text: 'Por ahora no se puede conectar Google Calendar. Avisa a soporte.' },
+  api: { kind: 'error', text: 'No se conectó: la API de Google Calendar no está habilitada en el proyecto de Google Cloud de la plataforma. Avisa a soporte; no es algo que debas cambiar tú.' },
   error: { kind: 'error', text: 'Google no respondió bien y no se conectó nada. Inténtalo de nuevo en unos minutos.' },
 };
 
