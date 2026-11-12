@@ -1,7 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { shortDateTime } from '../../lib/format';
-import { DEFAULT_BRAND_NAME, useBrand } from '../../lib/brand';
+import { DEFAULT_BRAND_NAME, useBrand } from '../../lib/platformBrand';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { showTestNotification, type TestNotificationResult } from './testNotification';
 import { ICON_ACCEPT, iconProblem, LOGO_ACCEPT, logoProblem, useBranding, useClearIcon, useClearLogo, useSetName, useUploadIcon, useUploadLogo, type BrandingFile, type BrandingView } from './useBranding';

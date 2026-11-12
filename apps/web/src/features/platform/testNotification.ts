@@ -1,4 +1,4 @@
-import type { Brand } from '../../lib/brand';
+import type { Brand } from '../../lib/platformBrand';
 
 export type TestNotificationResult = 'ok' | 'unsupported' | 'denied' | 'error';
 

@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetBrand } from '../src/lib/brand';
+import { resetBrand } from '../src/lib/platformBrand';
 import { iconProblem, logoProblem, type BrandingView } from '../src/features/platform/useBranding';
 import { authed, err, ME_ROOT, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 

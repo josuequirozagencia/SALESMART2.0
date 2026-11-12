@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_LABEL } from '../lib/format';
 import type { Me } from '../lib/types';
-import { useBrand, useDocumentTitle } from '../lib/brand';
+import { useBrand, useDocumentTitle } from '../lib/platformBrand';
 import { BrandMark, Logo } from './AuthShell';
 import { Avatar } from './Avatar';
 import { useBreakpoint } from './breakpoints';

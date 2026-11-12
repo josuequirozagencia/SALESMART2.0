@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, tokens } from '../../lib/api';
-import { refreshBrand } from '../../lib/brand';
+import { refreshBrand } from '../../lib/platformBrand';
 
 const KEY = ['platform', 'branding'] as const;
 

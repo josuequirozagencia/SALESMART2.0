@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { DEFAULT_BRAND_NAME, useBrand } from '../lib/brand';
+import { DEFAULT_BRAND_NAME, useBrand } from '../lib/platformBrand';
 import { CheckIcon } from './controls';
 
 const POINTS = [
