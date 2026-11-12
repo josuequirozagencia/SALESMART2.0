@@ -3,13 +3,12 @@ import { and, desc, gt, isNotNull, sql } from 'drizzle-orm';
 import { aiSuggestionRuns, Database, messages } from '../../../db';
 import { AppError, ConflictError } from '../../../errors';
 import { TenantContext } from '../../../tenant';
+import { AiLimitsService } from '../../platform';
 import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type InboxAccess } from '../../inbox';
 import { AgentTurnService } from '../agents/agent-turn.service';
 import { AgentsService } from '../agents/agents.service';
 import { AgentRuntimeService } from './agent-runtime.service';
 
-/** Sugerencias por empresa en 24 horas (v11 S4: valor provisional; el Súper Admin podrá cambiarlo cuando haya dónde guardarlo). */
-export const MAX_SUGGESTIONS_PER_DAY = 50;
 /** Cuántos mensajes recientes de la conversación se le dan al modelo como contexto. */
 const HISTORY_MESSAGES = 14;
 
@@ -35,6 +34,7 @@ export class ReplySuggestionService {
     @Inject(AgentsService) private readonly agents: AgentsService,
     @Inject(AgentRuntimeService) private readonly runtime: AgentRuntimeService,
     @Inject(AgentTurnService) private readonly turns: AgentTurnService,
+    @Inject(AiLimitsService) private readonly limits: AiLimitsService,
   ) {}
 
   async suggest(access: InboxAccess, conversationId: string): Promise<SuggestionView> {
@@ -56,8 +56,9 @@ export class ReplySuggestionService {
     });
     const settings = await this.agents.runtimeSettings(ctx.agentId);
     if (!settings.suggestionsEnabled) throw new ConflictError('SUGGESTIONS_DISABLED', 'Las sugerencias de respuesta no están activadas en el agente de esta conversación');
+    const max = (await this.limits.resolve()).suggestionsPerDay; // el tope lo fija el Súper Admin
     const used = await this.usedToday();
-    if (used >= MAX_SUGGESTIONS_PER_DAY) throw new ConflictError('SUGGESTION_LIMIT', `Tu empresa llegó al máximo de ${MAX_SUGGESTIONS_PER_DAY} sugerencias en 24 horas: inténtalo más tarde`);
+    if (used >= max) throw new ConflictError('SUGGESTION_LIMIT', `Tu empresa llegó al máximo de ${max} sugerencias en 24 horas: inténtalo más tarde`);
 
     // Lo que hay que contestar: el último bloque de mensajes del cliente que aún no tiene respuesta; lo anterior es el contexto
     const texts = ctx.recent.filter((m) => m.kind === 'text' && m.body && m.body.trim() !== '');
@@ -77,7 +78,7 @@ export class ReplySuggestionService {
     );
     const text = r.replies.join('\n\n').trim();
     if (text === '') throw new AppError(502, 'SUGGESTION_EMPTY', 'La IA no pudo preparar una sugerencia esta vez. Inténtalo de nuevo');
-    return { text, agent: { id: settings.id, name: settings.name }, credits_used: r.creditsUsed, remaining_today: Math.max(MAX_SUGGESTIONS_PER_DAY - used - 1, 0) };
+    return { text, agent: { id: settings.id, name: settings.name }, credits_used: r.creditsUsed, remaining_today: Math.max(max - used - 1, 0) };
   }
 
   private async usedToday(): Promise<number> {

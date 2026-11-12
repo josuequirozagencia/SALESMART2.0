@@ -78,6 +78,21 @@ export function useAiPlatformMutations() {
   };
 }
 
+/** Topes diarios de la IA por empresa (cada uno cuenta las últimas 24 horas). SOLO plataforma. */
+export interface AiLimits { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; updated_at: string }
+
+export function useAiLimits() {
+  return useQuery({ queryKey: ['platform', 'ai', 'limits'], retry: false, queryFn: () => api<AiLimits>('/platform/ai/limits') });
+}
+
+export function useSetAiLimits() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: Pick<AiLimits, 'tests_per_day' | 'suggestions_per_day' | 'follow_ups_per_day'>) => api<AiLimits>('/platform/ai/limits', { method: 'PUT', body: b }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'limits'] }),
+  });
+}
+
 /** Precio de un modelo de IA (dólares por millón de tokens). SOLO plataforma. */
 export interface AiModelPrice { model: string; kind: 'embedding' | 'chat'; usd_per_1m_input: string; usd_per_1m_output: string; updated_at: string }
 

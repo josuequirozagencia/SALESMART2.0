@@ -4,7 +4,7 @@ import { useIdempotencyKey } from '../../lib/idempotency';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
-import { KIND_LABEL, useAiLedger, useAiModels, useAiOrgs, useAddModel, useAiPlatformMutations, useSetModelPrice, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
+import { KIND_LABEL, useAiLedger, useAiLimits, useAiModels, useAiOrgs, useAddModel, useAiPlatformMutations, useSetAiLimits, useSetModelPrice, type AiLimits, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
 
 const n = (v: number): string => v.toLocaleString('es-EC');
 const when = (iso: string): string => new Date(iso).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' });
@@ -37,6 +37,47 @@ function PricingForm({ p }: { p: AiPricing }) {
       {error ? <Alert>{error}</Alert> : null}
       {saved ? <Alert kind="ok">Precio guardado.</Alert> : null}
       <div><Button type="submit" variant="primary" loading={setPricing.isPending}>Guardar precio</Button></div>
+    </form>
+  );
+}
+
+const LIMIT_FIELDS = [
+  { key: 'tests_per_day', label: 'Mensajes de prueba del agente por día', hint: 'El simulador «Probar» de Agentes IA.' },
+  { key: 'suggestions_per_day', label: 'Sugerencias de respuesta por día', hint: 'El botón «Sugerir» del redactor del Inbox.' },
+  { key: 'follow_ups_per_day', label: 'Seguimientos automáticos por día', hint: 'Mensajes que el agente envía cuando el cliente deja de responder.' },
+] as const;
+const LIMIT_MAX = 10_000;
+
+/** Topes diarios de la IA: el mismo número para toda empresa, contado por empresa en las últimas 24 horas. */
+function LimitsForm({ l }: { l: AiLimits }) {
+  const set = useSetAiLimits();
+  const [vals, setVals] = useState<Record<(typeof LIMIT_FIELDS)[number]['key'], string>>({ tests_per_day: String(l.tests_per_day), suggestions_per_day: String(l.suggestions_per_day), follow_ups_per_day: String(l.follow_ups_per_day) });
+  const [error, setError] = useState<string>();
+  const [saved, setSaved] = useState(false);
+  const submit = (e: FormEvent): void => {
+    e.preventDefault();
+    setSaved(false);
+    const out = {} as Record<(typeof LIMIT_FIELDS)[number]['key'], number>;
+    for (const f of LIMIT_FIELDS) {
+      const raw = vals[f.key].trim();
+      if (!/^\d{1,5}$/.test(raw) || Number(raw) < 1 || Number(raw) > LIMIT_MAX) return setError(`«${f.label}»: escribe un número entero de 1 a ${n(LIMIT_MAX)}.`);
+      out[f.key] = Number(raw);
+    }
+    setError(undefined);
+    set.mutate(out, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar los límites.')) });
+  };
+  return (
+    <form onSubmit={submit} noValidate aria-label="Límites diarios de la IA" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+      <h2 className="text-[15px] font-bold">Límites diarios de la IA</h2>
+      <p className="max-w-[70ch] text-[12.5px] text-muted">Frenan el abuso y el gasto sin control. Cada empresa cuenta lo suyo en las últimas 24 horas contra el mismo número; al llegar al límite, la acción se rechaza (o el seguimiento se omite) hasta que pase el tiempo. El cambio rige en menos de un minuto.</p>
+      <div className="grid grid-cols-1 gap-3 min-[720px]:grid-cols-3">
+        {LIMIT_FIELDS.map((f) => (
+          <Field key={f.key} label={f.label} hint={f.hint}>{(a) => <Input {...a} inputMode="numeric" value={vals[f.key]} onChange={(e) => { setVals({ ...vals, [f.key]: e.target.value }); setSaved(false); }} />}</Field>
+        ))}
+      </div>
+      {error ? <Alert>{error}</Alert> : null}
+      {saved ? <Alert kind="ok">Límites guardados.</Alert> : null}
+      <div><Button type="submit" variant="primary" loading={set.isPending}>Guardar límites</Button></div>
     </form>
   );
 }
@@ -205,11 +246,13 @@ function LedgerDialog({ org, onClose }: { org: AiOrg; onClose: () => void }) {
 export function AiCreditsPage() {
   const [search, setSearch] = useState('');
   const q = useAiOrgs(search);
+  const limits = useAiLimits();
   const [dialog, setDialog] = useState<{ kind: 'grant' | 'margin' | 'ledger'; org: AiOrg } | null>(null);
   const close = (): void => setDialog(null);
   return (
     <div className="grid gap-4">
       {q.data ? <PricingForm p={q.data.pricing} /> : null}
+      {limits.data ? <LimitsForm l={limits.data} /> : null}
       <ModelPrices />
       <section aria-label="Créditos por empresa" className="grid gap-3">
         <div className="flex flex-wrap items-center justify-between gap-3">

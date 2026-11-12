@@ -953,6 +953,13 @@
       "when": 1795100000000,
       "tag": "0135_v11_67c_calendar_toggle_and_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "7",
+      "when": 1795200000000,
+      "tag": "0136_v11_ai_daily_limits",
+      "breakpoints": true
     }
   ]
 }

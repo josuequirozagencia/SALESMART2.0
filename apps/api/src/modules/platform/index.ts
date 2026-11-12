@@ -5,6 +5,7 @@ export { PROVIDER_CATALOG } from './providers/catalog';
 export { PlatformCredentialsReader, type ActiveCredentials } from './providers/credentials-reader';
 export { CredentialVault, VaultOpenError } from './providers/credential-vault';
 export { AiPricingService, type AiPrice, type AiPricingView } from './ai-pricing.service';
+export { AiLimitsService, DEFAULT_AI_LIMITS, type AiLimits, type AiLimitsView } from './ai-limits.service';
 export { AiModelPricesService, type ModelPrice, type ModelPriceView } from './ai-model-prices.service';
 export { BrandingStore, type FaviconRef } from './branding/branding.store';
 export { checkFavicon, FAVICON_MAX_BYTES, FAVICON_MIN_PX, FAVICON_MAX_PX, type FaviconCheck, type FaviconType } from './branding/favicon-image';

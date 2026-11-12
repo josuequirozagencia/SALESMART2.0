@@ -16,6 +16,11 @@ export const pricingSchema = z.strictObject({
 });
 export type PricingDto = z.infer<typeof pricingSchema>;
 
+/** Topes diarios de la IA por empresa (cada uno de 1 a 10 000; el servidor y la base los validan). */
+const limit = z.number().int().min(1).max(10_000);
+export const limitsSchema = z.strictObject({ tests_per_day: limit, suggestions_per_day: limit, follow_ups_per_day: limit });
+export type LimitsDto = z.infer<typeof limitsSchema>;
+
 export const marginSchema = z.strictObject({ margin_pct: decimal.refine((v) => Number(v) <= 1000, 'de 0 a 1000').nullable() });
 export type MarginDto = z.infer<typeof marginSchema>;
 

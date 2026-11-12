@@ -2,9 +2,9 @@ import { Inject, Injectable } from '@nestjs/common';
 import { NotFoundError } from '../../errors';
 import { PlatformContext, TenantContext } from '../../tenant';
 import { CompaniesService, OrgDirectoryService } from '../organizations';
-import { AiModelPricesService, AiPricingService, PlatformAuditService, type AiPricingView, type ModelPriceView } from '../platform';
+import { AiLimitsService, AiModelPricesService, AiPricingService, PlatformAuditService, type AiLimitsView, type AiPricingView, type ModelPriceView } from '../platform';
 import { AiCreditsService, type CreditsView, type LedgerItemPlatformView, type LedgerItemView } from './ai-credits.service';
-import type { AdminOrganizationsQuery, CreateModelDto, GrantDto, MarginDto, ModelPriceDto, PricingDto } from './ai.dto';
+import type { AdminOrganizationsQuery, CreateModelDto, GrantDto, LimitsDto, MarginDto, ModelPriceDto, PricingDto } from './ai.dto';
 
 export interface AdminOrganizationItem {
   id: string;
@@ -35,6 +35,7 @@ export interface AdminOrganizationList {
 export class AiAdminService {
   constructor(
     @Inject(AiPricingService) private readonly pricing: AiPricingService,
+    @Inject(AiLimitsService) private readonly limits: AiLimitsService,
     @Inject(AiModelPricesService) private readonly models: AiModelPricesService,
     @Inject(AiCreditsService) private readonly credits: AiCreditsService,
     @Inject(CompaniesService) private readonly companies: CompaniesService,
@@ -44,6 +45,14 @@ export class AiAdminService {
 
   getPricing(): Promise<AiPricingView> {
     return this.pricing.get();
+  }
+
+  getLimits(): Promise<AiLimitsView> {
+    return this.limits.get();
+  }
+
+  setLimits(b: LimitsDto): Promise<AiLimitsView> {
+    return this.limits.set(b);
   }
 
   listModels(): Promise<ModelPriceView[]> {

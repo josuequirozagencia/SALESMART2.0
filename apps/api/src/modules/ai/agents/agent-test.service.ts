@@ -3,6 +3,7 @@ import { gt, sql } from 'drizzle-orm';
 import { agentTestRuns, Database } from '../../../db';
 import { ConflictError } from '../../../errors';
 import { TenantContext } from '../../../tenant';
+import { AiLimitsService } from '../../platform';
 import { AgentTurnService, FRAGMENTS_PER_TURN } from './agent-turn.service';
 import { AgentToolsService } from '../tools/agent-tools.service';
 import { hasTools } from '../tools/tool-defs';
@@ -10,8 +11,6 @@ import { AgentsService } from './agents.service';
 import type { TestTurnDto } from './agents.dto';
 
 export { FRAGMENTS_PER_TURN };
-/** Mensajes de prueba por empresa en 24 horas (ADR-53, decisión 11: evita abuso y gasto sin control). */
-export const MAX_TESTS_PER_DAY = 100;
 
 export interface TurnView {
   /** Lo que respondería el agente: uno o varios mensajes (según «dividir respuestas»). */
@@ -45,12 +44,14 @@ export class AgentTestService {
     @Inject(AgentsService) private readonly agents: AgentsService,
     @Inject(AgentTurnService) private readonly turns: AgentTurnService,
     @Inject(AgentToolsService) private readonly tools: AgentToolsService,
+    @Inject(AiLimitsService) private readonly limits: AiLimitsService,
   ) {}
 
   async turn(agentId: string, input: TestTurnDto): Promise<TurnView> {
     const settings = await this.agents.runtimeSettings(agentId); // 404 antes de gastar nada
+    const max = (await this.limits.resolve()).testsPerDay; // ADR-53, decisión 11: evita abuso y gasto sin control; el tope lo fija el Súper Admin
     const used = await this.usedToday();
-    if (used >= MAX_TESTS_PER_DAY) throw new ConflictError('AGENT_TEST_LIMIT', `Llegaste al máximo de ${MAX_TESTS_PER_DAY} mensajes de prueba en 24 horas: inténtalo más tarde`);
+    if (used >= max) throw new ConflictError('AGENT_TEST_LIMIT', `Llegaste al máximo de ${max} mensajes de prueba en 24 horas: inténtalo más tarde`);
     const userId = TenantContext.current().userId ?? null;
     // Las herramientas se ofrecen igual que en vivo, pero en la prueba solo se VALIDAN: no se escribe nada (dryRun)
     const config = await this.tools.configFor(agentId);
@@ -61,7 +62,7 @@ export class AgentTestService {
       replies: r.replies,
       trace: { search: { query: r.search.query, grounded: r.grounded, results: r.search.results }, missing_variables: r.missingVariables, model: { name: r.model.name, tokens_in: r.model.tokensIn, tokens_out: r.model.tokensOut }, split: r.replies.length > 1, trimmed: r.trimmed, tool_calls: r.toolCalls.map((c) => ({ tool: c.tool, outcome: c.outcome, detail: c.detail })) },
       credits_used: r.creditsUsed,
-      remaining_today: Math.max(MAX_TESTS_PER_DAY - used - 1, 0),
+      remaining_today: Math.max(max - used - 1, 0),
       contact: r.contact,
     };
   }

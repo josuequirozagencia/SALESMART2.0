@@ -11,7 +11,7 @@ import { configureApp, HttpModule } from '../../src/http';
 import { AI_PROVIDER, AiModule, AiProviderError, FakeAiProvider, KnowledgeProcessorService } from '../../src/modules/ai';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
-import { AiModelPricesService, AiPricingService } from '../../src/modules/platform';
+import { AiLimitsService, AiModelPricesService, AiPricingService } from '../../src/modules/platform';
 import { Argon2idHasher } from '../../src/security';
 import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
@@ -141,6 +141,8 @@ afterAll(async () => { await admin.query(`UPDATE ai_model_prices SET usd_per_1m_
 beforeEach(async () => {
   await seed();
   app.get(OrgDirectoryService).invalidate();
+  await admin.query('UPDATE ai_limits SET tests_per_day = 100, suggestions_per_day = 50, follow_ups_per_day = 200');
+  app.get(AiLimitsService).invalidate();
   app.get(AiPricingService).invalidate();
   app.get(AiModelPricesService).invalidate();
   ai.calls.length = 0;
@@ -308,6 +310,21 @@ describe('sugerir una respuesta (v11 S4)', () => {
     // las de hace más de 24 h no cuentan
     await admin.query(`UPDATE ai_suggestion_runs SET created_at = now() - interval '25 hours'`);
     expect((await suggest(T.carol, c.id)).status).toBe(200);
+  });
+
+  it('el Súper Admin puede cambiar el tope de sugerencias: con 2 la tercera da 409 con el número nuevo en el mensaje', async () => {
+    await liveAgent({ patch: { suggestions_enabled: true } });
+    const c = await mkConv({ status: 'working', owner: IDS.carol });
+    await inbound(c.id, 'Hola');
+    await admin.query('UPDATE ai_limits SET suggestions_per_day = 2');
+    app.get(AiLimitsService).invalidate();
+    const first = await suggest(T.carol, c.id);
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ remaining_today: 1 });
+    expect((await suggest(T.carol, c.id)).status).toBe(200);
+    const over = await suggest(T.carol, c.id);
+    expect(over.status).toBe(409);
+    expect(await json(over)).toMatchObject({ error: { code: 'SUGGESTION_LIMIT', message: expect.stringContaining('máximo de 2') } });
   });
 
   it('aislamiento A↔B: la empresa B no puede pedir sugerencias de una conversación de A (404) y sus límites y registros son aparte', async () => {

@@ -8,10 +8,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
-import { AI_PROVIDER, AiModule, AiProviderError, buildChatMessages, creditsFor, estimateInputTokens, FakeAiProvider, FRAGMENTS_PER_TURN, KnowledgeProcessorService, MAX_HISTORY_TURNS, MAX_TESTS_PER_DAY, splitReply, trimReply } from '../../src/modules/ai';
+import { AI_PROVIDER, AiModule, AiProviderError, buildChatMessages, creditsFor, estimateInputTokens, FakeAiProvider, FRAGMENTS_PER_TURN, KnowledgeProcessorService, MAX_HISTORY_TURNS, splitReply, trimReply } from '../../src/modules/ai';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
-import { AiModelPricesService, AiPricingService } from '../../src/modules/platform';
+import { AiLimitsService, AiModelPricesService, AiPricingService } from '../../src/modules/platform';
 import { Argon2idHasher } from '../../src/security';
 import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
@@ -108,6 +108,8 @@ afterAll(async () => { await admin.query(`UPDATE ai_model_prices SET usd_per_1m_
 beforeEach(async () => {
   await seed();
   app.get(OrgDirectoryService).invalidate();
+  await admin.query('UPDATE ai_limits SET tests_per_day = 100, suggestions_per_day = 50, follow_ups_per_day = 200');
+  app.get(AiLimitsService).invalidate();
   app.get(AiPricingService).invalidate();
   app.get(AiModelPricesService).invalidate();
   ai.calls.length = 0;
@@ -282,6 +284,8 @@ describe('créditos y tope diario', () => {
     expect(await json(nc)).toMatchObject({ error: { code: 'AI_NOT_CONFIGURED' } });
   });
 
+  const MAX_TESTS_PER_DAY = 100; // el valor con que nace la plataforma (migración 0136)
+
   it(`hay un tope de ${MAX_TESTS_PER_DAY} mensajes de prueba en 24 horas por empresa (409); los de más de un día no cuentan y cada empresa tiene el suyo`, async () => {
     const id = await mkAgent(T.alice, 'Sofía');
     await admin.query(`INSERT INTO agent_test_runs(id, organization_id, agent_id, grounded) SELECT gen_random_uuid(), $1, $2, false FROM generate_series(1, ${MAX_TESTS_PER_DAY - 1})`, [ORG_A, id]);
@@ -297,6 +301,22 @@ describe('créditos y tope diario', () => {
     expect((await test(T.alice, id, { message: 'Hola' })).status).toBe(200);
     const idB = await mkAgent(T.bob, 'De B');
     expect((await test(T.bob, idB, { message: 'Hola' })).status).toBe(200);
+  });
+
+  it('el Súper Admin puede cambiar el tope: con 3 la cuarta prueba da 409 y el mensaje y lo que queda hoy usan el número nuevo; subirlo lo libera', async () => {
+    const id = await mkAgent(T.alice, 'Sofía');
+    await admin.query('UPDATE ai_limits SET tests_per_day = 3');
+    app.get(AiLimitsService).invalidate();
+    const first = await json<Turn>(await test(T.alice, id, { message: 'Hola' }));
+    expect(first.remaining_today).toBe(2);
+    expect((await test(T.alice, id, { message: 'Hola' })).status).toBe(200);
+    expect((await test(T.alice, id, { message: 'Hola' })).status).toBe(200);
+    const over = await test(T.alice, id, { message: 'Hola' });
+    expect(over.status).toBe(409);
+    expect(await json(over)).toMatchObject({ error: { code: 'AGENT_TEST_LIMIT', message: expect.stringContaining('máximo de 3 mensajes') } });
+    await admin.query('UPDATE ai_limits SET tests_per_day = 10');
+    app.get(AiLimitsService).invalidate();
+    expect((await test(T.alice, id, { message: 'Hola' })).status).toBe(200);
   });
 
   it('cada turno deja solo METADATOS (quién, si hubo respaldo, tokens y créditos): el texto de la prueba no se guarda en ninguna parte', async () => {
