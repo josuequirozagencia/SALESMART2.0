@@ -29,6 +29,8 @@ export interface Appointment {
   reminder_offsets: number[];
   reminder_template: { id: string; name: string } | null;
   can: { edit: boolean; cancel: boolean; complete: boolean };
+  /** Google Calendar (67c): si esta cita se envía y cómo va (`null` = todavía sin sincronizar). */
+  calendar?: { enabled: boolean; state: 'off' | 'pending' | 'synced' | 'failed' | 'gone' | null };
 }
 export interface TemplateVariable { id: string; part: string; key: string }
 export interface AppointmentOptions {
@@ -37,6 +39,8 @@ export interface AppointmentOptions {
   window: { open: boolean; expires_at: string | null };
   templates: Array<{ id: string; name: string; language: string; category: string; body: string; variables: TemplateVariable[] }>;
   blocked: 'unassigned' | 'not_owner' | 'channel_off' | null;
+  /** Estado del calendario de Google de la empresa (para el interruptor «Crear evento en Google Calendar»). */
+  calendar: { state: 'connected' | 'needs_reconnect' | 'pending_calendar' | 'none' };
 }
 export interface AppointmentList { items: Appointment[]; timezone: string }
 export interface AgendaFilters { from: string; to: string }
@@ -50,6 +54,8 @@ export interface CreateAppointmentInput {
   reminders: number[];
   reminder_template_id?: string;
   reminder_params?: Record<string, string>;
+  /** ¿Crear la cita como evento en Google Calendar? (solo se manda con el calendario conectado). */
+  calendar_event?: boolean;
 }
 
 export function useAppointmentOptions(conversationId: string) {
@@ -81,7 +87,7 @@ export function useCreateAppointment() {
 
 export function useUpdateAppointment(id: string) {
   const done = useDone();
-  return useMutation({ mutationFn: (input: { starts_at?: string; duration_minutes?: number; kind?: string; notes?: string | null; reminders?: number[] }) => api<Appointment>(`/appointments/${id}`, { method: 'PATCH', body: input }), onSettled: done });
+  return useMutation({ mutationFn: (input: { starts_at?: string; duration_minutes?: number; kind?: string; notes?: string | null; reminders?: number[]; calendar_event?: boolean }) => api<Appointment>(`/appointments/${id}`, { method: 'PATCH', body: input }), onSettled: done });
 }
 
 export function useCancelAppointment(id: string) {

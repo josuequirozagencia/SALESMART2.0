@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, foreignKey, index, integer, jsonb, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { conversations, messages } from './conversations';
 import { contacts } from './crm';
@@ -29,6 +29,8 @@ export const appointments = tenantTable(
     /** Tipo de cita en texto libre («Corte», «Consulta»…). */
     kind: text('kind').notNull().default('Cita'),
     notes: text('notes'),
+    /** ¿Crear esta cita como evento en el Google Calendar de la empresa? (67c, ADR-67). Por omisión sí; la persona lo apaga al agendar o después. */
+    calendarSync: boolean('calendar_sync').notNull().default(true),
     /** scheduled → completed | cancelled. */
     status: text('status').notNull().default('scheduled'),
     /** Los «N minutos antes» configurados (los recordatorios se rehacen desde aquí al reprogramar). */

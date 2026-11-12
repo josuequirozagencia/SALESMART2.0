@@ -23,6 +23,8 @@ export const createAppointmentSchema = z
     /** Plantilla aprobada (y sus valores) para los recordatorios que caigan fuera de la ventana de 24 h. */
     reminder_template_id: z.uuid().optional(),
     reminder_params: params.optional(),
+    /** ¿Crear la cita como evento en el Google Calendar de la empresa? Por omisión sí (si hay calendario conectado). */
+    calendar_event: z.boolean().optional(),
   })
   .strict();
 export type CreateAppointmentDto = z.infer<typeof createAppointmentSchema>;
@@ -36,6 +38,7 @@ export const updateAppointmentSchema = z
     reminders: offsets.optional(),
     reminder_template_id: z.uuid().nullable().optional(),
     reminder_params: params.optional(),
+    calendar_event: z.boolean().optional(),
   })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });

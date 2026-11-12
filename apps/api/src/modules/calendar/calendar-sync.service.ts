@@ -19,8 +19,11 @@ export const SYNC_MAX_ATTEMPTS = 8;
 /** Espera creciente entre intentos (ms). */
 export const SYNC_BACKOFF_MS = [30_000, 60_000, 120_000, 300_000, 600_000, 1_200_000, 2_400_000, 3_600_000] as const;
 
-/** El id del evento en Google, DETERMINISTA a partir de la cita (Google solo admite a-v y 0-9, de 5 a 1024 caracteres): reintentar la creación no duplica. */
-export const eventIdOf = (appointmentId: string): string => appointmentId.replace(/-/g, '').toLowerCase();
+/**
+ * El id del evento en Google, DETERMINISTA a partir de la cita (Google solo admite a-v y 0-9, de 5 a 1024 caracteres): reintentar la creación no duplica. Si el evento se borró a propósito
+ * (cancelar la cita o apagar «Crear evento en Google Calendar»), la siguiente creación usa una `generation` nueva: Google no deja reutilizar el id de un evento borrado.
+ */
+export const eventIdOf = (appointmentId: string, generation = 0): string => appointmentId.replace(/-/g, '').toLowerCase() + (generation > 0 ? `g${generation}` : '');
 
 export interface SyncStats {
   pending: number;
@@ -33,7 +36,7 @@ export interface SyncStats {
 type Link = typeof appointmentCalendarEvents.$inferSelect;
 interface Loaded {
   link: Link;
-  appt: { id: string; status: string; startsAt: Date; durationMinutes: number; kind: string; ownerId: string; conversationId: string | null; contactName: string } | null;
+  appt: { id: string; status: string; calendarSync: boolean; startsAt: Date; durationMinutes: number; kind: string; ownerId: string; conversationId: string | null; contactName: string } | null;
 }
 
 /**
@@ -65,10 +68,18 @@ export class CalendarSyncService {
    * La cita cambió: hay que reconciliarla con Google. Se llama DENTRO de la transacción que la cambia. Sin calendario conectado no hace nada (las citas de antes de conectar no se envían).
    * Un evento que la persona borró en Google (`gone`) sigue así.
    */
-  async markDirty(tx: TenantTx, appointmentId: string): Promise<void> {
+  async markDirty(tx: TenantTx, appointmentId: string, enabled = true): Promise<void> {
     const [conn] = await tx.select({ status: calendarConnections.status }).from(calendarConnections).limit(1);
     if (!conn || conn.status === 'disconnected') return;
     const now = new Date();
+    if (!enabled) {
+      // La persona apagó «Crear evento en Google Calendar»: solo hay algo que hacer si ya existía un evento (se borra); si nunca hubo vínculo, no se crea uno
+      await tx
+        .update(appointmentCalendarEvents)
+        .set({ syncState: sql`CASE WHEN ${appointmentCalendarEvents.syncState} = 'gone' THEN 'gone' ELSE 'pending' END`, seq: sql`${appointmentCalendarEvents.seq} + 1`, attempts: 0, nextAttemptAt: now, processingStartedAt: null, lastError: null, updatedAt: now })
+        .where(eq(appointmentCalendarEvents.appointmentId, appointmentId));
+      return;
+    }
     await tx
       .insert(appointmentCalendarEvents)
       .values({ appointmentId, syncState: 'pending', nextAttemptAt: now })
@@ -131,32 +142,32 @@ export class CalendarSyncService {
     const { link, appt } = loaded;
     const calendarId = link.calendarId ?? auth.calendarId;
     try {
-      let result: { eventId: string | null; etag: string | null; state: 'synced' | 'gone'; calendarId: string | null; note: string | null };
-      if (!appt || appt.status === 'cancelled') {
+      let result: { eventId: string | null; etag: string | null; state: 'synced' | 'gone'; calendarId: string | null; note: string | null; generation: number };
+      if (!appt || appt.status === 'cancelled' || !appt.calendarSync) {
         // Borrar es idempotente: también cubre el caso de una tarea que murió justo después de crear el evento
-        await this.provider.deleteEvent({ accessToken: auth.accessToken, calendarId, eventId: link.eventId ?? eventIdOf(link.appointmentId) });
-        result = { eventId: null, etag: null, state: 'synced', calendarId: link.calendarId, note: null };
+        await this.provider.deleteEvent({ accessToken: auth.accessToken, calendarId, eventId: link.eventId ?? eventIdOf(link.appointmentId, link.generation) });
+        result = { eventId: null, etag: null, state: 'synced', calendarId: link.calendarId, note: null, generation: link.generation + 1 };
       } else if (appt.status === 'completed') {
-        result = { eventId: link.eventId, etag: link.etag, state: 'synced', calendarId: link.calendarId, note: null }; // una cita realizada se deja en el calendario como historia
+        result = { eventId: link.eventId, etag: link.etag, state: 'synced', calendarId: link.calendarId, note: null, generation: link.generation }; // una cita realizada se deja en el calendario como historia
       } else {
         const owner = (await this.members.labels([appt.ownerId])).get(appt.ownerId)?.name ?? 'Asesor';
-        const event = this.eventOf(appt, owner, timeZone, link.appointmentId);
+        const event = this.eventOf(appt, owner, timeZone, link.appointmentId, link.generation);
         try {
           if (link.eventId) {
             const ref = await this.provider.updateEvent({ accessToken: auth.accessToken, calendarId, eventId: link.eventId, event });
-            result = { eventId: ref.eventId, etag: ref.etag, state: 'synced', calendarId, note: null };
+            result = { eventId: ref.eventId, etag: ref.etag, state: 'synced', calendarId, note: null, generation: link.generation };
           } else {
             try {
               const ref = await this.provider.createEvent({ accessToken: auth.accessToken, calendarId, event });
-              result = { eventId: ref.eventId, etag: ref.etag, state: 'synced', calendarId, note: null };
+              result = { eventId: ref.eventId, etag: ref.etag, state: 'synced', calendarId, note: null, generation: link.generation };
             } catch (e) {
               if (!(e instanceof CalendarError) || e.kind !== 'exists') throw e;
               const ref = await this.provider.updateEvent({ accessToken: auth.accessToken, calendarId, eventId: event.id, event }); // ya estaba (una pasada anterior murió antes de anotarlo)
-              result = { eventId: ref.eventId, etag: ref.etag, state: 'synced', calendarId, note: null };
+              result = { eventId: ref.eventId, etag: ref.etag, state: 'synced', calendarId, note: null, generation: link.generation };
             }
           }
         } catch (e) {
-          if (e instanceof CalendarError && e.kind === 'gone') result = { eventId: link.eventId, etag: link.etag, state: 'gone', calendarId, note: 'El evento se borró en Google: no se vuelve a crear' };
+          if (e instanceof CalendarError && e.kind === 'gone') result = { eventId: link.eventId, etag: link.etag, state: 'gone', calendarId, note: 'El evento se borró en Google: no se vuelve a crear', generation: link.generation };
           else throw e;
         }
       }
@@ -166,10 +177,10 @@ export class CalendarSyncService {
     }
   }
 
-  private eventOf(a: NonNullable<Loaded['appt']>, owner: string, timeZone: string, appointmentId: string): CalendarEventInput {
+  private eventOf(a: NonNullable<Loaded['appt']>, owner: string, timeZone: string, appointmentId: string, generation: number): CalendarEventInput {
     const link = this.baseUrl && a.conversationId ? `\n${this.baseUrl}/inbox/${a.conversationId}` : '';
     return {
-      id: eventIdOf(appointmentId),
+      id: eventIdOf(appointmentId, generation),
       summary: `${a.kind} · ${a.contactName} · ${owner}`.slice(0, 200),
       description: `Cita agendada en Sales Smart.${link}`,
       startsAt: a.startsAt,
@@ -183,7 +194,7 @@ export class CalendarSyncService {
       const [link] = await tx.select().from(appointmentCalendarEvents).where(eq(appointmentCalendarEvents.id, id)).limit(1);
       if (!link) return null;
       const [a] = await tx
-        .select({ id: appointments.id, status: appointments.status, startsAt: appointments.startsAt, durationMinutes: appointments.durationMinutes, kind: appointments.kind, ownerId: appointments.ownerId, conversationId: appointments.conversationId, contactName: contacts.name })
+        .select({ id: appointments.id, status: appointments.status, calendarSync: appointments.calendarSync, startsAt: appointments.startsAt, durationMinutes: appointments.durationMinutes, kind: appointments.kind, ownerId: appointments.ownerId, conversationId: appointments.conversationId, contactName: contacts.name })
         .from(appointments)
         .innerJoin(contacts, and(eq(contacts.organizationId, appointments.organizationId), eq(contacts.id, appointments.contactId)))
         .where(eq(appointments.id, link.appointmentId))
@@ -193,12 +204,12 @@ export class CalendarSyncService {
   }
 
   /** Anota el resultado SOLO si la cita no cambió mientras se hablaba con Google; si cambió, queda pendiente para otra pasada. */
-  private async finish(link: Link, now: Date, r: { eventId: string | null; etag: string | null; state: 'synced' | 'gone'; calendarId: string | null; note: string | null }): Promise<boolean> {
+  private async finish(link: Link, now: Date, r: { eventId: string | null; etag: string | null; state: 'synced' | 'gone'; calendarId: string | null; note: string | null; generation: number }): Promise<boolean> {
     return this.db.withTenant(async (tx) => {
-      const [cur] = await tx.update(appointmentCalendarEvents).set({ syncState: r.state, eventId: r.eventId, etag: r.etag, calendarId: r.calendarId, attempts: 0, lastError: r.note, syncedAt: now, processingStartedAt: null, updatedAt: now }).where(and(eq(appointmentCalendarEvents.id, link.id), eq(appointmentCalendarEvents.seq, link.seq))).returning({ id: appointmentCalendarEvents.id });
+      const [cur] = await tx.update(appointmentCalendarEvents).set({ syncState: r.state, eventId: r.eventId, etag: r.etag, calendarId: r.calendarId, generation: r.generation, attempts: 0, lastError: r.note, syncedAt: now, processingStartedAt: null, updatedAt: now }).where(and(eq(appointmentCalendarEvents.id, link.id), eq(appointmentCalendarEvents.seq, link.seq))).returning({ id: appointmentCalendarEvents.id });
       if (!cur) {
         // La cita volvió a cambiar: lo que se envió ya quedó viejo; se vuelve a reconciliar enseguida (el evento ya existe, así que ahora solo se actualiza)
-        await tx.update(appointmentCalendarEvents).set({ eventId: r.eventId, etag: r.etag, calendarId: r.calendarId, processingStartedAt: null, nextAttemptAt: now, updatedAt: now }).where(eq(appointmentCalendarEvents.id, link.id));
+        await tx.update(appointmentCalendarEvents).set({ eventId: r.eventId, etag: r.etag, calendarId: r.calendarId, generation: r.generation, processingStartedAt: null, nextAttemptAt: now, updatedAt: now }).where(eq(appointmentCalendarEvents.id, link.id));
         return false;
       }
       if (r.state === 'gone') await writeAudit(tx, { entityType: 'calendar_event', entityId: link.appointmentId, field: 'sync_state', newValue: 'gone', source: 'automation' });

@@ -71,6 +71,8 @@ export const appointmentCalendarEvents = tenantTable(
     etag: text('etag'),
     syncState: text('sync_state').notNull().default('pending'),
     seq: integer('seq').notNull().default(1),
+    /** Cuántas veces se borró a propósito el evento de esta cita (al apagar «Crear evento en Google Calendar»): cada generación usa un id nuevo, porque Google no deja reutilizar el de un evento borrado. */
+    generation: integer('generation').notNull().default(0),
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
     /** Arrendamiento: la tarea que lo tomó (se retoma si murió a medias). */

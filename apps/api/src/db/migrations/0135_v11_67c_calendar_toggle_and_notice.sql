@@ -1,0 +1,6 @@
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_type_valid";--> statement-breakpoint
+ALTER TABLE "appointment_calendar_events" ADD COLUMN "generation" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "appointments" ADD COLUMN "calendar_sync" boolean DEFAULT true NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX "notifications_calendar_uq" ON "notifications" USING btree ("organization_id","user_id") WHERE "notifications"."type" = 'calendar_reconnect' AND "notifications"."read_at" IS NULL;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_calendar_shape" CHECK ("notifications"."type" <> 'calendar_reconnect' OR ("notifications"."conversation_id" IS NULL AND "notifications"."message_id" IS NULL AND "notifications"."task_id" IS NULL AND "notifications"."actor_id" IS NULL));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK ("notifications"."type" IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect'));

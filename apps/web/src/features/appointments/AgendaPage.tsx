@@ -7,6 +7,7 @@ import { addDays, dateTimeIn, dayLabel, isoToZoned, timeIn, todayIn, zonedToIso 
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
+import { CalendarMark } from './CalendarToggle';
 import { AgendaCalendar, periodLabel, shiftMonth, visibleDays, type AgendaView } from './AgendaCalendar';
 import { offsetLabel, useAgenda, useAppointment, useCancelAppointment, useCompleteAppointment, useUpdateAppointment, type AgendaFilters, type Appointment, type Reminder } from './useAppointments';
 
@@ -83,7 +84,7 @@ function AppointmentDetail({ id, tz, onClose }: { id: string; tz: string; onClos
               <b className="text-[15px]">{a.contact.name}</b>
               <p className="text-[12.5px] text-muted">{a.kind} · {dateTimeIn(a.starts_at, tz)} · {a.duration_minutes} min · {a.owner?.name ?? '—'}</p>
             </div>
-            <Pill kind={STATUS[a.status].kind}>{STATUS[a.status].label}</Pill>
+            <span className="flex flex-wrap items-center gap-1.5">{a.status === 'scheduled' || a.status === 'completed' ? <CalendarMark calendar={a.calendar} /> : null}<Pill kind={STATUS[a.status].kind}>{STATUS[a.status].label}</Pill></span>
           </div>
           {a.notes ? <p className="text-[13px]">Notas: {a.notes}</p> : null}
           {a.status === 'cancelled' ? <Alert>Cancelada: {a.cancel_reason}</Alert> : null}
@@ -106,6 +107,15 @@ function AppointmentDetail({ id, tz, onClose }: { id: string; tz: string; onClos
             )}
             {a.reminder_template ? <p className="text-[12px] text-muted">Plantilla para los que salgan con la ventana de 24 h cerrada: {a.reminder_template.name}</p> : null}
           </section>
+
+          {a.status === 'scheduled' && a.can.edit && a.calendar ? (
+            <section aria-label="Google Calendar" className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line p-3">
+              <span className="text-[13px]">{a.calendar.enabled ? 'Esta cita se envía al Google Calendar de la empresa.' : 'Esta cita no se envía a Google Calendar.'}</span>
+              <Button className={SMALL} loading={update.isPending} onClick={() => update.mutate({ calendar_event: !a.calendar!.enabled }, { onSuccess: () => setNotice(a.calendar!.enabled ? 'Se quitará de Google Calendar' : 'Se enviará a Google Calendar'), onError: fail })}>
+                {a.calendar.enabled ? 'Quitar de Google Calendar' : 'Enviar a Google Calendar'}
+              </Button>
+            </section>
+          ) : null}
 
           {panel === 'reschedule' ? (
             <section aria-label="Reprogramar" className="grid gap-2 rounded-xl border border-line p-3">
