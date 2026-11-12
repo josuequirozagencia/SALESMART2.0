@@ -7,6 +7,7 @@ import { addDays, dateTimeIn, dayLabel, isoToZoned, timeIn, todayIn, zonedToIso 
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
+import { useCalendarConnection } from '../calendar/useCalendar';
 import { CalendarMark } from './CalendarToggle';
 import { AgendaCalendar, periodLabel, shiftMonth, visibleDays, type AgendaView } from './AgendaCalendar';
 import { offsetLabel, useAgenda, useAppointment, useCancelAppointment, useCompleteAppointment, useUpdateAppointment, type AgendaFilters, type Appointment, type Reminder } from './useAppointments';
@@ -34,6 +35,29 @@ const REASON: Record<string, string> = {
   error: 'error inesperado',
 };
 const DELIVERY: Record<string, string> = { queued: 'en cola', sent: 'enviado', delivered: 'entregado', read: 'leído', failed: 'no se entregó' };
+
+const BANNER_LINK = 'inline-flex items-center rounded-[10px] border border-line px-3 py-1 text-[12.5px] font-semibold hover:bg-surface2';
+
+/**
+ * Aviso del calendario de Google según la conexión REAL de la empresa. Solo lo ve quien puede administrar conexiones (la API de la conexión es del administrador);
+ * el asesor no ve nada. Mientras carga o si no se pudo consultar, no se muestra nada (no se afirma «no conectado» sin saberlo).
+ */
+function CalendarBanner() {
+  const q = useCalendarConnection();
+  const c = q.data;
+  if (!c) return null;
+  const link = (text: string) => <Link to="/settings/calendar" className={BANNER_LINK}>{text}</Link>;
+  if (c.status === 'connected') {
+    return <Alert kind="ok"><span className="flex flex-wrap items-center gap-x-3 gap-y-1">Conectado a Google Calendar{c.calendar_name ? ` · ${c.calendar_name}` : ''}. Las citas con el interruptor encendido se envían solas.{link('Ver conexión')}</span></Alert>;
+  }
+  if (c.status === 'needs_reconnect') {
+    return <Alert kind="error"><span className="flex flex-wrap items-center gap-x-3 gap-y-1">Google Calendar necesita volver a conectarse: las citas nuevas no se envían hasta entonces.{link('Reconectar')}</span></Alert>;
+  }
+  if (c.status === 'pending_calendar') {
+    return <Alert kind="info"><span className="flex flex-wrap items-center gap-x-3 gap-y-1">Falta elegir el calendario de Google donde se guardarán las citas.{link('Elegir calendario')}</span></Alert>;
+  }
+  return <Alert kind="info"><span className="flex flex-wrap items-center gap-x-3 gap-y-1">Aún no hay ningún calendario conectado.{link('Conectar calendario')}</span></Alert>;
+}
 
 /** Cita abierta: recordatorios con su estado de entrega, reprogramar, cancelar (con motivo) o completar. */
 function AppointmentDetail({ id, tz, onClose }: { id: string; tz: string; onClose: () => void }) {
@@ -204,12 +228,7 @@ export function AgendaPage() {
           {offset !== 0 || picked ? <Button className={SMALL} onClick={() => { setOffset(0); setPicked(undefined); }}>Hoy</Button> : null}
         </div>
       </div>
-      <Alert kind="info">
-        <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          Aún no hay ningún calendario conectado.
-          <Link to="/settings/connections" className="inline-flex items-center rounded-[10px] border border-line px-3 py-1 text-[12.5px] font-semibold hover:bg-surface2">Conectar calendario</Link>
-        </span>
-      </Alert>
+      {showOwner ? <CalendarBanner /> : null}
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-[12px] text-muted">Hora de la empresa: {tz}</p>
         {showOwner && people.length > 0 ? (

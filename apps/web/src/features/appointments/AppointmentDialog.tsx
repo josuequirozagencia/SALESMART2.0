@@ -45,7 +45,9 @@ export function AppointmentDialog({ c, onClose }: { c: Conversation; onClose: ()
   const [done, setDone] = useState<{ when: string; reminders: number }>();
 
   const startsAt = date && time ? zonedToIso(date, time, tz) : null;
-  const windowEnd = data?.window.expires_at ? Date.parse(data.window.expires_at) - WINDOW_MARGIN_MS : Number.NEGATIVE_INFINITY;
+  // Con la ventana abierta y SIN fecha de cierre (WhatsApp por QR y GoHighLevel: no hay ventana de 24 h) ningún recordatorio necesita plantilla;
+  // con la ventana cerrada, todos la necesitan. La fecha de cierre solo existe en WhatsApp oficial.
+  const windowEnd = data?.window.expires_at ? Date.parse(data.window.expires_at) - WINDOW_MARGIN_MS : data?.window.open ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
   // ¿Algún recordatorio saldría con la ventana de 24 h ya cerrada? (la misma regla que aplica el servidor)
   const needsTemplate = startsAt !== null && offsets.some((o) => Date.parse(startsAt) - o * 60_000 > windowEnd);
   const template = data?.templates.find((t) => t.id === templateId);

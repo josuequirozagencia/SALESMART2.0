@@ -224,11 +224,36 @@ describe('Agenda', () => {
     expect(isoToZoned(from, TZ).time).toBe('00:00'); // empieza a las 00:00 de la empresa
   });
 
-  it('avisa que no hay calendario conectado y lleva a las conexiones', async () => {
-    mockApi(server(world()));
+  const CONNECTION = { configured: true, available: true, unavailable_reason: null, mode: 'own', calendar_name: 'Sales Smart · Growth', account: 'j***@g***.com', scopes: [], last_error: null, connected_at: NOW };
+  const cases = [
+    ['connected', /Conectado a Google Calendar · Sales Smart · Growth/, 'Ver conexión'],
+    ['needs_reconnect', /necesita volver a conectarse/, 'Reconectar'],
+    ['pending_calendar', /Falta elegir el calendario/, 'Elegir calendario'],
+    [null, /Aún no hay ningún calendario conectado/, 'Conectar calendario'],
+  ] as const;
+  for (const [status, text, link] of cases) {
+    it(`el aviso de la agenda sigue la conexión real de Google (${status ?? 'sin conexión'}) y lleva a Configuración › Google Calendar`, async () => {
+      mockApi({ ...server(world(), ME_ADMIN), 'GET /calendar/connection': () => ({ body: { ...CONNECTION, status } }) });
+      renderApp('/agenda');
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: link })).toHaveAttribute('href', '/settings/calendar');
+    });
+  }
+
+  it('el asesor no ve el aviso del calendario ni consulta la conexión (es del administrador)', async () => {
+    let asked = false;
+    mockApi({ ...server(world()), 'GET /calendar/connection': () => { asked = true; return err(403, 'FORBIDDEN', 'Sin permiso'); } });
     renderApp('/agenda');
-    expect(await screen.findByText('Aún no hay ningún calendario conectado.')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Conectar calendario' })).toHaveAttribute('href', '/settings/connections');
+    await screen.findByRole('grid', { name: /^Calendario de / });
+    expect(screen.queryByRole('link', { name: /Ver conexión|Reconectar|Elegir calendario|Conectar calendario/ })).not.toBeInTheDocument();
+    expect(asked).toBe(false);
+  });
+
+  it('si no se puede consultar la conexión no afirma que no esté conectada', async () => {
+    mockApi({ ...server(world(), ME_ADMIN), 'GET /calendar/connection': () => err(500, 'INTERNAL_ERROR', 'Error') });
+    renderApp('/agenda');
+    await screen.findByRole('grid', { name: /^Calendario de / });
+    expect(screen.queryByText(/Aún no hay ningún calendario conectado/)).not.toBeInTheDocument();
   });
 
   it('cambia entre mes y semana, y navega por periodos', async () => {
@@ -300,6 +325,32 @@ describe('Agenda', () => {
     await userEvent.click(await d.findByRole('button', { name: 'Marcar completada' }));
     await waitFor(() => expect(w.posts.at(-1)).toMatchObject({ path: '/appointments/a1/complete' }));
     expect(await d.findByText('Cita completada')).toBeInTheDocument();
+  });
+});
+
+describe('Agendar · canales sin ventana de 24 h (QR y GoHighLevel)', () => {
+  it('con la ventana abierta y sin fecha de cierre, los recordatorios NO piden plantilla y la cita sale sin ella', async () => {
+    const w = world({ options: { ...OPTIONS, max_reminders: 5, window: { open: true, expires_at: null }, templates: [] } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    await fillWhen(d, tomorrow(), '10:30');
+    await userEvent.click(d.getByRole('checkbox', { name: '2 días antes' }));
+    expect(d.queryByText(/solo se puede enviar con una plantilla aprobada/)).not.toBeInTheDocument();
+    expect(d.queryByLabelText('Plantilla')).not.toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
+    await waitFor(() => expect(w.posts).toHaveLength(1));
+    expect(w.posts[0]!.body).not.toHaveProperty('reminder_template_id');
+    expect((w.posts[0]!.body as { reminders: number[] }).reminders).toContain(2880);
+  });
+
+  it('con la ventana CERRADA (WhatsApp oficial) los recordatorios sí piden plantilla', async () => {
+    const w = world({ options: { ...OPTIONS, window: { open: false, expires_at: null } } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    await fillWhen(d, tomorrow(), '10:30');
+    expect(await d.findByText(/solo se puede enviar con una plantilla aprobada/)).toBeInTheDocument();
   });
 });
 

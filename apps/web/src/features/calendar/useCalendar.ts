@@ -37,8 +37,8 @@ export interface CalendarChoice { id: string; name: string; primary: boolean }
 export type CalendarOutcome = 'connected' | 'pick' | 'denied' | 'invalid' | 'scopes' | 'unavailable' | 'api' | 'error';
 export const OUTCOMES: readonly CalendarOutcome[] = ['connected', 'pick', 'denied', 'invalid', 'scopes', 'unavailable', 'api', 'error'];
 
-export function useCalendarConnection() {
-  return useQuery({ queryKey: ['calendar-connection'], retry: false, queryFn: () => api<CalendarConnection>('/calendar/connection') });
+export function useCalendarConnection(enabled = true) {
+  return useQuery({ queryKey: ['calendar-connection'], enabled, retry: false, queryFn: () => api<CalendarConnection>('/calendar/connection') });
 }
 
 /** Los calendarios de la cuenta donde se puede escribir (solo mientras falta elegir uno). */
