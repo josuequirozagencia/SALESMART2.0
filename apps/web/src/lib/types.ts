@@ -895,7 +895,7 @@ export interface MentionOption {
 /** Un aviso del centro de avisos: menciones en notas (F1, ADR-57) y avisos de tareas (F2, ADR-58). */
 export interface AppNotification {
   id: string;
-  type: 'mention' | 'task_assigned' | 'task_due';
+  type: 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect';
   created_at: string;
   read_at: string | null;
   /** Null en un aviso de vencimiento o de una tarea que creó el sistema. */

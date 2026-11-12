@@ -10,6 +10,7 @@ import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications,
 
 /** Qué dice un aviso: una mención en una nota, «te asignaron una tarea» o «tu tarea vence / venció» (F1 y F2, ADR-57 y ADR-58). */
 function textOf(n: AppNotification): string {
+  if (n.type === 'calendar_reconnect') return 'Google Calendar necesita que lo vuelvas a conectar. Las citas nuevas esperan hasta entonces para salir hacia Google.';
   if (n.type === 'task_assigned') return n.actor ? `${n.actor.name} te asignó la tarea «${n.task?.title ?? 'sin título'}»` : `Se te asignó la tarea «${n.task?.title ?? 'sin título'}»`;
   if (n.type === 'task_due') {
     const due = n.task?.due_at ?? null;
@@ -20,7 +21,7 @@ function textOf(n: AppNotification): string {
 }
 
 /** A dónde lleva un aviso: la conversación de una mención o la tarea (se abre en «Tareas»). */
-const hrefOf = (n: AppNotification): string => (n.type === 'mention' ? `/inbox/${n.conversation?.id ?? ''}` : `/tasks?task=${n.task?.id ?? ''}`);
+const hrefOf = (n: AppNotification): string => (n.type === 'mention' ? `/inbox/${n.conversation?.id ?? ''}` : n.type === 'calendar_reconnect' ? '/settings/calendar' : `/tasks?task=${n.task?.id ?? ''}`);
 
 function Item({ n, canMark, onOpen }: { n: AppNotification; canMark: boolean; onOpen: () => void }) {
   const mark = useMarkNotificationRead();

@@ -16,6 +16,7 @@ import { CalendarError, CalendarModule, CalendarSyncService, eventIdOf, FakeCale
 import { ChannelsModule, FAKE_WHATSAPP_TOKEN } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule } from '../../src/modules/inbox';
+import { NotificationsModule } from '../../src/modules/notifications';
 import { OpportunitiesModule } from '../../src/modules/opportunities';
 import { OrganizationsModule } from '../../src/modules/organizations';
 import { QueuesModule } from '../../src/modules/queues';
@@ -27,7 +28,7 @@ import { requireDb } from '../support/harness';
 
 const gcal = new FakeCalendarProvider();
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, ChannelsModule, QueuesModule, OpportunitiesModule, AttributionModule.register(), TemplatesModule, InboxModule, AppointmentsModule, CalendarModule.register({ provider: gcal }), HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, ChannelsModule, QueuesModule, OpportunitiesModule, AttributionModule.register(), TemplatesModule, InboxModule, AppointmentsModule, NotificationsModule, CalendarModule.register({ provider: gcal }), HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
 class TestAppModule {}
 
 const info = requireDb();
@@ -53,7 +54,7 @@ let seq = 0;
 const saved = { ...process.env };
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE appointment_calendar_events, calendar_connections, provider_credentials, provider_selection, platform_audit, appointment_reminders, appointments, message_templates, meta_events, response_timers, messages, conversation_participants, conversations, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, contact_phones, contacts, queue_products, queue_distribution_state, queue_members, whatsapp_accounts, channel_accounts, queues, channel_routes, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE notifications, appointment_calendar_events, calendar_connections, provider_credentials, provider_selection, platform_audit, appointment_reminders, appointments, message_templates, meta_events, response_timers, messages, conversation_participants, conversations, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, contact_phones, contacts, queue_products, queue_distribution_state, queue_members, whatsapp_accounts, channel_accounts, queues, channel_routes, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,$4)`, [id, kind, name, TZ]);
   }
@@ -379,5 +380,129 @@ describe('Citas → Google Calendar · permisos y aislamiento A↔B', () => {
     const { conv } = await mkConv();
     await mk(conv);
     await expect(admin.query(`UPDATE appointment_calendar_events SET sync_state = 'inventado' WHERE organization_id = $1`, [ORG_A])).rejects.toThrow(/appointment_calendar_events_state_valid/);
+  });
+});
+
+interface ApptView { id: string; calendar: { enabled: boolean; state: string | null } }
+const getAppt = async (id: string, token = T.alice): Promise<ApptView> => json<ApptView>(await call('GET', `/appointments/${id}`, token));
+interface Options { calendar: { state: string } }
+const optionsOf = async (conv: string, token = T.carol): Promise<Options> => json<Options>(await call('GET', `/appointments/options?conversation_id=${conv}`, token));
+interface Notice { id: string; type: string; read_at: string | null; conversation: unknown; task: unknown; actor: unknown }
+const notices = async (token: string): Promise<{ items: Notice[]; unread: number }> => json<{ items: Notice[]; unread: number }>(await call('GET', '/notifications', token));
+
+describe('Citas → Google Calendar · interruptor por cita (67c)', () => {
+  it('el formulario sabe si hay calendario: ninguno, conectado, o que requiere reconectar', async () => {
+    const { conv } = await mkConv();
+    expect((await optionsOf(conv)).calendar.state).toBe('none');
+    await connect(T.alice);
+    expect((await optionsOf(conv)).calendar.state).toBe('connected');
+    gcal.liveRefreshTokens.clear();
+    await mk(conv);
+    await runSync();
+    expect((await optionsOf(conv)).calendar.state).toBe('needs_reconnect');
+  });
+
+  it('apagado al agendar: la cita no se envía y no deja ni vínculo; la vista dice «apagado»', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    const a = await mk(conv, { calendar_event: false });
+    expect(await links()).toHaveLength(0);
+    expect(await runSync()).toBe(0);
+    expect(gcal.calls.filter((c) => c.kind === 'createEvent')).toHaveLength(0);
+    expect((await getAppt(a.id)).calendar).toEqual({ enabled: false, state: 'off' });
+    expect((await call('PATCH', `/appointments/${a.id}`, T.carol, { kind: 'Otro tipo' })).status).toBe(200);
+    expect(await links()).toHaveLength(0); // cambiarla tampoco la envía
+  });
+
+  it('encendido por omisión: la vista pasa de «en espera» a «sincronizada»', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    const a = await mk(conv);
+    expect((await getAppt(a.id)).calendar).toEqual({ enabled: true, state: 'pending' });
+    await runSync();
+    expect((await getAppt(a.id)).calendar).toEqual({ enabled: true, state: 'synced' });
+  });
+
+  it('apagarlo después borra el evento de Google; volver a encenderlo crea uno nuevo con OTRO id (Google no reutiliza el de un evento borrado)', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    const a = await mk(conv);
+    await runSync();
+    expect(gcal.events.size).toBe(1);
+    const first = [...gcal.events.values()][0]!.id;
+    expect((await call('PATCH', `/appointments/${a.id}`, T.carol, { calendar_event: false })).status).toBe(200);
+    expect((await getAppt(a.id)).calendar).toEqual({ enabled: false, state: 'off' });
+    await runSync();
+    expect(gcal.events.size).toBe(0);
+    expect((await links())[0]).toMatchObject({ sync_state: 'synced', event_id: null });
+    expect((await admin.query(`SELECT generation FROM appointment_calendar_events WHERE organization_id = $1`, [ORG_A])).rows[0].generation).toBe(1);
+    expect((await call('PATCH', `/appointments/${a.id}`, T.carol, { calendar_event: true })).status).toBe(200);
+    await runSync();
+    expect(gcal.events.size).toBe(1);
+    const again = [...gcal.events.values()][0]!.id;
+    expect(again).toBe(eventIdOf(a.id, 1));
+    expect(again).not.toBe(first);
+    expect(again).toMatch(/^[0-9a-v]{5,1024}$/); // alfabeto que Google admite
+    expect((await getAppt(a.id)).calendar).toEqual({ enabled: true, state: 'synced' });
+  });
+
+  it('apagar el interruptor de una cita que nunca se envió no habla con Google', async () => {
+    const { conv } = await mkConv();
+    const a = await mk(conv); // creada ANTES de conectar el calendario: sin vínculo
+    await connect(T.alice);
+    expect((await call('PATCH', `/appointments/${a.id}`, T.carol, { calendar_event: false })).status).toBe(200);
+    expect(await links()).toHaveLength(0);
+    expect(await runSync()).toBe(0);
+    expect(gcal.calls.filter((c) => c.kind === 'deleteEvent' || c.kind === 'createEvent')).toHaveLength(0);
+  });
+
+  it('el campo se valida: debe ser verdadero o falso', async () => {
+    const { conv } = await mkConv();
+    expect((await call('POST', '/appointments', T.carol, { conversation_id: conv, starts_at: inH(3), calendar_event: 'no' }, idem())).status).toBe(400);
+  });
+});
+
+describe('Citas → Google Calendar · aviso al administrador cuando requiere reconectar (67c)', () => {
+  it('avisa en la campana SOLO a quienes administran integraciones, una sola vez aunque siga roto, y al reconectar el aviso se da por leído', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    await mk(conv);
+    gcal.liveRefreshTokens.clear(); // la persona revocó el acceso en su cuenta de Google
+    await runSync();
+    const alice = await notices(T.alice);
+    expect(alice.items).toHaveLength(1);
+    expect(alice.items[0]).toMatchObject({ type: 'calendar_reconnect', read_at: null, conversation: null, task: null, actor: null });
+    expect(alice.unread).toBe(1);
+    expect((await notices(T.carol)).items).toHaveLength(0); // la asesora no administra integraciones
+    expect((await notices(T.bob)).items).toHaveLength(0); // ni otra empresa
+    await runSync();
+    await runSync();
+    expect((await notices(T.alice)).items).toHaveLength(1); // no se acumulan
+    await connect(T.alice);
+    const after = await notices(T.alice);
+    expect(after.unread).toBe(0);
+    expect(after.items[0]!.read_at).not.toBeNull();
+  });
+
+  it('una nueva caída, ya leída la anterior, vuelve a avisar', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    await mk(conv);
+    gcal.liveRefreshTokens.clear();
+    await runSync();
+    const first = (await notices(T.alice)).items[0]!;
+    expect((await call('POST', `/notifications/${first.id}/read`, T.alice)).status).toBe(200);
+    await connect(T.alice);
+    await mk(conv);
+    gcal.liveRefreshTokens.clear();
+    await runSync();
+    const list = await notices(T.alice);
+    expect(list.items.filter((n) => n.type === 'calendar_reconnect')).toHaveLength(2);
+    expect(list.unread).toBe(1);
+  });
+
+  it('la base rechaza un aviso de calendario con referencias a otra cosa', async () => {
+    await connect(T.alice);
+    await expect(admin.query(`INSERT INTO notifications(id, organization_id, user_id, type, actor_id) VALUES (gen_random_uuid(), $1, $2, 'calendar_reconnect', $2)`, [ORG_A, IDS.alice])).rejects.toThrow(/notifications_calendar_shape/);
   });
 });

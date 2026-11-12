@@ -6,6 +6,8 @@ import type { Conversation } from '../../lib/types';
 import { todayIn, zonedToIso, dateTimeIn } from '../../lib/zone';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
+import { KindField } from './AppointmentKind';
+import { CalendarToggle } from './CalendarToggle';
 import { offsetLabel, REMINDER_CHOICES, useAppointmentOptions, useCreateAppointment } from './useAppointments';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
@@ -34,6 +36,7 @@ export function AppointmentDialog({ c, onClose }: { c: Conversation; onClose: ()
   const [duration, setDuration] = useState(30);
   const [kind, setKind] = useState('Cita');
   const [notes, setNotes] = useState('');
+  const [calendarEvent, setCalendarEvent] = useState(true);
   const [offsets, setOffsets] = useState<number[]>([60]);
   const [templateId, setTemplateId] = useState('');
   const [params, setParams] = useState<Record<string, string>>({});
@@ -64,6 +67,7 @@ export function AppointmentDialog({ c, onClose }: { c: Conversation; onClose: ()
       duration_minutes: duration,
       kind: kind.trim(),
       reminders: offsets,
+      ...(data?.calendar.state === 'connected' ? { calendar_event: calendarEvent } : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
       ...(needsTemplate && template ? { reminder_template_id: template.id, reminder_params: Object.fromEntries(template.variables.map((v) => [v.id, (params[v.id] ?? '').trim()])) } : {}),
     };
@@ -99,7 +103,7 @@ export function AppointmentDialog({ c, onClose }: { c: Conversation; onClose: ()
               )}
             </Field>
           </div>
-          <Field label="Tipo de cita" error={errors.kind}>{(f) => <Input {...f} value={kind} maxLength={60} onChange={(e) => setKind(e.target.value)} />}</Field>
+          <KindField value={kind} onChange={setKind} error={errors.kind} />
           <Field label="Notas (opcional)">{(f) => <Input {...f} value={notes} maxLength={1000} onChange={(e) => setNotes(e.target.value)} />}</Field>
 
           <fieldset className="grid gap-2">
@@ -117,6 +121,8 @@ export function AppointmentDialog({ c, onClose }: { c: Conversation; onClose: ()
             </div>
             <p className="text-[12px] text-muted" aria-live="polite">{offsets.length === 0 ? 'Sin recordatorios.' : `Elegidos: ${offsets.map(offsetLabel).join(', ')}.`}</p>
           </fieldset>
+
+          <CalendarToggle state={data.calendar.state} value={calendarEvent} onChange={setCalendarEvent} />
 
           {needsTemplate ? (
             <section aria-label="Plantilla para los recordatorios" className="grid gap-2 rounded-xl border border-line p-3">

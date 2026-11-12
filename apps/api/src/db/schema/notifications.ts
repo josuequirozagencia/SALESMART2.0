@@ -52,11 +52,15 @@ export const notifications = tenantTable(
     foreignKey({ name: 'notifications_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'notifications_message_fk', columns: [t['organizationId']!, t['messageId']!], foreignColumns: [messages.organizationId, messages.id] }),
     foreignKey({ name: 'notifications_task_fk', columns: [t['organizationId']!, t['taskId']!], foreignColumns: [tasks.organizationId, tasks.id] }),
-    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due')`),
+    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect')`),
     // Una mención lleva su conversación y su nota
     check('notifications_mention_shape', sql`${t['type']!} <> 'mention' OR (${t['conversationId']!} IS NOT NULL AND ${t['messageId']!} IS NOT NULL AND ${t['actorId']!} IS NOT NULL)`),
     // Un aviso de tarea lleva su tarea (y ninguna conversación)
     check('notifications_task_shape', sql`${t['type']!} NOT IN ('task_assigned', 'task_due') OR (${t['taskId']!} IS NOT NULL AND ${t['conversationId']!} IS NULL AND ${t['messageId']!} IS NULL)`),
+    // Un aviso de calendario (v11 67c) no se refiere a nada más: ni conversación, ni nota, ni tarea, ni autor
+    check('notifications_calendar_shape', sql`${t['type']!} <> 'calendar_reconnect' OR (${t['conversationId']!} IS NULL AND ${t['messageId']!} IS NULL AND ${t['taskId']!} IS NULL AND ${t['actorId']!} IS NULL)`),
+    // Una sola alerta de «reconectar» SIN LEER por persona (si sigue roto no se acumulan)
+    uniqueIndex('notifications_calendar_uq').on(t['organizationId']!, t['userId']!).where(sql`${t['type']!} = 'calendar_reconnect' AND ${t['readAt']!} IS NULL`),
     // Un solo aviso por persona, tarea y tipo (repetir la tarea periódica no duplica)
     uniqueIndex('notifications_task_uq').on(t['organizationId']!, t['userId']!, t['taskId']!, t['type']!).where(sql`${t['taskId']!} IS NOT NULL`),
     // Un solo aviso por persona y nota

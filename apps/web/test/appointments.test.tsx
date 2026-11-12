@@ -26,6 +26,7 @@ const OPTIONS: AppointmentOptions = {
   window: { open: true, expires_at: new Date(Date.now() + 20 * HOUR).toISOString() },
   templates: [{ id: 't1', name: 'recordatorio_cita', language: 'es', category: 'utility', body: 'Hola {{1}}, te recordamos tu cita el {{2}}.', variables: [{ id: 'body:1', part: 'body', key: '1' }, { id: 'body:2', part: 'body', key: '2' }] }],
   blocked: null,
+  calendar: { state: 'none' },
 };
 const appt = (over: Partial<Appointment> = {}): Appointment => ({
   id: 'a1', contact: { id: 'k1', name: 'Ana Torres' }, conversation_id: 'c1', owner: { id: 'u2', name: 'Luis Navas' }, starts_at: new Date(Date.now() + 3 * HOUR).toISOString(),
@@ -34,7 +35,7 @@ const appt = (over: Partial<Appointment> = {}): Appointment => ({
     { id: 'r1', offset_minutes: 60, send_at: new Date(Date.now() + 2 * HOUR).toISOString(), status: 'sent', via: 'text', reason: null, delivery: 'delivered' },
     { id: 'r2', offset_minutes: 10, send_at: new Date(Date.now() + 2.8 * HOUR).toISOString(), status: 'skipped', via: null, reason: 'window_closed', delivery: null },
   ],
-  reminder_offsets: [60, 10], reminder_template: null, can: { edit: true, cancel: true, complete: true }, ...over,
+  reminder_offsets: [60, 10], reminder_template: null, can: { edit: true, cancel: true, complete: true }, calendar: { enabled: true, state: 'synced' }, ...over,
 });
 
 interface World {
@@ -63,7 +64,7 @@ function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
     },
     'GET /appointments': (c) => { w.agendaQueries.push(`${c.query.get('from')}|${c.query.get('to')}`); return { body: { items: [w.appt], timezone: TZ } }; },
     'GET /appointments/a1': () => ({ body: w.appt }),
-    'PATCH /appointments/a1': (c) => { record(c); w.appt = appt({ starts_at: (c.body as { starts_at: string }).starts_at }); return { body: w.appt }; },
+    'PATCH /appointments/a1': (c) => { record(c); const b = c.body as { starts_at?: string; calendar_event?: boolean }; w.appt = appt({ ...(b.starts_at ? { starts_at: b.starts_at } : {}), ...(b.calendar_event !== undefined ? { calendar: { enabled: b.calendar_event, state: b.calendar_event ? 'pending' : 'off' } } : {}) }); return { body: w.appt }; },
     'POST /appointments/a1/cancel': (c) => { record(c); w.appt = appt({ status: 'cancelled', cancel_reason: (c.body as { reason: string }).reason, can: { edit: false, cancel: false, complete: false } }); return { body: w.appt }; },
     'POST /appointments/a1/complete': (c) => { record(c); w.appt = appt({ status: 'completed', can: { edit: false, cancel: false, complete: false } }); return { body: w.appt }; },
   };
@@ -105,8 +106,8 @@ describe('Agendar desde el chat', () => {
     const d = await openDialog();
     await fillWhen(d, tomorrow(), '15:30');
     await userEvent.selectOptions(d.getByLabelText('Duración'), '45');
-    await userEvent.clear(d.getByLabelText('Tipo de cita'));
-    await userEvent.type(d.getByLabelText('Tipo de cita'), 'Corte y barba');
+    await userEvent.selectOptions(d.getByLabelText('Tipo de cita'), 'Otro (escribir)…');
+    await userEvent.type(d.getByLabelText('Escribe el tipo de cita'), 'Corte y barba');
     await userEvent.click(d.getByLabelText('1 día antes')); // se suma al de 1 hora que viene marcado
     await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
     await waitFor(() => expect(w.posts).toHaveLength(1));
@@ -199,9 +200,10 @@ describe('Agendar desde el chat', () => {
   });
 });
 
+/** Abre la cita de Ana desde el calendario (siempre está en el mes que se ve, sin importar la hora del día en que corra la prueba). */
+const openAna = async (): Promise<void> => { await userEvent.click((await screen.findAllByRole('button', { name: /^Abrir la cita de Ana Torres/ }))[0]!); };
+
 describe('Agenda', () => {
-  /** Abre la cita de Ana desde el calendario (siempre está en el mes que se ve, sin importar la hora del día en que corra la prueba). */
-  const openAna = async (): Promise<void> => { await userEvent.click((await screen.findAllByRole('button', { name: /^Abrir la cita de Ana Torres/ }))[0]!); };
 
   it('la sección está en el menú; muestra SIEMPRE un calendario del mes con la cita y, al elegir su día, la lista con sus datos, en la hora de la empresa', async () => {
     const w = world();
@@ -298,5 +300,118 @@ describe('Agenda', () => {
     await userEvent.click(await d.findByRole('button', { name: 'Marcar completada' }));
     await waitFor(() => expect(w.posts.at(-1)).toMatchObject({ path: '/appointments/a1/complete' }));
     expect(await d.findByText('Cita completada')).toBeInTheDocument();
+  });
+});
+
+describe('Agendar · tipo de cita: lista o texto libre (67c)', () => {
+  it('ofrece la lista, y elegir un tipo de la lista lo manda tal cual', async () => {
+    const w = world({ options: { ...OPTIONS, window: { open: true, expires_at: new Date(Date.now() + 60 * HOUR).toISOString() } } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    const select = d.getByLabelText('Tipo de cita') as HTMLSelectElement;
+    expect([...select.options].map((o) => o.text)).toEqual(['Cita', 'Visita al local', 'Llamada de cierre', 'Reunión virtual', 'Entrega de propuesta', 'Consulta', 'Seguimiento', 'Otro (escribir)…']);
+    expect(select.value).toBe('Cita');
+    expect(d.queryByLabelText('Escribe el tipo de cita')).not.toBeInTheDocument();
+    await fillWhen(d, tomorrow(), '10:30');
+    await userEvent.selectOptions(select, 'Visita al local');
+    await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
+    await waitFor(() => expect(w.posts).toHaveLength(1));
+    expect((w.posts[0]!.body as { kind: string }).kind).toBe('Visita al local');
+  });
+
+  it('«Otro» abre un campo para escribir el tipo, que es obligatorio; al volver a la lista desaparece', async () => {
+    const w = world({ options: { ...OPTIONS, window: { open: true, expires_at: new Date(Date.now() + 60 * HOUR).toISOString() } } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    await fillWhen(d, tomorrow(), '10:30');
+    await userEvent.selectOptions(d.getByLabelText('Tipo de cita'), 'Otro (escribir)…');
+    await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
+    expect(await d.findByText('Escribe el tipo de cita', { selector: 'span' })).toBeInTheDocument();
+    expect(w.posts).toEqual([]);
+    await userEvent.selectOptions(d.getByLabelText('Tipo de cita'), 'Consulta');
+    expect(d.queryByLabelText('Escribe el tipo de cita')).not.toBeInTheDocument();
+  });
+});
+
+describe('Agendar · interruptor «Crear evento en Google Calendar» (67c)', () => {
+  const open60 = { window: { open: true, expires_at: new Date(Date.now() + 60 * HOUR).toISOString() } };
+
+  it('con el calendario conectado está encendido por omisión y manda calendar_event; apagado manda false', async () => {
+    const w = world({ options: { ...OPTIONS, ...open60, calendar: { state: 'connected' } } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    const sw = d.getByRole('switch', { name: /Crear evento en Google Calendar/ });
+    expect(sw).toBeChecked();
+    await fillWhen(d, tomorrow(), '10:30');
+    await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
+    await waitFor(() => expect(w.posts).toHaveLength(1));
+    expect((w.posts[0]!.body as { calendar_event?: boolean }).calendar_event).toBe(true);
+  });
+
+  it('apagarlo manda calendar_event: false', async () => {
+    const w = world({ options: { ...OPTIONS, ...open60, calendar: { state: 'connected' } } });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const d = await openDialog();
+    await userEvent.click(d.getByRole('switch', { name: /Crear evento en Google Calendar/ }));
+    await fillWhen(d, tomorrow(), '10:30');
+    await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
+    await waitFor(() => expect(w.posts).toHaveLength(1));
+    expect((w.posts[0]!.body as { calendar_event?: boolean }).calendar_event).toBe(false);
+  });
+
+  for (const [state, text] of [['none', /No hay un calendario de Google conectado/], ['needs_reconnect', /necesita volver a conectarse/], ['pending_calendar', /Falta elegir el calendario/]] as const) {
+    it(`calendario «${state}»: el interruptor queda apagado y bloqueado, explica por qué y lleva a Configuración; no manda el campo`, async () => {
+      const w = world({ options: { ...OPTIONS, ...open60, calendar: { state } } });
+      mockApi(server(w));
+      renderApp('/inbox/c1');
+      const d = await openDialog();
+      const sw = d.getByRole('switch', { name: /Crear evento en Google Calendar/ });
+      expect(sw).toBeDisabled();
+      expect(sw).not.toBeChecked();
+      expect(d.getByText(text)).toBeInTheDocument();
+      expect(d.getByRole('link', { name: /Ir a Configuración › Google Calendar/ })).toHaveAttribute('href', '/settings/calendar');
+      await fillWhen(d, tomorrow(), '10:30');
+      await userEvent.click(d.getByRole('button', { name: 'Agendar' }));
+      await waitFor(() => expect(w.posts).toHaveLength(1));
+      expect(w.posts[0]!.body).not.toHaveProperty('calendar_event');
+    });
+  }
+});
+
+describe('Agenda · marca y cambio de Google Calendar por cita (67c)', () => {
+  it('el detalle muestra cómo va el evento en Google; sin estado no muestra marca', async () => {
+    mockApi(server(world({ appt: appt({ calendar: { enabled: true, state: 'failed' } }) })));
+    renderApp('/agenda');
+    await openAna();
+    const d = within(await screen.findByRole('dialog', { name: 'Cita' }));
+    expect(await d.findByText('No se pudo enviar a Google')).toBeInTheDocument();
+  });
+
+  it('una cita ya sincronizada se puede quitar de Google Calendar y volver a enviar', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/agenda');
+    await openAna();
+    const d = within(await screen.findByRole('dialog', { name: 'Cita' }));
+    expect(await d.findByText('En Google Calendar')).toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Quitar de Google Calendar' }));
+    await waitFor(() => expect(w.posts.some((p) => p.path.includes('/appointments/a1') && (p.body as { calendar_event?: boolean }).calendar_event === false)).toBe(true));
+    expect(await d.findByText('Sin Google Calendar')).toBeInTheDocument();
+    await userEvent.click(await d.findByRole('button', { name: 'Enviar a Google Calendar' }));
+    await waitFor(() => expect(w.posts.some((p) => (p.body as { calendar_event?: boolean }).calendar_event === true)).toBe(true));
+    expect(await d.findByText('Enviando a Google')).toBeInTheDocument();
+  });
+
+  it('una cita cerrada o sin permiso de edición no ofrece cambiarlo', async () => {
+    mockApi(server(world({ appt: appt({ can: { edit: false, cancel: false, complete: false } }) })));
+    renderApp('/agenda');
+    await openAna();
+    const d = within(await screen.findByRole('dialog', { name: 'Cita' }));
+    await d.findByText('En Google Calendar');
+    expect(d.queryByRole('button', { name: 'Quitar de Google Calendar' })).not.toBeInTheDocument();
   });
 });

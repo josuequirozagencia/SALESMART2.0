@@ -1,13 +1,13 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { calendarConnections, Database } from '../../db';
+import { calendarConnections, Database, notifications } from '../../db';
 import { ConflictError, NotFoundError, ServiceUnavailableError, ValidationError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { TenantContext } from '../../tenant';
 import { APP_CONFIG, APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
-import { OrgDirectoryService } from '../organizations';
+import { OrgDirectoryService, OrgMembersService } from '../organizations';
 import { CredentialVault, PlatformCredentialsReader, VaultOpenError } from '../platform';
 import { CALENDAR_PROVIDER, CalendarError, MODE_SCOPES, type CalendarMode, type CalendarProvider, type OAuthClient } from './calendar.ports';
 import { deriveKey, maskEmail, newNonce, pkceFor, signState, STATE_TTL_MS, verifyState } from './oauth-state';
@@ -65,6 +65,7 @@ export class CalendarConnectionService {
     @Inject(CALENDAR_PROVIDER) private readonly provider: CalendarProvider,
     @Inject(PlatformCredentialsReader) private readonly platform: PlatformCredentialsReader,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
+    @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {
     this.vault = CredentialVault.fromConfig(cfg.providers.credentialsKeys);
@@ -174,6 +175,8 @@ export class CalendarConnectionService {
     const sealed = this.vault!.seal({ refresh_token: refreshToken }, aadOf(org));
     const now = new Date();
     const previous = await this.db.withTenant(async (tx) => {
+      // Si había alertas de «requiere reconectar» sin leer, ya no hacen falta
+      await tx.update(notifications).set({ readAt: now }).where(and(eq(notifications.type, 'calendar_reconnect'), isNull(notifications.readAt)));
       const [cur] = await tx.select().from(calendarConnections).for('update').limit(1);
       const values = {
         mode,
@@ -354,11 +357,15 @@ export class CalendarConnectionService {
   }
 
   private async markNeedsReconnect(id: string, text: string): Promise<void> {
+    // A quién avisar es dato de identidad: se lee ANTES de la transacción de negocio
+    const admins = await this.members.withPermission('integrations.manage');
     await this.db.withTenant(async (tx) => {
       const [cur] = await tx.select().from(calendarConnections).where(eq(calendarConnections.id, id)).for('update').limit(1);
       if (!cur || cur.status === 'needs_reconnect' || cur.status === 'disconnected') return;
       await tx.update(calendarConnections).set({ status: 'needs_reconnect', lastError: text.slice(0, 300), updatedAt: new Date() }).where(eq(calendarConnections.id, id));
       await writeAudit(tx, { entityType: 'calendar_connection', entityId: id, field: 'status', oldValue: cur.status, newValue: 'needs_reconnect', source: 'automation' });
+      // Aviso en la campana a cada administrador de integraciones (la citas siguen guardándose; solo esperan para salir hacia Google). Repetirlo no acumula: una sin leer por persona.
+      if (admins.length > 0) await tx.insert(notifications).values(admins.map((userId) => ({ userId, type: 'calendar_reconnect' }))).onConflictDoNothing();
     });
   }
 

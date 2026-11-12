@@ -1,6 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { and, asc, eq, gte, inArray, lt, sql, type SQL } from 'drizzle-orm';
-import { appointmentReminders, appointments, channelAccounts, contacts, conversations, Database, messages, messageTemplates, type TenantTx } from '../../db';
+import { appointmentCalendarEvents, appointmentReminders, appointments, calendarConnections, channelAccounts, contacts, conversations, Database, messages, messageTemplates, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { AttributionService } from '../attribution';
 import { writeAudit } from '../audit';
@@ -52,6 +52,8 @@ export interface AppointmentView {
   reminder_offsets: number[];
   reminder_template: { id: string; name: string } | null;
   can: { edit: boolean; cancel: boolean; complete: boolean };
+  /** Google Calendar (67c): si esta cita se envía y cómo va. `state` null = todavía sin sincronizar (p. ej. no había calendario conectado). */
+  calendar: { enabled: boolean; state: 'off' | 'pending' | 'synced' | 'failed' | 'gone' | null };
 }
 export interface AppointmentOptions {
   timezone: string;
@@ -61,6 +63,8 @@ export interface AppointmentOptions {
   /** Plantillas aprobadas de la conexión (para los recordatorios fuera de la ventana de 24 h). */
   templates: Array<Pick<TemplateView, 'id' | 'name' | 'language' | 'category' | 'body' | 'variables'>>;
   blocked: 'unassigned' | 'not_owner' | 'channel_off' | null;
+  /** Estado del calendario de Google de la empresa, para el interruptor «Crear evento en Google Calendar». */
+  calendar: { state: 'connected' | 'needs_reconnect' | 'pending_calendar' | 'none' };
 }
 export interface AppointmentList {
   items: AppointmentView[];
@@ -117,12 +121,14 @@ export class AppointmentsService {
       if (c.ownerId === null) blocked = 'unassigned';
       else if (c.ownerId !== scope.userId && !scope.viewAll) blocked = 'not_owner';
       else if (channel.state !== 'active') blocked = 'channel_off';
+      const [cal] = await tx.select({ status: calendarConnections.status }).from(calendarConnections).limit(1);
+      const calendar: AppointmentOptions['calendar']['state'] = !cal || cal.status === 'disconnected' ? 'none' : (cal.status as 'connected' | 'needs_reconnect' | 'pending_calendar');
       const end = c.lastInboundAt ? c.lastInboundAt.getTime() + WINDOW_MS : null;
       const open = end !== null && end > Date.now();
       // GoHighLevel no tiene la ventana de 24 h de WhatsApp oficial (M7.4): los recordatorios salen como texto cuando toque
       // Solo WhatsApp oficial tiene ventana de 24 h y plantillas: WhatsApp por QR y GoHighLevel envían texto cuando toque
       const noWindow = contactSource.provider !== null && !hasWindow(contactSource.provider);
-      return { channelId: c.channelAccountId, noWindow, blocked, max: this.limitFor(contactSource.provider, contactSource.source), window: noWindow ? { open: true, expires_at: null } : { open, expires_at: end !== null ? new Date(end).toISOString() : null } };
+      return { channelId: c.channelAccountId, noWindow, blocked, calendar, max: this.limitFor(contactSource.provider, contactSource.source), window: noWindow ? { open: true, expires_at: null } : { open, expires_at: end !== null ? new Date(end).toISOString() : null } };
     });
     // Las plantillas existen solo en WhatsApp oficial: pedirlas de un canal QR o de GoHighLevel daba 404 y el formulario no cargaba
     const list = base.blocked === 'channel_off' || base.noWindow ? { items: [] } : await this.templates.forChannel(base.channelId);
@@ -132,6 +138,7 @@ export class AppointmentsService {
       window: base.window,
       templates: list.items.filter((t) => t.sendable).map((t) => ({ id: t.id, name: t.name, language: t.language, category: t.category, body: t.body, variables: t.variables })),
       blocked: base.blocked,
+      calendar: { state: base.calendar },
     };
   }
 
@@ -187,6 +194,7 @@ export class AppointmentsService {
         reminderOffsets: offsets,
         reminderTemplateId: tpl ? input.reminder_template_id! : null,
         reminderParams: tpl ? (input.reminder_params ?? {}) : {},
+        calendarSync: input.calendar_event !== false,
         idempotencyKey: key,
         createdBy: scope.userId,
       })
@@ -199,7 +207,7 @@ export class AppointmentsService {
     await this.attribution.onAppointmentCreated(tx, { contactId: appt.contactId, appointmentId: appt.id, startsAt }, now);
     const oppId = await this.opportunities.moveToAppointmentStage(tx, appt.contactId, scope.userId);
     if (oppId) await tx.update(appointments).set({ opportunityId: oppId }).where(eq(appointments.id, appt.id));
-    await this.calendar?.markDirty(tx, appt.id);
+    await this.calendar?.markDirty(tx, appt.id, appt.calendarSync);
     this.realtime?.touchHere(c.id);
     return { appointment: (await this.viewMany(tx, [appt.id], scope))[0]!, created: true };
   }
@@ -231,6 +239,7 @@ export class AppointmentsService {
         change('duration_minutes', 'durationMinutes', cur.durationMinutes, input.duration_minutes);
         change('kind', 'kind', cur.kind, input.kind);
         change('notes', 'notes', cur.notes, input.notes);
+        change('calendar_sync', 'calendarSync', cur.calendarSync, input.calendar_event);
         if (rebuild) {
           const conv = cur.conversationId ? await this.conversationFacts(tx, cur.conversationId) : null;
           if (offsets.length > 0 && !conv) throw new ConflictError('APPOINTMENT_NO_CONVERSATION', 'La cita no tiene conversación: no se pueden programar recordatorios');
@@ -248,7 +257,7 @@ export class AppointmentsService {
           await this.insertReminders(tx, id, offsets, startsAt, now);
         }
         for (const a of audits) await writeAudit(tx, { entityType: AUDIT, entityId: id, field: a.field, oldValue: a.oldValue, newValue: a.newValue, source: 'manual' });
-        await this.calendar?.markDirty(tx, id);
+        await this.calendar?.markDirty(tx, id, input.calendar_event ?? cur.calendarSync);
         if (cur.conversationId) this.realtime?.touchHere(cur.conversationId);
         return (await this.viewMany(tx, [id], scope))[0]!;
       }),
@@ -265,7 +274,7 @@ export class AppointmentsService {
         await tx.update(appointments).set({ status: 'cancelled', cancelledAt: now, cancelledBy: scope.userId, cancelReason: input.reason, updatedAt: now }).where(eq(appointments.id, id));
         await this.cancelPending(tx, id, 'appointment_cancelled', now);
         await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'status', oldValue: 'scheduled', newValue: 'cancelled', source: 'manual' });
-        await this.calendar?.markDirty(tx, id);
+        await this.calendar?.markDirty(tx, id, cur.calendarSync);
         if (cur.conversationId) this.realtime?.touchHere(cur.conversationId);
         return (await this.viewMany(tx, [id], scope))[0]!;
       }),
@@ -281,7 +290,7 @@ export class AppointmentsService {
         await tx.update(appointments).set({ status: 'completed', completedAt: now, updatedAt: now }).where(eq(appointments.id, id));
         await this.cancelPending(tx, id, 'appointment_completed', now);
         await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'status', oldValue: 'scheduled', newValue: 'completed', source: 'manual' });
-        await this.calendar?.markDirty(tx, id);
+        await this.calendar?.markDirty(tx, id, cur.calendarSync);
         return (await this.viewMany(tx, [id], scope))[0]!;
       }),
     );
@@ -504,6 +513,8 @@ export class AppointmentsService {
     if (templateIds.length > 0) {
       for (const t of await tx.select({ id: messageTemplates.id, name: messageTemplates.name }).from(messageTemplates).where(inArray(messageTemplates.id, templateIds))) names.set(t.id, t.name);
     }
+    const links = new Map<string, string>();
+    for (const l of await tx.select({ appointmentId: appointmentCalendarEvents.appointmentId, state: appointmentCalendarEvents.syncState }).from(appointmentCalendarEvents).where(inArray(appointmentCalendarEvents.appointmentId, [...ids]))) links.set(l.appointmentId, l.state);
     const order = new Map(ids.map((id, i) => [id, i]));
     return rows
       .map((r): AppointmentView => {
@@ -527,6 +538,7 @@ export class AppointmentsService {
           reminder_offsets: a.reminderOffsets,
           reminder_template: a.reminderTemplateId ? { id: a.reminderTemplateId, name: names.get(a.reminderTemplateId) ?? '' } : null,
           can: { edit: open && mine, cancel: open && mine, complete: open && mine },
+          calendar: { enabled: a.calendarSync, state: !a.calendarSync ? 'off' : ((links.get(a.id) as AppointmentView['calendar']['state'] | undefined) ?? null) },
         };
       })
       .sort((x, y) => (order.get(x.id) ?? 0) - (order.get(y.id) ?? 0));

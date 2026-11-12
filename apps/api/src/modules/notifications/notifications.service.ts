@@ -17,7 +17,7 @@ export interface NotificationsAccess {
   readonly viewAll: boolean;
 }
 
-export type NotificationType = 'mention' | 'task_assigned' | 'task_due';
+export type NotificationType = 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect';
 
 export interface NotificationView {
   id: string;
@@ -115,7 +115,9 @@ export class NotificationsService {
           .where(and(eq(tasks.organizationId, notifications.organizationId), eq(tasks.id, notifications.taskId), isNull(tasks.deletedAt), eq(tasks.assigneeId, me), or(ne(notifications.type, 'task_due'), eq(tasks.status, 'open')))),
       ),
     );
-    return [eq(notifications.userId, me), gt(notifications.createdAt, since), or(mention, task), extra];
+    // Alerta de sistema (v11 67c): no depende de ninguna conversación ni tarea; es de quien la recibe
+    const system = eq(notifications.type, 'calendar_reconnect');
+    return [eq(notifications.userId, me), gt(notifications.createdAt, since), or(mention, task, system), extra];
   }
 
   async list(access: NotificationsAccess, q: ListNotificationsQuery): Promise<NotificationPage> {
