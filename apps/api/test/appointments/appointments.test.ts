@@ -100,7 +100,7 @@ interface Options { timezone: string; max_reminders: number; window: { open: boo
 
 let seq = 0;
 /** Una conversación de A con su contacto (con clic de anuncio de Meta para que el Schedule sea atribuible). */
-async function mkConv(o: { owner?: string | null; lastInbound?: Date | null; ctwa?: boolean; source?: string; org?: string } = {}): Promise<{ conv: string; contact: string }> {
+async function mkConv(o: { owner?: string | null; lastInbound?: Date | null; ctwa?: boolean; source?: string; org?: string; channel?: string } = {}): Promise<{ conv: string; contact: string }> {
   seq += 1;
   const org = o.org ?? ORG_A;
   const owner = o.owner === undefined ? IDS.carol : o.owner;
@@ -108,7 +108,7 @@ async function mkConv(o: { owner?: string | null; lastInbound?: Date | null; ctw
   const contact = (await admin.query(`INSERT INTO contacts(id, organization_id, name, owner_id, ctwa_cl_id, source) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5) RETURNING id`, [org, `Cliente ${seq}`, owner, o.ctwa === false ? null : `ctwa-${seq}`, o.source ?? 'manual'])).rows[0].id as string;
   await admin.query(`INSERT INTO contact_phones(id, organization_id, contact_id, e164, is_primary) VALUES (gen_random_uuid(), $1, $2, $3, true)`, [org, contact, phone]);
   const last = o.lastInbound === undefined ? new Date() : o.lastInbound;
-  const conv = (await admin.query(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, owner_id, assigned_at, last_message_at, last_inbound_at, unread_count, peer_id) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, CASE WHEN $5::uuid IS NULL THEN NULL ELSE now() END, now(), $6, 0, $7) RETURNING id`, [org, contact, channelA, owner ? 'working' : 'unassigned', owner, last, phone.replace('+', '')])).rows[0].id as string;
+  const conv = (await admin.query(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, owner_id, assigned_at, last_message_at, last_inbound_at, unread_count, peer_id) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, CASE WHEN $5::uuid IS NULL THEN NULL ELSE now() END, now(), $6, 0, $7) RETURNING id`, [org, contact, o.channel ?? channelA, owner ? 'working' : 'unassigned', owner, last, phone.replace('+', '')])).rows[0].id as string;
   return { conv, contact };
 }
 const inH = (h: number): string => new Date(Date.now() + h * HOUR).toISOString();
@@ -306,6 +306,47 @@ describe('ventana de 24 h de WhatsApp y plantilla', () => {
     expect((await json<Options>(await call('GET', `/appointments/options?conversation_id=${qr.conv}`, T.carol))).max_reminders).toBe(REMINDER_LIMIT_EXTENDED);
     expect((await call('GET', `/appointments/options?conversation_id=${ok.conv}`, T.eve)).status).toBe(404);
     expect((await call('GET', `/appointments/options`, T.carol)).status).toBe(400);
+  });
+});
+
+/** Una conexión de otro proveedor (WhatsApp por QR o GoHighLevel): sin cuenta de WhatsApp oficial, sin ventana de 24 h y sin plantillas. */
+async function otherChannel(provider: 'evolution' | 'ghl', name: string): Promise<string> {
+  return (await admin.query(`INSERT INTO channel_accounts(id, organization_id, provider, is_official, name, status) VALUES (gen_random_uuid(), $1, $2, false, $3, 'active') RETURNING id`, [ORG_A, provider, name])).rows[0].id as string;
+}
+
+describe('conversaciones por WhatsApp QR y GoHighLevel (sin plantillas ni ventana de 24 h)', () => {
+  for (const [provider, max] of [['evolution', REMINDER_LIMIT_EXTENDED], ['ghl', REMINDER_LIMIT]] as const) {
+    it(`${provider}: el formulario carga (antes daba 404 por pedir plantillas de WhatsApp oficial), sin plantillas, ventana siempre abierta y el tope del canal`, async () => {
+      const channel = await otherChannel(provider, provider === 'evolution' ? 'QR Ventas' : 'GoHighLevel');
+      const { conv } = await mkConv({ channel, lastInbound: new Date(Date.now() - 5 * 24 * HOUR), ctwa: false });
+      const r = await call('GET', `/appointments/options?conversation_id=${conv}`, T.carol);
+      expect(r.status).toBe(200);
+      const o = await json<Options>(r);
+      expect(o).toMatchObject({ timezone: TZ, max_reminders: max, window: { open: true, expires_at: null }, templates: [], blocked: null });
+    });
+
+    it(`${provider}: se puede agendar con recordatorios aunque haga días que el cliente no escribe; salen como texto a su hora`, async () => {
+      const channel = await otherChannel(provider, 'Otra conexión');
+      const { conv } = await mkConv({ channel, lastInbound: new Date(Date.now() - 5 * 24 * HOUR), ctwa: false });
+      const startsAt = new Date(Date.now() + 90 * MIN);
+      const a = await mk(conv, { starts_at: startsAt.toISOString(), kind: 'Corte', reminders: [60] });
+      expect(a.reminders).toHaveLength(1);
+      expect(a.reminder_template).toBeNull();
+      expect(await runReminders(new Date(startsAt.getTime() - 60 * MIN + MIN))).toBe(1);
+      const msg = (await admin.query(`SELECT sender_type, kind, body FROM messages WHERE conversation_id = $1`, [conv])).rows;
+      expect(msg).toHaveLength(1);
+      expect(msg[0]).toMatchObject({ sender_type: 'automation', kind: 'text' });
+      expect((await get(a.id)).reminders[0]).toMatchObject({ status: 'sent', via: 'text' });
+    });
+  }
+
+  it('reprogramar una cita de un canal QR rehace los recordatorios sin pedir plantilla', async () => {
+    const channel = await otherChannel('evolution', 'QR Ventas');
+    const { conv } = await mkConv({ channel, lastInbound: new Date(Date.now() - 3 * 24 * HOUR), ctwa: false });
+    const a = await mk(conv, { reminders: [60] });
+    const r = await call('PATCH', `/appointments/${a.id}`, T.carol, { starts_at: inH(8), reminders: [120, 30] });
+    expect(r.status).toBe(200);
+    expect((await json<Appt>(r)).reminders.filter((x) => x.status !== 'cancelled').map((x) => x.offset_minutes).sort((x, y) => y - x)).toEqual([120, 30]);
   });
 });
 
