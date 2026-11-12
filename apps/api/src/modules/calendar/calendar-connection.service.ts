@@ -4,6 +4,7 @@ import type { AppConfig } from '../../config';
 import { calendarConnections, Database, notifications } from '../../db';
 import { ConflictError, NotFoundError, ServiceUnavailableError, ValidationError } from '../../errors';
 import type { AppLogger } from '../../logger';
+import { MAIL_PROVIDER, type MailProvider } from '../../mail';
 import { TenantContext } from '../../tenant';
 import { APP_CONFIG, APP_LOGGER } from '../../tokens';
 import { writeAudit } from '../audit';
@@ -67,6 +68,7 @@ export class CalendarConnectionService {
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Inject(MAIL_PROVIDER) private readonly mail: MailProvider,
   ) {
     this.vault = CredentialVault.fromConfig(cfg.providers.credentialsKeys);
     const master = cfg.providers.credentialsKeys?.current.key;
@@ -358,15 +360,33 @@ export class CalendarConnectionService {
 
   private async markNeedsReconnect(id: string, text: string): Promise<void> {
     // A quién avisar es dato de identidad: se lee ANTES de la transacción de negocio
-    const admins = await this.members.withPermission('integrations.manage');
-    await this.db.withTenant(async (tx) => {
+    const { organizationName, people } = await this.members.recipientsWithPermission('integrations.manage');
+    const admins = people.map((p) => p.id);
+    const changed = await this.db.withTenant(async (tx) => {
       const [cur] = await tx.select().from(calendarConnections).where(eq(calendarConnections.id, id)).for('update').limit(1);
-      if (!cur || cur.status === 'needs_reconnect' || cur.status === 'disconnected') return;
+      if (!cur || cur.status === 'needs_reconnect' || cur.status === 'disconnected') return false;
       await tx.update(calendarConnections).set({ status: 'needs_reconnect', lastError: text.slice(0, 300), updatedAt: new Date() }).where(eq(calendarConnections.id, id));
       await writeAudit(tx, { entityType: 'calendar_connection', entityId: id, field: 'status', oldValue: cur.status, newValue: 'needs_reconnect', source: 'automation' });
       // Aviso en la campana a cada administrador de integraciones (la citas siguen guardándose; solo esperan para salir hacia Google). Repetirlo no acumula: una sin leer por persona.
       if (admins.length > 0) await tx.insert(notifications).values(admins.map((userId) => ({ userId, type: 'calendar_reconnect' }))).onConflictDoNothing();
+      return true;
     });
+    // El correo sale UNA vez por cada caída (la transición está bajo bloqueo: repetirla no avisa de nuevo), ya con la transacción confirmada
+    if (changed) await this.mailReconnect(organizationName, people);
+  }
+
+  /** Avisa por correo a quienes administran las conexiones. Es un extra de la campana: un fallo se registra (sin correos ni detalles) y NUNCA rompe la sincronización ni a los demás destinatarios. */
+  private async mailReconnect(organizationName: string, people: readonly { email: string }[]): Promise<void> {
+    if (!this.mail.available) return;
+    let failed = 0;
+    for (const p of people) {
+      try {
+        await this.mail.sendCalendarReconnect({ to: p.email, organizationName, reconnectUrl: this.returnBase });
+      } catch {
+        failed++;
+      }
+    }
+    if (failed > 0) this.log.warn({ org_id: TenantContext.current().organizationId, failed, total: people.length }, 'no se pudo enviar el correo de Google Calendar a reconectar');
   }
 
   private async asUserError(e: unknown, connectionId: string): Promise<Error> {

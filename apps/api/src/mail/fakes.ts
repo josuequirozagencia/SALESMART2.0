@@ -1,5 +1,5 @@
 import type { AppLogger } from '../logger';
-import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 /** Sin proveedor: el servicio informa que no está disponible. Es el valor por defecto (y el único válido hoy en producción). */
 export class UnavailableMailProvider implements MailProvider {
@@ -28,6 +28,9 @@ export class UnavailableMailProvider implements MailProvider {
   sendCompanyRecovered(): Promise<void> {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
+  sendCalendarReconnect(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
 }
 /** SOLO PRUEBAS: guarda los correos en memoria. La configuración lo rechaza en producción. */
 export class MemoryMailProvider implements MailProvider {
@@ -40,6 +43,7 @@ export class MemoryMailProvider implements MailProvider {
   readonly companyExportReadyOutbox: CompanyExportReadyMail[] = [];
   readonly companyPurgeNoticeOutbox: CompanyPurgeNoticeMail[] = [];
   readonly companyRecoveredOutbox: CompanyRecoveredMail[] = [];
+  readonly calendarReconnectOutbox: CalendarReconnectMail[] = [];
   failNext = false;
   sendVerificationCode(mail: VerificationMail): Promise<void> {
     if (this.failNext) {
@@ -105,6 +109,14 @@ export class MemoryMailProvider implements MailProvider {
     this.companyRecoveredOutbox.push(mail);
     return Promise.resolve();
   }
+  sendCalendarReconnect(mail: CalendarReconnectMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.calendarReconnectOutbox.push(mail);
+    return Promise.resolve();
+  }
   lastInvitation(to: string): InvitationMail | undefined {
     return [...this.inviteOutbox].reverse().find((m) => m.to === to);
   }
@@ -160,6 +172,10 @@ export class ConsoleMailProvider implements MailProvider {
   }
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void> {
     this.log.warn({ to: mail.to, audience: mail.audience }, 'DEV ONLY: aviso de empresa recuperada (no se envía)');
+    return Promise.resolve();
+  }
+  sendCalendarReconnect(mail: CalendarReconnectMail): Promise<void> {
+    this.log.warn({ to: mail.to, reconnectUrl: mail.reconnectUrl }, 'DEV ONLY: aviso de Google Calendar a reconectar (no se envía)');
     return Promise.resolve();
   }
 }

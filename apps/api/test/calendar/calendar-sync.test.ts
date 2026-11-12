@@ -7,6 +7,7 @@ import { NestFactory } from '@nestjs/core';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
+import { MAIL_PROVIDER, MemoryMailProvider } from '../../src/mail';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AppointmentsModule } from '../../src/modules/appointments';
@@ -50,6 +51,7 @@ let app: INestApplication;
 let base = '';
 let hash = '';
 let T: Record<'alice' | 'carol' | 'bob' | 'root', string>;
+const mailbox = (): MemoryMailProvider => app.get<MemoryMailProvider>(MAIL_PROVIDER);
 let seq = 0;
 const saved = { ...process.env };
 
@@ -115,7 +117,7 @@ beforeAll(async () => {
   await admin.connect();
   hash = await new Argon2idHasher().hash(PW);
   for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'WHATSAPP_PROVIDER']) delete process.env[k];
-  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: FRONT, MAIL_PROVIDER: 'console', CAPTCHA_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: KEY, WHATSAPP_PROVIDER: 'fake' });
+  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: FRONT, MAIL_PROVIDER: 'memory', CAPTCHA_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: KEY, WHATSAPP_PROVIDER: 'fake' });
   delete process.env['DATABASE_URL_OWNER'];
   app = await NestFactory.create(TestAppModule, { logger: false, abortOnError: false });
   configureApp(app);
@@ -130,6 +132,8 @@ beforeEach(async () => {
     const ch = await call('POST', '/channels', tok, { name: 'Ventas', waba_id: '1234567890123', phone_number_id: tok === T.alice ? '1090123456789' : '1090123456790', access_token: FAKE_WHATSAPP_TOKEN });
     expect(ch.status).toBe(201);
   }
+  mailbox().calendarReconnectOutbox.length = 0;
+  mailbox().failNext = false;
   gcal.calls.length = 0;
   gcal.events.clear();
   gcal.grantedScopes = null;
@@ -499,6 +503,44 @@ describe('Citas → Google Calendar · aviso al administrador cuando requiere re
     const list = await notices(T.alice);
     expect(list.items.filter((n) => n.type === 'calendar_reconnect')).toHaveLength(2);
     expect(list.unread).toBe(1);
+  });
+
+  it('manda además un correo SOLO a quienes administran integraciones, una vez por caída, con el nombre de la empresa y el enlace a reconectar; la asesora y la otra empresa no reciben nada', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    await mk(conv);
+    expect(mailbox().calendarReconnectOutbox).toEqual([]); // conectado y sincronizando: nada que avisar
+    gcal.liveRefreshTokens.clear();
+    await runSync();
+    expect(mailbox().calendarReconnectOutbox).toEqual([{ to: 'alice@a.test', organizationName: 'Barbería Norte', reconnectUrl: `${FRONT}/settings/calendar` }]);
+    await runSync();
+    await runSync();
+    expect(mailbox().calendarReconnectOutbox).toHaveLength(1); // seguir roto no reenvía
+    // reconectar y que se caiga otra vez: nueva caída, nuevo aviso
+    await connect(T.alice);
+    expect(mailbox().calendarReconnectOutbox).toHaveLength(1); // reconectar no manda nada
+    await mk(conv);
+    gcal.liveRefreshTokens.clear();
+    await runSync();
+    expect(mailbox().calendarReconnectOutbox).toHaveLength(2);
+    expect(mailbox().calendarReconnectOutbox.every((m) => m.to === 'alice@a.test')).toBe(true);
+  });
+
+  it('si el correo falla, la campana, el estado y la sincronización siguen igual; la siguiente caída sí avisa', async () => {
+    await connect(T.alice);
+    const { conv } = await mkConv();
+    await mk(conv);
+    mailbox().failNext = true; // el proveedor de correo rechaza el primer envío
+    gcal.liveRefreshTokens.clear();
+    await runSync();
+    expect(mailbox().calendarReconnectOutbox).toEqual([]);
+    expect((await notices(T.alice)).items).toHaveLength(1); // la campana sí avisó
+    expect((await call('GET', '/calendar/connection', T.alice).then((r) => json<{ status: string }>(r))).status).toBe('needs_reconnect');
+    await connect(T.alice);
+    await mk(conv);
+    gcal.liveRefreshTokens.clear();
+    await runSync();
+    expect(mailbox().calendarReconnectOutbox).toHaveLength(1);
   });
 
   it('la base rechaza un aviso de calendario con referencias a otra cosa', async () => {

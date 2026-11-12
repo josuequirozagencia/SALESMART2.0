@@ -89,6 +89,14 @@ export interface CompanyRecoveredMail {
   audience: 'owner' | 'agency';
 }
 
+/** Aviso a quien administra las conexiones de una empresa: Google Calendar dejó de aceptar la conexión y hay que volver a conectarla (v11, ADR-67). No lleva datos de clientes ni detalles técnicos. */
+export interface CalendarReconnectMail {
+  to: string;
+  organizationName: string;
+  /** Enlace COMPLETO a Configuración › Google Calendar (`<FRONTEND_BASE_URL>/settings/calendar`; sin token: pide sesión). `null` = sin dirección pública configurada: el correo indica la ruta en palabras. */
+  reconnectUrl: string | null;
+}
+
 export interface MailProvider {
   /** false = no hay proveedor configurado: el registro responde 503 en lugar de fingir que envió. */
   readonly available: boolean;
@@ -100,4 +108,5 @@ export interface MailProvider {
   sendCompanyExportReady(mail: CompanyExportReadyMail): Promise<void>;
   sendCompanyPurgeNotice(mail: CompanyPurgeNoticeMail): Promise<void>;
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void>;
+  sendCalendarReconnect(mail: CalendarReconnectMail): Promise<void>;
 }
