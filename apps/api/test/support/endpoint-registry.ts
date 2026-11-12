@@ -212,6 +212,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/calendar/connection/calendar', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
   { route: 'POST /v1/calendar/connection/disconnect', kind: 'tenant', isolationTest: '../../calendar/calendar.test.ts' },
   { route: 'GET /v1/integrations/google-calendar/callback', kind: 'public' },
+  // Citas ↔ Google Calendar (67b). Pruebas: test/calendar/calendar-sync.test.ts
+  { route: 'POST /v1/calendar/sync/retry', kind: 'tenant', isolationTest: '../../calendar/calendar-sync.test.ts' },
   // GoHighLevel (M7.1, ADR-52). Pruebas: test/ghl/ghl.test.ts (A↔B, token jamás devuelto, secreto del webhook)
   { route: 'GET /v1/ghl/connection', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },
   { route: 'PUT /v1/ghl/connection', kind: 'tenant', isolationTest: '../../ghl/ghl.test.ts' },

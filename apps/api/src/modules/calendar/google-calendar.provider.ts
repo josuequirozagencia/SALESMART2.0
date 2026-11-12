@@ -1,4 +1,4 @@
-import { CalendarError, type CalendarInfo, type CalendarProvider, type OAuthClient, type TokenSet } from './calendar.ports';
+import { CalendarError, type CalendarEventInput, type CalendarEventRef, type CalendarInfo, type CalendarProvider, type OAuthClient, type TokenSet } from './calendar.ports';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -114,6 +114,30 @@ export class GoogleCalendarProvider implements CalendarProvider {
     await this.assertOk(res);
   }
 
+  async createEvent(i: { accessToken: string; calendarId: string; event: CalendarEventInput }): Promise<CalendarEventRef> {
+    const res = await this.call(`${this.ep.apiBase}/calendars/${encodeURIComponent(i.calendarId)}/events`, { method: 'POST', headers: this.json(i.accessToken), body: JSON.stringify(this.eventBody(i.event, true)) });
+    if (res.status === 409) throw new CalendarError('Ya existe un evento con ese id', false, false, 'exists');
+    await this.assertOk(res);
+    const ref = await this.ref(res, i.event.id);
+    return { eventId: ref.eventId, etag: ref.etag };
+  }
+
+  async updateEvent(i: { accessToken: string; calendarId: string; eventId: string; event: CalendarEventInput }): Promise<CalendarEventRef> {
+    const res = await this.call(`${this.ep.apiBase}/calendars/${encodeURIComponent(i.calendarId)}/events/${encodeURIComponent(i.eventId)}`, { method: 'PUT', headers: this.json(i.accessToken), body: JSON.stringify(this.eventBody(i.event, false)) });
+    if (res.status === 404 || res.status === 410) throw new CalendarError('El evento ya no existe en Google', false, false, 'gone');
+    await this.assertOk(res);
+    const ref = await this.ref(res, i.eventId);
+    // Un evento que la persona canceló en Google sigue respondiendo 200 con «cancelled»: para nosotros es borrado
+    if (ref.cancelled) throw new CalendarError('El evento ya no existe en Google', false, false, 'gone');
+    return { eventId: ref.eventId, etag: ref.etag };
+  }
+
+  async deleteEvent(i: { accessToken: string; calendarId: string; eventId: string }): Promise<void> {
+    const res = await this.call(`${this.ep.apiBase}/calendars/${encodeURIComponent(i.calendarId)}/events/${encodeURIComponent(i.eventId)}`, { method: 'DELETE', headers: { authorization: `Bearer ${i.accessToken}` } });
+    if (res.ok || res.status === 404 || res.status === 410) return; // ya no estaba: queda borrado
+    await this.assertOk(res);
+  }
+
   // ------------------------------------------------------------------ internos
 
   private async token(form: Record<string, string>): Promise<TokenBody> {
@@ -124,6 +148,27 @@ export class GoogleCalendarProvider implements CalendarProvider {
     // invalid_grant: código usado o vencido, o permiso revocado. invalid_client: el ID/secreto de la plataforma está mal.
     if (body.error === 'invalid_client') throw new CalendarError('La aplicación de Google de la plataforma no está bien configurada (ID o secreto de cliente)', false);
     throw new CalendarError('Google rechazó la autorización. Vuelve a conectar', false, true);
+  }
+
+  private json(accessToken: string): Record<string, string> {
+    return { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' };
+  }
+
+  /** El cuerpo del evento: título, descripción y horas. Sin invitados ni teléfonos. */
+  private eventBody(e: CalendarEventInput, withId: boolean): Record<string, unknown> {
+    return {
+      ...(withId ? { id: e.id } : {}),
+      summary: e.summary,
+      description: e.description,
+      start: { dateTime: e.startsAt.toISOString(), timeZone: e.timeZone },
+      end: { dateTime: e.endsAt.toISOString(), timeZone: e.timeZone },
+      extendedProperties: { private: { sales_smart: '1' } },
+    };
+  }
+
+  private async ref(res: Response, fallbackId: string): Promise<CalendarEventRef & { cancelled: boolean }> {
+    const j = (await res.json().catch(() => ({}))) as { id?: unknown; etag?: unknown; status?: unknown };
+    return { eventId: typeof j.id === 'string' && j.id ? j.id : fallbackId, etag: typeof j.etag === 'string' ? j.etag : null, cancelled: j.status === 'cancelled' };
   }
 
   private async call(url: string, init: RequestInit): Promise<Response> {

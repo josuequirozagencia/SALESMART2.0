@@ -318,6 +318,41 @@ export class CalendarConnectionService {
     }
   }
 
+  /**
+   * Para la sincronización de citas (67b): un acceso fresco y el calendario donde escribir, o por qué no se puede (sin conexión, falta elegir calendario o requiere reconectar). Un permiso que Google
+   * rechaza deja la conexión en «requiere reconectar». Un fallo pasajero de Google se propaga como `CalendarError` para que quien llama reintente.
+   */
+  async authorize(): Promise<{ ok: true; accessToken: string; calendarId: string } | { ok: false; reason: 'none' | 'pending' | 'needs_reconnect' }> {
+    const org = TenantContext.current().organizationId;
+    const cur = await this.db.withTenant(async (tx) => (await tx.select().from(calendarConnections).limit(1))[0] ?? null);
+    if (!cur || cur.status === 'disconnected' || !cur.credentialsSealed) return { ok: false, reason: 'none' };
+    if (cur.status === 'needs_reconnect') return { ok: false, reason: 'needs_reconnect' };
+    if (cur.status !== 'connected' || !cur.calendarId) return { ok: false, reason: 'pending' };
+    const client = await this.client();
+    if (!client) return { ok: false, reason: 'none' };
+    const refreshToken = this.openRefreshToken(cur.credentialsSealed, org);
+    if (!refreshToken) {
+      await this.markNeedsReconnect(cur.id, 'La autorización guardada no se puede leer: vuelve a conectar');
+      return { ok: false, reason: 'needs_reconnect' };
+    }
+    try {
+      const t = await this.provider.accessToken({ client, refreshToken });
+      return { ok: true, accessToken: t.accessToken, calendarId: cur.calendarId };
+    } catch (e) {
+      if (e instanceof CalendarError && e.credentials) {
+        await this.markNeedsReconnect(cur.id, e.message);
+        return { ok: false, reason: 'needs_reconnect' };
+      }
+      throw e;
+    }
+  }
+
+  /** La conexión de la empresa del contexto deja de servir (Google rechazó el permiso). Idempotente. */
+  async markConnectionNeedsReconnect(text: string): Promise<void> {
+    const id = await this.db.withTenant(async (tx) => (await tx.select({ id: calendarConnections.id }).from(calendarConnections).limit(1))[0]?.id ?? null);
+    if (id) await this.markNeedsReconnect(id, text);
+  }
+
   private async markNeedsReconnect(id: string, text: string): Promise<void> {
     await this.db.withTenant(async (tx) => {
       const [cur] = await tx.select().from(calendarConnections).where(eq(calendarConnections.id, id)).for('update').limit(1);

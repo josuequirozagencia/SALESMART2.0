@@ -15,6 +15,8 @@ class SimGoogle {
   readonly refresh = new Set<string>();
   readonly calendars: Array<{ id: string; summary: string; primary?: boolean; accessRole: string }> = [{ id: 'primary@example.com', summary: 'ana@example.com', primary: true, accessRole: 'owner' }];
   readonly seen: Array<{ method: string; path: string; auth: string | undefined; body: string }> = [];
+  /** Eventos por calendario e id (`cancelled` imita un evento que la persona borró en Google). */
+  readonly events = new Map<string, { body: Record<string, unknown>; cancelled: boolean }>();
   /** Para forzar un estado en la próxima respuesta de la ruta indicada. */
   forced: Array<{ path: string; status: number; body?: unknown }> = [];
   server!: Server;
@@ -86,6 +88,31 @@ class SimGoogle {
     if (u.pathname === '/calendar/v3/users/me/calendarList') {
       if (u.searchParams.get('minAccessRole') !== 'writer') return this.send(res, 400, { error: { code: 400 } });
       return this.send(res, 200, { items: this.calendars });
+    }
+    const ev = /^\/calendar\/v3\/calendars\/([^/]+)\/events(?:\/([^/]+))?$/.exec(u.pathname);
+    if (ev) {
+      const cal = decodeURIComponent(ev[1]!);
+      const id = ev[2] ? decodeURIComponent(ev[2]) : null;
+      if (req.method === 'POST' && !id) {
+        const j = JSON.parse(body) as { id: string };
+        if (this.events.has(`${cal}/${j.id}`)) return this.send(res, 409, { error: { code: 409, message: 'The requested identifier already exists.' } });
+        this.events.set(`${cal}/${j.id}`, { body: j as unknown as Record<string, unknown>, cancelled: false });
+        return this.send(res, 200, { id: j.id, etag: `"e-${j.id}"`, status: 'confirmed' });
+      }
+      const cur = id ? this.events.get(`${cal}/${id}`) : undefined;
+      if (req.method === 'PUT' && id) {
+        if (!cur) return this.send(res, 404, { error: { code: 404 } });
+        if (cur.cancelled) return this.send(res, 200, { id, etag: '"x"', status: 'cancelled' });
+        cur.body = { ...JSON.parse(body), id };
+        return this.send(res, 200, { id, etag: `"e2-${id}"`, status: 'confirmed' });
+      }
+      if (req.method === 'DELETE' && id) {
+        if (!cur) return this.send(res, 404, { error: { code: 404 } });
+        if (cur.cancelled) return this.send(res, 410, { error: { code: 410 } });
+        cur.cancelled = true;
+        res.writeHead(204);
+        return void res.end();
+      }
     }
     return this.send(res, 404, { error: { code: 404 } });
   }
@@ -161,6 +188,22 @@ describe('GoogleCalendarProvider · errores', () => {
       sim.forced.push({ path: '/calendar/v3/users/me/calendarList', status });
       expect(await p.listCalendars({ accessToken: t.accessToken }).catch((x: unknown) => x), `HTTP ${status}`).toMatchObject(want);
     }
+  });
+
+  it('eventos: lo que se manda a Google es título, horas y enlace (sin teléfono ni invitados); un evento cancelado en Google se trata como «gone»', async () => {
+    const p = make();
+    const t = await tokens(p);
+    const event = { id: 'b'.repeat(32), summary: 'Cita · Ana · Carla', description: 'Cita agendada en Sales Smart.\nhttps://app.ejemplo.test/inbox/1', startsAt: new Date('2030-02-01T15:00:00Z'), endsAt: new Date('2030-02-01T15:30:00Z'), timeZone: 'America/Guayaquil' };
+    sim.seen.length = 0;
+    await p.createEvent({ accessToken: t.accessToken, calendarId: 'cal@group.calendar.google.com', event });
+    const sent = sim.seen.find((x) => x.method === 'POST' && x.path.endsWith('/events'))!;
+    const j = JSON.parse(sent.body) as Record<string, unknown>;
+    expect(j).toMatchObject({ id: event.id, summary: 'Cita · Ana · Carla', start: { dateTime: '2030-02-01T15:00:00.000Z', timeZone: 'America/Guayaquil' }, end: { dateTime: '2030-02-01T15:30:00.000Z' } });
+    expect(Object.keys(j).sort()).toEqual(['description', 'end', 'extendedProperties', 'id', 'start', 'summary']);
+    expect(sent.auth).toBe(`Bearer ${t.accessToken}`);
+    // la persona lo borró en Google: Google responde 200 con status «cancelled» al actualizar
+    sim.events.get(`cal@group.calendar.google.com/${event.id}`)!.cancelled = true;
+    expect(await p.updateEvent({ accessToken: t.accessToken, calendarId: 'cal@group.calendar.google.com', eventId: event.id, event }).catch((x: unknown) => x)).toMatchObject({ kind: 'gone' });
   });
 
   it('403 porque la API no está habilitada en el proyecto (accessNotConfigured / SERVICE_DISABLED) ≠ falta un permiso: es de la plataforma', async () => {

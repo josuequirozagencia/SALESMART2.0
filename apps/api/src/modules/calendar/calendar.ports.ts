@@ -17,6 +17,23 @@ export interface TokenSet {
   scopes: string[];
 }
 
+/** Lo que se manda a Google de una cita: título, horas y un enlace. Nunca teléfono, correo ni invitados (ADR-67). */
+export interface CalendarEventInput {
+  /** Id del evento en Google (5–1024 caracteres de a-v y 0-9): determinista a partir de la cita. */
+  id: string;
+  summary: string;
+  description: string;
+  startsAt: Date;
+  endsAt: Date;
+  /** Zona horaria de la empresa (IANA). */
+  timeZone: string;
+}
+
+export interface CalendarEventRef {
+  eventId: string;
+  etag: string | null;
+}
+
 export interface CalendarInfo {
   id: string;
   name: string;
@@ -32,8 +49,8 @@ export class CalendarError extends Error {
     message: string,
     readonly retryable: boolean,
     readonly credentials = false,
-    /** Causa conocida que no es culpa de la persona: `api_disabled` = la API de Google Calendar no está habilitada en el proyecto de Google Cloud. */
-    readonly kind?: 'api_disabled',
+    /** Causa conocida: `api_disabled` = la API de Google Calendar no está habilitada en el proyecto de Google Cloud; `exists` = ya hay un evento con ese id (409); `gone` = el evento ya no existe en Google (404/410). */
+    readonly kind?: 'api_disabled' | 'exists' | 'gone',
   ) {
     super(message);
     this.name = 'CalendarError';
@@ -55,6 +72,12 @@ export interface CalendarProvider {
   createCalendar(i: { accessToken: string; name: string; timeZone: string }): Promise<CalendarInfo>;
   /** Los calendarios de la cuenta (modo `existing`; exige el permiso de la lista de calendarios). */
   listCalendars(i: { accessToken: string }): Promise<CalendarInfo[]>;
+  /** Crea un evento con el id indicado (determinista: reintentar no duplica). Si ya existe, `CalendarError.kind === 'exists'`. */
+  createEvent(i: { accessToken: string; calendarId: string; event: CalendarEventInput }): Promise<CalendarEventRef>;
+  /** Reemplaza los datos del evento. Si Google ya no lo tiene (o lo canceló), `CalendarError.kind === 'gone'`. */
+  updateEvent(i: { accessToken: string; calendarId: string; eventId: string; event: CalendarEventInput }): Promise<CalendarEventRef>;
+  /** Borra el evento. Que ya no exista cuenta como borrado (idempotente). */
+  deleteEvent(i: { accessToken: string; calendarId: string; eventId: string }): Promise<void>;
   /** Revoca el token en Google (al desconectar). Un token que ya no existe cuenta como revocado. */
   revoke(i: { token: string }): Promise<void>;
 }
@@ -86,6 +109,15 @@ export class NoCalendarProvider implements CalendarProvider {
     return this.fail();
   }
   revoke(): Promise<void> {
+    return this.fail();
+  }
+  createEvent(): Promise<CalendarEventRef> {
+    return this.fail();
+  }
+  updateEvent(): Promise<CalendarEventRef> {
+    return this.fail();
+  }
+  deleteEvent(): Promise<void> {
     return this.fail();
   }
 }

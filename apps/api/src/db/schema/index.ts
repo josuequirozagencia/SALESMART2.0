@@ -29,6 +29,6 @@ export { knowledgeDocuments, documentChunks, aiModelPrices } from './ai-knowledg
 export { agents, agentDocuments, agentChannels, agentTestRuns, aiSuggestionRuns } from './ai-agents';
 export { aiConversationState, aiToolCalls } from './ai-runtime';
 export { agentFollowUps, agentFollowUpSteps, agentFollowUpRuns } from './follow-ups';
-export { calendarConnections } from './calendar';
+export { calendarConnections, appointmentCalendarEvents } from './calendar';
 export { forms, formFields, formSubmissions } from './forms';
 export { automations, automationRuns, automationRunSteps, automationSettings } from './automations';

@@ -4,6 +4,7 @@ import { appointmentReminders, appointments, channelAccounts, contacts, conversa
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { AttributionService } from '../attribution';
 import { writeAudit } from '../audit';
+import { CalendarSyncService } from '../calendar';
 import { loadConversation, scopeOf, WINDOW_MS, type InboxAccess } from '../inbox';
 import { OpportunitiesService } from '../opportunities';
 import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
@@ -101,6 +102,8 @@ export class AppointmentsService {
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
+    /** Google Calendar (67b, ADR-67): cada cambio de una cita se anota para reconciliarla con el calendario conectado. Opcional: sin el módulo de calendario no pasa nada. */
+    @Optional() @Inject(CalendarSyncService) private readonly calendar?: CalendarSyncService,
   ) {}
 
   // ------------------------------------------------------------------ opciones del formulario
@@ -194,6 +197,7 @@ export class AppointmentsService {
     await this.attribution.onAppointmentCreated(tx, { contactId: appt.contactId, appointmentId: appt.id, startsAt }, now);
     const oppId = await this.opportunities.moveToAppointmentStage(tx, appt.contactId, scope.userId);
     if (oppId) await tx.update(appointments).set({ opportunityId: oppId }).where(eq(appointments.id, appt.id));
+    await this.calendar?.markDirty(tx, appt.id);
     this.realtime?.touchHere(c.id);
     return { appointment: (await this.viewMany(tx, [appt.id], scope))[0]!, created: true };
   }
@@ -242,6 +246,7 @@ export class AppointmentsService {
           await this.insertReminders(tx, id, offsets, startsAt, now);
         }
         for (const a of audits) await writeAudit(tx, { entityType: AUDIT, entityId: id, field: a.field, oldValue: a.oldValue, newValue: a.newValue, source: 'manual' });
+        await this.calendar?.markDirty(tx, id);
         if (cur.conversationId) this.realtime?.touchHere(cur.conversationId);
         return (await this.viewMany(tx, [id], scope))[0]!;
       }),
@@ -258,6 +263,7 @@ export class AppointmentsService {
         await tx.update(appointments).set({ status: 'cancelled', cancelledAt: now, cancelledBy: scope.userId, cancelReason: input.reason, updatedAt: now }).where(eq(appointments.id, id));
         await this.cancelPending(tx, id, 'appointment_cancelled', now);
         await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'status', oldValue: 'scheduled', newValue: 'cancelled', source: 'manual' });
+        await this.calendar?.markDirty(tx, id);
         if (cur.conversationId) this.realtime?.touchHere(cur.conversationId);
         return (await this.viewMany(tx, [id], scope))[0]!;
       }),
@@ -273,6 +279,7 @@ export class AppointmentsService {
         await tx.update(appointments).set({ status: 'completed', completedAt: now, updatedAt: now }).where(eq(appointments.id, id));
         await this.cancelPending(tx, id, 'appointment_completed', now);
         await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'status', oldValue: 'scheduled', newValue: 'completed', source: 'manual' });
+        await this.calendar?.markDirty(tx, id);
         return (await this.viewMany(tx, [id], scope))[0]!;
       }),
     );

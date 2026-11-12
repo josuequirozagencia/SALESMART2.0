@@ -1,7 +1,8 @@
 import { sql } from 'drizzle-orm';
-import { check, integer, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { check, foreignKey, index, integer, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { tenantTable } from './helpers';
+import { appointments } from './appointments';
 import { users } from './identity';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -48,5 +49,44 @@ export const calendarConnections = tenantTable(
     check('calendar_connections_credentials_by_status', sql`(${t['status']!} = 'disconnected' AND ${t['credentialsSealed']!} IS NULL AND ${t['keyVersion']!} IS NULL) OR (${t['status']!} <> 'disconnected' AND ${t['credentialsSealed']!} IS NOT NULL AND ${t['keyVersion']!} IS NOT NULL)`),
     // Un calendario conectado tiene dónde escribir
     check('calendar_connections_calendar_when_connected', sql`${t['status']!} <> 'connected' OR ${t['calendarId']!} IS NOT NULL`),
+  ],
+);
+
+/**
+ * Vínculo cita → evento de Google Calendar (v11 Pista G, 67b, ADR-67). TABLA DE NEGOCIO: RLS FORZADA, sin DELETE; una fila por cita. NO es una cola de operaciones: guarda el ESTADO DESEADO
+ * («esta cita cambió, hay que reconciliarla») y la tarea compara la cita de ahora con el evento de Google: crea, actualiza o borra según corresponda. Así no hay órdenes que se desordenen ni se
+ * repitan. `seq` sube cada vez que la cita cambia: la tarea solo da por sincronizado lo que leyó si `seq` no cambió mientras hablaba con Google.
+ *
+ * Estados: `pending` (hay que sincronizar) · `synced` · `failed` (falló definitivamente o agotó los intentos; se puede reintentar) · `gone` (la persona borró el evento en Google: se respeta y
+ * no se vuelve a crear). `event_id` es DETERMINISTA (derivado del id de la cita): si la tarea muere entre crear el evento y anotarlo, el reintento no duplica nada.
+ */
+export const appointmentCalendarEvents = tenantTable(
+  'appointment_calendar_events',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    appointmentId: uuid('appointment_id').notNull(),
+    /** Calendario de Google donde vive el evento (puede diferir del actual si la empresa cambió de calendario). */
+    calendarId: text('calendar_id'),
+    eventId: text('event_id'),
+    etag: text('etag'),
+    syncState: text('sync_state').notNull().default('pending'),
+    seq: integer('seq').notNull().default(1),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
+    /** Arrendamiento: la tarea que lo tomó (se retoma si murió a medias). */
+    processingStartedAt: ts('processing_started_at'),
+    /** Último fallo, en texto seguro (nunca un token ni datos de la cita). */
+    lastError: text('last_error'),
+    syncedAt: ts('synced_at'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'appointment_calendar_events_appointment_fk', columns: [t['organizationId']!, t['appointmentId']!], foreignColumns: [appointments.organizationId, appointments.id] }),
+    uniqueIndex('appointment_calendar_events_appointment_uq').on(t['organizationId']!, t['appointmentId']!),
+    index('appointment_calendar_events_due_idx').on(t['organizationId']!, t['syncState']!, t['nextAttemptAt']!),
+    check('appointment_calendar_events_state_valid', sql`${t['syncState']!} IN ('pending', 'synced', 'failed', 'gone')`),
+    check('appointment_calendar_events_error_len', sql`${t['lastError']!} IS NULL OR length(${t['lastError']!}) <= 300`),
+    check('appointment_calendar_events_attempts_valid', sql`${t['attempts']!} >= 0`),
   ],
 );

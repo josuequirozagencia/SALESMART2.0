@@ -72,6 +72,20 @@ export async function calendarProviderContract(make: () => Promise<ContractHarne
   expect(all.some((c) => c.id === created.id)).toBe(true);
   for (const c of all) expect(c).toEqual({ id: expect.any(String), name: expect.any(String), primary: expect.any(Boolean), writable: expect.any(Boolean) });
 
+  // 6b) eventos: crear con id propio (no se duplica), actualizar, y borrar es idempotente; lo que ya no existe se avisa con «gone»
+  const calendarId = created.id;
+  const event = { id: 'a'.repeat(32), summary: 'Corte · Ana · Carla', description: 'Cita agendada en Sales Smart.', startsAt: new Date('2030-01-10T15:00:00Z'), endsAt: new Date('2030-01-10T15:30:00Z'), timeZone: 'America/Guayaquil' };
+  const ref = await provider.createEvent({ accessToken: access.accessToken, calendarId, event });
+  expect(ref.eventId).toBe(event.id);
+  const dup = await provider.createEvent({ accessToken: access.accessToken, calendarId, event }).catch((e: unknown) => e);
+  expect(dup).toMatchObject({ kind: 'exists', credentials: false, retryable: false });
+  const moved = await provider.updateEvent({ accessToken: access.accessToken, calendarId, eventId: event.id, event: { ...event, summary: 'Corte · Ana · Eva', startsAt: new Date('2030-01-10T16:00:00Z'), endsAt: new Date('2030-01-10T16:30:00Z') } });
+  expect(moved.eventId).toBe(event.id);
+  await provider.deleteEvent({ accessToken: access.accessToken, calendarId, eventId: event.id });
+  await provider.deleteEvent({ accessToken: access.accessToken, calendarId, eventId: event.id }); // ya no existía: sigue sin fallar
+  const gone = await provider.updateEvent({ accessToken: access.accessToken, calendarId, eventId: event.id, event }).catch((e: unknown) => e);
+  expect(gone).toMatchObject({ kind: 'gone', credentials: false, retryable: false });
+
   // 7) revocar es idempotente: dejarlo sin efecto y volver a revocarlo no falla
   await provider.revoke({ token: tokens.refreshToken });
   await provider.revoke({ token: tokens.refreshToken });
