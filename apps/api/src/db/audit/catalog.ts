@@ -16,7 +16,7 @@ export interface TableCatalog {
 }
 
 export const PRODUCTION_CATALOG: TableCatalog = {
-  platform: ['platform_audit', 'provider_credentials', 'provider_selection', 'ai_pricing', 'ai_limits', 'ai_org_pricing', 'ai_model_prices', 'platform_branding'],
+  platform: ['platform_audit', 'provider_credentials', 'provider_selection', 'ai_pricing', 'ai_limits', 'ai_org_pricing', 'ai_model_prices', 'platform_branding', 'platform_branding_assets'],
   identity: ['users', 'organizations', 'organization_members', 'sessions', 'auth_throttle', 'email_verifications', 'signup_attempts', 'disposable_domains', 'password_resets', 'roles', 'permissions', 'role_permissions', 'trials', 'trial_config', 'plans', 'invitations', 'organization_ownership_history', 'organization_deletions', 'company_exports', 'access_sessions', 'view_as_log', 'attribution_endpoints', 'ghl_routes', 'form_routes', 'qr_routes', 'member_permissions', 'member_history', 'channel_routes'],
   reference: [],
   tenantRoot: [],

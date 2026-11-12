@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { Express, NextFunction, Request, Response } from 'express';
 import serveStatic from 'serve-static';
@@ -22,11 +22,32 @@ export interface WebStaticOptions {
   production: boolean;
   /** Orígenes extra para imágenes, audio y video (almacenamiento de archivos). Si falla, la web se sirve con la política base. */
   mediaOrigins?: MediaOrigins;
+  /** La marca de la plataforma (nombre y versión de los iconos), que se escribe en el HTML al servirlo. Si falla, se sirve con los valores por defecto. */
+  brand?: WebBrand;
 }
 
 /** Token con el que un módulo (adjuntos) ofrece los orígenes desde donde el navegador puede leer imágenes, audio y video (la URL firmada del almacenamiento). `HttpModule` lo busca sin depender de ese módulo. */
 export const WEB_MEDIA_ORIGINS = Symbol('WEB_MEDIA_ORIGINS');
 export type MediaOrigins = () => Promise<readonly string[]>;
+
+/** Token con el que el módulo de marca ofrece el nombre de la plataforma y la versión de sus iconos para el HTML. `HttpModule` lo busca sin depender de ese módulo. */
+export const WEB_BRAND = Symbol('WEB_BRAND');
+export type WebBrand = () => Promise<{ name: string; version: string }>;
+
+const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+/**
+ * Escribe la marca en el HTML: el texto de la pestaña (escapado) y los enlaces del manifest y del icono de instalación, con la versión del icono para que un cambio se vea de inmediato. Función pura.
+ * Sin las marcas esperadas en el HTML (un `index.html` de otra versión) lo devuelve tal cual.
+ */
+export function applyBrand(html: string, brand: { name: string; version: string }): string {
+  const v = encodeURIComponent(brand.version);
+  return html
+    .replace(/<title>[^<]*<\/title>/, `<title>${esc(brand.name)}</title>`)
+    .replace('<!--brand-head-->', `<link rel="manifest" href="/v1/branding/manifest.webmanifest?v=${v}" />
+    <link rel="apple-touch-icon" href="/v1/branding/apple-touch-icon.png?v=${v}" />
+    <meta name="application-name" content="${esc(brand.name)}" />`);
+}
 
 /** Solo se acepta un origen (esquema + servidor + puerto): nada que pueda colar otra directiva o un comodín en la CSP. */
 const ORIGIN = /^https?:\/\/[A-Za-z0-9.-]{1,253}(:\d{1,5})?$/;
@@ -75,6 +96,7 @@ export function mountWeb(express: Express, opts: WebStaticOptions): void {
   const dir = path.resolve(opts.distDir);
   const indexFile = path.join(dir, 'index.html');
   if (!existsSync(indexFile)) throw new Error(`WEB_DIST_DIR no contiene index.html (${dir}): ejecuta \`pnpm build\``);
+  const indexHtml = readFileSync(indexFile, 'utf8');
 
   const files = serveStatic(dir, {
     index: false, // la raíz y las rutas de la SPA las resuelve el manejador de abajo
@@ -99,9 +121,14 @@ export function mountWeb(express: Express, opts: WebStaticOptions): void {
     const send = (csp: string): void => {
       securityHeaders(res, opts.production, csp);
       res.setHeader('Cache-Control', 'no-store');
-      res.sendFile(indexFile, { dotfiles: 'deny' }, (err) => {
-        if (err) next(err);
-      });
+      // La marca (nombre e iconos) se escribe en el HTML al servirlo, sin parpadeo; si no se puede leer, sale con los valores por defecto del archivo
+      const brand = opts.brand ? opts.brand().catch(() => null) : Promise.resolve(null);
+      brand.then(
+        (b) => {
+          res.status(200).type('html').send(b ? applyBrand(indexHtml, b) : indexHtml);
+        },
+        next,
+      );
     };
     // La política depende de la configuración del almacenamiento (se lee con caché corta); si no se puede leer, la web igual se sirve con la base
     if (!opts.mediaOrigins) return send(CSP);
