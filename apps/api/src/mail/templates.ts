@@ -1,4 +1,4 @@
-import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface MailContent {
   subject: string;
@@ -203,4 +203,26 @@ export function companyRecoveredMail(m: CompanyRecoveredMail): MailContent {
     ? `La cuenta de ${m.organizationName} volvió a estar disponible, tal como estaba. Entra de nuevo con tu correo y tu contraseña: las sesiones anteriores se cerraron.`
     : `Tu cliente ${m.organizationName} volvió a estar disponible y recuperas el acceso que tenías.`;
   return { subject: owner ? `Recuperamos la cuenta de ${m.organizationName.slice(0, 60)}` : `Recuperaron a tu cliente ${m.organizationName.slice(0, 60)}`, html, text: `${headline} — Sales Smart\n\n${plain}\n` };
+}
+
+/** Aviso a quien administra las conexiones: Google Calendar necesita volver a conectarse (ADR-67). Solo se admite un enlace http(s) o ninguno. */
+export function calendarReconnectMail(m: CalendarReconnectMail): MailContent {
+  if (m.reconnectUrl !== null && !/^https?:\/\//i.test(m.reconnectUrl)) throw new Error('reconnectUrl debe ser http(s)');
+  const org = esc(m.organizationName);
+  const headline = 'Google Calendar necesita volver a conectarse';
+  const detail = `Google dejó de aceptar la conexión del calendario de <b>${org}</b> (por ejemplo, porque se quitó el acceso o venció la autorización). Mientras tanto, las citas se siguen guardando en Sales Smart, pero no se envían a Google; al volver a conectar, las pendientes salen solas.`;
+  const button = m.reconnectUrl
+    ? `<tr><td align="center" style="padding:6px 0 14px;"><a href="${esc(m.reconnectUrl)}" style="display:inline-block;background:#6a44f2;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;padding:12px 22px;">Volver a conectar</a></td></tr>
+<tr><td style="font-size:12px;line-height:1.5;color:#5f5a7a;word-break:break-all;">Si el botón no funciona, copia y pega este enlace en tu navegador:<br>${esc(m.reconnectUrl)}</td></tr>`
+    : `<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;">Entra a Sales Smart › Configuración › Google Calendar y pulsa «Conectar».</td></tr>`;
+  const html = frame(
+    headline,
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">${headline}</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:12px;">${detail}</td></tr>
+${button}`,
+    'Recibes este aviso porque administras las conexiones de tu empresa en Sales Smart.',
+  );
+  const how = m.reconnectUrl ? `Vuelve a conectar aquí: ${m.reconnectUrl}` : 'Entra a Sales Smart > Configuración > Google Calendar y pulsa «Conectar».';
+  const text = `${headline} — Sales Smart\n\nGoogle dejó de aceptar la conexión del calendario de ${m.organizationName} (por ejemplo, porque se quitó el acceso o venció la autorización). Mientras tanto, las citas se siguen guardando en Sales Smart, pero no se envían a Google; al volver a conectar, las pendientes salen solas.\n\n${how}\n\nRecibes este aviso porque administras las conexiones de tu empresa en Sales Smart.\n`;
+  return { subject: `Reconecta Google Calendar en ${m.organizationName.slice(0, 60)}`, html, text };
 }

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { MemoryMailProvider } from '../../src/mail/fakes';
 import type { MailProvider } from '../../src/mail/ports';
 import { ResendMailProvider } from '../../src/mail/resend.provider';
-import { companyDeletedMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail } from '../../src/mail/templates';
+import { calendarReconnectMail, companyDeletedMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail } from '../../src/mail/templates';
 import { FakeCaptchaVerifier } from '../../src/modules/auth/signup/fakes';
 import type { CaptchaVerifier } from '../../src/modules/auth/signup/ports';
 import { TurnstileVerifier } from '../../src/modules/auth/signup/turnstile.verifier';
@@ -171,6 +171,7 @@ describe('contrato de los puertos: el real y el fake cumplen la misma interfaz',
       await expect(p.sendOwnershipChange({ to: 'a@b.test', organizationName: 'Empresa', agencyName: 'Agencia', previousAgencyName: null })).resolves.toBeUndefined();
       await expect(p.sendCompanyDeleted({ to: 'a@b.test', organizationName: 'Empresa', purgeAfter: new Date('2026-11-09T15:00:00Z'), timeZone: 'America/Guayaquil', audience: 'owner' })).resolves.toBeUndefined();
       await expect(p.sendCompanyRecovered({ to: 'a@b.test', organizationName: 'Empresa', audience: 'agency' })).resolves.toBeUndefined();
+      await expect(p.sendCalendarReconnect({ to: 'a@b.test', organizationName: 'Empresa', reconnectUrl: 'https://x.test/settings/calendar' })).resolves.toBeUndefined();
     });
   }
   const captchas: Array<[string, CaptchaVerifier, string]> = [['FakeCaptchaVerifier', new FakeCaptchaVerifier(), 'fake-pass'], ['TurnstileVerifier', tvOk(), 'cualquier-token']];
@@ -242,6 +243,22 @@ describe('plantillas', () => {
     expect(r.html).toContain('Empresa &amp; Co');
     expect(r.text).toContain('las sesiones anteriores se cerraron');
     expect(companyRecoveredMail({ to: 'a@b.test', organizationName: 'E', audience: 'agency' }).subject).toContain('Recuperaron a tu cliente');
+  });
+  it('aviso de Google Calendar a reconectar: con enlace http(s) escapado, sin enlace dice la ruta en palabras, y rechaza esquemas peligrosos', () => {
+    const a = calendarReconnectMail({ to: 'a@b.test', organizationName: 'Empresa & <Co>', reconnectUrl: 'https://app.test/settings/calendar' });
+    expect(a.subject).toBe('Reconecta Google Calendar en Empresa & <Co>');
+    expect(a.html).toContain('Empresa &amp; &lt;Co&gt;');
+    expect(a.html).toContain('href="https://app.test/settings/calendar"');
+    expect(a.html).toContain('no se envían a Google');
+    expect(a.html).not.toContain('<Co>');
+    expect(a.text).toContain('https://app.test/settings/calendar');
+    expect(a.text).toContain('administras las conexiones');
+    const b = calendarReconnectMail({ to: 'a@b.test', organizationName: 'Empresa', reconnectUrl: null });
+    expect(b.html).not.toMatch(/href=/);
+    expect(b.html).toContain('Configuración › Google Calendar');
+    expect(b.text).toContain('Configuración > Google Calendar');
+    expect(() => calendarReconnectMail({ to: 'a@b.test', organizationName: 'Empresa', reconnectUrl: 'javascript:alert(1)' })).toThrow(/http/);
+    expect(calendarReconnectMail({ to: 'a@b.test', organizationName: 'E'.repeat(200), reconnectUrl: null }).subject.length).toBeLessThan(100);
   });
   it('minutos de vigencia: se redondean y nunca muestran 0', () => {
     expect(verificationMail({ to: 'a@b.test', code: '1', expiresInMinutes: 0.2 }).text).toContain('1 minutos');

@@ -1,5 +1,5 @@
-import { companyDeletedMail, companyExportReadyMail, companyPurgeNoticeMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail, type MailContent } from './templates';
-import type { CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import { calendarReconnectMail, companyDeletedMail, companyExportReadyMail, companyPurgeNoticeMail, companyRecoveredMail, invitationMail, ownershipChangeMail, passwordResetMail, verificationMail, type MailContent } from './templates';
+import type { CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface ResendOptions {
   apiKey: string;
@@ -59,6 +59,10 @@ export class ResendMailProvider implements MailProvider {
 
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void> {
     return this.send(mail.to, () => companyRecoveredMail(mail));
+  }
+
+  sendCalendarReconnect(mail: CalendarReconnectMail): Promise<void> {
+    return this.send(mail.to, () => calendarReconnectMail(mail));
   }
 
   /** La plantilla se construye DENTRO de la función asíncrona: un error de plantilla es un rechazo, nunca una excepción síncrona. */
