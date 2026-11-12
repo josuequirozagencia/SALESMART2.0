@@ -131,10 +131,10 @@ export class BrandingService {
     };
   }
 
-  /** Lo que se escribe en el HTML al servirlo: el nombre (el servidor lo escapa) y la versión de los iconos. */
-  async indexBrand(): Promise<{ name: string; version: string }> {
-    const s = await this.snapshot();
-    return { name: s.name ?? DEFAULT_APP_NAME, version: this.iconVersion(s) };
+  /** Lo que se escribe en el HTML al servirlo: el nombre (el servidor lo escapa), la versión de los iconos y los logos para el primer pintado de la interfaz. */
+  async indexBrand(): Promise<{ name: string; short_name: string; version: string; logo: PublicBranding['logo']; icon: { custom: boolean; icon_192: string; badge_96: string } }> {
+    const p = await this.publicInfo();
+    return { name: p.name, short_name: p.short_name, version: p.version, logo: p.logo, icon: { custom: p.icon.custom, icon_192: p.icon.icon_192, badge_96: p.icon.badge_96 } };
   }
 
   /** El manifest de la aplicación instalable. */

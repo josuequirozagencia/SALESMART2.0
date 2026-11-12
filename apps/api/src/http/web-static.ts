@@ -32,7 +32,15 @@ export type MediaOrigins = () => Promise<readonly string[]>;
 
 /** Token con el que el módulo de marca ofrece el nombre de la plataforma y la versión de sus iconos para el HTML. `HttpModule` lo busca sin depender de ese módulo. */
 export const WEB_BRAND = Symbol('WEB_BRAND');
-export type WebBrand = () => Promise<{ name: string; version: string }>;
+/** Lo que se escribe en el HTML: el nombre, la versión de los iconos y lo que la interfaz necesita para el primer pintado (logos y si hay icono propio). */
+export interface WebBrandInfo {
+  name: string;
+  version: string;
+  short_name?: string;
+  logo?: { light: string | null; dark: string | null };
+  icon?: { custom: boolean; icon_192: string; badge_96: string };
+}
+export type WebBrand = () => Promise<WebBrandInfo>;
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
@@ -40,13 +48,18 @@ const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
  * Escribe la marca en el HTML: el texto de la pestaña (escapado) y los enlaces del manifest y del icono de instalación, con la versión del icono para que un cambio se vea de inmediato. Función pura.
  * Sin las marcas esperadas en el HTML (un `index.html` de otra versión) lo devuelve tal cual.
  */
-export function applyBrand(html: string, brand: { name: string; version: string }): string {
+export function applyBrand(html: string, brand: WebBrandInfo): string {
   const v = encodeURIComponent(brand.version);
+  // Los datos de la marca para la interfaz van como un bloque de DATOS (type=application/json: no se ejecuta y la política de contenido no lo bloquea), así el logo y el nombre están desde el primer
+  // pintado sin una petición más. Se escapan `<`, `>`, `&` y los separadores de línea de Unicode: nada del contenido puede cerrar la etiqueta.
+  const data = JSON.stringify({ name: brand.name, short_name: brand.short_name ?? null, version: brand.version, logo: brand.logo ?? { light: null, dark: null }, icon: brand.icon ?? null })
+    .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   return html
     .replace(/<title>[^<]*<\/title>/, `<title>${esc(brand.name)}</title>`)
     .replace('<!--brand-head-->', `<link rel="manifest" href="/v1/branding/manifest.webmanifest?v=${v}" />
     <link rel="apple-touch-icon" href="/v1/branding/apple-touch-icon.png?v=${v}" />
-    <meta name="application-name" content="${esc(brand.name)}" />`);
+    <meta name="application-name" content="${esc(brand.name)}" />
+    <script id="brand-data" type="application/json">${data}</script>`);
 }
 
 /** Solo se acepta un origen (esquema + servidor + puerto): nada que pueda colar otra directiva o un comodín en la CSP. */

@@ -30,8 +30,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'MODEL_EXISTS': return e.message;
     // Sugerencias de respuesta (v11 S4, ADR-61): el servidor ya redacta el motivo
     case 'NO_AGENT': case 'SUGGESTIONS_DISABLED': case 'NOTHING_TO_ANSWER': case 'SUGGESTION_LIMIT': case 'SUGGESTION_EMPTY': return e.message;
-    // Marca de la plataforma (ADR-69): el servidor ya redacta el motivo del favicon
-    case 'FAVICON_EMPTY': case 'FAVICON_TOO_LARGE': case 'FAVICON_UNSUPPORTED': case 'FAVICON_CORRUPT': case 'FAVICON_NOT_SQUARE': case 'FAVICON_BAD_SIZE': case 'FAVICON_UPLOAD_FAILED': return e.message;
+    // Marca de la plataforma (ADR-69): el servidor ya redacta el motivo del nombre, del icono y de los logos
+    case 'BRANDING_NAME_INVALID': case 'BRANDING_UPLOAD_FAILED': case 'ICON_EMPTY': case 'ICON_TOO_LARGE': case 'ICON_NOT_PNG': case 'ICON_CORRUPT': case 'ICON_NOT_SQUARE': case 'ICON_TOO_SMALL': case 'ICON_TOO_BIG': case 'LOGO_EMPTY': case 'LOGO_TOO_LARGE': case 'LOGO_UNSUPPORTED': case 'LOGO_ANIMATED': case 'LOGO_TOO_WIDE': case 'LOGO_CORRUPT': case 'LOGO_TOO_BIG': return e.message;
     // Contactos (ADR-43): el servidor ya redacta el motivo para la persona
     case 'PHONE_TAKEN': return 'Uno de los teléfonos ya pertenece a otro contacto de tu empresa.';
     case 'OWNER_NOT_ALLOWED': return e.message;

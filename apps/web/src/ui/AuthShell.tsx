@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { DEFAULT_BRAND_NAME, useBrand } from '../lib/brand';
 import { CheckIcon } from './controls';
 
 const POINTS = [
@@ -8,13 +9,29 @@ const POINTS = [
   'Llamadas desde el navegador',
 ];
 
-export function Logo() {
+const initialOf = (name: string): string => name.trim().charAt(0).toUpperCase() || 'S';
+
+/**
+ * La marca de la plataforma (v11 §3): el logo que subió el Súper Admin para el fondo indicado (`dark` por omisión: la barra lateral y el panel de acceso son oscuros) o, sin él, el cuadrado con la inicial
+ * y el nombre. Sin marca propia se ve como siempre («Sales Smart 2.0»).
+ */
+export function Logo({ surface = 'dark' }: { surface?: 'light' | 'dark' }) {
+  const b = useBrand();
+  const src = surface === 'dark' ? (b.logo.dark ?? b.logo.light) : (b.logo.light ?? b.logo.dark);
+  if (src) return <img src={src} alt={b.name} className="h-9 w-auto max-w-[220px] object-contain" />;
   return (
     <div className="flex items-center gap-2.5 text-[17px] font-bold">
-      <i className="grid size-[34px] place-items-center rounded-[10px] font-[inherit] not-italic text-[color:var(--on-grad)] [background:var(--grad)]">S</i>
-      Sales Smart <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10.5px] font-semibold">2.0</span>
+      <i className="grid size-[34px] place-items-center rounded-[10px] font-[inherit] not-italic text-[color:var(--on-grad)] [background:var(--grad)]">{initialOf(b.name)}</i>
+      {b.name === DEFAULT_BRAND_NAME ? <>Sales Smart <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10.5px] font-semibold">2.0</span></> : b.name}
     </div>
   );
+}
+
+/** El cuadrado de la marca (menú lateral plegado): el icono de la aplicación si el Súper Admin subió uno; si no, la inicial del nombre. */
+export function BrandMark() {
+  const b = useBrand();
+  if (b.iconCustom && b.icon192) return <img src={b.icon192} alt={b.name} className="size-[34px] rounded-[10px] object-cover" />;
+  return <i aria-label={b.name} role="img" className="grid size-[34px] place-items-center rounded-[10px] text-[17px] font-bold not-italic text-[color:var(--on-grad)] [background:var(--grad)]">{initialOf(b.name)}</i>;
 }
 
 /** Marco de las pantallas de acceso: panel de marca a la izquierda (se oculta en móvil) y la tarjeta a la derecha. */
