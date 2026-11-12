@@ -4,6 +4,8 @@ import { APP_CONFIG } from '../../tokens';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
 import { CalendarConnectionService } from './calendar-connection.service';
+import { CalendarSyncJob } from './calendar-sync.job';
+import { CalendarSyncService } from './calendar-sync.service';
 import { CalendarCallbackController, CalendarController } from './calendar.controller';
 import { FakeCalendarProvider } from './calendar.fake';
 import { CALENDAR_PROVIDER, NoCalendarProvider, type CalendarProvider } from './calendar.ports';
@@ -26,11 +28,13 @@ export class CalendarModule {
       controllers: [CalendarController, CalendarCallbackController],
       providers: [
         CalendarConnectionService,
+        CalendarSyncService,
+        CalendarSyncJob,
         opts.provider
           ? { provide: CALENDAR_PROVIDER, useValue: opts.provider }
           : { provide: CALENDAR_PROVIDER, useFactory: (cfg: AppConfig): CalendarProvider => (cfg.channels.calendarProvider === 'google' ? new GoogleCalendarProvider() : cfg.channels.calendarProvider === 'fake' ? new FakeCalendarProvider() : new NoCalendarProvider()), inject: [APP_CONFIG] },
       ],
-      exports: [CalendarConnectionService],
+      exports: [CalendarConnectionService, CalendarSyncService, CalendarSyncJob],
     };
     if (!opts.provider) CalendarModule.standard = mod;
     return mod;

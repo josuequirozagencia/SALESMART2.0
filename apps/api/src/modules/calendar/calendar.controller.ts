@@ -4,6 +4,7 @@ import { TooManyAttemptsError } from '../../errors';
 import { Public, WindowLimiter, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { CalendarConnectionService } from './calendar-connection.service';
+import { CalendarSyncService } from './calendar-sync.service';
 import { callbackQuerySchema, chooseSchema, startSchema, type CallbackQuery, type ChooseDto, type StartDto } from './calendar.dto';
 
 /**
@@ -12,13 +13,26 @@ import { callbackQuerySchema, chooseSchema, startSchema, type CallbackQuery, typ
  */
 @Controller('calendar')
 export class CalendarController {
-  constructor(@Inject(CalendarConnectionService) private readonly calendar: CalendarConnectionService) {}
+  constructor(
+    @Inject(CalendarConnectionService) private readonly calendar: CalendarConnectionService,
+    @Inject(CalendarSyncService) private readonly sync: CalendarSyncService,
+  ) {}
 
+  /** La conexión y, aparte, cómo va la sincronización de las citas (pendientes, fallidas…). */
   @RequirePermission('integrations.manage')
   @Get('connection')
   @Header('Cache-Control', 'no-store')
-  connection() {
-    return this.calendar.get();
+  async connection() {
+    return { ...(await this.calendar.get()), sync: await this.sync.stats() };
+  }
+
+  /** Vuelve a intentar las citas que fallaron al sincronizarse. */
+  @RequirePermission('integrations.manage')
+  @Post('sync/retry')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  retry() {
+    return this.sync.retryFailed();
   }
 
   /** Devuelve la dirección de Google a la que la web manda a la persona. */

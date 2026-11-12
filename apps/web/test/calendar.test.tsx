@@ -10,7 +10,7 @@ const AT = '2026-11-11T15:00:00.000Z';
 const conn = (over: Partial<CalendarConnection> = {}): CalendarConnection => ({ configured: false, available: true, unavailable_reason: null, status: null, mode: null, calendar_name: null, account: null, scopes: [], last_error: null, connected_at: null, ...over });
 const CHOICES: CalendarChoice[] = [{ id: 'primary-cal', name: 'ana@example.com', primary: true }, { id: 'ventas-cal', name: 'Ventas', primary: false }];
 
-interface World { c: CalendarConnection; calls: Record<string, Call[]>; choices?: CalendarChoice[]; startFails?: () => ReturnType<Handler>; chooseFails?: () => ReturnType<Handler> }
+interface World { c: CalendarConnection; retryFails?: () => ReturnType<Handler>; calls: Record<string, Call[]>; choices?: CalendarChoice[]; startFails?: () => ReturnType<Handler>; chooseFails?: () => ReturnType<Handler> }
 const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
 function server(w: World): Record<string, Handler> {
   return {
@@ -25,6 +25,7 @@ function server(w: World): Record<string, Handler> {
       w.c = conn({ configured: true, status: 'connected', mode: 'existing', calendar_name: (w.choices ?? CHOICES).find((x) => x.id === id)!.name, account: 'a***@example.com', connected_at: AT });
       return { body: w.c };
     },
+    'POST /calendar/sync/retry': (c) => { rec(w, 'retry', c); if (w.retryFails) return w.retryFails(); w.c = { ...w.c, sync: { pending: 1, failed: 0, gone: 0, synced: 4, last_synced_at: AT } }; return { body: { requeued: 2 } }; },
     'POST /calendar/connection/disconnect': (c) => { rec(w, 'disconnect', c); w.c = conn({ status: 'disconnected' }); return { body: w.c }; },
   };
 }
@@ -84,6 +85,35 @@ describe('Configuración › Google Calendar', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sí, desconectar' }));
     await waitFor(() => expect(w.calls['disconnect']).toHaveLength(1));
     expect(await screen.findByText('Desconectado')).toBeInTheDocument();
+  });
+
+  it('conectado: muestra cuántas citas están en Google, cuántas esperan y cuántas fallaron; «Reintentar» solo aparece con errores y vuelve a ponerlas en cola', async () => {
+    const w: World = { c: conn({ configured: true, status: 'connected', mode: 'own', calendar_name: 'X', account: 'a***@example.com', connected_at: AT, sync: { pending: 1, failed: 2, gone: 1, synced: 4, last_synced_at: AT } }), calls: {} };
+    mockApi(server(w));
+    renderApp('/settings/calendar');
+    const box = within(await screen.findByRole('region', { name: 'Sincronización de citas' }));
+    expect(box.getByText(/4 citas sincronizadas · 1 en espera · 2 con error · 1 borrada en Google/)).toBeInTheDocument();
+    expect(box.getByText(/No pudimos enviar 2 citas a Google/)).toBeInTheDocument();
+    await userEvent.click(box.getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(w.calls['retry']).toHaveLength(1));
+    await waitFor(() => expect(within(screen.getByRole('region', { name: 'Sincronización de citas' })).queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument());
+  });
+
+  it('sin errores no ofrece reintentar; sin citas lo dice; y no aparece si la conexión no está activa', async () => {
+    const w: World = { c: conn({ configured: true, status: 'connected', mode: 'own', calendar_name: 'X', account: 'a***@example.com', connected_at: AT, sync: { pending: 0, failed: 0, gone: 0, synced: 0, last_synced_at: null } }), calls: {} };
+    mockApi(server(w));
+    renderApp('/settings/calendar');
+    const box = within(await screen.findByRole('region', { name: 'Sincronización de citas' }));
+    expect(box.getByText('0 citas sincronizadas')).toBeInTheDocument();
+    expect(box.getByText(/Todavía no se ha sincronizado ninguna cita/)).toBeInTheDocument();
+    expect(box.queryByRole('button', { name: 'Reintentar' })).not.toBeInTheDocument();
+  });
+
+  it('con la conexión rota no muestra la sincronización', async () => {
+    mockApi(server({ c: conn({ configured: true, status: 'needs_reconnect', mode: 'own', sync: { pending: 3, failed: 0, gone: 0, synced: 1, last_synced_at: null } }), calls: {} }));
+    renderApp('/settings/calendar');
+    await screen.findByText('Requiere reconexión');
+    expect(screen.queryByRole('region', { name: 'Sincronización de citas' })).not.toBeInTheDocument();
   });
 
   it('falta elegir: lista los calendarios, bloquea hasta elegir y guarda el elegido', async () => {

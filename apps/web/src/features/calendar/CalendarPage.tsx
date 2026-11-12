@@ -54,6 +54,37 @@ function Status({ c }: { c: CalendarConnection }) {
   );
 }
 
+/** Cómo van las citas hacia Google: cuántas ya están, cuántas esperan y cuántas fallaron (con «Reintentar»). */
+function SyncStatus({ c }: { c: CalendarConnection }) {
+  const m = useCalendarMutations();
+  const [error, setError] = useState<string>();
+  const s = c.sync;
+  if (!s || c.status !== 'connected') return null;
+  const retry = (): void => {
+    setError(undefined);
+    m.retry.mutate(undefined, { onError: (e) => setError(friendlyError(e, 'No pudimos volver a intentarlo.')) });
+  };
+  return (
+    <section aria-label="Sincronización de citas" className="grid gap-2 rounded-xl border border-line p-4">
+      <h2 className="text-[15px] font-bold">Citas en Google Calendar</h2>
+      <p className="text-[13.5px]">
+        {s.synced} {s.synced === 1 ? 'cita sincronizada' : 'citas sincronizadas'}
+        {s.pending > 0 ? ` · ${s.pending} en espera` : ''}
+        {s.failed > 0 ? ` · ${s.failed} con error` : ''}
+        {s.gone > 0 ? ` · ${s.gone} borrada${s.gone === 1 ? '' : 's'} en Google` : ''}
+      </p>
+      <p className="text-[12px] text-muted">{s.last_synced_at ? `Última sincronización: ${shortDateTime(s.last_synced_at)}.` : 'Todavía no se ha sincronizado ninguna cita.'} Solo se envían las citas que agendes o cambies después de conectar; si borras un evento en Google, no se vuelve a crear.</p>
+      {s.failed > 0 ? (
+        <>
+          <Alert>No pudimos enviar {s.failed === 1 ? 'una cita' : `${s.failed} citas`} a Google. Revisa que la conexión esté bien y vuelve a intentarlo.</Alert>
+          {error ? <Alert>{error}</Alert> : null}
+          <div><Button loading={m.retry.isPending} onClick={retry}>Reintentar</Button></div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
 function Picker() {
   const choices = useCalendarChoices(true);
   const m = useCalendarMutations();
@@ -131,7 +162,7 @@ export function CalendarPage() {
     <div className="grid gap-5">
       <SettingsNav />
       <p className="max-w-[680px] text-[13.5px] text-muted">
-        Cada cita que agendes en Sales Smart aparecerá como un evento en tu calendario de Google. Solo va de Sales Smart hacia Google; si borras o cambias un evento allá, no cambia aquí. Un administrador conecta una sola cuenta para toda la empresa.
+        Cada cita que agendes en Sales Smart aparecerá como un evento en tu calendario de Google, y si la mueves o la cancelas aquí, el evento se actualiza o se borra. Solo va de Sales Smart hacia Google; si cambias un evento allá, no cambia aquí. Un administrador conecta una sola cuenta para toda la empresa.
       </p>
       {outcome ? (
         <div className="grid gap-2">
@@ -145,6 +176,7 @@ export function CalendarPage() {
         <>
           <Status c={c} />
           {!c.available ? <Alert kind="info">Por ahora no se puede conectar: {c.unavailable_reason ? UNAVAILABLE[c.unavailable_reason] : 'falta configuración del servidor'}. Avisa a soporte.</Alert> : null}
+          <SyncStatus c={c} />
           {c.available && status === 'pending_calendar' ? <Picker /> : null}
           {c.available && (status === 'disconnected' || status === 'needs_reconnect') ? <Connect c={c} reconnect={status === 'needs_reconnect'} /> : null}
           {c.configured || status === 'needs_reconnect' ? (

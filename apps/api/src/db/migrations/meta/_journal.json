@@ -939,6 +939,13 @@
       "when": 1794900000000,
       "tag": "0133_v11_67a_calendar_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "7",
+      "when": 1795000000000,
+      "tag": "0134_v11_67b_appointment_calendar_events",
+      "breakpoints": true
     }
   ]
 }

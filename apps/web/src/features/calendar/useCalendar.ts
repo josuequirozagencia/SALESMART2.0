@@ -5,6 +5,16 @@ export type CalendarStatus = 'pending_calendar' | 'connected' | 'needs_reconnect
 export type CalendarMode = 'own' | 'existing';
 export type CalendarUnavailable = 'provider' | 'encryption' | 'base_url' | 'platform_credentials';
 
+/** Cómo va el envío de las citas a Google (v11 Pista G, 67b). */
+export interface CalendarSyncStats {
+  pending: number;
+  failed: number;
+  /** Eventos que la persona borró en Google (se respetan). */
+  gone: number;
+  synced: number;
+  last_synced_at: string | null;
+}
+
 export interface CalendarConnection {
   configured: boolean;
   /** ¿Se puede conectar ahora? Si no, `unavailable_reason` dice qué falta. */
@@ -18,6 +28,7 @@ export interface CalendarConnection {
   scopes: string[];
   last_error: string | null;
   connected_at: string | null;
+  sync?: CalendarSyncStats;
 }
 
 export interface CalendarChoice { id: string; name: string; primary: boolean }
@@ -41,6 +52,7 @@ export function useCalendarMutations() {
   return {
     start: useMutation({ mutationFn: (mode: CalendarMode) => api<{ url: string }>('/calendar/connection/start', { method: 'POST', body: { mode } }) }),
     choose: useMutation({ mutationFn: (calendarId: string) => api<CalendarConnection>('/calendar/connection/calendar', { method: 'PUT', body: { calendar_id: calendarId } }), onSettled: done }),
+    retry: useMutation({ mutationFn: () => api<{ requeued: number }>('/calendar/sync/retry', { method: 'POST' }), onSettled: done }),
     disconnect: useMutation({ mutationFn: () => api<CalendarConnection>('/calendar/connection/disconnect', { method: 'POST' }), onSettled: done }),
   };
 }

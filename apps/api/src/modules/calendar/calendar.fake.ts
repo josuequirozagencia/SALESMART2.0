@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { CalendarError, type CalendarInfo, type CalendarProvider, type OAuthClient, type TokenSet } from './calendar.ports';
+import { CalendarError, type CalendarEventInput, type CalendarEventRef, type CalendarInfo, type CalendarProvider, type OAuthClient, type TokenSet } from './calendar.ports';
 
 /** Lo que el fake «hizo» en Google, en orden (las pruebas lo leen). */
 export type FakeCalendarCall =
@@ -9,7 +9,10 @@ export type FakeCalendarCall =
   | { kind: 'accountEmail' }
   | { kind: 'createCalendar'; name: string; timeZone: string }
   | { kind: 'listCalendars' }
-  | { kind: 'revoke'; token: string };
+  | { kind: 'revoke'; token: string }
+  | { kind: 'createEvent'; calendarId: string; event: CalendarEventInput }
+  | { kind: 'updateEvent'; calendarId: string; eventId: string; event: CalendarEventInput }
+  | { kind: 'deleteEvent'; calendarId: string; eventId: string };
 
 /**
  * Fake del calendario para pruebas. Código válido: `good` (o `good-<n>`); cualquier otro ⇒ rechazo. Verifica PKCE de verdad (el verificador debe corresponder al desafío de la dirección que se
@@ -25,6 +28,8 @@ export class FakeCalendarProvider implements CalendarProvider {
     { id: 'primary-cal', name: 'ana.perez@example.com', primary: true, writable: true },
     { id: 'ventas-cal', name: 'Ventas', primary: false, writable: true },
   ];
+  /** Los eventos que «tiene Google», por calendario e id (las pruebas los leen y los borran para simular que la persona los quitó). */
+  readonly events = new Map<string, CalendarEventInput & { calendarId: string; etag: string }>();
   /** Los refresh tokens que «siguen vigentes». */
   readonly liveRefreshTokens = new Set<string>();
   /** Si es true, Google «no entrega» refresh token. */
@@ -124,5 +129,36 @@ export class FakeCalendarProvider implements CalendarProvider {
     this.calls.push({ kind: 'revoke', token: i.token });
     this.maybeFail('revoke');
     this.liveRefreshTokens.delete(i.token);
+  }
+
+  async createEvent(i: { accessToken: string; calendarId: string; event: CalendarEventInput }): Promise<CalendarEventRef> {
+    await Promise.resolve();
+    this.calls.push({ kind: 'createEvent', calendarId: i.calendarId, event: i.event });
+    this.maybeFail('createEvent');
+    const key = `${i.calendarId}/${i.event.id}`;
+    if (this.events.has(key)) throw new CalendarError('Ya existe un evento con ese id', false, false, 'exists');
+    this.n += 1;
+    const etag = `"etag-${this.n}"`;
+    this.events.set(key, { ...i.event, calendarId: i.calendarId, etag });
+    return { eventId: i.event.id, etag };
+  }
+
+  async updateEvent(i: { accessToken: string; calendarId: string; eventId: string; event: CalendarEventInput }): Promise<CalendarEventRef> {
+    await Promise.resolve();
+    this.calls.push({ kind: 'updateEvent', calendarId: i.calendarId, eventId: i.eventId, event: i.event });
+    this.maybeFail('updateEvent');
+    const key = `${i.calendarId}/${i.eventId}`;
+    if (!this.events.has(key)) throw new CalendarError('El evento ya no existe en Google', false, false, 'gone');
+    this.n += 1;
+    const etag = `"etag-${this.n}"`;
+    this.events.set(key, { ...i.event, calendarId: i.calendarId, etag });
+    return { eventId: i.eventId, etag };
+  }
+
+  async deleteEvent(i: { accessToken: string; calendarId: string; eventId: string }): Promise<void> {
+    await Promise.resolve();
+    this.calls.push({ kind: 'deleteEvent', calendarId: i.calendarId, eventId: i.eventId });
+    this.maybeFail('deleteEvent');
+    this.events.delete(`${i.calendarId}/${i.eventId}`);
   }
 }
