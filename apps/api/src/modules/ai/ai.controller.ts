@@ -5,7 +5,7 @@ import { PlatformOnly, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { AiAdminService } from './ai-admin.service';
 import { AiCreditsService } from './ai-credits.service';
-import { adminOrganizationsQuerySchema, createModelSchema, creditsQuerySchema, grantSchema, idempotencyKeySchema, marginSchema, modelParamSchema, modelPriceSchema, pricingSchema, type AdminOrganizationsQuery, type CreateModelDto, type CreditsQuery, type GrantDto, type MarginDto, type ModelPriceDto, type PricingDto } from './ai.dto';
+import { adminOrganizationsQuerySchema, createModelSchema, creditsQuerySchema, grantSchema, idempotencyKeySchema, limitsSchema, marginSchema, modelParamSchema, modelPriceSchema, pricingSchema, type AdminOrganizationsQuery, type CreateModelDto, type CreditsQuery, type GrantDto, type LimitsDto, type MarginDto, type ModelPriceDto, type PricingDto } from './ai.dto';
 
 const orgParam = new ZodValidationPipe(z.uuid());
 
@@ -49,6 +49,19 @@ export class AiAdminController {
   @Header('Cache-Control', 'no-store')
   setPricing(@Body(new ZodValidationPipe(pricingSchema)) b: PricingDto) {
     return this.admin.setPricing(b);
+  }
+
+  /** Topes diarios de la IA por empresa: mensajes de prueba, sugerencias de respuesta y seguimientos del agente. */
+  @Get('limits')
+  @Header('Cache-Control', 'no-store')
+  limits() {
+    return this.admin.getLimits();
+  }
+
+  @Put('limits')
+  @Header('Cache-Control', 'no-store')
+  setLimits(@Body(new ZodValidationPipe(limitsSchema)) b: LimitsDto) {
+    return this.admin.setLimits(b);
   }
 
   /** Precio de los modelos de IA (dólares por millón de tokens). */

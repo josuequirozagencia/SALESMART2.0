@@ -98,6 +98,29 @@ export const aiPricing = platformTable(
   ],
 );
 
+/**
+ * Topes DIARIOS de la IA por empresa (v11, tabla de PLATAFORMA: solo `app_platform`; una sola fila): mensajes de prueba del simulador, sugerencias de respuesta y seguimientos automáticos del agente,
+ * cada uno contado en las últimas 24 horas por empresa. Los valores de la migración (100 / 50 / 200) son los que antes iban fijos en el código. El Súper Admin los cambia; el límite es para toda la
+ * plataforma (no hay valor por empresa todavía).
+ */
+export const aiLimits = platformTable(
+  'ai_limits',
+  {
+    id: integer('id').primaryKey().default(1),
+    testsPerDay: integer('tests_per_day').notNull().default(100),
+    suggestionsPerDay: integer('suggestions_per_day').notNull().default(50),
+    followUpsPerDay: integer('follow_ups_per_day').notNull().default(200),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+    updatedBy: uuid('updated_by'),
+  },
+  (t) => [
+    check('ai_limits_singleton', sql`${t.id} = 1`),
+    check('ai_limits_tests_valid', sql`${t.testsPerDay} >= 1 AND ${t.testsPerDay} <= 10000`),
+    check('ai_limits_suggestions_valid', sql`${t.suggestionsPerDay} >= 1 AND ${t.suggestionsPerDay} <= 10000`),
+    check('ai_limits_follow_ups_valid', sql`${t.followUpsPerDay} >= 1 AND ${t.followUpsPerDay} <= 10000`),
+  ],
+);
+
 /** Margen propio de una empresa (sustituye al global). Tabla de PLATAFORMA. Sin fila = usa el global. */
 export const aiOrgPricing = platformTable(
   'ai_org_pricing',

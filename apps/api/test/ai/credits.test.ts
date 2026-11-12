@@ -2,6 +2,8 @@
 //   GET /v1/ai/credits
 //   GET /v1/platform/ai/pricing
 //   PUT /v1/platform/ai/pricing
+//   GET /v1/platform/ai/limits
+//   PUT /v1/platform/ai/limits
 //   GET /v1/platform/ai/organizations
 //   PUT /v1/platform/ai/organizations/:id/margin
 //   POST /v1/platform/ai/organizations/:id/grants
@@ -17,7 +19,7 @@ import { configureApp, HttpModule } from '../../src/http';
 import { AiCreditsService, AiModule, creditsFor } from '../../src/modules/ai';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
-import { AiPricingService, PlatformCredentialsReader } from '../../src/modules/platform';
+import { AiLimitsService, AiPricingService, PlatformCredentialsReader } from '../../src/modules/platform';
 import { Argon2idHasher } from '../../src/security';
 import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
@@ -49,6 +51,7 @@ const saved = { ...process.env };
 async function seed(): Promise<void> {
   await admin.query('TRUNCATE ai_holds, ai_ledger, ai_wallets, ai_org_pricing, platform_audit, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
   await admin.query(`UPDATE ai_pricing SET usd_per_credit = 0.01, global_margin_pct = 100`);
+  await admin.query('UPDATE ai_limits SET tests_per_day = 100, suggestions_per_day = 50, follow_ups_per_day = 200');
   await admin.query(`UPDATE trial_config SET welcome_credits = ${WELCOME}`);
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna'], [AG1, 'agency', 'Agencia Uno']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
@@ -107,6 +110,7 @@ beforeEach(async () => {
   await seed();
   app.get(OrgDirectoryService).invalidate();
   app.get(AiPricingService).invalidate();
+  app.get(AiLimitsService).invalidate();
   T = { alice: await login('alice@a.test'), carol: await login('carol@a.test'), bob: await login('bob@b.test'), root: await login('root@plat.test') };
 });
 
@@ -337,6 +341,28 @@ describe('Súper Admin: precio, margen, regalos y saldos', () => {
     expect((await inOrg(ORG_A, () => credits().settle(holdId, { costUsd: 0.07 }))).credits).toBe(9);
   });
 
+  it('GET y PUT /platform/ai/limits: valores de origen, solo el Súper Admin, validación y auditoría de plataforma', async () => {
+    for (const m of ['GET', 'PUT'] as const) {
+      expect((await call(m, '/platform/ai/limits')).status, m).toBe(401);
+      for (const t of [T.alice, T.carol]) expect((await call(m, '/platform/ai/limits', t, m === 'PUT' ? { tests_per_day: 1, suggestions_per_day: 1, follow_ups_per_day: 1 } : undefined)).status, m).toBe(403);
+    }
+    const got = await call('GET', '/platform/ai/limits', T.root);
+    expect(got.headers.get('cache-control')).toBe('no-store');
+    expect(await json(got)).toMatchObject({ tests_per_day: 100, suggestions_per_day: 50, follow_ups_per_day: 200 });
+    const ok = await call('PUT', '/platform/ai/limits', T.root, { tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500 });
+    expect(ok.status).toBe(200);
+    expect(await json(ok)).toMatchObject({ tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500 });
+    for (const bad of [{ tests_per_day: 0, suggestions_per_day: 50, follow_ups_per_day: 200 }, { tests_per_day: 10001, suggestions_per_day: 50, follow_ups_per_day: 200 }, { tests_per_day: 1.5, suggestions_per_day: 50, follow_ups_per_day: 200 }, { tests_per_day: '5', suggestions_per_day: 50, follow_ups_per_day: 200 }, { tests_per_day: -1, suggestions_per_day: 50, follow_ups_per_day: 200 }, { tests_per_day: 5, suggestions_per_day: 50 }, { tests_per_day: 5, suggestions_per_day: 50, follow_ups_per_day: 200, otro: 1 }]) {
+      expect((await call('PUT', '/platform/ai/limits', T.root, bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect((await admin.query('SELECT tests_per_day, suggestions_per_day, follow_ups_per_day FROM ai_limits')).rows).toEqual([{ tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500 }]); // lo rechazado no cambió nada
+    const audit = (await admin.query(`SELECT action, details FROM platform_audit WHERE action = 'ai.limits.update'`)).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].details).toMatchObject({ before: { tests_per_day: 100, suggestions_per_day: 50, follow_ups_per_day: 200 }, after: { tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500 } });
+    // los topes que ven los servicios cambian al instante en esta instancia
+    expect(await app.get(AiLimitsService).resolve()).toEqual({ testsPerDay: 30, suggestionsPerDay: 80, followUpsPerDay: 500 });
+  });
+
   it('POST /platform/ai/organizations/:id/grants: regala con llave de idempotencia, lo ve el cliente (sin costo) y queda auditado en las dos auditorías', async () => {
     const r = await grant(T.root, ORG_A, 500, 'key-regalo-0001', 'Regalo por la prueba del piloto');
     expect(r.status).toBe(201);
@@ -480,7 +506,10 @@ describe('aislamiento A↔B y permisos de la base de datos', () => {
     await expect(as(info.rwUrl, 'TRUNCATE ai_ledger')).rejects.toThrow(/permission denied/);
     await expect(as(info.rwUrl, 'DELETE FROM ai_wallets')).rejects.toThrow(/permission denied/);
     await expect(as(info.rwUrl, 'DELETE FROM ai_holds')).rejects.toThrow(/permission denied/);
-    for (const t of ['ai_pricing', 'ai_org_pricing']) await expect(as(info.rwUrl, `SELECT * FROM ${t}`), t).rejects.toThrow(/permission denied/);
+    for (const t of ['ai_pricing', 'ai_limits', 'ai_org_pricing']) await expect(as(info.rwUrl, `SELECT * FROM ${t}`), t).rejects.toThrow(/permission denied/);
+    await expect(as(info.identityUrl, 'SELECT * FROM ai_limits')).rejects.toThrow(/permission denied/);
+    await expect(as(info.platformUrl, 'DELETE FROM ai_limits')).rejects.toThrow(/permission denied/);
+    await expect(as(info.platformUrl, 'INSERT INTO ai_limits(id) VALUES (2)')).rejects.toThrow(/permission denied/);
     for (const url of [info.platformUrl, info.identityUrl]) for (const t of ['ai_wallets', 'ai_ledger', 'ai_holds']) await expect(as(url, `SELECT 1 FROM ${t}`), t).rejects.toThrow(/permission denied/);
     await expect(as(info.identityUrl, 'SELECT * FROM ai_pricing')).rejects.toThrow(/permission denied/);
     await expect(as(info.platformUrl, 'DELETE FROM ai_pricing')).rejects.toThrow(/permission denied/);
@@ -500,6 +529,11 @@ describe('aislamiento A↔B y permisos de la base de datos', () => {
     await expect(admin.query(`INSERT INTO ai_wallets(id, organization_id) VALUES (gen_random_uuid(), '${ORG_A}')`)).rejects.toThrow(/ai_wallets_org_uq/); // un monedero por empresa
     await expect(admin.query(`INSERT INTO ai_holds(id, organization_id, credits, kind) VALUES (gen_random_uuid(), '${ORG_A}', 0, 'use')`)).rejects.toThrow(/ai_holds_credits_valid/);
     await expect(admin.query(`INSERT INTO ai_holds(id, organization_id, credits, kind) VALUES (gen_random_uuid(), '${ORG_A}', 5, 'grant')`)).rejects.toThrow(/ai_holds_kind_valid/);
+    for (const [col, name] of [['tests_per_day', 'ai_limits_tests_valid'], ['suggestions_per_day', 'ai_limits_suggestions_valid'], ['follow_ups_per_day', 'ai_limits_follow_ups_valid']] as const) {
+      await expect(admin.query(`UPDATE ai_limits SET ${col} = 0`), col).rejects.toThrow(name);
+      await expect(admin.query(`UPDATE ai_limits SET ${col} = 10001`), col).rejects.toThrow(name);
+    }
+    await expect(admin.query(`INSERT INTO ai_limits(id) VALUES (2)`)).rejects.toThrow(/ai_limits_singleton/);
     await expect(admin.query(`UPDATE ai_pricing SET usd_per_credit = 0`)).rejects.toThrow(/ai_pricing_price_valid/);
     await expect(admin.query(`UPDATE ai_pricing SET global_margin_pct = 1001`)).rejects.toThrow(/ai_pricing_margin_valid/);
     await expect(admin.query(`INSERT INTO ai_pricing(id) VALUES (2)`)).rejects.toThrow(/ai_pricing_singleton|duplicate/);

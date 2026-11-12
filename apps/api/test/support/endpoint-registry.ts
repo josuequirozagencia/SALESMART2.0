@@ -234,6 +234,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/ai/credits', kind: 'tenant', isolationTest: '../../ai/credits.test.ts' },
   { route: 'GET /v1/platform/ai/pricing', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'PUT /v1/platform/ai/pricing', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'GET /v1/platform/ai/limits', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'PUT /v1/platform/ai/limits', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'GET /v1/platform/ai/organizations', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'PUT /v1/platform/ai/organizations/:id/margin', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'POST /v1/platform/ai/organizations/:id/grants', kind: 'platform', test: '../../ai/credits.test.ts' },

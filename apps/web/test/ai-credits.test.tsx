@@ -65,14 +65,16 @@ describe('Configuración › Créditos IA (cliente)', () => {
 
 describe('Plataforma › Créditos IA (Súper Admin)', () => {
   const org = (over: Partial<AiOrg> = {}): AiOrg => ({ id: ORG_A, name: 'Barbería Norte', state: 'trial', balance: 1000, held: 0, granted: 1000, used: 0, margin_pct: '100.00', margin_override: false, ...over });
-  interface World { orgs: AiOrg[]; pricing: { usd_per_credit: string; global_margin_pct: string; updated_at: string }; calls: Record<string, Call[]>; ledger: PlatformLedgerItem[]; grantFails?: () => ReturnType<Handler> }
-  const world = (over: Partial<World> = {}): World => ({ orgs: [org(), org({ id: ORG_B, name: 'Estudio Luna', balance: 0, granted: 0 })], pricing: { usd_per_credit: '0.010000', global_margin_pct: '100.00', updated_at: AT }, calls: {}, ledger: [], ...over });
+  interface World { limits: { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; updated_at: string }; orgs: AiOrg[]; pricing: { usd_per_credit: string; global_margin_pct: string; updated_at: string }; calls: Record<string, Call[]>; ledger: PlatformLedgerItem[]; grantFails?: () => ReturnType<Handler> }
+  const world = (over: Partial<World> = {}): World => ({ limits: { tests_per_day: 100, suggestions_per_day: 50, follow_ups_per_day: 200, updated_at: AT }, orgs: [org(), org({ id: ORG_B, name: 'Estudio Luna', balance: 0, granted: 0 })], pricing: { usd_per_credit: '0.010000', global_margin_pct: '100.00', updated_at: AT }, calls: {}, ledger: [], ...over });
   const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
   function server(w: World): Record<string, Handler> {
     return {
       ...authed(ME_ROOT),
       'GET /platform/trials': () => ({ body: NO_TRIALS }),
       'GET /platform/ai/models': () => ({ body: [] }),
+      'GET /platform/ai/limits': () => ({ body: w.limits }),
+      'PUT /platform/ai/limits': (c) => { rec(w, 'limits', c); w.limits = { ...w.limits, ...(c.body as object) }; return { body: w.limits }; },
       'GET /platform/ai/organizations': (c) => { rec(w, 'list', c); const q = c.query.get('q')?.toLowerCase(); return { body: { items: w.orgs.filter((o) => !q || o.name.toLowerCase().includes(q)), next_cursor: null, pricing: w.pricing } satisfies AiOrgList }; },
       'PUT /platform/ai/pricing': (c) => { rec(w, 'pricing', c); const b = c.body as { usd_per_credit: string; global_margin_pct: string }; w.pricing = { ...w.pricing, usd_per_credit: Number(b.usd_per_credit).toFixed(6), global_margin_pct: Number(b.global_margin_pct).toFixed(2) }; return { body: w.pricing }; },
       [`PUT /platform/ai/organizations/${ORG_A}/margin`]: (c) => { rec(w, 'margin', c); const m = (c.body as { margin_pct: string | null }).margin_pct; w.orgs = w.orgs.map((o) => (o.id === ORG_A ? { ...o, margin_pct: m ?? w.pricing.global_margin_pct, margin_override: m !== null } : o)); return { body: { id: ORG_A, margin_pct: m ?? '100.00', margin_override: m !== null } }; },
@@ -119,6 +121,40 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     await userEvent.click(form.getByRole('button', { name: 'Guardar precio' }));
     await waitFor(() => expect(w.calls['pricing']![0]!.body).toEqual({ usd_per_credit: '0.02', global_margin_pct: '150.5' }));
     expect(await form.findByText('Precio guardado.')).toBeInTheDocument();
+  });
+
+  it('límites diarios de la IA: muestra los vigentes, valida números enteros de 1 a 10 000 y manda los tres valores', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/platform/ai');
+    const form = within(await screen.findByRole('form', { name: 'Límites diarios de la IA' }));
+    expect(form.getByLabelText('Mensajes de prueba del agente por día')).toHaveValue('100');
+    expect(form.getByLabelText('Sugerencias de respuesta por día')).toHaveValue('50');
+    expect(form.getByLabelText('Seguimientos automáticos por día')).toHaveValue('200');
+    for (const bad of ['0', '10001', '1.5', 'abc', '']) {
+      await userEvent.clear(form.getByLabelText('Sugerencias de respuesta por día'));
+      if (bad) await userEvent.type(form.getByLabelText('Sugerencias de respuesta por día'), bad);
+      await userEvent.click(form.getByRole('button', { name: 'Guardar límites' }));
+      expect(await form.findByRole('alert'), bad).toHaveTextContent(/número entero de 1 a 10\.000|número entero de 1 a 10000/);
+    }
+    expect(w.calls['limits']).toBeUndefined();
+    await userEvent.clear(form.getByLabelText('Sugerencias de respuesta por día'));
+    await userEvent.type(form.getByLabelText('Sugerencias de respuesta por día'), '80');
+    await userEvent.clear(form.getByLabelText('Seguimientos automáticos por día'));
+    await userEvent.type(form.getByLabelText('Seguimientos automáticos por día'), '500');
+    await userEvent.click(form.getByRole('button', { name: 'Guardar límites' }));
+    await waitFor(() => expect(w.calls['limits']![0]!.body).toEqual({ tests_per_day: 100, suggestions_per_day: 80, follow_ups_per_day: 500 }));
+    expect(await form.findByText('Límites guardados.')).toBeInTheDocument();
+  });
+
+  it('si el servidor rechaza los límites, muestra el motivo y no dice que se guardó', async () => {
+    const w = world();
+    mockApi({ ...server(w), 'PUT /platform/ai/limits': () => err(400, 'VALIDATION_ERROR', 'Datos inválidos') });
+    renderApp('/platform/ai');
+    const form = within(await screen.findByRole('form', { name: 'Límites diarios de la IA' }));
+    await userEvent.click(form.getByRole('button', { name: 'Guardar límites' }));
+    expect(await form.findByRole('alert')).toBeInTheDocument();
+    expect(form.queryByText('Límites guardados.')).toBeNull();
   });
 
   it('regalar créditos: valida, manda la llave de idempotencia y muestra el saldo nuevo; el mismo envío repetido usa la misma llave', async () => {

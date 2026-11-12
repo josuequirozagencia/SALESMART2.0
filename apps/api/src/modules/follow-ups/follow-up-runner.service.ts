@@ -21,6 +21,7 @@ import { writeAudit } from '../audit';
 import { AutomationEnqueueService } from '../automations';
 import { windowOf } from '../inbox';
 import { OrgDirectoryService, type OrgDirectory } from '../organizations';
+import { AiLimitsService } from '../platform';
 import { resolveQuickReply } from '../quick-replies';
 import { RealtimeService } from '../realtime';
 import { isOpenAt, nextOpenAt, SlaService } from '../sla';
@@ -29,7 +30,6 @@ import {
   dueAt,
   ENDS_CHAIN,
   LEASE_MS,
-  MAX_FOLLOW_UPS_PER_DAY,
   RETRY_MS,
   RUN_BATCH,
   SCENARIO,
@@ -76,6 +76,7 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
     @Inject(AutomationEnqueueService) private readonly enqueue: AutomationEnqueueService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
+    @Inject(AiLimitsService) private readonly limits: AiLimitsService,
   ) {}
 
   onModuleInit(): void {
@@ -138,6 +139,7 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
 
   /** Resuelve UN paso en tres tiempos: (A) decidir bajo bloqueo, (B) escribir el texto fuera de la transacción (la IA tarda y cobra), (C) volver a comprobar y enviar bajo bloqueo. */
   private async processOne(id: string, now: Date, dir: OrgDirectory): Promise<Outcome> {
+    const dailyMax = (await this.limits.resolve()).followUpsPerDay; // el tope lo fija el Súper Admin; se lee ANTES de abrir la transacción de la empresa
     // A) decidir
     const a = await this.db.withTenant(async (tx) => {
       const l = await this.load(tx, id);
@@ -156,7 +158,7 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
         if (l.channel.status !== 'active') return { kind: 'skip' as const, reason: 'channel_unavailable' as SkipReason };
         if (!windowOf(l.conv.lastInboundAt, now, l.channel.provider).open) return { kind: 'skip' as const, reason: 'window_closed' as SkipReason };
         const [sent] = await tx.select({ n: sql<number>`count(*)::int` }).from(agentFollowUpRuns).where(and(eq(agentFollowUpRuns.status, 'sent'), gt(agentFollowUpRuns.processedAt, new Date(now.getTime() - 24 * 3_600_000))));
-        if ((sent?.n ?? 0) >= MAX_FOLLOW_UPS_PER_DAY) return { kind: 'skip' as const, reason: 'daily_limit' as SkipReason };
+        if ((sent?.n ?? 0) >= dailyMax) return { kind: 'skip' as const, reason: 'daily_limit' as SkipReason };
       }
       let history: Array<{ role: 'user' | 'assistant'; text: string }> = [];
       if (step.mode === 'ai') {

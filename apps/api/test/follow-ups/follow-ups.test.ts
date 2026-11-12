@@ -13,7 +13,7 @@ import { AgentRuntimeService, AI_PROVIDER, AiModule, AiProviderError, FakeAiProv
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { FollowUpRunnerService, FollowUpsModule } from '../../src/modules/follow-ups';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
-import { AiModelPricesService, AiPricingService } from '../../src/modules/platform';
+import { AiLimitsService, AiModelPricesService, AiPricingService } from '../../src/modules/platform';
 import { Argon2idHasher } from '../../src/security';
 import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
@@ -146,6 +146,8 @@ afterAll(async () => { await admin.query(`UPDATE ai_model_prices SET usd_per_1m_
 beforeEach(async () => {
   await seed();
   app.get(OrgDirectoryService).invalidate();
+  await admin.query('UPDATE ai_limits SET tests_per_day = 100, suggestions_per_day = 50, follow_ups_per_day = 200');
+  app.get(AiLimitsService).invalidate();
   app.get(AiPricingService).invalidate();
   app.get(AiModelPricesService).invalidate();
   ai.calls.length = 0;
@@ -347,6 +349,15 @@ describe('la cadena de seguimientos', () => {
     expect(await followTick(new Date(Date.now() + 10 * MINUTE))).toBe(1);
     const mine = (await runs()).find((x) => x['status'] === 'skipped');
     expect(mine).toMatchObject({ reason: 'daily_limit' });
+  });
+
+  it('el Súper Admin puede cambiar el tope de seguimientos: con 5 envíos ya hechos y un tope de 5, el paso se omite («daily_limit»)', async () => {
+    const { agent, conv } = await armed();
+    await admin.query(`INSERT INTO agent_follow_up_runs(id, organization_id, agent_id, conversation_id, chain_inbound_at, anchor_at, step_position, due_at, status, processed_at) SELECT gen_random_uuid(), $1, $2, $3, now() - (g || ' days')::interval - interval '30 days', now(), 1, now(), 'sent', now() FROM generate_series(1, 5) g`, [ORG_A, agent, conv]);
+    await admin.query('UPDATE ai_limits SET follow_ups_per_day = 5');
+    app.get(AiLimitsService).invalidate();
+    expect(await followTick(new Date(Date.now() + 10 * MINUTE))).toBe(1);
+    expect((await runs()).find((x) => x['status'] === 'skipped')).toMatchObject({ reason: 'daily_limit' });
   });
 
   it('un mensaje del cliente gana UNA cadena: terminada la secuencia no se rearma sola, y tras otro mensaje del cliente con respuesta del agente nace una nueva (la anterior pendiente queda reemplazada)', async () => {

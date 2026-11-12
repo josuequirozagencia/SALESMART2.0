@@ -8,8 +8,6 @@ export const MAX_STEPS = 5;
 export const MIN_DELAY_MINUTES = 5;
 export const MAX_DELAY_MINUTES = 7 * 24 * 60;
 export const MAX_FIXED_TEXT = 1000;
-/** Envíos de seguimiento por empresa en 24 horas (valor provisional, ADR-68). */
-export const MAX_FOLLOW_UPS_PER_DAY = 200;
 /** Cuánto espera un paso que no pudo salir por algo pasajero antes de reintentar. */
 export const RETRY_MS = 60_000;
 /** Una tarea que murió a medias deja el paso «tomado»: pasado este tiempo se retoma. */
