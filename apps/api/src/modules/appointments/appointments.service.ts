@@ -5,7 +5,7 @@ import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '.
 import { AttributionService } from '../attribution';
 import { writeAudit } from '../audit';
 import { CalendarSyncService } from '../calendar';
-import { loadConversation, scopeOf, WINDOW_MS, type InboxAccess } from '../inbox';
+import { hasWindow, loadConversation, scopeOf, WINDOW_MS, type InboxAccess } from '../inbox';
 import { OpportunitiesService } from '../opportunities';
 import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
 import { RealtimeService } from '../realtime';
@@ -120,10 +120,12 @@ export class AppointmentsService {
       const end = c.lastInboundAt ? c.lastInboundAt.getTime() + WINDOW_MS : null;
       const open = end !== null && end > Date.now();
       // GoHighLevel no tiene la ventana de 24 h de WhatsApp oficial (M7.4): los recordatorios salen como texto cuando toque
-      const noWindow = contactSource.provider === 'ghl';
-      return { channelId: c.channelAccountId, blocked, max: this.limitFor(contactSource.provider, contactSource.source), window: noWindow ? { open: true, expires_at: null } : { open, expires_at: end !== null ? new Date(end).toISOString() : null } };
+      // Solo WhatsApp oficial tiene ventana de 24 h y plantillas: WhatsApp por QR y GoHighLevel envían texto cuando toque
+      const noWindow = contactSource.provider !== null && !hasWindow(contactSource.provider);
+      return { channelId: c.channelAccountId, noWindow, blocked, max: this.limitFor(contactSource.provider, contactSource.source), window: noWindow ? { open: true, expires_at: null } : { open, expires_at: end !== null ? new Date(end).toISOString() : null } };
     });
-    const list = base.blocked === 'channel_off' ? { items: [] } : await this.templates.forChannel(base.channelId);
+    // Las plantillas existen solo en WhatsApp oficial: pedirlas de un canal QR o de GoHighLevel daba 404 y el formulario no cargaba
+    const list = base.blocked === 'channel_off' || base.noWindow ? { items: [] } : await this.templates.forChannel(base.channelId);
     return {
       timezone: tz,
       max_reminders: base.max,
@@ -170,7 +172,7 @@ export class AppointmentsService {
     const startsAt = new Date(input.starts_at);
     this.assertFuture(startsAt, now);
     const offsets = [...(input.reminders ?? [])].sort((a, b) => b - a);
-    const tpl = await this.checkReminders(tx, { offsets, startsAt, now, channelId: c.channelAccountId, lastInboundAt: c.lastInboundAt, noWindow: contactSource.provider === 'ghl', limit: this.limitFor(contactSource.provider, contactSource.source), templateId: input.reminder_template_id ?? null, params: input.reminder_params ?? {} });
+    const tpl = await this.checkReminders(tx, { offsets, startsAt, now, channelId: c.channelAccountId, lastInboundAt: c.lastInboundAt, noWindow: contactSource.provider !== null && !hasWindow(contactSource.provider), limit: this.limitFor(contactSource.provider, contactSource.source), templateId: input.reminder_template_id ?? null, params: input.reminder_params ?? {} });
 
     const [a] = await tx
       .insert(appointments)
@@ -234,7 +236,7 @@ export class AppointmentsService {
           if (offsets.length > 0 && !conv) throw new ConflictError('APPOINTMENT_NO_CONVERSATION', 'La cita no tiene conversación: no se pueden programar recordatorios');
           const templateId = input.reminder_template_id !== undefined ? input.reminder_template_id : cur.reminderTemplateId;
           const params = input.reminder_params ?? cur.reminderParams;
-          const useTemplate = conv && offsets.length > 0 ? await this.checkReminders(tx, { offsets, startsAt, now, channelId: conv.channelId, lastInboundAt: conv.lastInboundAt, noWindow: conv.provider === 'ghl', limit: this.limitFor(conv.provider, conv.source), templateId, params }) : false;
+          const useTemplate = conv && offsets.length > 0 ? await this.checkReminders(tx, { offsets, startsAt, now, channelId: conv.channelId, lastInboundAt: conv.lastInboundAt, noWindow: !hasWindow(conv.provider), limit: this.limitFor(conv.provider, conv.source), templateId, params }) : false;
           change('reminders', 'reminderOffsets', cur.reminderOffsets, offsets);
           set.reminderTemplateId = useTemplate ? templateId : null;
           set.reminderParams = useTemplate ? params : {};
@@ -367,7 +369,7 @@ export class AppointmentsService {
     const conv = await this.conversationFacts(tx, a.conversationId);
     if (!conv || conv.channelState !== 'active') return { status: 'skipped', reason: 'channel_off' };
 
-    const windowOpen = conv.provider === 'ghl' || (conv.lastInboundAt !== null && conv.lastInboundAt.getTime() + WINDOW_MS - WINDOW_MARGIN_MS > now.getTime());
+    const windowOpen = !hasWindow(conv.provider) || (conv.lastInboundAt !== null && conv.lastInboundAt.getTime() + WINDOW_MS - WINDOW_MARGIN_MS > now.getTime());
     let kind: 'text' | 'template';
     let body: string;
     let meta: Record<string, unknown> = {};
