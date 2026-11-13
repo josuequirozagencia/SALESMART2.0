@@ -226,6 +226,9 @@ describe('S1.2 · icono de etiquetas en la cabecera del chat', () => {
     // sin buscador ni «Crear etiqueta» (8 o menos y sin permiso)
     expect(dlg.queryByRole('searchbox')).not.toBeInTheDocument();
     expect(dlg.queryByRole('button', { name: 'Crear etiqueta' })).not.toBeInTheDocument();
+    // al marcar una etiqueta la lista se vuelve a pintar y en un navegador real el foco se pierde: Esc debe cerrar igual
+    (document.activeElement as HTMLElement | null)?.blur();
+    expect(document.body).toHaveFocus();
     await userEvent.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Etiquetas de la conversación' })).not.toBeInTheDocument());
     expect(icon).toHaveFocus();

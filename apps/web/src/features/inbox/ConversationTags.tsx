@@ -141,9 +141,12 @@ export function TagsPopoverButton({ c }: { c: Conversation }) {
       if (panel.current?.contains(t) || button.current?.contains(t)) return;
       setOpen(false);
     };
+    // Esc cierra aunque el foco ya no esté dentro del panel (al marcar una etiqueta la lista se vuelve a pintar y el foco se pierde)
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { e.preventDefault(); setOpen(false); button.current?.focus(); } };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('touchstart', onDown);
-    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('touchstart', onDown); };
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('touchstart', onDown); document.removeEventListener('keydown', onKey); };
   }, [open]);
   return (
     <>
