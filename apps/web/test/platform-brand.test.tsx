@@ -150,7 +150,7 @@ describe('service worker de notificaciones', () => {
     await w.push({ body: 'Hola', url: '/inbox/c1', tag: 'conv-1' });
     expect(w.fetches).toEqual(['/v1/branding']);
     expect(w.shown).toHaveLength(1);
-    expect(w.shown[0]).toMatchObject({ title: 'Mi Marca', options: { body: 'Hola', icon: '/v1/branding/icon-192.png?v=v5', badge: '/v1/branding/badge-96.png?v=v5', tag: 'conv-1', renotify: true, data: { url: '/inbox/c1' } } });
+    expect(w.shown[0]).toMatchObject({ title: 'Mi Marca', options: { body: 'Hola', icon: '/v1/branding/icon-192.png?v=v5', badge: '/v1/branding/badge-96.png?v=v5', tag: 'conv-1', data: { url: '/inbox/c1' } } });
   });
 
   it('respeta el título que manda el servidor', async () => {
@@ -182,11 +182,13 @@ describe('service worker de notificaciones', () => {
     expect(w.shown).toHaveLength(2);
   });
 
-  it('con la aplicación a la vista no repite la notificación, salvo la de prueba (force)', async () => {
+  it('v13 S4.1: el service worker ya no decide por su cuenta; muestra lo que llega aunque haya una ventana a la vista (el servidor ya filtró lo de la conversación que se mira) y cada mensaje con su etiqueta, sin reemplazarse', async () => {
     const w = loadWorker(brandReply(BRAND), true);
-    await w.push({ body: 'Hola' });
-    expect(w.shown).toHaveLength(0);
+    await w.push({ body: 'Hola', tag: 'msg-1' });
+    await w.push({ body: 'Otro', tag: 'msg-2' });
     await w.push({ body: 'Prueba', force: true });
-    expect(w.shown).toHaveLength(1);
+    expect(w.shown).toHaveLength(3);
+    expect(w.shown.map((x) => (x.options as { tag?: string }).tag)).toEqual(['msg-1', 'msg-2', undefined]);
+    expect(w.shown.every((x) => !('renotify' in (x.options as object)))).toBe(true);
   });
 });

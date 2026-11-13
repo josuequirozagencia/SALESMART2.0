@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, exists, gt, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
-import { contacts, conversations, Database, messageMentions, messages, notifications, tasks, type TenantTx } from '../../db';
+import { contacts, conversations, Database, messageMentions, messages, notifications, sales, tasks, type TenantTx } from '../../db';
 import { NotFoundError } from '../../errors';
 import { decodeTimeCursor, encodeTimeCursor } from '../../http';
 import { TenantContext } from '../../tenant';
@@ -17,7 +17,7 @@ export interface NotificationsAccess {
   readonly viewAll: boolean;
 }
 
-export type NotificationType = 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect';
+export type NotificationType = 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created';
 
 export interface NotificationView {
   id: string;
@@ -33,6 +33,8 @@ export interface NotificationView {
   excerpt: string | null;
   /** Solo en los avisos de tareas (F2, ADR-58): el título y el vencimiento se leen de la tarea al pedir la lista. */
   task: { id: string; title: string; due_at: string | null; status: 'open' | 'done'; contact_id: string | null } | null;
+  /** Solo en los avisos de una venta nueva (v13 S4.2): se lee de la venta al pedir la lista. */
+  sale: { id: string; product: string; amount: string; currency: string; seller: { id: string; name: string } | null; contact: { id: string; name: string } } | null;
 }
 
 export interface NotificationPage {
@@ -77,6 +79,23 @@ export class NotificationsService {
     return rows.map((r) => ({ userId: r.userId, notificationId: r.id }));
   }
 
+  /**
+   * «Nueva venta» (v13 S4.2): un aviso por persona de `recipients` (menos quien la registró), en su propia transacción —se llama DESPUÉS de confirmar la venta, nunca dentro—. Es idempotente:
+   * una persona tiene a lo sumo UN aviso por venta (índice único), así que repetir la llamada no duplica. Devuelve solo a quienes se les creó ahora (para el aviso en vivo).
+   */
+  async recordSaleCreated(input: { saleId: string; actorId: string; recipients: readonly string[] }): Promise<CreatedNotice[]> {
+    const ids = [...new Set(input.recipients)].filter((u) => u !== input.actorId);
+    if (ids.length === 0) return [];
+    const rows = await this.db.withTenant((tx) =>
+      tx
+        .insert(notifications)
+        .values(ids.map((userId) => ({ userId, type: 'sale_created', actorId: input.actorId, saleId: input.saleId })))
+        .onConflictDoNothing()
+        .returning({ id: notifications.id, userId: notifications.userId }),
+    );
+    return rows.map((r) => ({ userId: r.userId, notificationId: r.id }));
+  }
+
   /** Las personas mencionadas en cada nota (por id de mensaje), con su nombre actual. Lectura para armar la vista del hilo. */
   async mentionsOf(messageIds: readonly string[]): Promise<Map<string, Array<{ user_id: string; name: string }>>> {
     const out = new Map<string, Array<{ user_id: string; name: string }>>();
@@ -117,7 +136,9 @@ export class NotificationsService {
     );
     // Alerta de sistema (v11 67c): no depende de ninguna conversación ni tarea; es de quien la recibe
     const system = eq(notifications.type, 'calendar_reconnect');
-    return [eq(notifications.userId, me), gt(notifications.createdAt, since), or(mention, task, system), extra];
+    // Venta nueva (v13 S4.2): solo la ve quien ve toda la empresa (la administración) y mientras la venta exista; un asesor nunca ve avisos de ventas ajenas
+    const sale = and(eq(notifications.type, 'sale_created'), viewAll ? exists(tx.select({ one: sql`1` }).from(sales).where(and(eq(sales.organizationId, notifications.organizationId), eq(sales.id, notifications.saleId)))) : sql`false`);
+    return [eq(notifications.userId, me), gt(notifications.createdAt, since), or(mention, task, system, sale), extra];
   }
 
   async list(access: NotificationsAccess, q: ListNotificationsQuery): Promise<NotificationPage> {
@@ -158,14 +179,21 @@ export class NotificationsService {
       const tasksById = new Map<string, { id: string; title: string; dueAt: Date | null; status: string; contactId: string | null }>(
         taskIds.length === 0 ? [] : (await tx.select({ id: tasks.id, title: tasks.title, dueAt: tasks.dueAt, status: tasks.status, contactId: tasks.contactId }).from(tasks).where(inArray(tasks.id, taskIds))).map((t) => [t.id, t]),
       );
-      return { rows, page, unread, bodies, contactsByConversation, tasksById };
+      const saleIds = page.map((r) => r.n.saleId).filter((x): x is string => x !== null);
+      const salesById = new Map<string, { id: string; product: string; amount: string; currency: string; sellerId: string; contactId: string; contactName: string }>(
+        saleIds.length === 0
+          ? []
+          : (await tx.select({ id: sales.id, product: sales.productName, amount: sales.amount, currency: sales.currency, sellerId: sales.sellerId, contactId: contacts.id, contactName: contacts.name }).from(sales).innerJoin(contacts, and(eq(contacts.organizationId, sales.organizationId), eq(contacts.id, sales.contactId))).where(inArray(sales.id, saleIds))).map((s) => [s.id, s]),
+      );
+      return { rows, page, unread, bodies, contactsByConversation, tasksById, salesById };
     });
-    const names = await this.members.labels([...new Set(data.page.map((r) => r.n.actorId).filter((x): x is string => x !== null))]);
+    const names = await this.members.labels([...new Set([...data.page.map((r) => r.n.actorId), ...[...data.salesById.values()].map((s) => s.sellerId)].filter((x): x is string => x !== null))]);
     const last = data.page[data.page.length - 1];
     return {
       items: data.page.map((r) => {
         const contact = r.n.conversationId ? data.contactsByConversation.get(r.n.conversationId) : undefined;
         const task = r.n.taskId ? data.tasksById.get(r.n.taskId) : undefined;
+        const sale = r.n.saleId ? data.salesById.get(r.n.saleId) : undefined;
         return {
           id: r.n.id,
           type: r.n.type as NotificationType,
@@ -176,6 +204,7 @@ export class NotificationsService {
           message_id: r.n.messageId,
           excerpt: r.n.messageId && data.bodies.get(r.n.messageId) ? excerpt(data.bodies.get(r.n.messageId)!) : null,
           task: task ? { id: task.id, title: task.title, due_at: task.dueAt ? task.dueAt.toISOString() : null, status: task.status as 'open' | 'done', contact_id: task.contactId } : null,
+          sale: sale ? { id: sale.id, product: sale.product, amount: sale.amount, currency: sale.currency, seller: names.get(sale.sellerId) ?? { id: sale.sellerId, name: 'Persona desconocida' }, contact: { id: sale.contactId, name: sale.contactName } } : null,
         };
       }),
       next_cursor: data.rows.length > q.limit && last ? encodeTimeCursor({ k: last.key, id: last.n.id }) : null,

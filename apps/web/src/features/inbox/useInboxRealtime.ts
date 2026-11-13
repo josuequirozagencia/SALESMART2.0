@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { api } from '../../lib/api';
 import { playIncomingSound, soundEnabled } from '../../lib/notifySound';
-import { startRealtime } from '../../lib/realtime';
+import { PRESENCE_HEARTBEAT_MS, reportPresence, startRealtime } from '../../lib/realtime';
 import type { Conversation } from '../../lib/types';
 
 /** Junta los avisos que llegan en ráfaga (un mensaje nuevo suele traer tres) y vuelve a pedir lo afectado una sola vez. */
@@ -19,6 +19,24 @@ export function useInboxRealtime(userId: string, organizationId: string, pathnam
   const here = useRef(pathname);
   useEffect(() => {
     here.current = pathname;
+  }, [pathname]);
+  // v13 S4.1: presencia. Se dice qué conversación está abierta y si la pestaña está a la vista, al cambiar de pantalla, al cambiar de pestaña y cada 10 s mientras se ve. Nada de esto abre
+  // permisos: solo sirve para que el servidor no mande una notificación del sistema de lo que la persona ya está leyendo.
+  useEffect(() => {
+    const open = /^\/inbox\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\/|$)/i.exec(pathname)?.[1] ?? null;
+    const say = (): void => reportPresence(open, document.visibilityState === 'visible');
+    say();
+    const beat = setInterval(() => { if (document.visibilityState === 'visible') say(); }, PRESENCE_HEARTBEAT_MS);
+    const onHide = (): void => reportPresence(open, false);
+    document.addEventListener('visibilitychange', say);
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('focus', say);
+    return () => {
+      clearInterval(beat);
+      document.removeEventListener('visibilitychange', say);
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('focus', say);
+    };
   }, [pathname]);
   useEffect(() => {
     const conversations = new Set<string>();

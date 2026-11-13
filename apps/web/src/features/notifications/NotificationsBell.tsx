@@ -10,6 +10,12 @@ import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications,
 
 /** Qué dice un aviso: una mención en una nota, «te asignaron una tarea» o «tu tarea vence / venció» (F1 y F2, ADR-57 y ADR-58). */
 function textOf(n: AppNotification): string {
+  // v13 S4.2: «Nueva venta: {vendedor} · {monto} · {contacto}»
+  if (n.type === 'sale_created') {
+    const s = n.sale;
+    if (!s) return 'Nueva venta registrada';
+    return `Nueva venta: ${s.seller?.name ?? 'Sin vendedor'} · ${new Intl.NumberFormat('es-EC', { style: 'currency', currency: s.currency }).format(Number(s.amount))} · ${s.contact.name}`;
+  }
   if (n.type === 'calendar_reconnect') return 'Google Calendar necesita que lo vuelvas a conectar. Las citas nuevas esperan hasta entonces para salir hacia Google.';
   if (n.type === 'task_assigned') return n.actor ? `${n.actor.name} te asignó la tarea «${n.task?.title ?? 'sin título'}»` : `Se te asignó la tarea «${n.task?.title ?? 'sin título'}»`;
   if (n.type === 'task_due') {
@@ -21,7 +27,7 @@ function textOf(n: AppNotification): string {
 }
 
 /** A dónde lleva un aviso: la conversación de una mención o la tarea (se abre en «Tareas»). */
-const hrefOf = (n: AppNotification): string => (n.type === 'mention' ? `/inbox/${n.conversation?.id ?? ''}` : n.type === 'calendar_reconnect' ? '/settings/calendar' : `/tasks?task=${n.task?.id ?? ''}`);
+const hrefOf = (n: AppNotification): string => (n.type === 'mention' ? `/inbox/${n.conversation?.id ?? ''}` : n.type === 'calendar_reconnect' ? '/settings/calendar' : n.type === 'sale_created' ? '/sales' : `/tasks?task=${n.task?.id ?? ''}`);
 
 function Item({ n, canMark, onOpen }: { n: AppNotification; canMark: boolean; onOpen: () => void }) {
   const mark = useMarkNotificationRead();
@@ -58,7 +64,7 @@ function Panel({ canMark, onClose }: { canMark: boolean; onClose: () => void }) 
       {all.isError ? <Alert>{friendlyError(all.error, 'No pudimos marcar los avisos como leídos.')}</Alert> : null}
       {q.isPending ? <div className="grid place-items-center py-8 text-muted"><Spinner label="Cargando avisos" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los avisos.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
-      {q.isSuccess && items.length === 0 ? <p className="rounded-xl border border-dashed border-line px-4 py-8 text-center text-[13px] text-muted">Todavía no tienes avisos. Aquí aparecerá cuando alguien te mencione con «@» en una nota, te asignen una tarea o una tarea tuya esté por vencer.</p> : null}
+      {q.isSuccess && items.length === 0 ? <p className="rounded-xl border border-dashed border-line px-4 py-8 text-center text-[13px] text-muted">Todavía no tienes avisos. Aquí aparecerá cuando alguien te mencione con «@» en una nota, te asignen una tarea, una tarea tuya esté por vencer o —si administras la empresa— alguien registre una venta.</p> : null}
       {items.length > 0 ? <ul aria-label="Avisos" className="grid max-h-[55vh] gap-1.5 overflow-y-auto">{items.map((n) => <Item key={n.id} n={n} canMark={canMark} onOpen={onClose} />)}</ul> : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
       <div className="flex justify-end"><Button onClick={onClose}>Cerrar</Button></div>

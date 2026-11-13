@@ -29,6 +29,12 @@ const MAX_MESSAGES_PER_BURST = 20;
 const PERMISSION_TTL_MS = 5_000;
 const KNOWN_TTL_MS = 10 * 60_000;
 const KNOWN_MAX = 5_000;
+/** Cuánto vale un latido de presencia (v13 S4.1): pasado este tiempo sin noticias, la persona se considera ausente y SÍ se le avisa (ante la duda, se notifica). */
+export const PRESENCE_TTL_MS = 20_000;
+/** Latidos de presencia que se aceptan por conexión y ventana (el cliente manda uno cada ~10 s y al cambiar de pantalla). */
+const PRESENCE_PER_WINDOW = 20;
+const PRESENCE_WINDOW_MS = 10_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 interface Pending {
   organizationId: string;
@@ -42,10 +48,18 @@ interface Pending {
   inbound: Set<string>;
 }
 
+/** Lo que una conexión dice que está mirando (v13 S4.1). */
+interface Presence {
+  conversationId: string | null;
+  visible: boolean;
+  at: number;
+}
+
 interface SocketData {
   userId: string;
   organizationId: string;
   token: string;
+  presence?: Presence;
 }
 
 /** Dirección del cliente según los saltos de proxy de confianza (los mismos que usa Express). */
@@ -75,6 +89,7 @@ function bearer(raw: unknown): string | undefined {
 export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy {
   private io: Server | null = null;
   private readonly limiter = new WindowLimiter(HANDSHAKES_PER_MINUTE, 60_000);
+  private readonly presenceLimiter = new WindowLimiter(PRESENCE_PER_WINDOW, PRESENCE_WINDOW_MS);
   private readonly pending = new Map<string, Pending>();
   private readonly known = new Map<string, { at: number; users: Set<string> }>();
   private readonly perms = new Map<string, { at: number; ids: string[] }>();
@@ -140,6 +155,8 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
   private async onConnection(socket: Socket): Promise<void> {
     const { userId, organizationId } = socket.data as SocketData;
     const room = personRoom(organizationId, userId);
+    // Presencia (v13 S4.1): el cliente avisa qué conversación tiene abierta y si la pestaña está a la vista; con eso se decide si un mensaje nuevo merece una notificación del sistema
+    socket.on('presence', (raw: unknown) => this.onPresence(socket, raw));
     await socket.join(room);
     // Tope por persona: se cierra la más antigua
     const io = this.io;
@@ -149,6 +166,37 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
       const oldest = io.sockets.sockets.get(mine[0] as string);
       if (oldest && oldest.id !== socket.id) oldest.disconnect(true);
     }
+  }
+
+  /**
+   * Un latido de presencia: `{ conversation_id: uuid | null, visible: boolean }`. Solo se guarda en memoria de esa conexión; nada de lo que diga puede dar acceso a algo (a lo sumo, quien
+   * miente evita sus PROPIAS notificaciones). Lo malformado y el exceso se ignoran sin responder.
+   */
+  private onPresence(socket: Socket, raw: unknown): void {
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return;
+    if (!this.presenceLimiter.take(socket.id).ok) return;
+    const o = raw as Record<string, unknown>;
+    const cid = o['conversation_id'];
+    if (typeof o['visible'] !== 'boolean') return;
+    if (cid !== null && !(typeof cid === 'string' && UUID.test(cid))) return;
+    (socket.data as SocketData).presence = { conversationId: cid, visible: o['visible'], at: Date.now() };
+  }
+
+  /**
+   * ¿Esta persona está MIRANDO ahora esta conversación? Sí si alguna de sus conexiones en esta empresa informó, hace menos de 20 s, que la tiene abierta con la pestaña a la vista. Cualquier
+   * duda (sin conexión, latido viejo, otra conversación, pestaña oculta) es «no»: se le avisa.
+   */
+  isWatching(organizationId: string, userId: string, conversationId: string): boolean {
+    const io = this.io;
+    if (!io) return false;
+    const room = io.sockets.adapter.rooms.get(personRoom(organizationId, userId));
+    if (!room) return false;
+    const now = Date.now();
+    for (const id of room) {
+      const p = (io.sockets.sockets.get(id)?.data as SocketData | undefined)?.presence;
+      if (p && p.visible && p.conversationId === conversationId && now - p.at <= PRESENCE_TTL_MS) return true;
+    }
+    return false;
   }
 
   /** Cierra las conexiones cuya sesión venció, se revocó o ya actúa en otra empresa: el cliente se reconecta con la sesión vigente. */
@@ -235,7 +283,9 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
     const recipients = await this.recipientsOf(p.organizationId, p.conversationId);
     for (const u of p.also) recipients.add(u);
     // Notificación push de los mensajes entrantes nuevos (ADR-64): sin esperar y sin lanzar; el responsable o, sin responsable, quienes la pueden ver
-    for (const id of p.inbound) void this.push?.notifyInbound(p.organizationId, p.conversationId, id, new Set(recipients));
+    // v13 S4.1: a quien ya la está mirando no se le avisa (la decisión es del servidor para que no haya carreras entre el cliente y el aviso)
+    const watching = new Set([...recipients].filter((u) => this.isWatching(p.organizationId, u, p.conversationId)));
+    for (const id of p.inbound) void this.push?.notifyInbound(p.organizationId, p.conversationId, id, new Set(recipients), watching);
     // Quien lo veía antes (dueño anterior, colaborador retirado) también debe enterarse de que cambió
     const before = this.known.get(`${p.organizationId}:${p.conversationId}`);
     this.remember(p.organizationId, p.conversationId, recipients);
