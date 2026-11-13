@@ -94,7 +94,7 @@ async function connect(token: string, phoneId: string, name: string, waba = '123
 interface Sch { id: string; text: string; send_at: string; status: 'scheduled' | 'sent' | 'cancelled' | 'failed'; reason: string | null; created_at: string; resolved_at: string | null; author: { id: string; name: string }; mine: boolean; can_cancel: boolean }
 
 let seq = 0;
-async function mkConv(o: { owner?: string | null; status?: string; org?: string; lastInbound?: Date | null } = {}): Promise<string> {
+async function mkConv(o: { owner?: string | null; status?: string; org?: string; lastInbound?: Date | null; channel?: string } = {}): Promise<string> {
   seq += 1;
   const org = o.org ?? ORG_A;
   const owner = o.owner === undefined ? IDS.carol : o.owner;
@@ -106,7 +106,7 @@ async function mkConv(o: { owner?: string | null; status?: string; org?: string;
     await admin.query(
       `INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, owner_id, assigned_at, last_message_at, last_inbound_at, unread_count, peer_id)
        VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, $7, $8, 1, $9) RETURNING id`,
-      [org, contact, org === ORG_B ? channelB : channelA, status, owner, owner ? new Date() : null, ago(30 * MIN), o.lastInbound === undefined ? ago(HOUR) : o.lastInbound, phone.slice(1)],
+      [org, contact, o.channel ?? (org === ORG_B ? channelB : channelA), status, owner, owner ? new Date() : null, ago(30 * MIN), o.lastInbound === undefined ? ago(HOUR) : o.lastInbound, phone.slice(1)],
     )
   ).rows[0].id as string;
 }
@@ -241,6 +241,30 @@ describe('programar', () => {
     const live = await mkConv();
     await admin.query(`UPDATE channel_accounts SET status = 'disabled' WHERE id = $1`, [channelA]);
     expect(await code(await schedule(T.carol, live, { text: 'hola', send_at: inMs(HOUR) }))).toBe('CHANNEL_DISABLED');
+  });
+
+  it('WhatsApp por QR no tiene ventana de 24 h: programa aunque el último mensaje del cliente sea de hace 3 días, o no haya ninguno; el oficial a las 25 h sigue rechazado (v13 S0.1)', async () => {
+    const qr = (await admin.query(`INSERT INTO channel_accounts(id, organization_id, provider, is_official, name, status) VALUES (gen_random_uuid(), $1, 'evolution', false, 'Línea QR', 'active') RETURNING id`, [ORG_A])).rows[0].id as string;
+    const old = await mkConv({ channel: qr, lastInbound: ago(72 * HOUR) });
+    const never = await mkConv({ channel: qr, lastInbound: null });
+    const s = await ok<Sch>(await schedule(T.carol, old, { text: 'Hola, retomo lo del otro día', send_at: inMs(5 * 24 * HOUR) }), 201);
+    expect(s.status).toBe('scheduled');
+    await ok<Sch>(await schedule(T.carol, never, { text: 'Hola', send_at: inMs(2 * HOUR) }), 201);
+    // la ventana de 24 h no aplica, pero el horizonte es de 30 días
+    const far = await schedule(T.carol, old, { text: 'muy lejos', send_at: inMs(31 * 24 * HOUR) });
+    expect(far.status).toBe(400);
+    expect((await json<{ error: { details: Array<{ path: string; code: string }> } }>(far)).error.details[0]).toMatchObject({ path: 'send_at', code: 'too_far' });
+    expect((await schedule(T.carol, old, { text: 'cerca', send_at: inMs(20_000) })).status).toBe(400); // lo de «al menos un minuto» sigue valiendo
+    // el oficial: 25 h sin que escriba el cliente ⇒ la ventana cerrada, con SU error
+    const official = await mkConv({ lastInbound: ago(25 * HOUR) });
+    expect(await code(await schedule(T.carol, official, { text: 'hola', send_at: inMs(HOUR) }))).toBe('WINDOW_CLOSED');
+    // y a su hora sale como un mensaje normal de quien lo programó, sin tropezar con una ventana que este canal no tiene
+    await makeDue(s.id);
+    expect(await runDue()).toBeGreaterThanOrEqual(1);
+    expect((await list(T.carol, old)).find((x) => x.id === s.id)).toBeUndefined(); // ya no es «pendiente»
+    const sentRow = (await admin.query(`SELECT status, reason FROM scheduled_messages WHERE id = $1`, [s.id])).rows[0] as { status: string; reason: string | null };
+    expect(sentRow).toMatchObject({ status: 'sent', reason: null });
+    expect((await msgs(old)).map((m) => `${m.sender_type}:${m.body}`)).toContain('human:Hola, retomo lo del otro día');
   });
 
   it(`hay un máximo de ${MAX_PENDING_PER_CONVERSATION} pendientes por conversación (409 SCHEDULE_LIMIT); cancelar uno deja programar otro`, async () => {

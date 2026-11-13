@@ -94,6 +94,10 @@ describe('horas para programar (puras)', () => {
     expect(scheduleLimit({ window: { open: false, expires_at: null } })).toBeNull();
     expect(scheduleLimit({ window: { open: false, expires_at: exp.toISOString() } })).toBeNull();
   });
+  it('scheduleLimit en un canal SIN ventana (QR: abierta y sin fecha de cierre) no la trata como cerrada: hasta 30 días', () => {
+    const limit = scheduleLimit({ window: { open: true, expires_at: null } }, now);
+    expect(limit?.getTime()).toBe(now.getTime() + 30 * 24 * HOUR);
+  });
   it('quickTimes ofrece solo las horas que caben en la ventana', () => {
     expect(quickTimes(now, new Date(now.getTime() + 23 * HOUR)).map((o) => o.label)).toEqual(['En 30 minutos', 'En 1 hora', 'En 3 horas', 'Mañana a las 9:00']);
     expect(quickTimes(now, new Date(now.getTime() + 90 * MIN)).map((o) => o.label)).toEqual(['En 30 minutos', 'En 1 hora']);
@@ -142,6 +146,20 @@ describe('Redactor · programar', () => {
     const group = within(dlg).getByRole('group', { name: 'Horas sugeridas' });
     expect(within(group).getAllByRole('button').map((b) => b.textContent)).toEqual(['En 30 minutos', 'En 1 hora']);
     expect(within(dlg).getByText(/Puedes programarlo hasta/)).toBeInTheDocument();
+  });
+
+  it('en una conversación de WhatsApp por QR (sin ventana de 24 h) deja programar y no dice «pasaron 24 horas» ni pide plantilla', async () => {
+    const w = world({ conv: conv({ window: { open: true, expires_at: null } }) });
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    await userEvent.type(await box(), 'Hola');
+    await userEvent.click(screen.getByRole('button', { name: 'Programar mensaje' }));
+    const dlg = await screen.findByRole('dialog', { name: 'Programar mensaje' });
+    expect(within(dlg).queryByText(/Pasaron más de 24 horas/)).not.toBeInTheDocument();
+    expect(within(dlg).getByLabelText(/Día y hora/)).toBeInTheDocument();
+    expect(within(dlg).getByText(/Puedes programarlo hasta .*\(30 días\)/)).toBeInTheDocument();
+    expect(within(dlg).queryByText(/WhatsApp solo permite plantillas/)).not.toBeInTheDocument();
+    expect(within(dlg).getByRole('button', { name: 'Programar' })).toBeInTheDocument();
   });
 
   it('valida la hora antes de molestar al servidor: vacía, pasada o fuera de la ventana', async () => {
