@@ -47,22 +47,16 @@ self.addEventListener('push', function (event) {
     data = {};
   }
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (wins) {
-      // Con la aplicación a la vista ya suena y se ve en la bandeja: no se repite como notificación del sistema (salvo la de prueba, que lleva `force`)
-      if (data.force !== true) {
-        for (var i = 0; i < wins.length; i++) {
-          if (wins[i].visibilityState === 'visible' && wins[i].focused) return undefined;
-        }
-      }
-      return brandInfo().then(function (brand) {
-        return self.registration.showNotification(typeof data.title === 'string' && data.title ? data.title : brand.name, {
-          body: typeof data.body === 'string' && data.body ? data.body : 'Mensaje nuevo',
-          icon: brand.icon,
-          badge: brand.badge,
-          tag: typeof data.tag === 'string' ? data.tag : undefined,
-          renotify: true,
-          data: { url: typeof data.url === 'string' ? data.url : '/inbox' },
-        });
+    // v13 S4.1: AQUÍ no se decide si mostrar el aviso. Quién está mirando qué conversación lo sabe el servidor (presencia por persona con latido); si el mensaje es de la conversación que la persona
+    // tiene abierta y a la vista, el servidor ni siquiera manda el push. Antes se ocultaba con CUALQUIER ventana a la vista, y quien miraba otra conversación nunca se enteraba. Cada mensaje lleva
+    // su propia `tag`: los avisos de una misma conversación no se reemplazan entre sí.
+    brandInfo().then(function (brand) {
+      return self.registration.showNotification(typeof data.title === 'string' && data.title ? data.title : brand.name, {
+        body: typeof data.body === 'string' && data.body ? data.body : 'Mensaje nuevo',
+        icon: brand.icon,
+        badge: brand.badge,
+        tag: typeof data.tag === 'string' ? data.tag : undefined,
+        data: { url: typeof data.url === 'string' ? data.url : '/inbox' },
       });
     }),
   );

@@ -9,6 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { Client } from 'pg';
+import { io as connectIo, type Socket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
@@ -17,12 +18,13 @@ import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { ChannelsModule, FAKE_WHATSAPP_TOKEN, FakeWhatsAppProvider, WHATSAPP_PROVIDER } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule } from '../../src/modules/inbox';
-import { FakePushSender, PUSH_SENDER, PushModule } from '../../src/modules/push';
+import { FakePushSender, PUSH_SENDER, PushModule, PushService } from '../../src/modules/push';
 import { RealtimeModule, RealtimeService } from '../../src/modules/realtime';
 import { OpportunitiesModule } from '../../src/modules/opportunities';
 import { OrganizationsModule } from '../../src/modules/organizations';
 import { QueuesModule } from '../../src/modules/queues';
 import { Argon2idHasher } from '../../src/security';
+import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
@@ -323,5 +325,156 @@ describe('notificación de prueba', () => {
     sender().results.set(EP_C, 'gone');
     expect(await ok<{ gone: number }>(await call('POST', '/push/test', T.carol))).toMatchObject({ sent: 0, gone: 1 });
     expect(await status(T.carol, EP_C)).toEqual({ subscribed: false, show_text: false });
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════ v13 S4.1 — presencia y destinatarios
+describe('una notificación por mensaje, solo si no la estás mirando (v13 S4.1)', () => {
+  const sockets: Socket[] = [];
+  afterEach(() => { for (const s of sockets.splice(0)) s.close(); });
+  const origin = (): string => base.replace(/\/v1$/, '');
+
+  /** Una conexión en vivo de `token` que dice qué mira; resuelve cuando el servidor ya la registró. */
+  async function watch(token: string, conversationId: string | null, visible = true): Promise<Socket> {
+    const s = connectIo(origin(), { path: '/v1/realtime', transports: ['websocket'], reconnection: false, forceNew: true, auth: { token } });
+    sockets.push(s);
+    await new Promise<void>((resolve, reject) => { s.once('connect', () => resolve()); s.once('connect_error', reject); });
+    s.emit('presence', { conversation_id: conversationId, visible });
+    await new Promise((r) => setTimeout(r, 150));
+    return s;
+  }
+  const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 700));
+
+  it('quien la está mirando (pestaña a la vista) no recibe nada; al ocultarla, al abrir otra conversación o con el latido vencido, sí', async () => {
+    const conv = await mkConv({ owner: IDS.carol });
+    const other = await mkConv({ owner: IDS.carol });
+    await ok(await sub(T.carol, EP_C, false));
+    const s = await watch(T.carol, conv);
+    arrives(conv, await mkInbound(conv));
+    await settle();
+    expect(sender().sent).toHaveLength(0); // la está mirando
+    s.emit('presence', { conversation_id: conv, visible: false }); // cambió de pestaña
+    await new Promise((r) => setTimeout(r, 150));
+    arrives(conv, await mkInbound(conv));
+    await wait(() => sender().sent.length >= 1);
+    expect(sender().sent).toHaveLength(1);
+    s.emit('presence', { conversation_id: other, visible: true }); // mira OTRA conversación
+    await new Promise((r) => setTimeout(r, 150));
+    arrives(conv, await mkInbound(conv));
+    await wait(() => sender().sent.length >= 2);
+    expect(sender().sent).toHaveLength(2);
+    s.emit('presence', { conversation_id: conv, visible: true });
+    await new Promise((r) => setTimeout(r, 150));
+    const real = Date.now.bind(Date);
+    vi.spyOn(Date, 'now').mockImplementation(() => real() + 25_000); // el último latido ya tiene más de 20 s: ante la duda, se avisa
+    arrives(conv, await mkInbound(conv));
+    await wait(() => sender().sent.length >= 3);
+    expect(sender().sent).toHaveLength(3);
+  });
+
+  it('un latido mal formado se ignora (no apaga los avisos) y la presencia en otra empresa no cuenta', async () => {
+    const conv = await mkConv({ owner: IDS.carol });
+    await ok(await sub(T.carol, EP_C, false));
+    const s = await watch(T.carol, null, false);
+    for (const bad of [{ conversation_id: 'no-es-un-uuid', visible: true }, { conversation_id: conv, visible: 'si' }, 'hola', null, [conv], { visible: true }]) s.emit('presence', bad);
+    await new Promise((r) => setTimeout(r, 200));
+    await watch(T.bob, conv); // la de B (otra empresa) mirando el mismo id
+    arrives(conv, await mkInbound(conv));
+    await wait(() => sender().sent.length >= 1);
+    expect(sender().sent).toHaveLength(1);
+  });
+
+  it('cada mensaje lleva su propia etiqueta (no se reemplazan) y el aviso trae el id del mensaje y ningún teléfono', async () => {
+    const conv = await mkConv({ owner: IDS.carol });
+    await ok(await sub(T.carol, EP_C, true));
+    const m1 = await mkInbound(conv, { text: 'Primero' });
+    const m2 = await mkInbound(conv, { text: 'Segundo' });
+    arrives(conv, m1);
+    arrives(conv, m2);
+    await wait(() => sender().sent.length >= 2);
+    const payloads = sender().sent.map((x) => JSON.parse(x.payload) as { tag: string; message_id: string; title: string; body: string });
+    expect(new Set(payloads.map((p) => p.tag))).toEqual(new Set([`msg-${m1}`, `msg-${m2}`]));
+    expect(new Set(payloads.map((p) => p.message_id))).toEqual(new Set([m1, m2]));
+    expect(JSON.stringify(payloads)).not.toMatch(/\+?5939\d{8}/);
+  });
+
+  it('con responsable avisa a él y a los colaboradores vigentes (también los que solo ven), no a un colaborador retirado ni a la administración', async () => {
+    const conv = await mkConv({ owner: IDS.carol });
+    await admin.query(`INSERT INTO conversation_participants(id, organization_id, conversation_id, user_id, permission) VALUES (gen_random_uuid(), $1, $2, $3, 'view')`, [ORG_A, conv, IDS.eve]);
+    await ok(await sub(T.carol, EP_C, false));
+    await ok(await sub(T.eve, EP_E, false));
+    await ok(await sub(T.alice, EP_A, false)); // ve todo, pero hay responsable
+    arrives(conv, await mkInbound(conv));
+    await wait(() => sender().sent.length >= 2);
+    await settle();
+    expect(sender().sent.map((x) => x.endpoint).sort()).toEqual([EP_C, EP_E].sort());
+    sender().sent.length = 0;
+    await admin.query(`UPDATE conversation_participants SET revoked_at = now(), revoked_by = $2 WHERE conversation_id = $1`, [conv, IDS.alice]);
+    arrives(conv, await mkInbound(conv));
+    await wait(() => sender().sent.length >= 1);
+    await settle();
+    expect(sender().sent.map((x) => x.endpoint)).toEqual([EP_C]);
+  });
+
+  it('sin responsable: los miembros activos del departamento que pueden verla; si ninguno puede, quienes la ven; nunca a quien no puede abrirla', async () => {
+    const queue = (await admin.query(`INSERT INTO queues(id, organization_id, name) VALUES (gen_random_uuid(), $1, 'Ventas') RETURNING id`, [ORG_A])).rows[0].id as string;
+    await admin.query(`INSERT INTO queue_members(organization_id, queue_id, user_id, active) VALUES ($1, $2, $3, true), ($1, $2, $4, false)`, [ORG_A, queue, IDS.eve, IDS.carol]);
+    const conv = await mkConv({ owner: null });
+    await admin.query(`UPDATE conversations SET queue_id = $2 WHERE id = $1`, [conv, queue]);
+    await ok(await sub(T.carol, EP_C, false));
+    await ok(await sub(T.eve, EP_E, false));
+    await ok(await sub(T.alice, EP_A, false));
+    const msg = await mkInbound(conv);
+    const push = app.get(PushService, { strict: false });
+    // Eva es del departamento y la ve (se le compartió); Carolina está inactiva en él; Alicia (administración) no es del departamento
+    await push.notifyInbound(ORG_A, conv, msg, new Set([IDS.eve, IDS.alice]));
+    expect(sender().sent.map((x) => x.endpoint)).toEqual([EP_E]);
+    sender().sent.length = 0;
+    // Nadie del departamento puede verla: se avisa a quienes sí la ven
+    await push.notifyInbound(ORG_A, conv, msg, new Set([IDS.alice]));
+    expect(sender().sent.map((x) => x.endpoint)).toEqual([EP_A]);
+    sender().sent.length = 0;
+    // Un miembro del departamento que la está mirando no recibe el aviso
+    await push.notifyInbound(ORG_A, conv, msg, new Set([IDS.eve, IDS.alice]), new Set([IDS.eve]));
+    expect(sender().sent).toHaveLength(0);
+  });
+
+  it('A↔B: la presencia, los destinatarios y los avisos no cruzan de empresa', async () => {
+    const conv = await mkConv({ owner: IDS.carol });
+    await ok(await sub(T.bob, EP_A));
+    arrives(conv, await mkInbound(conv));
+    await settle();
+    expect(sender().sent).toHaveLength(0);
+    expect(app.get(RealtimeService, { strict: false }).isWatching(ORG_B, IDS.carol, conv)).toBe(false);
+  });
+});
+
+describe('aviso de una venta nueva por push (v13 S4.2)', () => {
+  it('va solo a las personas indicadas, con vendedor, monto y contacto si eligieron ver el texto; si no, un aviso genérico; con su propia etiqueta', async () => {
+    await ok(await sub(T.alice, EP_A, true));
+    await ok(await sub(T.carol, EP_C, true)); // asesora: no es destinataria
+    await ok(await sub(T.eve, EP_E, false));
+    const push = app.get(PushService, { strict: false });
+    const run = (recipients: string[]) => TenantContext.run({ organizationId: ORG_A, requestId: 'r' }, () => push.notifySale(recipients, { saleId: 'sale-1', seller: 'Carolina Vera', amount: '$120.00', contact: 'Ana Torres' }));
+    await run([IDS.alice, IDS.eve]);
+    const sent = sender().sent.map((x) => ({ endpoint: x.endpoint, ...(JSON.parse(x.payload) as { title: string; body: string; url: string; tag: string }) }));
+    expect(sent.map((x) => x.endpoint).sort()).toEqual([EP_A, EP_E].sort());
+    expect(sent.find((x) => x.endpoint === EP_A)).toMatchObject({ title: 'Nueva venta', body: 'Carolina Vera · $120.00 · Ana Torres', url: '/sales', tag: 'sale-sale-1' });
+    expect(sent.find((x) => x.endpoint === EP_E)!.body).toBe('Se registró una venta nueva'); // sin «mostrar el texto»: nada de nombres ni montos
+    sender().sent.length = 0;
+    await run([]);
+    expect(sender().sent).toHaveLength(0);
+  });
+
+  it('A↔B: el aviso de la empresa A no llega a las suscripciones de B ni se da de baja nada ajeno; un navegador que ya no existe (410) se da de baja', async () => {
+    await ok(await sub(T.bob, EP_A, true)); // la misma dirección, en la empresa B
+    await ok(await sub(T.alice, EP_A, true));
+    await ok(await sub(T.alice, EP_E, true));
+    sender().results.set(EP_E, 'gone');
+    const push = app.get(PushService, { strict: false });
+    await TenantContext.run({ organizationId: ORG_A, requestId: 'r' }, () => push.notifySale([IDS.alice, IDS.bob], { saleId: 's', seller: 'x', amount: '1', contact: 'y' }));
+    expect(sender().sent.map((x) => x.endpoint)).toEqual([EP_A]); // una sola vez: la de Alicia (la de Beto es de la empresa B y no se toca)
+    expect((await rows()).find((x) => x.endpoint === EP_E)!.revoked_at).not.toBeNull();
+    expect((await rows()).find((x) => x.organization_id === ORG_B)!.revoked_at).toBeNull();
   });
 });

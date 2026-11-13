@@ -1,7 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { contacts, conversations, Database, messages, pushSubscriptions } from '../../db';
+import { contacts, conversationParticipants, conversations, Database, messages, pushSubscriptions, queueMembers } from '../../db';
 import { ForbiddenError, TooManyAttemptsError, ValidationError } from '../../errors';
 import { WindowLimiter } from '../../http';
 import type { AppLogger } from '../../logger';
@@ -108,6 +108,25 @@ export class PushService {
     return out;
   }
 
+  /**
+   * Aviso de una venta nueva (v13 S4.2) a las personas dadas (la administración de la empresa). Sin el permiso de mostrar el texto, no lleva ni vendedor, ni monto, ni cliente. Corre dentro del
+   * contexto de la empresa de quien registró la venta. Mejor esfuerzo: nunca lanza.
+   */
+  async notifySale(recipients: readonly string[], n: { saleId: string; seller: string; amount: string; contact: string }): Promise<void> {
+    if (!this.cfg.push.enabled || recipients.length === 0) return;
+    try {
+      const subs = await this.db.withTenant((tx) => tx.select().from(pushSubscriptions).where(and(inArray(pushSubscriptions.userId, [...recipients]), isNull(pushSubscriptions.revokedAt))));
+      const gone: string[] = [];
+      for (const s of subs) {
+        const payload = JSON.stringify({ title: 'Nueva venta', body: s.showText ? `${n.seller} · ${n.amount} · ${n.contact}` : 'Se registró una venta nueva', url: '/sales', tag: `sale-${n.saleId}` });
+        if ((await this.sender.send({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload)) === 'gone') gone.push(s.id);
+      }
+      if (gone.length > 0) await this.db.withTenant((tx) => tx.update(pushSubscriptions).set({ revokedAt: new Date() }).where(inArray(pushSubscriptions.id, gone)));
+    } catch (e) {
+      this.log.warn({ err: e instanceof Error ? e.name : 'Error' }, 'push: no se pudo avisar de una venta nueva');
+    }
+  }
+
   /** Da de baja este navegador para la persona (solo el suyo: el de otra persona no se toca). */
   async unsubscribe(input: EndpointInput): Promise<PushStatusView> {
     const userId = this.me();
@@ -118,16 +137,21 @@ export class PushService {
   }
 
   /**
-   * Avisa de un mensaje entrante. Lo llama el tiempo real (fuera de cualquier petición) con las personas que pueden ver la conversación; aquí se decide a quién: su responsable, o todas ellas si
-   * aún no tiene. Mejor esfuerzo: nunca lanza (el mensaje ya está en la bandeja).
+   * Avisa de un mensaje entrante (v13 S4.1: UNA notificación por mensaje). Lo llama el tiempo real (fuera de cualquier petición) con las personas que pueden ver la conversación (`candidates`:
+   * dueño, colaboradores vigentes y quien ve todo, siempre con permiso de leer el Inbox) y con las que la están MIRANDO en este instante (`watching`: a ellas no). Aquí se decide a quién:
+   *  - con responsable: él y los colaboradores con acceso vigente;
+   *  - sin responsable: los miembros activos del departamento de la conversación que puedan verla (y, si ninguno puede o no tiene departamento, todas las personas que la ven). Nunca a quien no
+   *    puede abrirla: el aviso lleva el nombre del cliente.
+   * Solo cuentan los mensajes del cliente: lo propio, lo automático, lo del agente de IA y las notas son de salida. Cada aviso lleva su propia etiqueta (no se reemplazan entre sí). Mejor esfuerzo:
+   * nunca lanza (el mensaje ya está en la bandeja).
    */
-  async notifyInbound(organizationId: string, conversationId: string, messageId: string, candidates: ReadonlySet<string>): Promise<void> {
+  async notifyInbound(organizationId: string, conversationId: string, messageId: string, candidates: ReadonlySet<string>, watching: ReadonlySet<string> = new Set()): Promise<void> {
     if (!this.cfg.push.enabled || candidates.size === 0) return;
     try {
       await TenantContext.run({ organizationId }, async () => {
         const [row] = await this.db.withTenant((tx) =>
           tx
-            .select({ ownerId: conversations.ownerId, contact: contacts.name, kind: messages.kind, body: messages.body, direction: messages.direction })
+            .select({ ownerId: conversations.ownerId, queueId: conversations.queueId, contact: contacts.name, kind: messages.kind, body: messages.body, direction: messages.direction })
             .from(messages)
             .innerJoin(conversations, and(eq(conversations.organizationId, messages.organizationId), eq(conversations.id, messages.conversationId)))
             .innerJoin(contacts, and(eq(contacts.organizationId, conversations.organizationId), eq(contacts.id, conversations.contactId)))
@@ -135,7 +159,16 @@ export class PushService {
             .limit(1),
         );
         if (!row || row.direction !== 'in') return;
-        const recipients = row.ownerId ? (candidates.has(row.ownerId) ? [row.ownerId] : []) : [...candidates];
+        let who: string[];
+        if (row.ownerId) {
+          const collaborators = await this.db.withTenant((tx) => tx.select({ userId: conversationParticipants.userId }).from(conversationParticipants).where(and(eq(conversationParticipants.conversationId, conversationId), isNull(conversationParticipants.revokedAt))));
+          who = [row.ownerId, ...collaborators.map((c) => c.userId)].filter((u) => candidates.has(u));
+        } else {
+          const dept = row.queueId ? await this.db.withTenant((tx) => tx.select({ userId: queueMembers.userId }).from(queueMembers).where(and(eq(queueMembers.queueId, row.queueId!), eq(queueMembers.active, true)))) : [];
+          const inDept = dept.map((d) => d.userId).filter((u) => candidates.has(u));
+          who = inDept.length > 0 ? inDept : [...candidates];
+        }
+        const recipients = [...new Set(who)].filter((u) => !watching.has(u));
         if (recipients.length === 0) return;
         const subs = await this.db.withTenant((tx) => tx.select().from(pushSubscriptions).where(and(inArray(pushSubscriptions.userId, recipients), isNull(pushSubscriptions.revokedAt))));
         const gone: string[] = [];
@@ -143,7 +176,7 @@ export class PushService {
         for (const s of subs) {
           const text = (row.body ?? '').replace(/\s+/g, ' ').trim();
           const shown = row.kind === 'text' && text !== '' ? (text.length > BODY_CHARS ? `${text.slice(0, BODY_CHARS - 1)}…` : text) : (KIND_TEXT[row.kind] ?? 'Mensaje nuevo');
-          const payload = JSON.stringify({ title: row.contact, body: s.showText ? shown : 'Mensaje nuevo', conversation_id: conversationId, url: `/inbox/${conversationId}`, tag: `conv-${conversationId}` });
+          const payload = JSON.stringify({ title: row.contact, body: s.showText ? shown : 'Mensaje nuevo', conversation_id: conversationId, message_id: messageId, url: `/inbox/${conversationId}`, tag: `msg-${messageId}` });
           const r = await this.sender.send({ endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, payload);
           if (r === 'gone') gone.push(s.id);
           else if (r === 'sent') sentIds.push(s.id);

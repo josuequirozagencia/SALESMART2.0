@@ -68,7 +68,7 @@ async function start(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE sale_change_requests, sale_payments, sale_status_history, sales, meta_events, response_timers, messages, conversation_participants, conversations, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, contact_phones, contacts, queue_products, queue_distribution_state, queue_members, whatsapp_accounts, channel_accounts, queues, channel_routes, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE notifications, sale_change_requests, sale_payments, sale_status_history, sales, meta_events, response_timers, messages, conversation_participants, conversations, stage_history, opportunities, pipeline_stages, pipelines, contact_tags, tags, contact_phones, contacts, queue_products, queue_distribution_state, queue_members, whatsapp_accounts, channel_accounts, queues, channel_routes, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'America/Guayaquil')`, [id, kind, name]);
   }
@@ -495,5 +495,91 @@ describe('base de datos', () => {
     await expect(admin.query(`UPDATE sales SET status = 'cancelled' WHERE id = $1`, [s.id])).rejects.toThrow(/sales_cancel_consistent/);
     await expect(admin.query(`UPDATE sales SET amount = 0 WHERE id = $1`, [s.id])).rejects.toThrow(/sales_amount_valid/);
     expect(contact).toBeTruthy();
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════ v13 S4.2 — aviso de venta nueva a la administración
+describe('aviso de venta nueva (v13 S4.2)', () => {
+  interface Notice { id: string; type: string; read_at: string | null; actor: { id: string; name: string } | null; sale: { id: string; product: string; amount: string; currency: string; seller: { id: string; name: string } | null; contact: { id: string; name: string } } | null }
+  const bell = async (token: string): Promise<{ items: Notice[]; unread: number | null }> => {
+    const r = await call('GET', '/notifications', token);
+    expect(r.status).toBe(200);
+    return json(r);
+  };
+  const rows = async (): Promise<Array<{ user_id: string; sale_id: string; actor_id: string }>> => (await admin.query(`SELECT user_id, sale_id, actor_id FROM notifications WHERE type = 'sale_created' ORDER BY user_id`)).rows;
+
+  it('cuando una asesora registra una venta, la administración de ESA empresa recibe «Nueva venta» con vendedor, monto y contacto; ningún asesor la recibe', async () => {
+    const { conv } = await mkConv();
+    const sale = await mk(conv, { amount: 120 });
+    const a = await bell(T.alice);
+    expect(a.unread).toBe(1);
+    expect(a.items).toHaveLength(1);
+    expect(a.items[0]).toMatchObject({ type: 'sale_created', read_at: null, actor: { id: IDS.carol, name: 'Carolina Vera' }, sale: { id: sale.id, amount: '120.00', currency: 'USD', seller: { id: IDS.carol, name: 'Carolina Vera' }, contact: { name: expect.stringMatching(/^Cliente \d+$/) as string } } });
+    expect(a.items[0]!.sale!.product).toBeTruthy();
+    for (const t of [T.carol, T.eve]) expect((await bell(t)).items).toEqual([]);
+    expect(await rows()).toEqual([{ user_id: IDS.alice, sale_id: sale.id, actor_id: IDS.carol }]);
+  });
+
+  it('quien registra la venta no se avisa a sí mismo (una administradora que vende en una conversación ajena)', async () => {
+    const { conv } = await mkConv();
+    const mine = await mk(conv, {}, T.alice); // la administradora puede registrar en nombre del dueño
+    expect(mine.seller).toMatchObject({ id: IDS.carol });
+    expect((await bell(T.alice)).items).toEqual([]);
+    expect(await rows()).toEqual([]);
+  });
+
+  it('una repetición con la misma Idempotency-Key no avisa otra vez; dos peticiones simultáneas con la misma llave dejan un solo aviso', async () => {
+    const { conv } = await mkConv();
+    const k = key();
+    const first = await sell(T.carol, { conversation_id: conv, product_id: productA, amount: 30 }, k);
+    expect(first.status).toBe(201);
+    const again = await sell(T.carol, { conversation_id: conv, product_id: productA, amount: 30 }, k);
+    expect(again.status).toBe(200);
+    expect((await bell(T.alice)).items).toHaveLength(1);
+    const { conv: c2 } = await mkConv();
+    const k2 = key();
+    await Promise.all([1, 2, 3].map(() => sell(T.carol, { conversation_id: c2, product_id: productA, amount: 40 }, k2)));
+    expect((await bell(T.alice)).items).toHaveLength(2); // la primera venta y esta; no cuatro
+    expect((await rows())).toHaveLength(2);
+  });
+
+  it('abonos, correcciones y anulaciones no son ventas nuevas: no generan avisos', async () => {
+    const { conv } = await mkConv();
+    const sale = await mk(conv, { amount: 100, down_payment: 20, method: 'cash' });
+    expect((await bell(T.alice)).items).toHaveLength(1);
+    expect((await pay(T.carol, sale.id, 30)).status).toBeLessThan(300);
+    expect((await call('POST', `/sales/${sale.id}/corrections`, T.alice, { amount: 5, reason: 'error de digitación' }, idem())).status).toBeLessThan(300);
+    expect((await call('POST', `/sales/${sale.id}/cancel`, T.alice, { reason: 'el cliente se arrepintió' })).status).toBe(200);
+    expect((await bell(T.alice)).items).toHaveLength(1);
+    expect(await rows()).toHaveLength(1);
+  });
+
+  it('marcar como leído funciona y es solo de quien lo recibió; un asesor al que se le cambió el rol no ve avisos de ventas aunque existan', async () => {
+    const { conv } = await mkConv();
+    await mk(conv);
+    const n = (await bell(T.alice)).items[0]!;
+    expect((await call('POST', `/notifications/${n.id}/read`, T.carol)).status).toBe(404); // ajeno
+    expect((await call('POST', `/notifications/${n.id}/read`, T.alice)).status).toBe(200);
+    expect((await bell(T.alice)).unread).toBe(0);
+    // un aviso de venta puesto a la fuerza a una asesora (p. ej. quien dejó de ser administradora) no se le muestra: ve solo lo suyo
+    await admin.query(`INSERT INTO notifications(id, organization_id, user_id, type, actor_id, sale_id) SELECT gen_random_uuid(), organization_id, $1, 'sale_created', actor_id, sale_id FROM notifications WHERE id = $2`, [IDS.eve, n.id]);
+    expect((await bell(T.eve)).items).toEqual([]);
+    expect((await bell(T.eve)).unread).toBe(0);
+  });
+
+  it('A↔B: la venta de A no avisa a la administración de B', async () => {
+    const a = await mkConv();
+    await mk(a.conv);
+    expect((await bell(T.bob)).items).toEqual([]);
+    expect(await rows()).toEqual([{ user_id: IDS.alice, sale_id: expect.any(String) as string, actor_id: IDS.carol }]);
+  });
+
+  it('base de datos: un aviso por persona y venta, la venta debe ser de la misma empresa y el aviso de venta no lleva conversación ni tarea', async () => {
+    const { conv } = await mkConv();
+    const sale = await mk(conv);
+    await expect(admin.query(`INSERT INTO notifications(id, organization_id, user_id, type, actor_id, sale_id) VALUES (gen_random_uuid(), $1, $2, 'sale_created', $3, $4)`, [ORG_A, IDS.alice, IDS.carol, sale.id])).rejects.toThrow(/notifications_sale_uq/);
+    await expect(admin.query(`INSERT INTO notifications(id, organization_id, user_id, type, actor_id, sale_id) VALUES (gen_random_uuid(), $1, $2, 'sale_created', $3, $4)`, [ORG_B, IDS.bob, IDS.carol, sale.id])).rejects.toThrow(/notifications_sale_fk/);
+    await expect(admin.query(`INSERT INTO notifications(id, organization_id, user_id, type, actor_id, sale_id, conversation_id) VALUES (gen_random_uuid(), $1, $2, 'sale_created', $3, $4, $5)`, [ORG_A, IDS.eve, IDS.carol, sale.id, conv])).rejects.toThrow(/notifications_sale_shape/);
+    await expect(admin.query(`INSERT INTO notifications(id, organization_id, user_id, type, actor_id) VALUES (gen_random_uuid(), $1, $2, 'sale_created', $3)`, [ORG_A, IDS.eve, IDS.carol])).rejects.toThrow(/notifications_sale_shape/);
   });
 });

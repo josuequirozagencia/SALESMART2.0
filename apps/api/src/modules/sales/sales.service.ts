@@ -10,6 +10,7 @@ import { loadConversation, scopeOf, type InboxAccess } from '../inbox';
 import { OpportunitiesService } from '../opportunities';
 import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
 import { RealtimeService } from '../realtime';
+import { SaleNoticesService } from './sale-notices.service';
 import { SlaService } from '../sla';
 import {
   MAX_OPEN_REQUESTS_PER_SALE,
@@ -133,6 +134,7 @@ export class SalesService {
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
     @Optional() @Inject(DomainEventBus) private readonly events?: DomainEventBus,
+    @Optional() @Inject(SaleNoticesService) private readonly notices?: SaleNoticesService,
   ) {}
 
   // ------------------------------------------------------------------ opciones del formulario
@@ -162,7 +164,13 @@ export class SalesService {
     const currency = await this.directory.currency();
     const run = (): Promise<Created> => this.db.withTenant((tx) => this.createIn(tx, access, key, input, currency));
     try {
-      return await this.hydrate(await run());
+      const made = await this.hydrate(await run());
+      // v13 S4.2: la administración se entera de una venta NUEVA, ya confirmada. Una repetición con la misma llave (`created: false`) no avisa otra vez
+      if (made.created) {
+        const sale = made.sale;
+        await this.notices?.created({ saleId: sale.id, authorId: scopeOf(access).userId, seller: sale.seller?.name ?? 'Sin vendedor', contact: sale.contact.name, amount: sale.amount, currency: sale.currency });
+      }
+      return made;
     } catch (e) {
       // Dos peticiones con la misma llave a la vez: gana una y la otra devuelve lo mismo
       if (this.isKeyClash(e, 'sales_org_key_uq')) return this.hydrate(await this.db.withTenant((tx) => this.replay(tx, scopeOf(access), key, input)));

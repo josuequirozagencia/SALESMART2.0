@@ -1,0 +1,6 @@
+ALTER TABLE "notifications" DROP CONSTRAINT "notifications_type_valid";--> statement-breakpoint
+ALTER TABLE "notifications" ADD COLUMN "sale_id" uuid;--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_sale_fk" FOREIGN KEY ("organization_id","sale_id") REFERENCES "public"."sales"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE UNIQUE INDEX "notifications_sale_uq" ON "notifications" USING btree ("organization_id","user_id","sale_id") WHERE "notifications"."type" = 'sale_created';--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_sale_shape" CHECK ("notifications"."type" <> 'sale_created' OR ("notifications"."sale_id" IS NOT NULL AND "notifications"."actor_id" IS NOT NULL AND "notifications"."conversation_id" IS NULL AND "notifications"."message_id" IS NULL AND "notifications"."task_id" IS NULL));--> statement-breakpoint
+ALTER TABLE "notifications" ADD CONSTRAINT "notifications_type_valid" CHECK ("notifications"."type" IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect', 'sale_created'));

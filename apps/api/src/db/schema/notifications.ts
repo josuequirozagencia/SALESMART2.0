@@ -4,6 +4,7 @@ import { uuidv7 } from '@sales-smart/shared';
 import { conversations, messages } from './conversations';
 import { tasks } from './crm';
 import { tenantTable } from './helpers';
+import { sales } from './sales';
 import { users } from './identity';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
@@ -45,14 +46,21 @@ export const notifications = tenantTable(
     messageId: uuid('message_id'),
     /** Avisos de tareas (F2, ADR-58). */
     taskId: uuid('task_id'),
+    /** Avisos de una venta nueva (v13 S4.2). */
+    saleId: uuid('sale_id'),
     createdAt: ts('created_at').notNull().defaultNow(),
     readAt: ts('read_at'),
   },
   (t) => [
     foreignKey({ name: 'notifications_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'notifications_message_fk', columns: [t['organizationId']!, t['messageId']!], foreignColumns: [messages.organizationId, messages.id] }),
+    foreignKey({ name: 'notifications_sale_fk', columns: [t['organizationId']!, t['saleId']!], foreignColumns: [sales.organizationId, sales.id] }),
     foreignKey({ name: 'notifications_task_fk', columns: [t['organizationId']!, t['taskId']!], foreignColumns: [tasks.organizationId, tasks.id] }),
-    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect')`),
+    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect', 'sale_created')`),
+    // Un aviso de venta nueva lleva su venta y quien la registró; ninguna conversación, nota ni tarea
+    check('notifications_sale_shape', sql`${t['type']!} <> 'sale_created' OR (${t['saleId']!} IS NOT NULL AND ${t['actorId']!} IS NOT NULL AND ${t['conversationId']!} IS NULL AND ${t['messageId']!} IS NULL AND ${t['taskId']!} IS NULL)`),
+    // Un solo aviso por persona y venta (repetir el registro no duplica)
+    uniqueIndex('notifications_sale_uq').on(t['organizationId']!, t['userId']!, t['saleId']!).where(sql`${t['type']!} = 'sale_created'`),
     // Una mención lleva su conversación y su nota
     check('notifications_mention_shape', sql`${t['type']!} <> 'mention' OR (${t['conversationId']!} IS NOT NULL AND ${t['messageId']!} IS NOT NULL AND ${t['actorId']!} IS NOT NULL)`),
     // Un aviso de tarea lleva su tarea (y ninguna conversación)

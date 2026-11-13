@@ -17,6 +17,22 @@ const EVENTS: readonly RealtimeEventName[] = ['conversation.created', 'conversat
 /** Espera antes de volver a conectar tras un fallo, creciendo hasta el tope (1, 2, 5, 10 y 30 s). */
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000] as const;
 
+/** Cada cuánto se repite el latido de presencia mientras la pestaña está a la vista (el servidor lo da por vencido a los 20 s). */
+export const PRESENCE_HEARTBEAT_MS = 10_000;
+
+/** Lo último que la persona dijo mirar; se reenvía al reconectar. */
+let lastPresence: { conversationId: string | null; visible: boolean } = { conversationId: null, visible: false };
+let activeSocket: Socket | null = null;
+
+/**
+ * Dice al servidor qué conversación se está mirando (v13 S4.1): `conversationId` la abierta (o null) y `visible` si la pestaña está a la vista (`visibilityState = visible`). Con eso el servidor
+ * decide si un mensaje nuevo merece una notificación del sistema. Sin conexión no hace nada (y el servidor, ante la duda, avisa); al reconectar se reenvía lo último.
+ */
+export function reportPresence(conversationId: string | null, visible: boolean): void {
+  lastPresence = { conversationId, visible };
+  if (activeSocket?.connected) activeSocket.emit('presence', { conversation_id: conversationId, visible });
+}
+
 let status: RealtimeStatus = 'off';
 const listeners = new Set<() => void>();
 function setStatus(next: RealtimeStatus): void {
@@ -71,9 +87,12 @@ export function startRealtime(h: Handlers): () => void {
     }, wait);
   };
 
+  activeSocket = socket;
   socket.on('connect', () => {
     attempt = 0;
     setStatus('live');
+    // Lo que se estaba mirando se vuelve a decir (la conexión nueva no sabe nada)
+    socket.emit('presence', { conversation_id: lastPresence.conversationId, visible: lastPresence.visible });
     if (wasDown) {
       wasDown = false;
       h.onResync();
@@ -99,6 +118,7 @@ export function startRealtime(h: Handlers): () => void {
   return () => {
     closed = true;
     clearTimeout(timer);
+    if (activeSocket === socket) activeSocket = null;
     socket.close();
     setStatus('off');
   };

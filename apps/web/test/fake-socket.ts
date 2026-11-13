@@ -6,6 +6,8 @@ export class FakeSocket {
   closed = false;
   connects = 0;
   authToken: string | null = null;
+  /** Lo que la aplicación le dice al servidor (p. ej. la presencia), en orden. */
+  readonly emitted: Array<{ event: string; payload: unknown }> = [];
   private readonly handlers = new Map<string, Handler[]>();
 
   constructor(readonly opts: { path?: string; auth?: (cb: (data: Record<string, unknown>) => void) => void }) {
@@ -13,6 +15,10 @@ export class FakeSocket {
   }
   on(event: string, fn: Handler): this {
     this.handlers.set(event, [...(this.handlers.get(event) ?? []), fn]);
+    return this;
+  }
+  emit(event: string, payload?: unknown): this {
+    this.emitted.push({ event, payload });
     return this;
   }
   connect(): this {

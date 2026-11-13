@@ -248,6 +248,6 @@ describe('campana: avisos de tareas', () => {
     bell([]);
     renderApp('/contacts');
     await userEvent.click(await screen.findByRole('button', { name: 'Avisos' }));
-    expect(await screen.findByText(/te asignen una tarea o una tarea tuya esté por vencer/)).toBeInTheDocument();
+    expect(await screen.findByText(/te asignen una tarea, una tarea tuya esté por vencer/)).toBeInTheDocument();
   });
 });
