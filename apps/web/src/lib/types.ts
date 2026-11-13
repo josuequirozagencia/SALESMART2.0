@@ -888,6 +888,8 @@ export interface ChatMessage {
   reaction: string | null;
   /** Reacción NUESTRA a este mensaje del cliente (M5.8). */
   my_reaction?: string | null;
+  /** Transcripción por IA de una nota de voz del cliente (v13 S5b, ADR-70); puede contener errores. */
+  transcript?: { text: string; seconds: number } | null;
   status: MessageStatus;
   error: string | null;
   sent_at: string;

@@ -132,6 +132,8 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     expect(form.getByLabelText('Sugerencias de respuesta por día')).toHaveValue('50');
     expect(form.getByLabelText('Seguimientos automáticos por día')).toHaveValue('200');
     expect(form.getByLabelText('Imágenes que leen los agentes por día')).toHaveValue('300');
+    expect(form.getByLabelText('Audios que transcriben los agentes por día')).toHaveValue('200');
+    expect(form.getByLabelText('Duración máxima de un audio (segundos)')).toHaveValue('120');
     for (const bad of ['0', '10001', '1.5', 'abc', '']) {
       await userEvent.clear(form.getByLabelText('Sugerencias de respuesta por día'));
       if (bad) await userEvent.type(form.getByLabelText('Sugerencias de respuesta por día'), bad);
@@ -144,8 +146,22 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     await userEvent.clear(form.getByLabelText('Seguimientos automáticos por día'));
     await userEvent.type(form.getByLabelText('Seguimientos automáticos por día'), '500');
     await userEvent.click(form.getByRole('button', { name: 'Guardar límites' }));
-    await waitFor(() => expect(w.calls['limits']![0]!.body).toEqual({ tests_per_day: 100, suggestions_per_day: 80, follow_ups_per_day: 500, images_per_day: 300 }));
+    await waitFor(() => expect(w.calls['limits']![0]!.body).toEqual({ tests_per_day: 100, suggestions_per_day: 80, follow_ups_per_day: 500, images_per_day: 300, transcriptions_per_day: 200, audio_max_seconds: 120 }));
     expect(await form.findByText('Límites guardados.')).toBeInTheDocument();
+  });
+
+  it('la duración máxima del audio va de 15 a 300 segundos', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/platform/ai');
+    const form = within(await screen.findByRole('form', { name: 'Límites diarios de la IA' }));
+    for (const bad of ['14', '301', '1.5', 'x', '']) {
+      await userEvent.clear(form.getByLabelText('Duración máxima de un audio (segundos)'));
+      if (bad) await userEvent.type(form.getByLabelText('Duración máxima de un audio (segundos)'), bad);
+      await userEvent.click(form.getByRole('button', { name: 'Guardar límites' }));
+      expect(await form.findByRole('alert'), bad).toHaveTextContent(/de 15 a 300 segundos/);
+    }
+    expect(w.calls['limits']).toBeUndefined();
   });
 
   it('si el servidor rechaza los límites, muestra el motivo y no dice que se guardó', async () => {

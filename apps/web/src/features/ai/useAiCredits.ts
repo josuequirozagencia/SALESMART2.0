@@ -104,7 +104,7 @@ export function useAiModels() {
 export function useAddModel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { model: string; usd_per_1m_input: string; usd_per_1m_output: string; vision?: boolean }) => api<AiModelPrice>('/platform/ai/models', { method: 'POST', body: b }),
+    mutationFn: (b: { model: string; kind?: 'chat' | 'transcription'; usd_per_1m_input?: string; usd_per_1m_output?: string; vision?: boolean; usd_per_minute?: string }) => api<AiModelPrice>('/platform/ai/models', { method: 'POST', body: b }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
   });
 }
@@ -112,7 +112,7 @@ export function useAddModel() {
 export function useSetModelPrice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ model, usd_per_1m_input, usd_per_1m_output, vision }: { model: string; usd_per_1m_input: string; usd_per_1m_output: string; vision?: boolean }) => api<AiModelPrice>(`/platform/ai/models/${encodeURIComponent(model)}`, { method: 'PUT', body: { usd_per_1m_input, usd_per_1m_output, ...(vision !== undefined ? { vision } : {}) } }),
+    mutationFn: ({ model, usd_per_1m_input, usd_per_1m_output, vision, usd_per_minute }: { model: string; usd_per_1m_input?: string; usd_per_1m_output?: string; vision?: boolean; usd_per_minute?: string }) => api<AiModelPrice>(`/platform/ai/models/${encodeURIComponent(model)}`, { method: 'PUT', body: { ...(usd_per_1m_input !== undefined ? { usd_per_1m_input } : {}), ...(usd_per_1m_output !== undefined ? { usd_per_1m_output } : {}), ...(usd_per_minute !== undefined ? { usd_per_minute } : {}), ...(vision !== undefined ? { vision } : {}) } }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
   });
 }

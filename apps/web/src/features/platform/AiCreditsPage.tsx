@@ -46,13 +46,16 @@ const LIMIT_FIELDS = [
   { key: 'suggestions_per_day', label: 'Sugerencias de respuesta por día', hint: 'El botón «Sugerir» del redactor del Inbox.' },
   { key: 'follow_ups_per_day', label: 'Seguimientos automáticos por día', hint: 'Mensajes que el agente envía cuando el cliente deja de responder.' },
   { key: 'images_per_day', label: 'Imágenes que leen los agentes por día', hint: 'Las fotos de clientes que un agente con «Leer imágenes» manda a la IA.' },
+  { key: 'transcriptions_per_day', label: 'Audios que transcriben los agentes por día', hint: 'Las notas de voz que un agente con «Escuchar audios» manda a transcribir.' },
 ] as const;
+const AUDIO_MAX = { min: 15, max: 300 } as const;
 const LIMIT_MAX = 10_000;
 
 /** Topes diarios de la IA: el mismo número para toda empresa, contado por empresa en las últimas 24 horas. */
 function LimitsForm({ l }: { l: AiLimits }) {
   const set = useSetAiLimits();
-  const [vals, setVals] = useState<Record<(typeof LIMIT_FIELDS)[number]['key'], string>>({ tests_per_day: String(l.tests_per_day), suggestions_per_day: String(l.suggestions_per_day), follow_ups_per_day: String(l.follow_ups_per_day), images_per_day: String(l.images_per_day) });
+  const [vals, setVals] = useState<Record<(typeof LIMIT_FIELDS)[number]['key'], string>>({ tests_per_day: String(l.tests_per_day), suggestions_per_day: String(l.suggestions_per_day), follow_ups_per_day: String(l.follow_ups_per_day), images_per_day: String(l.images_per_day), transcriptions_per_day: String(l.transcriptions_per_day) });
+  const [audioMax, setAudioMax] = useState(String(l.audio_max_seconds));
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const submit = (e: FormEvent): void => {
@@ -64,8 +67,10 @@ function LimitsForm({ l }: { l: AiLimits }) {
       if (!/^\d{1,5}$/.test(raw) || Number(raw) < 1 || Number(raw) > LIMIT_MAX) return setError(`«${f.label}»: escribe un número entero de 1 a ${n(LIMIT_MAX)}.`);
       out[f.key] = Number(raw);
     }
+    const am = audioMax.trim();
+    if (!/^\d{1,3}$/.test(am) || Number(am) < AUDIO_MAX.min || Number(am) > AUDIO_MAX.max) return setError(`«Duración máxima de un audio»: escribe un número entero de ${AUDIO_MAX.min} a ${AUDIO_MAX.max} segundos.`);
     setError(undefined);
-    set.mutate(out, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar los límites.')) });
+    set.mutate({ ...out, audio_max_seconds: Number(am) }, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar los límites.')) });
   };
   return (
     <form onSubmit={submit} noValidate aria-label="Límites diarios de la IA" className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
@@ -75,6 +80,7 @@ function LimitsForm({ l }: { l: AiLimits }) {
         {LIMIT_FIELDS.map((f) => (
           <Field key={f.key} label={f.label} hint={f.hint}>{(a) => <Input {...a} inputMode="numeric" value={vals[f.key]} onChange={(e) => { setVals({ ...vals, [f.key]: e.target.value }); setSaved(false); }} />}</Field>
         ))}
+        <Field label="Duración máxima de un audio (segundos)" hint="Un audio más largo pasa a una persona. De 15 a 300.">{(a) => <Input {...a} inputMode="numeric" value={audioMax} onChange={(e) => { setAudioMax(e.target.value); setSaved(false); }} />}</Field>
       </div>
       {error ? <Alert>{error}</Alert> : null}
       {saved ? <Alert kind="ok">Límites guardados.</Alert> : null}
@@ -88,11 +94,17 @@ function ModelRow({ m }: { m: AiModelPrice }) {
   const [input, setInput] = useState(num(m.usd_per_1m_input));
   const [output, setOutput] = useState(num(m.usd_per_1m_output));
   const [vision, setVision] = useState(m.vision);
+  const [perMinute, setPerMinute] = useState(num(m.usd_per_minute ?? '0'));
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const submit = (e: FormEvent): void => {
     e.preventDefault();
     setSaved(false);
+    if (m.kind === 'transcription') {
+      if (!DECIMAL.test(perMinute.trim()) || Number(perMinute) > 10000) return setError('Un número de 0 a 10000.');
+      setError(undefined);
+      return set.mutate({ model: m.model, usd_per_minute: perMinute.trim() }, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar el precio.')) });
+    }
     if (!DECIMAL.test(input.trim()) || Number(input) > 10000 || !DECIMAL.test(output.trim()) || Number(output) > 10000) return setError('Dos números de 0 a 10000.');
     setError(undefined);
     set.mutate({ model: m.model, usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim(), ...(m.kind === 'chat' ? { vision } : {}) }, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar el precio.')) });
@@ -100,12 +112,19 @@ function ModelRow({ m }: { m: AiModelPrice }) {
   return (
     <li className="py-3">
       <form onSubmit={submit} noValidate aria-label={`Precio de ${m.model}`} className="grid gap-2">
-        <div className="flex flex-wrap items-center gap-2"><b className="text-[13.5px]">{m.model}</b><Pill kind="muted">{m.kind === 'embedding' ? 'Embeddings' : 'Chat'}</Pill></div>
-        <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-3 min-[560px]:items-end">
-          <Field label="Entrada (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} />}</Field>
-          <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
-          <div><Button type="submit" loading={set.isPending}>Guardar</Button></div>
-        </div>
+        <div className="flex flex-wrap items-center gap-2"><b className="text-[13.5px]">{m.model}</b><Pill kind="muted">{m.kind === 'embedding' ? 'Embeddings' : m.kind === 'transcription' ? 'Transcripción' : 'Chat'}</Pill></div>
+        {m.kind === 'transcription' ? (
+          <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-3 min-[560px]:items-end">
+            <Field label="Por minuto de audio (USD)" hint="Se cobra la duración real del audio, redondeada hacia arriba al segundo.">{(f) => <Input {...f} inputMode="decimal" value={perMinute} onChange={(e) => setPerMinute(e.target.value)} />}</Field>
+            <div><Button type="submit" loading={set.isPending}>Guardar</Button></div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-3 min-[560px]:items-end">
+            <Field label="Entrada (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} />}</Field>
+            <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
+            <div><Button type="submit" loading={set.isPending}>Guardar</Button></div>
+          </div>
+        )}
         {m.kind === 'chat' ? <label className="inline-flex items-center gap-2 text-[13px] font-semibold"><input type="checkbox" checked={vision} onChange={(e) => { setVision(e.target.checked); setSaved(false); }} aria-label={`${m.model} entiende imágenes`} />Entiende imágenes (los agentes pueden activar «Leer imágenes» con este modelo)</label> : null}
         {error ? <Alert>{error}</Alert> : null}
         {saved ? <Alert kind="ok">Precio guardado.</Alert> : null}
@@ -121,12 +140,22 @@ function AddModelForm() {
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
   const [vision, setVision] = useState(false);
+  const [kind, setKind] = useState<'chat' | 'transcription'>('chat');
+  const [perMinute, setPerMinute] = useState('');
   const [error, setError] = useState<string>();
   const [done, setDone] = useState<string>();
   const submit = (e: FormEvent): void => {
     e.preventDefault();
     setDone(undefined);
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model.trim())) return setError('Escribe el nombre exacto del modelo, sin espacios (por ejemplo, gpt-4.1-mini).');
+    if (kind === 'transcription') {
+      if (!DECIMAL.test(perMinute.trim()) || Number(perMinute) > 10000) return setError('El precio por minuto es un número de 0 a 10000.');
+      setError(undefined);
+      return add.mutate({ model: model.trim(), kind: 'transcription', usd_per_minute: perMinute.trim() }, {
+        onSuccess: (m) => { setDone(`Modelo ${m.model} agregado: los agentes ya pueden escuchar audios.`); setModel(''); setPerMinute(''); },
+        onError: (e2) => setError(friendlyError(e2, 'No pudimos agregar el modelo.')),
+      });
+    }
     if (!DECIMAL.test(input.trim()) || Number(input) > 10000 || !DECIMAL.test(output.trim()) || Number(output) > 10000) return setError('Los precios son dos números de 0 a 10000.');
     setError(undefined);
     add.mutate({ model: model.trim(), usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim(), ...(vision ? { vision: true } : {}) }, {
@@ -138,13 +167,24 @@ function AddModelForm() {
     <form onSubmit={submit} noValidate aria-label="Agregar un modelo de chat" className="grid gap-2 rounded-xl border border-dashed border-line p-3">
       <h3 className="text-[13.5px] font-bold">Agregar un modelo de chat</h3>
       <p className="text-[12.5px] text-muted">Escribe el nombre exacto del modelo en OpenAI y su precio (están en la página de precios de OpenAI). Sin precio no se puede usar. Los modelos de razonamiento más nuevos pueden exigir ajustes: pruébalo en el simulador del agente antes de activarlo.</p>
+      <fieldset className="flex flex-wrap gap-3 text-[13px] font-semibold">
+        <legend className="sr-only">Tipo de modelo</legend>
+        <label className="inline-flex items-center gap-1.5"><input type="radio" name="kind" checked={kind === 'chat'} onChange={() => setKind('chat')} />Chat</label>
+        <label className="inline-flex items-center gap-1.5"><input type="radio" name="kind" checked={kind === 'transcription'} onChange={() => setKind('transcription')} />Transcripción de audio</label>
+      </fieldset>
       <div className="grid grid-cols-1 gap-2 min-[640px]:grid-cols-4 min-[640px]:items-end">
-        <Field label="Nombre del modelo">{(f) => <Input {...f} value={model} onChange={(e) => setModel(e.target.value)} placeholder="gpt-4.1-mini" autoComplete="off" />}</Field>
-        <Field label="Entrada (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} />}</Field>
-        <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
+        <Field label="Nombre del modelo">{(f) => <Input {...f} value={model} onChange={(e) => setModel(e.target.value)} placeholder={kind === 'chat' ? 'gpt-4.1-mini' : 'whisper-1'} autoComplete="off" />}</Field>
+        {kind === 'chat' ? (
+          <>
+            <Field label="Entrada (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={input} onChange={(e) => setInput(e.target.value)} />}</Field>
+            <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
+          </>
+        ) : (
+          <Field label="Por minuto de audio (USD)">{(f) => <Input {...f} inputMode="decimal" value={perMinute} onChange={(e) => setPerMinute(e.target.value)} />}</Field>
+        )}
         <div><Button type="submit" variant="primary" loading={add.isPending}>Agregar modelo</Button></div>
       </div>
-      <label className="inline-flex items-center gap-2 text-[13px] font-semibold"><input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} />Entiende imágenes (visión)</label>
+      {kind === 'chat' ? <label className="inline-flex items-center gap-2 text-[13px] font-semibold"><input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} />Entiende imágenes (visión)</label> : null}
       {error ? <Alert>{error}</Alert> : null}
       {done ? <Alert kind="ok">{done}</Alert> : null}
     </form>

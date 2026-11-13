@@ -40,6 +40,8 @@ export interface Agent extends AgentCard {
   suggestions_enabled: boolean;
   /** El agente lee las imágenes del cliente (v13 S5, ADR-70). */
   read_images: boolean;
+  /** El agente transcribe las notas de voz del cliente (v13 S5b, ADR-70). */
+  transcribe_audio: boolean;
   document_ids: string[];
   channel_ids: string[];
   readiness: { instructions: boolean; documents: boolean; channel: boolean };
@@ -50,6 +52,8 @@ export interface AgentOptions {
   models: string[];
   /** De esos, los que entienden imágenes (solo con ellos se puede activar «Leer imágenes»). */
   vision_models: string[];
+  /** ¿La plataforma cargó un modelo de transcripción? Sin él no se puede activar «Escuchar audios». */
+  transcription_available: boolean;
   covers: Cover[];
   limits: { max_agents: number; max_photo_bytes: number; max_chunks: number; max_capture_fields: number };
   variables: Array<{ key: string; label: string; example: string; kind: 'builtin' | 'custom' }>;
@@ -101,6 +105,7 @@ export type AgentPatch = Partial<{
   tasks_enabled: boolean;
   suggestions_enabled: boolean;
   read_images: boolean;
+  transcribe_audio: boolean;
 }>;
 
 export function useAgents() {
