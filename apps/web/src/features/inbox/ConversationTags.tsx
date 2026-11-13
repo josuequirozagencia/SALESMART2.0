@@ -1,9 +1,10 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import type { Contact, ContactTag, Conversation } from '../../lib/types';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
+import { Icon } from '../../ui/Icon';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { TagBadge } from '../../ui/TagBadge';
@@ -25,21 +26,28 @@ function useSetContactTags(c: Conversation) {
   });
 }
 
+/** Con más etiquetas que esto, el editor compacto ofrece un buscador. */
+const SEARCH_FROM = 8;
+
 /**
- * Etiquetas del contacto desde el chat (M5.8, ADR-45/46): las ve, agrega y quita, y crea una nueva sin salir. Las del sistema (Lead, Cita agendada, Venta) solo las pone el
- * servidor: aquí se ven pero no se mueven. Crear exige `tags.manage` (el servidor lo informa en `access.manage`); asignar sigue las reglas de edición de contactos, así que
- * si la persona no puede, el servidor responde y se le dice.
+ * El editor de etiquetas: las del sistema solo se ven; las personalizadas se marcan y desmarcan. `compact` (popover del chat móvil, v13 S1.2): con buscador si hay más de 8 y la creación
+ * escondida tras «Crear etiqueta». Crear exige `tags.manage` (el servidor lo informa en `access.manage`); asignar sigue las reglas de edición de contactos, así que si la persona no puede,
+ * el servidor responde y se le dice.
  */
-function TagsDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
+function TagsEditor({ c, compact = false }: { c: Conversation; compact?: boolean }) {
   const tags = useTags();
   const setTags = useSetContactTags(c);
   const create = useCreateTag();
   const [name, setName] = useState('');
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [error, setError] = useState<string>();
+  const [query, setQuery] = useState('');
+  const [creating, setCreating] = useState(!compact);
   const mine = new Set(c.tags.filter((t) => !t.is_system).map((t) => t.id));
   const custom = (tags.data?.items ?? []).filter((t) => !t.is_system);
   const canCreate = tags.data?.access.manage === true;
+  const searchable = compact && custom.length > SEARCH_FROM;
+  const shown = searchable && query.trim() ? custom.filter((t) => t.name.toLowerCase().includes(query.trim().toLowerCase())) : custom;
 
   const toggle = (t: ContactTag): void => {
     setError(undefined);
@@ -60,24 +68,26 @@ function TagsDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
   };
 
   return (
-    <Modal title={`Etiquetas de ${c.contact.name}`} onClose={onClose}>
+    <>
       {tags.isPending ? <div className="grid place-items-center py-6 text-muted"><Spinner label="Cargando etiquetas" /></div> : null}
       {tags.isError ? <Alert>{friendlyError(tags.error, 'No pudimos cargar las etiquetas.')}</Alert> : null}
       {error ? <Alert>{error}</Alert> : null}
       {c.tags.some((t) => t.is_system) ? (
         <div className="grid gap-1">
-          <span className="text-[12.5px] font-semibold text-muted">Del sistema (las pone el sistema)</span>
+          <span className="text-[12.5px] font-semibold text-muted">Del sistema (solo lectura: las pone el sistema)</span>
           <div className="flex flex-wrap gap-1.5">{c.tags.filter((t) => t.is_system).map((t) => <Pill key={t.id} kind="muted">{t.name}</Pill>)}</div>
         </div>
       ) : null}
       {tags.isSuccess ? (
         <fieldset className="grid gap-1.5">
           <legend className="mb-1 text-[12.5px] font-semibold text-muted">Personalizadas</legend>
+          {searchable ? <input type="search" aria-label="Buscar etiquetas" placeholder="Buscar etiqueta" value={query} onChange={(e) => setQuery(e.target.value)} className="min-h-11 rounded-[10px] border border-line-strong bg-surface px-3 text-[14px]" /> : null}
           {custom.length === 0 ? <p className="text-[13px] text-muted">{canCreate ? 'Aún no hay etiquetas. Crea la primera abajo.' : 'Aún no hay etiquetas personalizadas. Pide a un administrador que cree alguna.'}</p> : null}
-          <ul className="grid max-h-56 gap-0.5 overflow-y-auto">
-            {custom.map((t) => (
+          {custom.length > 0 && shown.length === 0 ? <p role="status" className="text-[13px] text-muted">Ninguna etiqueta se llama «{query.trim()}».</p> : null}
+          <ul className={`grid gap-0.5 overflow-y-auto ${compact ? 'max-h-64' : 'max-h-56'}`}>
+            {shown.map((t) => (
               <li key={t.id}>
-                <label className="flex min-h-[40px] cursor-pointer items-center gap-2.5 rounded-lg px-2 hover:bg-surface2">
+                <label className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-2 hover:bg-surface2">
                   <input type="checkbox" checked={mine.has(t.id)} disabled={setTags.isPending} onChange={() => toggle(t)} className="size-4" />
                   <span aria-hidden="true" className="size-3 rounded-full" style={{ backgroundColor: t.color }} />
                   <span className="text-[14px] font-semibold">{t.name}</span>
@@ -87,7 +97,8 @@ function TagsDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
           </ul>
         </fieldset>
       ) : null}
-      {canCreate ? (
+      {canCreate && compact && !creating ? <Button onClick={() => setCreating(true)}>Crear etiqueta</Button> : null}
+      {canCreate && creating ? (
         <form onSubmit={submit} className="grid gap-2 border-t border-line pt-3" aria-label="Crear etiqueta">
           <span className="text-[12.5px] font-semibold text-muted">Crear una etiqueta nueva</span>
           <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
@@ -97,8 +108,77 @@ function TagsDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
           <Button type="submit" loading={create.isPending}>Crear y agregar</Button>
         </form>
       ) : null}
+    </>
+  );
+}
+
+/** Etiquetas del contacto desde el chat (M5.8, ADR-45/46) en una ventana: ver, agregar y quitar, y crear una nueva sin salir. */
+function TagsDialog({ c, onClose }: { c: Conversation; onClose: () => void }) {
+  return (
+    <Modal title={`Etiquetas de ${c.contact.name}`} onClose={onClose}>
+      <TagsEditor c={c} />
       <div className="flex justify-end"><Button onClick={onClose}>Listo</Button></div>
     </Modal>
+  );
+}
+
+/**
+ * El icono de etiquetas de la cabecera del chat móvil (v13 S1.2): abre el popover «Etiquetas de la conversación». Un punto sobre el icono avisa que el contacto tiene etiquetas. Se cierra con Esc
+ * (el foco vuelve al icono) o al tocar fuera; el panel recibe el foco al abrir. Las etiquetas del sistema solo se muestran.
+ */
+export function TagsPopoverButton({ c }: { c: Conversation }) {
+  const [open, setOpen] = useState(false);
+  const [top, setTop] = useState(0);
+  const button = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const id = useId();
+  const close = (): void => { setOpen(false); button.current?.focus(); };
+  useEffect(() => {
+    if (!open) return;
+    panel.current?.focus();
+    const onDown = (e: Event): void => {
+      const t = e.target as Node;
+      if (panel.current?.contains(t) || button.current?.contains(t)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('touchstart', onDown);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('touchstart', onDown); };
+  }, [open]);
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        aria-label={c.tags.length > 0 ? `Etiquetas de la conversación (${c.tags.length})` : 'Etiquetas de la conversación'}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-controls={open ? id : undefined}
+        onClick={() => { setTop((button.current?.getBoundingClientRect().bottom ?? 56) + 4); setOpen((v) => !v); }}
+        className={`relative grid size-11 shrink-0 place-items-center rounded-full hover:bg-surface2 ${open ? 'bg-accent-soft text-accent' : 'text-muted'}`}
+      >
+        <Icon name="tag" size={22} />
+        {c.tags.length > 0 ? <span aria-hidden="true" className="absolute right-1.5 top-1.5 size-2.5 rounded-full bg-accent" /> : null}
+      </button>
+      {open ? (
+        <div
+          ref={panel}
+          id={id}
+          role="dialog"
+          aria-label="Etiquetas de la conversación"
+          tabIndex={-1}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); } }}
+          style={{ top }}
+          className="fixed inset-x-3 z-40 ml-auto grid max-h-[min(70dvh,480px)] max-w-sm gap-3 overflow-y-auto rounded-2xl border border-line bg-surface p-3 shadow-[var(--shadow)] focus:outline-none"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <h3 className="text-[15px] font-bold">Etiquetas de la conversación</h3>
+            <button type="button" aria-label="Cerrar las etiquetas" onClick={close} className="grid size-11 place-items-center rounded-full text-muted hover:bg-surface2"><Icon name="close" /></button>
+          </div>
+          <TagsEditor c={c} compact />
+        </div>
+      ) : null}
+    </>
   );
 }
 

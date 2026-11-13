@@ -18,6 +18,7 @@ import { ScheduleDialog } from './ScheduleDialog';
 import { SheetButton } from './SheetButton';
 import { TemplatePicker } from './TemplatePicker';
 import { useConversationQuickReplies, useMentionOptions, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
+import { useLongPress } from './useLongPress';
 
 const MAX = 4096;
 const MAX_SUGGESTIONS = 6;
@@ -127,6 +128,9 @@ export function Composer({ c }: { c: Conversation }) {
   const mentionData = useMentionOptions(c.id, noteMode && c.can.note);
   const people = useMemo(() => (mention && mentionData.data ? suggestMentions(mentionData.data.items, mention.query) : []), [mention, mentionData.data]);
   const mentionOpen = mention !== null && mentionClosedAt !== mention.start && mentionData.isSuccess;
+  // v13 S1.5: en móvil, mantener pulsado «Enviar» abre «Programar mensaje» (las mismas reglas que el botón «Programar»); también está en el menú «+»
+  const canSchedule = !noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment && trimmed !== '' && pending.length === 0;
+  const hold = useLongPress({ enabled: mobile && canSchedule, onLongPress: () => setScheduling(true) });
 
   if (!c.can.reply && !c.can.note) return block ? <p className="border-t border-line bg-surface px-4 py-3 text-[13px] text-muted">{block}</p> : null;
 
@@ -370,20 +374,36 @@ export function Composer({ c }: { c: Conversation }) {
               <IconButton label="Emojis" pressed={emojis} disabled={!canWrite} onClick={() => setEmojis((v) => !v)}><SmileIcon /></IconButton>
               {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
             </div>
-            {mobile && !noteMode && c.can.reply && c.channel.kind !== 'ghl' && !trimmed && !pendingAttachment ? (
-              <IconButton label="Grabar nota de voz" disabled={!!block || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton>
-            ) : (
+            {/* v13 S1.5: el botón de la derecha es SIEMPRE el micrófono; al escribir cambia a «Enviar» y, sin texto, vuelve al micrófono. Si ahora no se puede grabar (conversación sin aceptar, etc.) el micrófono sigue ahí, desactivado y con su motivo */}
+            {mobile && mode === 'reply' && c.can.reply && c.channel.kind !== 'ghl' && !trimmed && !pendingAttachment ? (
               <button
                 type="button"
-                aria-label={noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
-                title={noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
-                aria-busy={send.isPending || undefined}
-                disabled={send.isPending || (!trimmed && !pendingAttachment) || !canWrite || pending.length > 0}
-                onClick={submit}
-                className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-accent-ink disabled:opacity-50"
+                aria-label="Grabar nota de voz"
+                title={block ?? 'Grabar nota de voz'}
+                disabled={!!block || voice.recording || upload.isPending}
+                onClick={() => void voice.start()}
+                className="grid size-11 shrink-0 place-items-center rounded-full border border-line text-muted hover:text-fg disabled:opacity-50"
               >
-                <Icon name="send" size={20} />
+                <MicIcon />
               </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  aria-label={noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
+                  title={canSchedule ? 'Enviar (mantén pulsado para programar)' : noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
+                  aria-busy={send.isPending || undefined}
+                  {...(canSchedule ? { 'aria-describedby': `${listId}-hold` } : {})}
+                  disabled={send.isPending || (!trimmed && !pendingAttachment) || !canWrite || pending.length > 0}
+                  onClick={() => { if (hold.consumeClick()) return; submit(); }}
+                  style={hold.style}
+                  {...hold.handlers}
+                  className="grid size-11 shrink-0 place-items-center rounded-full bg-accent text-accent-ink disabled:opacity-50"
+                >
+                  <Icon name="send" size={20} />
+                </button>
+                {canSchedule ? <span id={`${listId}-hold`} className="sr-only">Mantén pulsado para programar el mensaje</span> : null}
+              </>
             )}
           </>
         ) : (

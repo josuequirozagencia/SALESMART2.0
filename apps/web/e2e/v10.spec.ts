@@ -110,7 +110,8 @@ for (const size of SIZES) {
       await expect(resume).toHaveAttribute('aria-checked', 'false');
       await expect(page.getByRole('status', { name: 'Agente de IA' })).toHaveCount(0);
       await expect(page.getByText(/Pausado: una persona intervino/)).toHaveCount(0);
-      await expect(chat.getByText('QR', { exact: true })).toBeVisible();
+      // v13 S1.2: el canal va como texto del subtítulo («+593… · QR»); el chip «QR» salió de la cabecera
+      await expect(chat.getByRole('button', { name: 'Ver los datos de Cliente V10' })).toContainText('· QR');
       await expect(page.getByText(/no oficial/i)).toHaveCount(0);
 
       // Áreas táctiles de al menos 44 × 44 px

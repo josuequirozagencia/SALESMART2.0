@@ -1785,11 +1785,11 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
       return p;
     };
     const owner = await login(one.owner_id);
-    await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByText(/Responder en (19|20) min/)).toBeVisible();
+    await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByLabel(/SLA al día: responder en (19|20) min/)).toBeVisible();
     await db.query(`UPDATE response_timers SET started_at = now() - interval '25 minutes', due_at = now() - interval '5 minutes' WHERE conversation_id = $1 AND stopped_at IS NULL`, [one.id]);
     await owner.reload();
     await owner.getByRole('tab', { name: /Esperando/ }).click();
-    await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByText(/Vencida hace [56] min/)).toBeVisible();
+    await expect(owner.getByRole('link', { name: /^Cliente Uno/ }).getByLabel(/SLA vencido hace [56] min/)).toBeVisible();
     await owner.getByRole('button', { name: /Filtros/ }).click();
     await owner.getByRole('combobox', { name: 'Tiempo de respuesta' }).selectOption('late');
     await expect(owner.getByRole('link', { name: /^Cliente Uno/ })).toBeVisible();
@@ -1798,7 +1798,7 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     await owner.getByRole('combobox', { name: 'Tiempo de respuesta' }).selectOption('');
     await owner.getByRole('link', { name: /^Cliente Uno/ }).click();
     const thread = owner.getByRole('region', { name: 'Conversación con Cliente Uno' });
-    await expect(thread.getByText(/Vencida hace [56] min/)).toBeVisible();
+    await expect(thread.getByLabel(/SLA vencido hace [56] min/)).toBeVisible();
     // Al aceptar y responder, el cronómetro se detiene y guarda cuánto tardó
     await thread.getByRole('button', { name: 'Aceptar' }).click();
     await thread.getByRole('textbox', { name: 'Mensaje' }).fill('Hola, claro: ¿mañana a las 10?');
@@ -1843,7 +1843,7 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     const receiver = next === one.owner_id ? owner : await login(next);
     await receiver.getByRole('link', { name: 'Inbox' }).click();
     await receiver.getByRole('tab', { name: /Esperando/ }).click();
-    await expect(receiver.getByRole('link', { name: /^Cliente Dos/ }).getByText(/Responder en (19|20) min/)).toBeVisible({ timeout: 30_000 });
+    await expect(receiver.getByRole('link', { name: /^Cliente Dos/ }).getByLabel(/SLA al día: responder en (19|20) min/)).toBeVisible({ timeout: 30_000 });
     await receiver.getByRole('link', { name: /^Cliente Dos/ }).click();
     await expect(receiver.getByRole('region', { name: 'Conversación con Cliente Dos' }).getByRole('log', { name: 'Mensajes' }).getByText(noteText)).toBeVisible();
     const former = { authorization: `Bearer ${await apiLogin(request, advisors[two.owner_id]!.email)}` };

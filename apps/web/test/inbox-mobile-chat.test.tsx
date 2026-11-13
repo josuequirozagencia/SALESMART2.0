@@ -148,7 +148,9 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     mockApi(server(conv({ channel: qrChannel })).routes);
     renderApp('/inbox/c1');
     const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
-    expect(chat.getByText('QR')).toBeInTheDocument();
+    // v13 S1.2: el canal va como texto del subtítulo («+593… · QR»), no como chip; el icono de etiquetas ocupa su lugar
+    expect(chat.getByRole('button', { name: 'Ver los datos de Ana Torres' })).toHaveTextContent(/· QR/);
+    expect(chat.getByRole('button', { name: /Etiquetas de la conversación/ })).toBeInTheDocument();
     expect(screen.queryByText(/no oficial/)).not.toBeInTheDocument();
   });
 
@@ -244,12 +246,12 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
     await chat.findByRole('button', { name: 'Ver los datos de Ana Torres' });
     expect(chat.queryByText('Trabajando')).not.toBeInTheDocument();
-    expect(chat.queryByText(/Responder en/)).not.toBeInTheDocument();
+    expect(chat.queryByLabelText(/SLA/)).not.toBeInTheDocument();
     expect(chat.queryByText(/Puedes escribir libremente/)).not.toBeInTheDocument();
     await userEvent.click(chat.getByRole('button', { name: 'Más acciones' }));
     const dlg = within(await screen.findByRole('dialog', { name: 'Datos del contacto' }));
     expect(dlg.getByText('Trabajando')).toBeInTheDocument();
-    expect(dlg.getByText(/Responder en/)).toBeInTheDocument();
+    expect(dlg.getByLabelText(/SLA al día: responder en/)).toBeInTheDocument();
   });
 
   it('un cronómetro VENCIDO sí sigue a la vista en la cabecera móvil (pide acción)', async () => {
@@ -258,7 +260,7 @@ describe('Chat móvil · cabecera y panel (v10)', () => {
     mockApi(server(c).routes);
     renderApp('/inbox/c1');
     const chat = within(await screen.findByRole('region', { name: 'Conversación con Ana Torres' }));
-    expect(await chat.findByText(/Vencida hace/)).toBeInTheDocument();
+    expect(await chat.findByLabelText(/SLA vencido hace/)).toBeInTheDocument();
   });
 
   it('un autor cuyo nombre es un correo se muestra como «Asesor»; el correo no aparece en ningún lado de la bandeja', async () => {
