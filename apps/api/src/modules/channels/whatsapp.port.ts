@@ -50,10 +50,21 @@ export interface ParsedWebhook {
   readonly ignored: number;
 }
 
-/** Mensaje de texto a enviar. `to` es el teléfono de destino en dígitos (sin «+»), tal como lo informó el proveedor. */
+/**
+ * El mensaje al que una respuesta cita (v13 S3.3). `externalId` es el identificador que el proveedor le dio; `fromMe` dice si lo escribimos nosotros (la línea) o el cliente, y `text` su
+ * texto (para los proveedores que lo piden en la cita). Meta Cloud solo usa `externalId` (`context.message_id`).
+ */
+export interface QuotedMessage {
+  readonly externalId: string;
+  readonly fromMe: boolean;
+  readonly text: string | null;
+}
+
+/** Mensaje de texto a enviar. `to` es el teléfono de destino en dígitos (sin «+»), tal como lo informó el proveedor. `replyTo`: lo cita (v13 S3.3). */
 export interface SendTextInput {
   readonly to: string;
   readonly text: string;
+  readonly replyTo?: QuotedMessage | undefined;
 }
 
 /** Reacción a un mensaje del cliente (M5.8). `emoji` vacío quita la reacción. `targetExternalId` es el identificador que el proveedor le dio al mensaje del cliente. */

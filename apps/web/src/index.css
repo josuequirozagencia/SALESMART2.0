@@ -211,5 +211,15 @@ body { font-size: min(var(--fs-max), max(var(--fs-min), calc(13.5px - var(--fs-s
 }
 @media (prefers-reduced-motion: reduce) { .chat-screen { animation: none; } }
 
+/* Burbuja de los mensajes que escribe una persona (v13 S3.1): el degradado del tema y el texto --on-grad (AA en los tres temas, claro y oscuro: ver `test/bubble-contrast.test.ts`).
+   Todo lo que va dentro hereda ese color a pleno (sin opacidades que bajen el contraste); sin capa, para ganarle a las utilidades de Tailwind. El estado de entrega se distingue por
+   su forma y su peso, no por la transparencia. */
+.bubble-grad { background: var(--grad); color: var(--on-grad); }
+.bubble-grad :is(.text-muted, .text-fg) { color: inherit; }
+.bubble-grad :is(.opacity-60, .opacity-70, .opacity-80) { opacity: 1; }
+
+/* Al saltar a un mensaje citado (v13 S3.3) la burbuja se remarca un instante; sin animación, así que vale también con «reducir movimiento» */
+.flash-msg > div { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 10px; }
+
 /* Botón primario con el degradado de la marca y su brillo (v10); el texto usa --on-grad */
 button.bg-accent.border-accent, a.bg-accent { background: var(--grad); border-color: transparent; color: var(--on-grad); box-shadow: 0 6px 16px var(--glow); }

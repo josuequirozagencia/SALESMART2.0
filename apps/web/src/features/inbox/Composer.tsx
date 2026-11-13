@@ -1,6 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
-import type { Conversation, MentionOption, ResolvedQuickReply } from '../../lib/types';
+import type { ChatMessage, Conversation, MentionOption, ResolvedQuickReply } from '../../lib/types';
 import { useBreakpoint } from '../../ui/breakpoints';
 import { Alert, Button } from '../../ui/controls';
 import { Drawer } from '../../ui/Drawer';
@@ -14,6 +14,7 @@ import { SuggestButton, SuggestionCard, useReplySuggestion } from './ReplySugges
 import { EmojiPicker } from './EmojiPicker';
 import { mentionAt, mentionIdsIn, suggestMentions, type Picked } from './mentions';
 import { kindLabel } from './inboxFormat';
+import { quoteWho } from './MessageBubble';
 import { ScheduleDialog } from './ScheduleDialog';
 import { SheetButton } from './SheetButton';
 import { TemplatePicker } from './TemplatePicker';
@@ -57,7 +58,7 @@ export function suggest(items: readonly ResolvedQuickReply[], query: string): Re
  * Lo que no se pudo llenar queda marcado como `{{variable}}` y no deja enviar hasta completarlo.
  * Cuando no se puede escribir al cliente explica por qué; las notas siguen disponibles para quien tenga permiso.
  */
-export function Composer({ c }: { c: Conversation }) {
+export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; /** El mensaje al que se responde citándolo (v13 S3.3). */ replyTo?: ChatMessage | null; onReplyDone?: (() => void) | undefined }) {
   const suggestion = useReplySuggestion(c);
   const reply = useSendReply(c.id);
   const note = useSendNote(c.id);
@@ -131,6 +132,9 @@ export function Composer({ c }: { c: Conversation }) {
   // v13 S1.5: en móvil, mantener pulsado «Enviar» abre «Programar mensaje» (las mismas reglas que el botón «Programar»); también está en el menú «+»
   const canSchedule = !noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment && trimmed !== '' && pending.length === 0;
   const hold = useLongPress({ enabled: mobile && canSchedule, onLongPress: () => setScheduling(true) });
+  // Al elegir un mensaje para responderlo, el cursor pasa al cuadro de texto (en el teléfono abre el teclado, como WhatsApp)
+  const replyId = replyTo?.id;
+  useEffect(() => { if (replyId) ref.current?.focus(); }, [replyId]);
 
   if (!c.can.reply && !c.can.note) return block ? <p className="border-t border-line bg-surface px-4 py-3 text-[13px] text-muted">{block}</p> : null;
 
@@ -151,7 +155,7 @@ export function Composer({ c }: { c: Conversation }) {
       note.mutate({ text: trimmed, ...(mentions.length > 0 ? { mentions } : {}) }, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
       setPicked([]);
     } else {
-      reply.mutate(trimmed, { onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
+      reply.mutate(replyTo ? { text: trimmed, reply_to_message_id: replyTo.id } : trimmed, { onSuccess: () => onReplyDone?.(), onError: () => setText((cur) => (cur === '' ? trimmed : cur)) });
     }
   };
 
@@ -304,6 +308,15 @@ export function Composer({ c }: { c: Conversation }) {
       {!noteMode ? <SuggestionCard s={suggestion} hasText={trimmed !== ''} onUse={useDraft} /> : null}
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : pendingAttachment ? 'No pudimos enviar el archivo.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
+      {replyTo && !noteMode ? (
+        <div role="group" aria-label="Respondiendo a un mensaje" className="flex items-start gap-2 rounded-lg border-l-4 border-accent bg-surface2 px-2.5 py-1.5 text-[12.5px]">
+          <span className="min-w-0 flex-1">
+            <b className="block truncate">Respondiendo a {quoteWho({ id: replyTo.id, direction: replyTo.direction, sender_type: replyTo.sender_type, author: replyTo.author, kind: replyTo.kind, text: replyTo.text }, c.contact.name)}</b>
+            <span className="line-clamp-2 break-words text-muted">{replyTo.text ?? kindLabel(replyTo.kind)}</span>
+          </span>
+          <IconButton label="Cancelar la respuesta" onClick={() => onReplyDone?.()}><XIcon /></IconButton>
+        </div>
+      ) : null}
       <div className="relative flex items-end gap-2">
         {mentionOpen ? (
           <div className="absolute inset-x-0 bottom-full z-10 mb-1.5 max-h-64 overflow-y-auto rounded-xl border border-line bg-surface p-1 shadow-[var(--shadow)]">

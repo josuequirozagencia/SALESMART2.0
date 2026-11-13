@@ -23,6 +23,8 @@ interface Harness {
 const KEY = 'evo-global-key-for-tests';
 const states = new Map<string, 'open' | 'connecting' | 'close'>();
 const pictures = new Map<string, string>();
+/** Los cuerpos de los mensajes que el servidor simulado recibió (para comprobar lo que el adaptador manda). */
+const sentBodies: Array<{ path: string; body: Record<string, unknown> }> = [];
 let seq = 0;
 let server: http.Server;
 let base = '';
@@ -53,6 +55,7 @@ beforeAll(async () => {
         return send(201, { wuid: `${String(body['number'])}@s.whatsapp.net`, profilePictureUrl: pictures.get(String(body['number'])) ?? null });
       }
       if (a === 'message') {
+        sentBodies.push({ path: url.pathname, body });
         if (states.get(inst) !== 'open') return send(400, { status: 400, error: 'Bad Request', response: { message: ['Connection Closed'] } });
         seq += 1;
         return send(201, { key: { remoteJid: `${String(body['number'])}@s.whatsapp.net`, fromMe: true, id: `3EB0SIM${String(seq).padStart(12, '0')}` }, status: 'PENDING', messageType: 'conversation' });
@@ -115,6 +118,16 @@ describe.each(harnesses)('puerto de sesión por QR: %s', (_name, make) => {
     const doc = await h.provider.sendMedia(h.creds, i, { to: '593990000002', kind: 'document', bytes: Buffer.from('pdf'), mimeType: 'application/pdf', filename: 'a.pdf', caption: null });
     const aud = await h.provider.sendMedia(h.creds, i, { to: '593990000002', kind: 'audio', bytes: Buffer.from('ogg'), mimeType: 'audio/ogg', filename: null, caption: null });
     expect(new Set([a.externalId, b.externalId, img.externalId, doc.externalId, aud.externalId]).size).toBe(5);
+  });
+
+  it('una respuesta citada (replyTo) sale igual que un texto y devuelve su identificador (v13 S3.3)', async () => {
+    const h = make();
+    const i = await fresh(h);
+    h.openSession(i);
+    const a = await h.provider.sendText(h.creds, i, { to: '593990000002', text: 'Sí, a las 10', replyTo: { externalId: 'WAID-CITADO-1', fromMe: false, text: '¿Atienden mañana?' } });
+    const b = await h.provider.sendText(h.creds, i, { to: '593990000002', text: 'Gracias', replyTo: { externalId: 'WAID-CITADO-2', fromMe: true, text: null } });
+    expect(a.externalId).toBeTruthy();
+    expect(b.externalId).not.toBe(a.externalId);
   });
 
   it('la foto de perfil: la dirección si el número la tiene, null si no; con la sesión caída falla «session_down» y con una clave mala «not_configured»', async () => {
@@ -180,6 +193,23 @@ describe.each(harnesses)('puerto de sesión por QR: %s', (_name, make) => {
       expect(e).toBeInstanceOf(QrSessionError);
       expect((e as Error).message).not.toMatch(/593990000002|texto-privado|evo-global-key|fake-qr-key|SECRETO-DEL-WEBHOOK|otra/);
     }
+  });
+});
+
+describe('adaptador de Evolution: la cita viaja como `quoted` (v13 S3.3; forma de la API v2, sin validar contra un servidor real)', () => {
+  it('con replyTo manda quoted con el id, de quién era y su texto; sin replyTo no manda nada de más', async () => {
+    const p = new EvolutionProvider();
+    const creds = { baseUrl: base, apiKey: KEY };
+    const instance = `ss-quoted-${Date.now()}`;
+    await p.createInstance(creds, { instance, webhookUrl: 'https://app.ejemplo.com/h' });
+    states.set(instance, 'open');
+    sentBodies.length = 0;
+    await p.sendText(creds, instance, { to: '593990000002', text: 'Respuesta', replyTo: { externalId: 'WAID-X', fromMe: false, text: 'Pregunta del cliente' } });
+    await p.sendText(creds, instance, { to: '593990000002', text: 'Sin cita' });
+    expect(sentBodies).toHaveLength(2);
+    expect(sentBodies[0]!.path).toBe(`/message/sendText/${instance}`);
+    expect(sentBodies[0]!.body).toEqual({ number: '593990000002', text: 'Respuesta', quoted: { key: { id: 'WAID-X', fromMe: false, remoteJid: '593990000002@s.whatsapp.net' }, message: { conversation: 'Pregunta del cliente' } } });
+    expect(sentBodies[1]!.body).toEqual({ number: '593990000002', text: 'Sin cita' });
   });
 });
 

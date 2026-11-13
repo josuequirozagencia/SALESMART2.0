@@ -51,6 +51,8 @@ export const ICONS = {
   tag: 'M3 3h8l10 10-8 8L3 11z M7.5 7.5h.01',
   note: 'M6 3h9l4 4v14H6z M14 3v5h5 M9 13h7 M9 17h7',
   task: 'M4 4h16v16H4z M8 12l3 3 5-6',
+  reply: 'M9 14L4 9l5-5 M4 9h10a6 6 0 0 1 6 6v3',
+  pin: 'M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z M12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   trash: 'M4 7h16 M9 7V4h6v3 M6 7l1 13h10l1-13 M10 11v6 M14 11v6',
   chevronsLeft: 'M11 17l-5-5 5-5 M18 17l-5-5 5-5',
   chevronsRight: 'M13 17l5-5-5-5 M6 17l5-5-5-5',

@@ -9,3 +9,4 @@ export { AutoCloseService, CLOSE_BATCH } from './auto-close.service';
 export { OutboundDispatcher, backoffMs, SEND_BATCH, SEND_LEASE_MS, SEND_MAX_ATTEMPTS, type DispatchResult } from './outbound-dispatcher.service';
 export { WINDOW_MS, hasWindow, assertCanReply, assertWindowOpen, loadConversation, scopeOf, windowOf, type InboxAccess, type InboxScope } from './inbox.access';
 export type { ConversationView, MessageView } from './inbox.views';
+export type { QuoteView } from './message-quotes.service';

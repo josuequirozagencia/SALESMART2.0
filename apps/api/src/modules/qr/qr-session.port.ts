@@ -40,6 +40,13 @@ export interface QrCodeResult {
   readonly state: EvolutionConnectionState;
 }
 
+/** El mensaje al que una respuesta cita (v13 S3.3); misma forma que `QuotedMessage` del WhatsApp oficial (el módulo QR no importa el de canales). */
+export interface QrQuoted {
+  readonly externalId: string;
+  readonly fromMe: boolean;
+  readonly text: string | null;
+}
+
 export interface QrSendMedia {
   /** Teléfono de destino en dígitos (sin «+»). */
   readonly to: string;
@@ -64,7 +71,7 @@ export interface QrSessionProvider {
   deleteInstance(credentials: QrCredentials, instance: string): Promise<void>;
   /** La dirección de la foto de perfil de un número (dígitos, sin «+»), o null si no tiene foto o su privacidad no la deja ver. Falla igual que el resto (sesión caída, clave…). */
   fetchProfilePicture(credentials: QrCredentials, instance: string, phone: string): Promise<string | null>;
-  sendText(credentials: QrCredentials, instance: string, input: { to: string; text: string }): Promise<SentMessage>;
+  sendText(credentials: QrCredentials, instance: string, input: { to: string; text: string; replyTo?: QrQuoted | undefined }): Promise<SentMessage>;
   sendMedia(credentials: QrCredentials, instance: string, input: QrSendMedia): Promise<SentMessage>;
 }
 

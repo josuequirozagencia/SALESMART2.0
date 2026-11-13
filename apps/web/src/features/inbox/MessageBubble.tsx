@@ -7,7 +7,11 @@ import { Button } from '../../ui/controls';
 import { QUICK_REACTIONS } from './emoji';
 import { fileSize } from '../../lib/format';
 import { attachmentTypeLabel, bubbleTime, describeExtra, firstName, kindLabel, personName } from './inboxFormat';
+import { useSwipeReply } from './useSwipeReply';
+import type { ReplyQuote } from '../../lib/types';
 import { splitMentions } from './mentions';
+import { LocationCard } from './LocationCard';
+import { validPlace, type Place } from '../../lib/osm';
 
 const TICK: Record<string, { text: string; label: string; cls: string }> = {
   queued: { text: '◷', label: 'Enviando', cls: 'opacity-60' },
@@ -17,9 +21,12 @@ const TICK: Record<string, { text: string; label: string; cls: string }> = {
   failed: { text: '!', label: 'No se pudo enviar', cls: 'text-crit font-bold opacity-100' },
 };
 
-function Ticks({ status }: { status: ChatMessage['status'] }) {
+/** Sobre el degradado (`onGrad`) el color no puede distinguir «leído» de «entregado» (el azul no tiene contraste): se distingue por el peso y la transparencia suave de los gráficos (≥ 3:1). */
+const TICK_ON_GRAD: Record<string, string> = { queued: 'opacity-75', sent: 'opacity-75', delivered: 'opacity-75', read: 'font-black', failed: 'font-black underline' };
+
+function Ticks({ status, onGrad = false }: { status: ChatMessage['status']; onGrad?: boolean }) {
   const t = TICK[status];
-  return t ? <span role="img" aria-label={t.label} title={t.label} className={`ml-1 tracking-[-0.34em] ${t.cls}`}>{t.text}</span> : null;
+  return t ? <span role="img" aria-label={t.label} title={t.label} className={`ml-1 tracking-[-0.34em] ${onGrad ? (TICK_ON_GRAD[status] ?? '') : t.cls}`}>{t.text}</span> : null;
 }
 
 /** Una imagen del hilo. En móvil se toca para verla ampliada a pantalla completa (con botón de cerrar); en escritorio es un enlace a otra pestaña, como siempre. */
@@ -58,12 +65,17 @@ function DocumentCard({ url, mime, size, filename }: { url: string; mime: string
 
 /** El contenido: texto, o el nombre del tipo de contenido cuando no hay texto (los archivos aún no se descargan: llega en M5.6). */
 function Body({ m }: { m: ChatMessage }) {
-  const extra = describeExtra(m);
+  // v13 S3.2: una ubicación con coordenadas válidas se ve como un mapa con pin (y su nombre y dirección); sin ellas, solo el rótulo «Ubicación»
+  const where = m.kind === 'location' ? (m.extra?.['location'] ?? null) : null;
+  const w = validPlace(where) ? (where as Place & { name?: unknown; address?: unknown }) : null;
+  const card = w ? { place: w, name: typeof w.name === 'string' ? w.name : null, address: typeof w.address === 'string' ? w.address : null } : null;
+  const extra = card ? null : describeExtra(m);
   const isText = m.kind === 'text' || m.kind === 'note' || m.kind === 'template';
   const att = m.attachment;
   return (
     <>
-      {!isText && (!FILE_KINDS.has(m.kind) || !att?.url) ? <span className="mb-0.5 block text-[12px] font-semibold opacity-80">{kindLabel(m.kind)}</span> : null}
+      {card ? <LocationCard place={card.place} name={card.name} address={card.address} /> : null}
+      {!isText && !card && (!FILE_KINDS.has(m.kind) || !att?.url) ? <span className="mb-0.5 block text-[12px] font-semibold opacity-80">{kindLabel(m.kind)}</span> : null}
       {m.text ? <span className="block whitespace-pre-wrap break-words">{m.is_note && m.mentions && m.mentions.length > 0 ? splitMentions(m.text, m.mentions).map((p, i) => (p.mention ? <mark key={i} className="rounded bg-accent-soft px-0.5 font-semibold text-accent">{p.text}</mark> : <span key={i}>{p.text}</span>)) : m.text}</span> : null}
       {extra ? <span className="block text-[12.5px] opacity-80">{extra}</span> : null}
       {att ? (
@@ -103,8 +115,30 @@ function ReactMenu({ m, onReact }: { m: ChatMessage; onReact: (id: string, emoji
   );
 }
 
+/** Quién habló en el mensaje citado, en una palabra o dos. */
+export function quoteWho(q: ReplyQuote, contactName: string): string {
+  if (q.direction === 'in') return contactName;
+  if (q.sender_type === 'ai') return 'Agente de IA';
+  if (q.sender_type === 'automation') return 'Mensaje automático';
+  return q.author ? personName(q.author.name) : 'Equipo';
+}
+
+/** La cita dentro de una burbuja: barra de color, quién y qué (texto o tipo de contenido); tocarla lleva al mensaje original si está en pantalla. */
+export function QuoteBlock({ quote, contactName, onJump }: { quote: ReplyQuote; contactName: string; onJump?: ((id: string) => void) | undefined }) {
+  const who = quoteWho(quote, contactName);
+  const what = quote.text ?? kindLabel(quote.kind);
+  return (
+    <button type="button" aria-label={`Mensaje citado de ${who}: ${what}. Ir al mensaje`} onClick={() => onJump?.(quote.id)} className="mb-1 block w-full min-w-0 rounded-md border-l-4 border-current bg-black/[.07] px-2 py-1 text-left">
+      <b className="block truncate text-[12px]">{who}</b>
+      <span className="line-clamp-2 break-words text-[12.5px]">{what}</span>
+    </button>
+  );
+}
+
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
-export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '' }: { spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode }) {
+export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '', contactName = '', onReply, onJump }: { spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode; contactName?: string; /** Si se puede responder citando este mensaje (v13 S3.3): lo que hace el gesto, el botón «Responder» y el teclado. */ onReply?: ((m: ChatMessage) => void) | undefined; onJump?: ((id: string) => void) | undefined }) {
+  const mobile = useBreakpoint() === 'mobile';
+  const swipe = useSwipeReply({ enabled: mobile && onReply !== undefined && !m.is_note, onReply: () => onReply?.(m) });
   if (m.is_note) {
     const auto = m.sender_type === 'system';
     return (
@@ -118,17 +152,26 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar,
     );
   }
   const out = m.direction === 'out';
+  // v13 S3.1: lo que escribe una persona lleva el color del tema; el agente de IA y los avisos automáticos, una variante suave (con su etiqueta) para distinguirse sin perder contraste
+  const grad = out && m.sender_type !== 'ai' && m.sender_type !== 'automation';
   const canReact = !out && onReact !== undefined;
+  const replyButton = onReply ? (
+    <button type="button" aria-label="Responder a este mensaje" title="Responder" onClick={() => onReply(m)} className="grid size-8 shrink-0 place-items-center self-center rounded-full text-muted opacity-0 hover:bg-surface2 hover:opacity-100 focus-visible:opacity-100 group-hover/msg:opacity-100 max-md:sr-only max-md:focus-visible:not-sr-only max-md:focus-visible:size-11 max-md:focus-visible:opacity-100"><Icon name="reply" size={16} /></button>
+  ) : null;
   return (
-    <li className={`flex gap-2 ${out ? 'flex-row-reverse' : ''} ${spacing}`}>
+    <li id={`msg-${m.id}`} className={`group/msg relative ${spacing}`}>
+      {onReply ? <span aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full bg-surface2 text-muted" style={{ opacity: swipe.progress, transform: `translateY(-50%) scale(${0.6 + 0.4 * swipe.progress})` }}><Icon name="reply" size={16} /></span> : null}
+      <div className={`flex gap-2 ${out ? 'flex-row-reverse' : ''}`} style={swipe.style} {...swipe.handlers}>
       {avatar !== undefined ? <span className="w-7 shrink-0 self-start">{avatar}</span> : null}
       <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className={`flex w-full min-w-0 items-start gap-1 ${out ? 'justify-end' : ''}`}>
-      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg px-3 py-2 text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
+      {out ? replyButton : null}
+      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg px-3 py-2 text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${grad ? 'bubble-grad rounded-tr-sm' : out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
         {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{firstName(m.author.name)}</span> : null}
         {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Agente de IA</span> : null}
         {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}
         {m.template ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Plantilla · <span className="font-mono">{m.template.name}</span></span> : null}
+        {m.reply_to ? <QuoteBlock quote={m.reply_to} contactName={contactName} onJump={onJump} /> : null}
         <Body m={m} />
         {m.template && m.template.buttons.length > 0 ? (
           <span className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Botones de la plantilla">
@@ -138,12 +181,13 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar,
         <span className="mt-0.5 flex items-center justify-end text-[11px] text-muted">
           {out && m.extra?.['origin'] === 'device' ? <span className="mr-1">Desde el teléfono ·</span> : null}
           <time dateTime={m.sent_at}>{bubbleTime(m.sent_at)}</time>
-          {out ? <Ticks status={m.status} /> : null}
+          {out ? <Ticks status={m.status} onGrad={grad} /> : null}
         </span>
         {m.reaction ? <span role="img" aria-label={`Reacción del cliente: ${m.reaction}`} className="absolute -bottom-3 right-2 rounded-full border border-line bg-surface px-1.5 py-0.5 text-[13px] leading-none shadow-sm">{m.reaction}</span> : null}
         {m.my_reaction ? <span role="img" aria-label={`Tu reacción: ${m.my_reaction}`} className="absolute -bottom-3 left-2 rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[13px] leading-none shadow-sm">{m.my_reaction}</span> : null}
       </div>
       {canReact ? <ReactMenu m={m} onReact={onReact} /> : null}
+      {out ? null : replyButton}
       </div>
       {m.status === 'failed' ? (
         <div role="alert" className="mt-1 flex max-w-[78%] flex-wrap items-center justify-end gap-2 text-right text-[12.5px] text-crit">
@@ -151,6 +195,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar,
           {canRetry ? <Button variant="link" className="text-[12.5px]" loading={retrying} onClick={() => onRetry(m.id)}>Reintentar</Button> : null}
         </div>
       ) : null}
+      </div>
       </div>
     </li>
   );

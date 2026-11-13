@@ -14,7 +14,8 @@ const text = (max: number) =>
     .max(max)
     .refine((v) => !/\p{Cc}/u.test(v.replace(/[\n\r\t]/g, '')), 'caracteres no permitidos');
 
-export const replySchema = z.object({ text: text(MAX_MESSAGE_LENGTH) }).strict();
+/** Responder con texto. `reply_to_message_id`: cita un mensaje de la misma conversación (v13 S3.3); el servidor valida que exista, no sea una nota y ya haya salido. */
+export const replySchema = z.object({ text: text(MAX_MESSAGE_LENGTH), reply_to_message_id: z.uuid().optional() }).strict();
 export type ReplyDto = z.infer<typeof replySchema>;
 
 /** Reaccionar a un mensaje del cliente: un emoji (un solo símbolo, quizá con modificadores) o vacío/null para quitar la reacción. */

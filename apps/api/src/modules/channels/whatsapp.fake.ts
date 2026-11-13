@@ -23,6 +23,8 @@ export interface FakeSent {
   readonly to: string;
   readonly text: string;
   readonly externalId: string;
+  /** Si fue una respuesta citada (v13 S3.3): el mensaje citado. */
+  readonly replyTo?: { readonly externalId: string; readonly fromMe: boolean; readonly text: string | null };
   readonly template?: { readonly name: string; readonly language: string; readonly components: readonly TemplateSendComponent[] };
   /** Si fue un archivo: de qué tipo, cuánto pesó, su nombre y su pie. `text` es `[archivo] <tipo>` (más el pie, si lo hubo). */
   readonly media?: { readonly kind: MediaKind; readonly mimeType: string; readonly size: number; readonly filename: string | null; readonly caption: string | null; readonly bytes: Buffer };
@@ -74,6 +76,7 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     // Mismas validaciones y mismo orden que el adaptador de Meta: destino y texto se revisan antes de «salir a la red»
     if (!/^[0-9]{8,15}$/.test(input.to)) return Promise.reject(new WhatsAppProviderError('recipient_invalid', 'El número de destino no es válido'));
     if (input.text === '' || input.text.length > 4096) return Promise.reject(new WhatsAppProviderError('rejected', 'El texto no es válido para WhatsApp'));
+    if (input.replyTo && (input.replyTo.externalId === '' || input.replyTo.externalId.length > 256)) return Promise.reject(new WhatsAppProviderError('rejected', 'El mensaje citado no es válido para WhatsApp'));
     if (credentials.accessToken !== FAKE_WHATSAPP_TOKEN) return Promise.reject(new WhatsAppProviderError('invalid_token', 'El proveedor rechazó el token'));
     if (phoneNumberId.startsWith(FAKE_UNKNOWN_PREFIX)) return Promise.reject(new WhatsAppProviderError('number_not_found', 'El proveedor no encontró el número de la conexión'));
     const tag = Object.keys(FAKE_SEND_FAILURES).find((k) => input.text.startsWith(k));
@@ -83,7 +86,7 @@ export class FakeWhatsAppProvider implements WhatsAppProvider {
     }
     this.counter += 1;
     const externalId = `wamid.FAKE.${this.counter}`;
-    this.outbox.push({ phoneNumberId, to: input.to, text: input.text, externalId });
+    this.outbox.push({ phoneNumberId, to: input.to, text: input.text, externalId, ...(input.replyTo ? { replyTo: { ...input.replyTo } } : {}) });
     return Promise.resolve({ externalId });
   }
 

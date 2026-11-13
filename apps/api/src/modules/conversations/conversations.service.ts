@@ -96,6 +96,7 @@ export class ConversationsService {
         body: m.text,
         media: m.media ? { id: m.media.id, mime_type: m.media.mimeType, filename: m.media.filename } : null,
         meta: { wa_id: m.fromRaw, ...m.extra },
+        replyToMessageId: await this.quotedId(tx, channelAccountId, m.replyToExternalId),
         status: 'received',
         sentAt: m.sentAt,
       })
@@ -134,6 +135,13 @@ export class ConversationsService {
   }
 
   /** El archivo de un mensaje que entra, aparte en `message_attachments`: la tarea `attachments` lo descarga y lo revisa. */
+  /** El id (nuestro) del mensaje que un mensaje entrante cita, si ese mensaje es de ESTE canal y ya lo conocemos (v13 S3.3). Si no, la respuesta se guarda sin cita. */
+  private async quotedId(tx: TenantTx, channelAccountId: string, externalId: string | undefined): Promise<string | null> {
+    if (!externalId) return null;
+    const [q] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, externalId), ne(messages.kind, 'note'))).limit(1);
+    return q?.id ?? null;
+  }
+
   private async queueMediaDownload(tx: TenantTx, conversationId: string, messageId: string, m: NormalizedMessage): Promise<void> {
     if (!m.media || !FILE_KINDS.has(m.kind)) return;
     await tx.insert(messageAttachments).values({
@@ -185,6 +193,7 @@ export class ConversationsService {
         body: m.text,
         media: m.media ? { id: m.media.id, mime_type: m.media.mimeType, filename: m.media.filename } : null,
         meta: { wa_id: m.fromRaw, ...m.extra, origin: 'device' },
+        replyToMessageId: await this.quotedId(tx, channelAccountId, m.replyToExternalId),
         status: 'sent',
         sentAt: m.sentAt,
       })

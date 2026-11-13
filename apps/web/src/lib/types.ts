@@ -861,8 +861,21 @@ export interface ChatAttachment {
   url: string | null;
   expires_at: string | null;
 }
+/** La cita que un mensaje lleva (v13 S3.3): el mensaje al que responde, en pocas palabras. */
+export interface ReplyQuote {
+  id: string;
+  direction: 'in' | 'out';
+  sender_type: string;
+  author: { id: string; name: string } | null;
+  kind: string;
+  /** Texto o pie recortado; null si no tiene (una imagen sin pie, una ubicación…). */
+  text: string | null;
+}
+
 export interface ChatMessage {
   id: string;
+  /** Si este mensaje responde citando a otro (v13 S3.3). */
+  reply_to?: ReplyQuote | null;
   direction: 'in' | 'out';
   sender_type: string;
   author: { id: string; name: string } | null;

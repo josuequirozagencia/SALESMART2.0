@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { EvolutionConnectionState } from '../channels';
 import type { SentMessage } from '../channels';
-import { QrSessionError, type QrCodeResult, type QrCredentials, type QrSendMedia, type QrSessionProvider, type QrErrorCode } from './qr-session.port';
+import { QrSessionError, type QrCodeResult, type QrCredentials, type QrQuoted, type QrSendMedia, type QrSessionProvider, type QrErrorCode } from './qr-session.port';
 
 /** Clave que acepta el fake: cualquier otra se rechaza como `not_configured` (igual que Evolution con una clave equivocada). */
 export const FAKE_QR_KEY = 'fake-qr-key';
@@ -17,6 +17,8 @@ export interface FakeQrSent {
   readonly text: string | null;
   readonly media: { kind: string; mimeType: string; bytes: number; filename: string | null } | null;
   readonly externalId: string;
+  /** Si fue una respuesta citada (v13 S3.3): el mensaje citado. */
+  readonly replyTo?: { readonly externalId: string; readonly fromMe: boolean; readonly text: string | null };
 }
 
 /**
@@ -117,7 +119,7 @@ export class FakeQrSession implements QrSessionProvider {
     }
   }
 
-  private send(c: QrCredentials, instance: string, to: string, text: string | null, media: FakeQrSent['media']): Promise<SentMessage> {
+  private send(c: QrCredentials, instance: string, to: string, text: string | null, media: FakeQrSent['media'], replyTo?: QrQuoted): Promise<SentMessage> {
     try {
       this.check(c);
       const i = this.get(instance);
@@ -125,15 +127,15 @@ export class FakeQrSession implements QrSessionProvider {
       if (f) throw f;
       if (i.state !== 'open') throw new QrSessionError('session_down', 'La sesión de WhatsApp no está abierta: hay que escanear el QR de nuevo');
       const externalId = `FAKE${randomUUID().replaceAll('-', '').slice(0, 18).toUpperCase()}`;
-      this.sent.push({ instance, to, text, media, externalId });
+      this.sent.push({ instance, to, text, media, externalId, ...(replyTo ? { replyTo: { ...replyTo } } : {}) });
       return Promise.resolve({ externalId });
     } catch (e) {
       return Promise.reject(e);
     }
   }
 
-  sendText(c: QrCredentials, instance: string, input: { to: string; text: string }): Promise<SentMessage> {
-    return this.send(c, instance, input.to, input.text, null);
+  sendText(c: QrCredentials, instance: string, input: { to: string; text: string; replyTo?: QrQuoted | undefined }): Promise<SentMessage> {
+    return this.send(c, instance, input.to, input.text, null, input.replyTo);
   }
 
   sendMedia(c: QrCredentials, instance: string, input: QrSendMedia): Promise<SentMessage> {

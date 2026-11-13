@@ -45,6 +45,8 @@ interface Plan {
   text: string;
   sentAt: Date;
   attachment: { storageKey: string; mimeType: string; filename: string | null; kind: MediaKind } | null;
+  /** Si es una respuesta citada (v13 S3.3): el mensaje citado. */
+  replyTo: { externalId: string; fromMe: boolean; text: string | null } | null;
 }
 
 /**
@@ -80,7 +82,7 @@ export class QrOutboundService {
       }
     }
     try {
-      const sent = plan.attachment && bytes ? await this.provider.sendMedia(creds, plan.instance, { to: plan.to, kind: plan.attachment.kind, bytes, mimeType: plan.attachment.mimeType, filename: plan.attachment.filename, caption: plan.text || null }) : await this.provider.sendText(creds, plan.instance, { to: plan.to, text: plan.text });
+      const sent = plan.attachment && bytes ? await this.provider.sendMedia(creds, plan.instance, { to: plan.to, kind: plan.attachment.kind, bytes, mimeType: plan.attachment.mimeType, filename: plan.attachment.filename, caption: plan.text || null }) : await this.provider.sendText(creds, plan.instance, { to: plan.to, text: plan.text, replyTo: plan.replyTo ?? undefined });
       await this.db.withTenant((tx) => tx.update(messages).set({ status: 'sent', externalId: sent.externalId, nextAttemptAt: null, error: null }).where(and(eq(messages.id, plan.messageId), eq(messages.status, 'queued'))));
       return { outcome: 'sent' };
     } catch (e) {
@@ -150,7 +152,7 @@ export class QrOutboundService {
             sql`NOT EXISTS (SELECT 1 FROM messages o WHERE o.organization_id = ${messages.organizationId} AND o.conversation_id = ${messages.conversationId} AND o.direction = 'out' AND o.status = 'queued' AND (o.sent_at, o.id) < (${messages.sentAt}, ${messages.id}) AND o.kind <> 'note')`,
           ),
         )
-        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, sentAt: messages.sentAt });
+        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, sentAt: messages.sentAt, replyToMessageId: messages.replyToMessageId });
       const m = rows[0];
       if (!m) return { kind: 'skipped' as const };
 
@@ -195,6 +197,12 @@ export class QrOutboundService {
         if (!att || att.state !== 'ready' || !att.storageKey) return failLocal('attachment_data');
         attachment = { storageKey: att.storageKey, mimeType: att.mimeType, filename: att.filename, kind: att.kind as MediaKind };
       }
+      // Una respuesta citada (v13 S3.3): se busca el id que el proveedor le dio al mensaje citado
+      let replyTo: Plan['replyTo'] = null;
+      if (m.replyToMessageId && m.kind === 'text') {
+        const [q] = await tx.select({ externalId: messages.externalId, direction: messages.direction, body: messages.body }).from(messages).where(eq(messages.id, m.replyToMessageId)).limit(1);
+        if (q?.externalId) replyTo = { externalId: q.externalId, fromMe: q.direction === 'out', text: q.body };
+      }
       // La sesión debe estar abierta; si no, el mensaje ESPERA (no falla, no gasta intentos)
       if (ctx.state !== 'open') return waitLocal('session_down', SESSION_RETRY_MS);
       // Calentamiento y pausa mínima: cuántos mensajes salieron ya por esta sesión en las últimas 24 h y cuándo fue el último
@@ -205,7 +213,7 @@ export class QrOutboundService {
         .where(and(eq(messages.channelAccountId, m.channelAccountId), eq(messages.direction, 'out'), inArray(messages.status, ['sent', 'delivered', 'read']), gt(messages.sentAt, since), sql`${messages.id} <> ${m.id}`));
       const gate = sendGate({ sentLast24h: stat?.n ?? 0, lastSentAt: stat?.last ? new Date(stat.last) : null, firstConnectedAt: ctx.firstConnectedAt, now });
       if (!gate.ok) return waitLocal(gate.reason === 'daily' ? 'rate_limited' : 'rate_limited', Math.max(gate.retryAt.getTime() - now.getTime(), 1_000));
-      return { kind: 'plan' as const, plan: { messageId: m.id, attempts: m.attempts, instance: ctx.instance, to, text: m.body ?? '', sentAt: m.sentAt, attachment } };
+      return { kind: 'plan' as const, plan: { messageId: m.id, attempts: m.attempts, instance: ctx.instance, to, text: m.body ?? '', sentAt: m.sentAt, attachment, replyTo } };
     });
   }
 }

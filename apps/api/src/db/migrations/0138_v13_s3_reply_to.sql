@@ -1,0 +1,4 @@
+ALTER TABLE "messages" ADD COLUMN "reply_to_message_id" uuid;--> statement-breakpoint
+ALTER TABLE "messages" ADD CONSTRAINT "messages_reply_to_fk" FOREIGN KEY ("organization_id","reply_to_message_id") REFERENCES "public"."messages"("organization_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "messages_reply_to_idx" ON "messages" USING btree ("organization_id","reply_to_message_id") WHERE "messages"."reply_to_message_id" IS NOT NULL;--> statement-breakpoint
+ALTER TABLE "messages" ADD CONSTRAINT "messages_reply_not_self" CHECK ("messages"."reply_to_message_id" IS NULL OR "messages"."reply_to_message_id" <> "messages"."id");

@@ -54,6 +54,8 @@ export interface NormalizedMessage {
    * (el destinatario) y el mensaje se guarda como de salida, sin autor de la plataforma.
    */
   readonly origin?: 'contact' | 'device';
+  /** Si el mensaje CITA a otro (v13 S3.3): el identificador, en el proveedor, del mensaje citado. Ausente si no cita nada. */
+  readonly replyToExternalId?: string;
 }
 
 /** Estado de un mensaje que SALIÓ, según el proveedor. */

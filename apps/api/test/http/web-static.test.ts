@@ -161,7 +161,7 @@ describe('web servida por la API — producción y errores de configuración', (
 
   it('buildCsp añade el origen del almacenamiento solo a img-src y media-src; descarta lo que no sea un origen limpio', () => {
     const csp = buildCsp(['https://files.example.com', 'https://x.com; script-src *', '*', 'javascript:alert(1)', 'https://files.example.com']);
-    expect(csp).toContain("img-src 'self' data: https://files.example.com;");
+    expect(csp).toContain("img-src 'self' data: https://tile.openstreetmap.org https://files.example.com;");
     expect(csp).toContain("media-src 'self' https://files.example.com;");
     expect(csp).not.toContain('script-src *');
     expect(csp).not.toContain('javascript:');

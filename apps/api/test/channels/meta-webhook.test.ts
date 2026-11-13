@@ -363,6 +363,19 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(audit).not.toContain('Hola, quiero una cita');
   });
 
+  it('un mensaje que CITA a otro (context.id) guarda a cuál responde; si el citado no se conoce, queda sin cita (v13 S3.3)', async () => {
+    await post(wa({ id: 'wamid.Q1', text: 'Hola' }));
+    await post(wa({ id: 'wamid.Q2', text: 'Sobre eso…', ts: T0 + 5, message: { context: { id: 'wamid.Q1' } } }));
+    await post(wa({ id: 'wamid.Q3', text: 'Y esto', ts: T0 + 6, message: { context: { id: 'wamid.DESCONOCIDO' } } }));
+    await runJob();
+    const rows = (await admin.query('SELECT id, external_id, reply_to_message_id, meta FROM messages WHERE organization_id = $1', [ORG_A])).rows as Array<{ id: string; external_id: string; reply_to_message_id: string | null; meta: Record<string, unknown> }>;
+    const by = (x: string) => rows.find((r) => r.external_id === x)!;
+    expect(by('wamid.Q1').reply_to_message_id).toBeNull();
+    expect(by('wamid.Q2').reply_to_message_id).toBe(by('wamid.Q1').id);
+    expect(by('wamid.Q3').reply_to_message_id).toBeNull();
+    expect(by('wamid.Q2').meta).toEqual({ wa_id: ANA }); // la cita no se mezcla con los datos del tipo
+  });
+
   it('quien escribe por primera vez es un lead: el sistema le pone la etiqueta «Lead»; a un contacto que ya existía no se le pone ni se le quita nada, y no se manda ningún evento a Meta', async () => {
     expect((await call('POST', '/contacts', aliceToken, { name: 'Ya existía', phones: [`+${BETO}`] })).status).toBe(201);
     await post(wa({ id: 'wamid.N1' })); // Ana, nueva

@@ -25,7 +25,7 @@ describe('vista previa de un mensaje', () => {
     expect(long.endsWith('…')).toBe(true);
     expect(previewOf('image', null)).toBe('Imagen');
     expect(previewOf('audio', '')).toBe('Audio');
-    expect(previewOf('location', '   ')).toBe('Ubicación');
+    expect(previewOf('location', '   ')).toBe('📍 Ubicación');
     expect(previewOf('unsupported', null)).toBe('Mensaje no compatible');
     expect(previewOf('algo-nuevo', null)).toBe('Mensaje');
   });

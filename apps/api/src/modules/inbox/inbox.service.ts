@@ -13,6 +13,7 @@ import { decode, encode } from './inbox.cursor';
 import { abilities, channelState, collabColumn, loadConversation, scopeOf, visibleTo, type Collab, type InboxAccess, type InboxScope } from './inbox.access';
 import type { InboxTab, ListConversationsQuery, MessagesQuery } from './inbox.dto';
 import { conversationView, messageView, type ConversationParts, type ConversationView, type MessageView, type ParticipantView } from './inbox.views';
+import { MessageQuotesService } from './message-quotes.service';
 
 export interface ConversationList {
   items: ConversationView[];
@@ -96,6 +97,7 @@ export class InboxService {
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
+    @Inject(MessageQuotesService) private readonly quotes: MessageQuotesService,
   ) {}
 
   async list(access: InboxAccess, q: ListConversationsQuery): Promise<ConversationList> {
@@ -163,7 +165,8 @@ export class InboxService {
     }));
     const attMap = new Map(attachments.map((x) => [x.id, x.attachment]));
     const mentioned = await this.notifications.mentionsOf(data.page.filter((m) => m.kind === 'note').map((m) => m.id));
-    return { items: data.page.map((m) => messageView(m, m.createdBy ? (authors.get(m.createdBy) ?? { id: m.createdBy, name: 'Persona desconocida' }) : null, attMap.get(m.id) ?? null, mentioned.get(m.id) ?? [])), next_cursor: data.next };
+    const quotes = await this.quotes.forRows(data.page);
+    return { items: data.page.map((m) => messageView(m, m.createdBy ? (authors.get(m.createdBy) ?? { id: m.createdBy, name: 'Persona desconocida' }) : null, attMap.get(m.id) ?? null, mentioned.get(m.id) ?? [], quotes.get(m.id) ?? null)), next_cursor: data.next };
   }
 
   /** Lo que la pantalla necesita para sus filtros. */
