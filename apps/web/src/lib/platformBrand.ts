@@ -11,10 +11,12 @@ export interface Brand {
   icon192: string | null;
   /** La silueta monocroma de las notificaciones (Android). */
   badge96: string | null;
+  /** El sonido propio de mensaje nuevo (con su versión) o `null`: la aplicación usa su tono por omisión. */
+  sound: string | null;
 }
 
 export const DEFAULT_BRAND_NAME = 'Sales Smart 2.0';
-const DEFAULT: Brand = { name: DEFAULT_BRAND_NAME, shortName: null, version: 'default-1', logo: { light: null, dark: null }, iconCustom: false, icon192: null, badge96: null };
+const DEFAULT: Brand = { name: DEFAULT_BRAND_NAME, shortName: null, version: 'default-1', logo: { light: null, dark: null }, iconCustom: false, icon192: null, badge96: null, sound: null };
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
 /** Solo direcciones de la propia aplicación (`/v1/branding/...`): nada que cargue una imagen de otro sitio. */
@@ -37,6 +39,7 @@ export function parseBrand(raw: unknown): Brand {
     iconCustom: icon['custom'] === true,
     icon192: own(icon['icon_192']),
     badge96: own(icon['badge_96']),
+    sound: own(r['sound']),
   };
 }
 
@@ -71,6 +74,11 @@ const subscribe = (cb: () => void): (() => void) => {
   listeners.add(cb);
   return () => listeners.delete(cb);
 };
+
+/** Avisa cuando cambia la marca (para volver a preparar el sonido propio). */
+export function subscribeBrand(cb: () => void): () => void {
+  return subscribe(cb);
+}
 
 export function useBrand(): Brand {
   return useSyncExternalStore(subscribe, getBrand, getBrand);

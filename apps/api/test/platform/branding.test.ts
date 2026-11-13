@@ -1,6 +1,7 @@
 // v11 §3 — Marca de la plataforma (solo Súper Admin): nombre, logos e icono de la aplicación. Rutas cubiertas (el registro de endpoints exige que este archivo las mencione):
 //   GET /v1/platform/branding · PUT /v1/platform/branding · PUT /v1/platform/branding/icon · DELETE /v1/platform/branding/icon
 //   PUT /v1/platform/branding/logo-light · DELETE /v1/platform/branding/logo-light · PUT /v1/platform/branding/logo-dark · DELETE /v1/platform/branding/logo-dark
+//   PUT /v1/platform/branding/sound · DELETE /v1/platform/branding/sound
 //   GET /v1/branding · GET /v1/branding/manifest.webmanifest · GET /v1/branding/favicon · GET /v1/branding/:file
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
@@ -77,7 +78,7 @@ interface View {
   logo_light: { version: string; content_type: string; px: number | null } | null;
   logo_dark: { version: string; content_type: string; px: number | null } | null;
 }
-interface Pub { name: string; short_name: string; version: string; icon: { custom: boolean; favicon: string; apple_touch: string; icon_192: string; icon_512: string; badge_96: string }; logo: { light: string | null; dark: string | null } }
+interface Pub { name: string; short_name: string; version: string; icon: { custom: boolean; favicon: string; apple_touch: string; icon_192: string; icon_512: string; badge_96: string }; logo: { light: string | null; dark: string | null }; sound: string | null }
 
 // ---- imágenes reales (sharp): un círculo índigo con transparencia, uno opaco, etc.
 const circleSvg = (n: number): Buffer => Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${n}" height="${n}"><circle cx="${n / 2}" cy="${n / 2}" r="${n / 2 - 4}" fill="#4f46e5"/></svg>`);
@@ -86,6 +87,27 @@ const pngOpaque = (w: number, h: number): Promise<Buffer> => sharp({ create: { w
 const webp = (w: number, h: number): Promise<Buffer> => sharp({ create: { width: w, height: h, channels: 3, background: '#112233' } }).webp().toBuffer();
 const jpeg = (n: number): Promise<Buffer> => sharp({ create: { width: n, height: n, channels: 3, background: '#112233' } }).jpeg().toBuffer();
 const size = async (b: Buffer): Promise<string> => { const m = await sharp(b).metadata(); return `${m.width}x${m.height}`; };
+// ---- sonidos de prueba construidos a mano: la validación es por contenido, no por extensión
+/** MP3 mínimo: etiqueta ID3v2 opcional y cuadros MPEG-1 capa III de 128 kbps / 44,1 kHz (cabecera FF FB 90 64, cuadro de 417 bytes). */
+function mp3(o: { id3?: boolean; frames?: number; padding?: number } = {}): Buffer {
+  const parts: Buffer[] = [];
+  if (o.id3) parts.push(Buffer.from('ID3\x04\x00\x00\x00\x00\x00\x10', 'latin1'), Buffer.alloc(16));
+  if (o.padding) parts.push(Buffer.alloc(o.padding));
+  for (let i = 0; i < (o.frames ?? 3); i++) parts.push(Buffer.from([0xff, 0xfb, 0x90, 0x64]), Buffer.alloc(413));
+  return Buffer.concat(parts);
+}
+const box = (type: string, ...body: Buffer[]): Buffer => {
+  const b = Buffer.concat(body);
+  const h = Buffer.alloc(8);
+  h.writeUInt32BE(8 + b.length, 0);
+  h.write(type, 4, 'latin1');
+  return Buffer.concat([h, b]);
+};
+/** M4A mínimo: `ftyp` M4A y un manejador de pista (`soun` = audio, `vide` = video). */
+function m4a(handler = 'soun', brand = 'M4A '): Buffer {
+  const hdlr = box('hdlr', Buffer.alloc(8), Buffer.from(handler, 'latin1'), Buffer.alloc(12));
+  return Buffer.concat([box('ftyp', Buffer.from(brand, 'latin1'), Buffer.alloc(4), Buffer.from('M4A isom', 'latin1')), box('moov', box('trak', box('mdia', hdlr))), box('mdat', Buffer.alloc(300))]);
+}
 const bodyOf = async (r: Response): Promise<Buffer> => Buffer.from(await r.arrayBuffer());
 
 const storage = () => app.get(StorageGateway, { strict: false }).fake;
@@ -126,6 +148,8 @@ describe('acceso: solo el Súper Admin cambia la marca', () => {
       ['DELETE', '/platform/branding/logo-light', undefined],
       ['PUT', '/platform/branding/logo-dark', img],
       ['DELETE', '/platform/branding/logo-dark', undefined],
+      ['PUT', '/platform/branding/sound', mp3()],
+      ['DELETE', '/platform/branding/sound', undefined],
     ];
     for (const [m, p, b] of attempts) {
       expect((await call(m, p, undefined, b)).status, `${m} ${p} sin sesión`).toBe(401);
@@ -171,6 +195,7 @@ describe('lo público: sin nada propio entrega los valores por defecto y no reve
       version: 'default-1',
       icon: { custom: false, favicon: '/v1/branding/favicon?v=default-1', apple_touch: '/v1/branding/apple-touch-icon.png?v=default-1', icon_192: '/v1/branding/icon-192.png?v=default-1', icon_512: '/v1/branding/icon-512.png?v=default-1', badge_96: '/v1/branding/badge-96.png?v=default-1' },
       logo: { light: null, dark: null },
+      sound: null,
     });
     expect(JSON.stringify(p)).not.toMatch(/Barbería|Agencia Uno|alice|root@/);
     const etag = r.headers.get('etag')!;
@@ -191,7 +216,7 @@ describe('lo público: sin nada propio entrega los valores por defecto y no reve
     }
   });
 
-  it('un archivo desconocido o un logo sin subir responde 404 con el error estándar; no se puede pedir por la ruta ni el sonido (aún) ni otra cosa', async () => {
+  it('un archivo desconocido o un logo sin subir responde 404 con el error estándar; el sonido sin subir también es 404 (la aplicación usa su tono) y nada fuera de la lista se puede pedir', async () => {
     for (const f of ['logo-light', 'logo-dark', 'nada.png', 'sound', '..%2Fsecretos', 'toString', '__proto__']) {
       const r = await call('GET', `/branding/${f}`);
       expect(r.status, f).toBe(404);
@@ -412,6 +437,102 @@ describe('logos', () => {
     expect(objects()).toEqual([]);
     expect((await json<Pub>(await call('GET', '/branding'))).logo).toEqual({ light: null, dark: null });
     expect((await audits()).map((x) => x.action)).toEqual(['branding.logo.set', 'branding.logo.cleared']);
+  });
+});
+
+describe('sonido de notificación', () => {
+  it('un MP3 (con o sin etiqueta ID3) o un M4A válidos se guardan, se entregan sin sesión con su tipo, versionados y con caché larga, y quedan auditados', async () => {
+    const mp = mp3({ id3: true, padding: 8 });
+    const r = await call('PUT', '/platform/branding/sound', T.root, mp);
+    expect(r.status).toBe(200);
+    const v = await json<{ sound: { version: string; bytes: number; content_type: string } | null }>(r);
+    expect(v.sound).toMatchObject({ bytes: mp.length, content_type: 'audio/mpeg' });
+    expect(objects()).toHaveLength(1);
+    expect(objects()[0]).toMatch(/^platform\/branding\/sound-[0-9a-f-]{36}$/);
+    const pub = await json<Pub>(await call('GET', '/branding'));
+    expect(pub.sound).toBe(`/v1/branding/sound?v=${v.sound!.version}`);
+    const f = await call('GET', pub.sound!.replace('/v1', ''));
+    expect(f.status).toBe(200);
+    expect(f.headers.get('content-type')).toBe('audio/mpeg');
+    expect(f.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(f.headers.get('cache-control')).toBe('public, max-age=31536000, immutable');
+    expect(f.headers.get('etag')).toBe(`"${v.sound!.version}"`);
+    expect((await bodyOf(f)).equals(mp)).toBe(true);
+    expect((await call('GET', '/branding/sound', undefined, undefined, { 'if-none-match': `"${v.sound!.version}"` })).status).toBe(304);
+    // sin la versión: caché corta
+    expect((await call('GET', '/branding/sound')).headers.get('cache-control')).toBe('public, max-age=300');
+    // sin ID3, y un M4A en su lugar
+    expect((await call('PUT', '/platform/branding/sound', T.root, mp3())).status).toBe(200);
+    const r2 = await call('PUT', '/platform/branding/sound', T.root, m4a());
+    expect(r2.status).toBe(200);
+    expect((await json<{ sound: { content_type: string } }>(r2)).sound.content_type).toBe('audio/mp4');
+    expect((await call('GET', '/branding/sound')).headers.get('content-type')).toBe('audio/mp4');
+    expect(objects()).toHaveLength(1);
+    expect(await rows()).toEqual(['sound']);
+    expect((await audits()).map((x) => x.action)).toEqual(['branding.sound.set', 'branding.sound.set', 'branding.sound.set']);
+    expect((await audits())[0]!.actor_user_id).toBe(IDS.root);
+  });
+
+  it('el estado del Súper Admin trae el sonido; sin sonido, null', async () => {
+    expect((await json<{ sound: unknown }>(await call('GET', '/platform/branding', T.root))).sound).toBeNull();
+    await call('PUT', '/platform/branding/sound', T.root, mp3());
+    expect((await json<{ sound: { content_type: string } }>(await call('GET', '/platform/branding', T.root))).sound?.content_type).toBe('audio/mpeg');
+  });
+
+  it('rechaza por contenido lo que no es un sonido: extensión falsa, SVG, imagen, video MP4, MPEG de otra capa, vacío y más de 200 KB; no deja nada guardado ni auditado', async () => {
+    const png = await pngCircle(64);
+    const cases: Array<[string, Buffer, number, string]> = [
+      ['vacío', Buffer.alloc(0), 400, 'SOUND_EMPTY'],
+      ['texto con «extensión» mp3', Buffer.from('esto no es un mp3, aunque se llame sonido.mp3'), 400, 'SOUND_FORMAT_INVALID'],
+      ['SVG', circleSvg(40), 400, 'SOUND_FORMAT_INVALID'],
+      ['PNG', png, 400, 'SOUND_FORMAT_INVALID'],
+      ['video MP4 (manejador de video)', m4a('vide', 'isom'), 400, 'SOUND_FORMAT_INVALID'],
+      ['MP4 sin pista de audio', m4a('meta'), 400, 'SOUND_FORMAT_INVALID'],
+      ['ID3 sin ningún cuadro detrás', Buffer.concat([Buffer.from('ID3\x04\x00\x00\x00\x00\x00\x10', 'latin1'), Buffer.alloc(16)]), 400, 'SOUND_FORMAT_INVALID'],
+      ['cuadro MPEG de capa II (no MP3)', Buffer.concat([Buffer.from([0xff, 0xfd, 0x90, 0x64]), Buffer.alloc(400)]), 400, 'SOUND_FORMAT_INVALID'],
+      ['más de 200 KB', mp3({ frames: 600 }), 413, 'SOUND_TOO_LARGE'],
+    ];
+    for (const [name, body, status, code] of cases) {
+      const r = await call('PUT', '/platform/branding/sound', T.root, body);
+      expect(r.status, name).toBe(status);
+      expect(await json<{ error: { code: string } }>(r), name).toMatchObject({ error: { code } });
+    }
+    expect(objects()).toEqual([]);
+    expect(await rows()).toEqual([]);
+    expect(await audits()).toEqual([]);
+    // el límite es exacto: 200 KB justos sí
+    const exact = Buffer.concat([mp3({ frames: 1 }), Buffer.alloc(200 * 1024 - 417)]);
+    expect(exact.length).toBe(200 * 1024);
+    expect((await call('PUT', '/platform/branding/sound', T.root, exact)).status).toBe(200);
+  });
+
+  it('restaurar el sonido por defecto borra el archivo y la referencia, el público vuelve a no tener sonido y se puede repetir', async () => {
+    await call('PUT', '/platform/branding/sound', T.root, mp3());
+    expect(objects()).toHaveLength(1);
+    expect((await call('DELETE', '/platform/branding/sound', T.root)).status).toBe(200);
+    expect(objects()).toEqual([]);
+    expect(await rows()).toEqual([]);
+    expect((await json<Pub>(await call('GET', '/branding'))).sound).toBeNull();
+    expect((await call('GET', '/branding/sound')).status).toBe(404);
+    expect((await call('DELETE', '/platform/branding/sound', T.root)).status).toBe(200);
+    expect((await audits()).map((x) => x.action)).toEqual(['branding.sound.set', 'branding.sound.cleared', 'branding.sound.cleared']);
+  });
+
+  it('sin almacenamiento disponible responde 503 y no deja referencias a medias; el sonido no toca los logos ni el icono', async () => {
+    storage().down = true;
+    const r = await call('PUT', '/platform/branding/sound', T.root, mp3());
+    expect(r.status).toBe(503);
+    expect(await rows()).toEqual([]);
+    storage().down = false;
+    await call('PUT', '/platform/branding/logo-light', T.root, await pngOpaque(300, 80));
+    await call('PUT', '/platform/branding/sound', T.root, mp3());
+    await call('DELETE', '/platform/branding/sound', T.root);
+    expect(await rows()).toEqual(['logo-light']);
+  });
+
+  it('el archivo solo se pide por su nombre exacto', async () => {
+    await call('PUT', '/platform/branding/sound', T.root, mp3());
+    for (const f of ['sound.mp3', 'sound.m4a', 'Sound']) expect((await call('GET', `/branding/${f}`)).status, f).toBe(404);
   });
 });
 

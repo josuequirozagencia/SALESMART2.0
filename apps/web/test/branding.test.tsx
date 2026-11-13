@@ -1,16 +1,19 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { resetBrand } from '../src/lib/platformBrand';
-import { iconProblem, logoProblem, type BrandingView } from '../src/features/platform/useBranding';
+import { getBrand, resetBrand } from '../src/lib/platformBrand';
+import { iconProblem, logoProblem, soundProblem, type BrandingView } from '../src/features/platform/useBranding';
 import { authed, err, ME_ROOT, mockApi, renderApp, resetWorld, type Call, type Handler } from './helpers';
 
 vi.mock('../src/features/platform/testNotification', () => ({ showTestNotification: vi.fn() }));
 import { showTestNotification } from '../src/features/platform/testNotification';
+vi.mock('../src/lib/notifySound', async (importOriginal) => ({ ...(await importOriginal<typeof import('../src/lib/notifySound')>()), testSound: vi.fn() }));
+import { testSound } from '../src/lib/notifySound';
 
 beforeEach(() => {
   vi.unstubAllGlobals();
   vi.mocked(showTestNotification).mockReset();
+  vi.mocked(testSound).mockReset();
   resetWorld();
   resetBrand();
   document.title = '';
@@ -20,9 +23,10 @@ beforeEach(() => {
 const NO_TRIALS = { items: [], next_cursor: null, pending_extensions: 0, summary: { active: 0, expiring_soon: 0, pending: 0, extension_days: 3 } };
 const EMPTY: BrandingView = {
   name: null, short_name: null, default_name: 'Sales Smart 2.0', effective_name: 'Sales Smart 2.0',
-  icon: { custom: false, version: null, px: null, has_badge: false, updated_at: null }, logo_light: null, logo_dark: null, updated_at: null,
+  icon: { custom: false, version: null, px: null, has_badge: false, updated_at: null }, logo_light: null, logo_dark: null, sound: null, updated_at: null,
 };
 const ICON_V = 'aaaaaaaa-0000-4000-8000-000000000001';
+const SOUND_V = 'bbbbbbbb-0000-4000-8000-000000000002';
 
 interface Server { routes: Record<string, Handler>; puts: Array<{ path: string; bytes: number; type: string | undefined }>; calls: Record<string, Call[]>; view: () => BrandingView }
 
@@ -41,7 +45,9 @@ function server(initial: BrandingView = EMPTY, over: Record<string, Handler> = {
     'PUT /platform/branding/logo-light': raw('logo-light', (v) => ({ ...v, logo_light: { version: 'l1', bytes: 4096, content_type: 'image/png', px: 400 } })),
     'PUT /platform/branding/logo-dark': raw('logo-dark', (v) => ({ ...v, logo_dark: { version: 'd1', bytes: 3072, content_type: 'image/webp', px: 300 } })),
     'DELETE /platform/branding/logo-light': () => { state = { ...state, logo_light: null }; return { body: state }; },
-    'GET /branding': () => ({ body: { name: state.effective_name, short_name: state.short_name ?? state.effective_name.slice(0, 12), version: state.icon.version ?? 'default-1', icon: { custom: state.icon.custom, favicon: '/v1/branding/favicon', apple_touch: '/v1/branding/apple-touch-icon.png', icon_192: `/v1/branding/icon-192.png?v=${state.icon.version ?? 'default-1'}`, icon_512: '/v1/branding/icon-512.png', badge_96: '/v1/branding/badge-96.png' }, logo: { light: state.logo_light ? '/v1/branding/logo-light?v=l1' : null, dark: state.logo_dark ? '/v1/branding/logo-dark?v=d1' : null } } }),
+    'PUT /platform/branding/sound': raw('sound', (v) => ({ ...v, sound: { version: SOUND_V, bytes: 30 * 1024, content_type: 'audio/mpeg' } })),
+    'DELETE /platform/branding/sound': () => { state = { ...state, sound: null }; return { body: state }; },
+    'GET /branding': () => ({ body: { name: state.effective_name, short_name: state.short_name ?? state.effective_name.slice(0, 12), version: state.icon.version ?? 'default-1', icon: { custom: state.icon.custom, favicon: '/v1/branding/favicon', apple_touch: '/v1/branding/apple-touch-icon.png', icon_192: `/v1/branding/icon-192.png?v=${state.icon.version ?? 'default-1'}`, icon_512: '/v1/branding/icon-512.png', badge_96: '/v1/branding/badge-96.png' }, logo: { light: state.logo_light ? '/v1/branding/logo-light?v=l1' : null, dark: state.logo_dark ? '/v1/branding/logo-dark?v=d1' : null }, sound: state.sound ? `/v1/branding/sound?v=${state.sound.version}` : null } }),
     ...over,
   };
   return s;
@@ -65,6 +71,19 @@ describe('reglas de los archivos (solo ayuda: el servidor vuelve a validar el co
     expect(logoProblem({ name: 'a.webp', type: 'image/webp', size: 100 })).toBeNull();
     expect(logoProblem({ name: 'a.jpg', type: 'image/jpeg', size: 100 })).toMatch(/PNG o un WebP/);
     expect(logoProblem({ name: 'a.svg', type: 'image/svg+xml', size: 100 })).toMatch(/SVG/);
+  });
+
+  it('el sonido: MP3 o M4A, no vacío y hasta 200 KB', () => {
+    expect(soundProblem({ name: 'ping.mp3', type: 'audio/mpeg', size: 30_000 })).toBeNull();
+    expect(soundProblem({ name: 'ping.m4a', type: 'audio/mp4', size: 30_000 })).toBeNull();
+    expect(soundProblem({ name: 'ping.m4a', type: 'audio/x-m4a', size: 30_000 })).toBeNull();
+    expect(soundProblem({ name: 'ping.MP3', type: '', size: 30_000 })).toBeNull();
+    expect(soundProblem({ name: 'ping.mp3', type: 'audio/mpeg', size: 200 * 1024 })).toBeNull();
+    expect(soundProblem({ name: 'ping.mp3', type: 'audio/mpeg', size: 200 * 1024 + 1 })).toMatch(/200 KB/);
+    expect(soundProblem({ name: 'ping.mp3', type: 'audio/mpeg', size: 0 })).toMatch(/vacío/);
+    expect(soundProblem({ name: 'ping.wav', type: 'audio/wav', size: 100 })).toMatch(/MP3 \(recomendado\) o un M4A/);
+    expect(soundProblem({ name: 'ping.ogg', type: 'audio/ogg', size: 100 })).toMatch(/MP3/);
+    expect(soundProblem({ name: 'logo.png', type: 'image/png', size: 100 })).toMatch(/MP3/);
   });
 });
 
@@ -234,6 +253,111 @@ describe('Plataforma › Marca (solo Súper Admin)', () => {
       await userEvent.click(light.getByRole('button', { name: 'Sí, quitar' }));
       expect(await light.findByText('Logo quitado.')).toBeInTheDocument();
       expect(light.getByRole('button', { name: 'Subir logo' })).toBeInTheDocument();
+    });
+  });
+
+  describe('sonido de notificación', () => {
+    const mp3 = (size = 30 * 1024) => file('ping.mp3', 'audio/mpeg', size);
+    const WITH_SOUND: BrandingView = { ...EMPTY, sound: { version: SOUND_V, bytes: 30 * 1024, content_type: 'audio/mpeg' } };
+
+    it('sin sonido propio muestra los requisitos y las limitaciones, deja probar el tono y no ofrece restaurar', async () => {
+      mockApi(server().routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      expect(await w.findByText(/Sin sonido propio: se usa el tono por omisión/)).toBeInTheDocument();
+      const req = w.getByRole('list', { name: 'Requisitos del sonido' });
+      expect(req).toHaveTextContent(/MP3 \(recomendado\) o M4A \(AAC\), a 128 kbps/);
+      expect(req).toHaveTextContent(/de 1 a 3 segundos/);
+      expect(req).toHaveTextContent(/hasta 100 KB recomendado; el máximo aceptado es 200 KB/);
+      const lim = w.getByRole('list', { name: 'Limitaciones del sonido' });
+      expect(lim).toHaveTextContent(/aplicación cerrada.*sonido del sistema/);
+      expect(lim).toHaveTextContent(/hasta que la persona la toca una vez/);
+      expect(w.getByRole('button', { name: 'Subir sonido' })).toBeInTheDocument();
+      expect(w.queryByRole('button', { name: 'Restaurar sonido por defecto' })).not.toBeInTheDocument();
+      vi.mocked(testSound).mockResolvedValue('ok');
+      await userEvent.click(w.getByRole('button', { name: 'Probar sonido' }));
+      await waitFor(() => expect(testSound).toHaveBeenCalledWith(null));
+    });
+
+    it('subir un MP3 lo manda tal cual, muestra el resultado y la marca de la interfaz recibe la dirección del sonido', async () => {
+      const s = server();
+      mockApi(s.routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      await userEvent.upload(await screen.findByLabelText('Elegir un sonido'), mp3());
+      expect(await w.findByText(/Sonido actualizado/)).toBeInTheDocument();
+      expect(s.puts).toEqual([{ path: 'sound', bytes: 30 * 1024, type: 'audio/mpeg' }]);
+      expect(await w.findByText(/Sonido propio · MP3 · 30 KB/)).toBeInTheDocument();
+      expect(w.getByRole('button', { name: 'Cambiar sonido' })).toBeInTheDocument();
+      expect(w.getByRole('button', { name: 'Restaurar sonido por defecto' })).toBeInTheDocument();
+      await waitFor(() => expect(getBrand().sound).toBe(`/v1/branding/sound?v=${SOUND_V}`));
+    });
+
+    it('«Probar sonido» con sonido propio toca ese archivo (con su versión) y explica si no se pudo', async () => {
+      mockApi(server(WITH_SOUND).routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      vi.mocked(testSound).mockResolvedValueOnce('ok').mockResolvedValueOnce('error').mockResolvedValueOnce('unsupported');
+      await userEvent.click(await w.findByRole('button', { name: 'Probar sonido' }));
+      await waitFor(() => expect(testSound).toHaveBeenCalledWith(`/v1/branding/sound?v=${SOUND_V}`));
+      expect(w.queryByRole('alert')).not.toBeInTheDocument();
+      await userEvent.click(w.getByRole('button', { name: 'Probar sonido' }));
+      expect(await w.findByRole('alert')).toHaveTextContent(/No se pudo reproducir el sonido/);
+      await userEvent.click(w.getByRole('button', { name: 'Probar sonido' }));
+      await waitFor(() => expect(w.getByRole('alert')).toHaveTextContent(/no puede reproducir audio/));
+    });
+
+    it('rechaza en la pantalla otros formatos y más de 200 KB, sin llamar al servidor', async () => {
+      const s = server();
+      mockApi(s.routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      const input = await screen.findByLabelText('Elegir un sonido');
+      await userEvent.upload(input, file('ping.wav', 'audio/wav'), { applyAccept: false });
+      expect(await w.findByText(/No se aceptan WAV, OGG ni otros formatos/)).toBeInTheDocument();
+      await userEvent.upload(input, mp3(200 * 1024 + 1));
+      expect(await w.findByText(/el máximo es 200 KB/)).toBeInTheDocument();
+      expect(s.puts).toEqual([]);
+    });
+
+    it('si el servidor rechaza el archivo (por ejemplo un MP3 falso), muestra su motivo y no cambia nada', async () => {
+      mockApi(server(EMPTY, { 'PUT /platform/branding/sound': () => err(400, 'SOUND_FORMAT_INVALID', 'El sonido debe ser un MP3 (recomendado) o un M4A (AAC) válido: el contenido del archivo no corresponde a ninguno de los dos') }).routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      await userEvent.upload(await screen.findByLabelText('Elegir un sonido'), mp3());
+      expect(await w.findByText(/el contenido del archivo no corresponde a ninguno de los dos/)).toBeInTheDocument();
+      expect(w.getByText(/Sin sonido propio/)).toBeInTheDocument();
+    });
+
+    it('avisa (sin impedir la subida) si el archivo dura más de 5 s', async () => {
+      class FakeOffline {
+        decodeAudioData(): Promise<{ duration: number }> {
+          return Promise.resolve({ duration: 7.2 });
+        }
+      }
+      vi.stubGlobal('OfflineAudioContext', FakeOffline);
+      const s = server();
+      mockApi(s.routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      await userEvent.upload(await screen.findByLabelText('Elegir un sonido'), mp3());
+      expect(await w.findByText(/dura 7\.2 s/)).toBeInTheDocument();
+      expect(await w.findByText(/Sonido actualizado/)).toBeInTheDocument();
+      expect(s.puts).toHaveLength(1);
+    });
+
+    it('restaurar pide confirmación y, al confirmar, vuelve al tono por omisión', async () => {
+      const s = server(WITH_SOUND);
+      mockApi(s.routes);
+      renderApp('/platform/branding');
+      const w = await section('Sonido de notificación');
+      await userEvent.click(await w.findByRole('button', { name: 'Restaurar sonido por defecto' }));
+      await userEvent.click(w.getByRole('button', { name: 'No' }));
+      expect(w.queryByRole('group', { name: /Confirmar/ })).not.toBeInTheDocument();
+      await userEvent.click(w.getByRole('button', { name: 'Restaurar sonido por defecto' }));
+      await userEvent.click(w.getByRole('button', { name: 'Sí, quitar' }));
+      expect(await w.findByText(/Sonido quitado/)).toBeInTheDocument();
+      expect(await w.findByText(/Sin sonido propio/)).toBeInTheDocument();
     });
   });
 

@@ -10,3 +10,4 @@ export { AiModelPricesService, type ModelPrice, type ModelPriceView } from './ai
 export { BrandingStore, type AssetRef, type AssetChange, type BrandSnapshot } from './branding/branding.store';
 export { BRANDING_ASSETS, ICON_VARIANTS, ICON_VARIANT_NAMES, BADGE_PX, IMAGE_MAX_BYTES, ICON_MIN_PX, ICON_MAX_PX, LOGO_MAX_WIDTH, DEFAULT_APP_NAME, NAME_MIN, NAME_MAX, SHORT_NAME_MAX, checkName, type BrandingAsset, type IconVariant, type NameCheck } from './branding/brand-files';
 export { buildIcon, buildLogo, defaultImages, type BuiltIcon, type BuiltLogo, type ImageFailure } from './branding/brand-images';
+export { checkSound, looksLikeMp3, looksLikeM4a, SOUND_MAX_BYTES, type SoundCheck, type SoundType } from './branding/brand-sound';

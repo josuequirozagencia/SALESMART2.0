@@ -4,13 +4,13 @@ import { z } from 'zod';
 import { AppError, NotFoundError } from '../../errors';
 import { Public, PlatformOnly, WindowLimiter, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
-import { IMAGE_MAX_BYTES } from '../platform';
+import { IMAGE_MAX_BYTES, SOUND_MAX_BYTES } from '../platform';
 import { BrandingService, type PublicFile, type ServedFile } from './branding.service';
 
 /** Lee el cuerpo hasta `limit` bytes. Se lee AQUÍ —después de autenticar y de comprobar el permiso—, así quien no es Súper Admin no hace que el servidor reciba nada. */
 function readBody(req: Request, limit: number, code: string): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const tooLarge = (): AppError => new AppError(413, code, `El archivo pesa demasiado: el máximo es ${limit / 1024 / 1024} MB`);
+    const tooLarge = (): AppError => new AppError(413, code, `El archivo pesa demasiado: el máximo es ${limit >= 1024 * 1024 ? `${limit / 1024 / 1024} MB` : `${Math.round(limit / 1024)} KB`}`);
     const declared = Number(req.headers['content-length']);
     if (Number.isFinite(declared) && declared > limit) {
       req.resume();
@@ -105,6 +105,21 @@ export class BrandingController {
   clearLogoDark() {
     return this.branding.clearLogo('dark');
   }
+
+  /** El cuerpo ES el MP3 o M4A del sonido de mensaje nuevo (hasta 200 KB); se valida por su contenido. */
+  @Put('sound')
+  @Header('Cache-Control', 'no-store')
+  async setSound(@Req() req: Request) {
+    return this.branding.setSound(await readBody(req, SOUND_MAX_BYTES, 'SOUND_TOO_LARGE'));
+  }
+
+  /** Vuelve al tono por omisión de la aplicación. */
+  @Delete('sound')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  clearSound() {
+    return this.branding.clearSound();
+  }
 }
 
 /** Nombres públicos de los archivos → cuál se entrega. */
@@ -117,6 +132,7 @@ const FILES: Record<string, PublicFile> = {
   'badge-96.png': 'badge-96',
   'logo-light': 'logo-light',
   'logo-dark': 'logo-dark',
+  sound: 'sound',
 };
 const ONE_YEAR = 31_536_000;
 
