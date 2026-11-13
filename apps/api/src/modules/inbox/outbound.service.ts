@@ -16,6 +16,7 @@ import { assertCanReply, assertWindowOpen, loadConversation, scopeOf, type Conve
 import type { NoteDto, ReplyDto, SendMediaDto, SendTemplateDto } from './inbox.dto';
 import { messageView, type MessageView } from './inbox.views';
 import { MentionsService } from './mentions.service';
+import { MessageQuotesService } from './message-quotes.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 
 /** Lo que un envío humano pone en el mensaje: texto o plantilla ya armada. */
@@ -25,6 +26,8 @@ interface Outgoing {
   meta: Record<string, unknown>;
   /** ¿Solo se puede enviar dentro de las 24 h del último mensaje del cliente? (el texto sí; una plantilla, no). */
   needsWindow: boolean;
+  /** El mensaje de la misma conversación al que esta respuesta cita (v13 S3.3). */
+  replyToId?: string | null;
 }
 
 /**
@@ -52,11 +55,12 @@ export class OutboundService {
     @Inject(APP_LOGGER) private readonly log: AppLogger,
     @Inject(MentionsService) private readonly mentions: MentionsService,
     @Inject(NotificationsService) private readonly notifications: NotificationsService,
+    @Inject(MessageQuotesService) private readonly quotes: MessageQuotesService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
   async reply(access: InboxAccess, conversationId: string, dto: ReplyDto): Promise<MessageView> {
-    return this.send(scopeOf(access), conversationId, () => Promise.resolve({ kind: 'text', body: dto.text, meta: {}, needsWindow: true }));
+    return this.send(scopeOf(access), conversationId, () => Promise.resolve({ kind: 'text', body: dto.text, meta: {}, needsWindow: true, replyToId: dto.reply_to_message_id ?? null }));
   }
 
   /** Envía un adjunto ya subido (M5.6d): un mensaje cuyo contenido sale de `message_attachments`. Un adjunto por mensaje. */
@@ -161,9 +165,10 @@ export class OutboundService {
     assertCanReply(scope, c, channel.state, collab, channel.provider);
     const out = await make(tx, c);
     if (out.needsWindow) assertWindowOpen(c.lastInboundAt, now, channel.provider);
+    if (out.replyToId) await this.assertReplyTarget(tx, conversationId, out.replyToId, channel.provider);
     const [m] = await tx
       .insert(messages)
-      .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: out.kind, body: out.body, meta: out.meta, status: 'queued', sentAt: now, createdBy: scope.userId, attempts: 0, nextAttemptAt: now })
+      .values({ conversationId, channelAccountId: c.channelAccountId, direction: 'out', senderType: 'human', kind: out.kind, body: out.body, meta: out.meta, replyToMessageId: out.replyToId ?? null, status: 'queued', sentAt: now, createdBy: scope.userId, attempts: 0, nextAttemptAt: now })
       .returning({ id: messages.id });
     const at = now.toISOString();
     await tx
@@ -175,6 +180,17 @@ export class OutboundService {
     // Responder sin haber aceptado equivale a aceptar: queda en la auditoría como el cambio de estado que es
     if (c.status === 'pending') await writeAudit(tx, { entityType: 'conversation', entityId: conversationId, field: 'status', oldValue: 'pending', newValue: 'waiting' });
     return m!.id;
+  }
+
+  /**
+   * El mensaje que una respuesta cita (v13 S3.3): debe ser de ESTA conversación y no una nota interna (si no, 404 uniforme: no se distingue de uno que no existe), y haber salido ya —tener
+   * el identificador que le dio el proveedor— porque es con él que el proveedor sabe cuál es (409 `REPLY_TARGET_NOT_SENT`). GoHighLevel no tiene citas (409 `REPLY_UNSUPPORTED`).
+   */
+  private async assertReplyTarget(tx: TenantTx, conversationId: string, targetId: string, provider: string): Promise<void> {
+    if (provider === 'ghl') throw new ConflictError('REPLY_UNSUPPORTED', 'Por GoHighLevel no se pueden citar mensajes');
+    const [t] = await tx.select({ externalId: messages.externalId }).from(messages).where(and(eq(messages.id, targetId), eq(messages.conversationId, conversationId), sql`${messages.kind} <> 'note'`)).limit(1);
+    if (!t) throw new NotFoundError();
+    if (!t.externalId) throw new ConflictError('REPLY_TARGET_NOT_SENT', 'Ese mensaje todavía no ha salido: no se puede responder a él');
   }
 
   /** Un texto libre en cola, en nombre de `scope` (mensajes programados). Mismas reglas que responder; lanza lo mismo (404, 403, 409). Devuelve el id del mensaje. */
@@ -243,6 +259,7 @@ export class OutboundService {
     const att = await this.db.withTenant(async (tx) => (await tx.select().from(messageAttachments).where(eq(messageAttachments.messageId, messageId)).limit(1))[0] ?? null);
     const attachment: MessageView['attachment'] = att ? { id: att.id, kind: att.kind, mime_type: att.mimeType, filename: att.filename, size_bytes: att.sizeBytes, scan_status: att.scanStatus, error: att.error, url: null, expires_at: null } : null;
     const mentions = row.kind === 'note' ? ((await this.notifications.mentionsOf([row.id])).get(row.id) ?? []) : [];
-    return messageView(row, author, attachment, mentions);
+    const quote = (await this.quotes.forRows([row])).get(row.id) ?? null;
+    return messageView(row, author, attachment, mentions, quote);
   }
 }

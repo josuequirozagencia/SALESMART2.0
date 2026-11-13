@@ -3,7 +3,7 @@ import { and, asc, eq, isNull, lte, sql } from 'drizzle-orm';
 import { channelAccounts, contactPhones, conversations, Database, messageAttachments, messages, whatsappAccounts } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type MediaKind, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
+import { ChannelVault, isRetryableError, WHATSAPP_PROVIDER, WhatsAppProviderError, type MediaKind, type QuotedMessage, type TemplateSendComponent, type WhatsAppErrorCode, type WhatsAppProvider } from '../channels';
 import { AttachmentsService } from '../attachments';
 import { GhlError, GhlOutboundService, type GhlSendPlan } from '../ghl';
 import { QrOutboundService } from '../qr';
@@ -77,6 +77,8 @@ interface SendPlan {
   media: { kind: MediaKind; mimeType: string; filename: string | null; bytes: Buffer; caption: string | null } | null;
   /** Si el canal es GoHighLevel (M7.4): token, contacto y canal de GHL por el que se responde. */
   ghl?: GhlSendPlan | null;
+  /** Si es una respuesta citada (v13 S3.3): el mensaje citado (con el id que le dio el proveedor). */
+  replyTo?: QuotedMessage | null;
 }
 
 /**
@@ -151,7 +153,7 @@ export class OutboundDispatcher {
       } else if (plan.media) {
         sentId = (await this.provider.sendMedia(credentials, plan.phoneNumberId, { to: plan.to, kind: plan.media.kind, bytes: plan.media.bytes, mimeType: plan.media.mimeType, filename: plan.media.filename, caption: plan.media.caption })).externalId;
       } else {
-        sentId = (plan.template ? await this.provider.sendTemplate(credentials, plan.phoneNumberId, { to: plan.to, name: plan.template.name, language: plan.template.language, components: plan.template.components }) : await this.provider.sendText(credentials, plan.phoneNumberId, { to: plan.to, text: plan.text })).externalId;
+        sentId = (plan.template ? await this.provider.sendTemplate(credentials, plan.phoneNumberId, { to: plan.to, name: plan.template.name, language: plan.template.language, components: plan.template.components }) : await this.provider.sendText(credentials, plan.phoneNumberId, { to: plan.to, text: plan.text, replyTo: plan.replyTo ?? undefined })).externalId;
       }
     } catch (e) {
       if (e instanceof WhatsAppProviderError) code = e.code;
@@ -229,7 +231,7 @@ export class OutboundDispatcher {
             sql`NOT EXISTS (SELECT 1 FROM messages o WHERE o.organization_id = ${messages.organizationId} AND o.conversation_id = ${messages.conversationId} AND o.direction = 'out' AND o.status = 'queued' AND (o.sent_at, o.id) < (${messages.sentAt}, ${messages.id}))`,
           ),
         )
-        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, meta: messages.meta });
+        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, meta: messages.meta, replyToMessageId: messages.replyToMessageId });
       const m = rows[0];
       if (!m) return { kind: 'skipped' as const };
 
@@ -276,6 +278,12 @@ export class OutboundDispatcher {
       }
       const isMedia = m.kind === 'image' || m.kind === 'video' || m.kind === 'audio' || m.kind === 'document' || m.kind === 'sticker';
       if (!to || (!isMedia && m.body === null)) return fail('no_recipient', NO_RECIPIENT);
+      // Una respuesta citada (v13 S3.3): se busca el id que el proveedor le dio al mensaje citado
+      let replyTo: QuotedMessage | null = null;
+      if (m.replyToMessageId && m.kind === 'text') {
+        const [q] = await tx.select({ externalId: messages.externalId, direction: messages.direction, body: messages.body }).from(messages).where(eq(messages.id, m.replyToMessageId)).limit(1);
+        if (q?.externalId) replyTo = { externalId: q.externalId, fromMe: q.direction === 'out', text: q.body };
+      }
       let template: SendPlan['template'] = null;
       if (m.kind === 'template') {
         const t = m.meta['template'] as { name?: unknown; language?: unknown; send?: unknown } | undefined;
@@ -289,7 +297,7 @@ export class OutboundDispatcher {
         if (!att || att.state !== 'ready' || !att.storageKey) return fail('attachment_data', ATTACHMENT_DATA);
         attInfo = { storageKey: att.storageKey, mimeType: att.mimeType, filename: att.filename, kind: att.kind as MediaKind };
       }
-      return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body ?? '', to, phoneNumberId: ctx.phoneNumberId, accessToken, template, attInfo } as unknown as SendPlan & { attInfo: typeof attInfo } };
+      return { kind: 'plan' as const, plan: { messageId: m.id, channelAccountId: m.channelAccountId, attempts: m.attempts, text: m.body ?? '', to, phoneNumberId: ctx.phoneNumberId, accessToken, template, attInfo, replyTo } as unknown as SendPlan & { attInfo: typeof attInfo } };
     });
     if (result.kind !== 'plan') return result;
     const plan = result.plan;
@@ -307,6 +315,6 @@ export class OutboundDispatcher {
       const captionable = mediaInfo.kind === 'image' || mediaInfo.kind === 'video' || mediaInfo.kind === 'document';
       return { kind: 'plan' as const, plan: { messageId: plan.messageId, channelAccountId: plan.channelAccountId, attempts: plan.attempts, text: plan.text, to: plan.to, phoneNumberId: plan.phoneNumberId, accessToken: plan.accessToken, template: null, media: { kind: mediaInfo.kind, mimeType: mediaInfo.mimeType, filename: mediaInfo.filename, bytes: mediaBytes, caption: captionable ? mediaInfo.caption : null } } };
     }
-    return { kind: 'plan' as const, plan: { messageId: plan.messageId, channelAccountId: plan.channelAccountId, attempts: plan.attempts, text: plan.text, to: plan.to, phoneNumberId: plan.phoneNumberId, accessToken: plan.accessToken, template: plan.template, media: null } };
+    return { kind: 'plan' as const, plan: { messageId: plan.messageId, channelAccountId: plan.channelAccountId, attempts: plan.attempts, text: plan.text, to: plan.to, phoneNumberId: plan.phoneNumberId, accessToken: plan.accessToken, template: plan.template, media: null, replyTo: plan.replyTo ?? null } };
   }
 }

@@ -136,8 +136,13 @@ export const messages = tenantTable(
     attempts: integer('attempts').notNull().default(0),
     nextAttemptAt: ts('next_attempt_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
+    /** v13 S3.3: el mensaje al que este responde citándolo (el de la misma empresa). Texto del cliente o nuestro; nunca una nota interna. */
+    replyToMessageId: uuid('reply_to_message_id'),
   },
   (t) => [
+    foreignKey({ name: 'messages_reply_to_fk', columns: [t['organizationId']!, t['replyToMessageId']!], foreignColumns: [t['organizationId']!, t['id']!] }),
+    check('messages_reply_not_self', sql`${t['replyToMessageId']!} IS NULL OR ${t['replyToMessageId']!} <> ${t['id']!}`),
+    index('messages_reply_to_idx').on(t['organizationId']!, t['replyToMessageId']!).where(sql`${t['replyToMessageId']!} IS NOT NULL`),
     foreignKey({ name: 'messages_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'messages_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
     check('messages_direction_valid', sql`${t['direction']!} IN ('in', 'out')`),

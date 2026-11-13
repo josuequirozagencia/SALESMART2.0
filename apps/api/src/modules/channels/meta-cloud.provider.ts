@@ -125,12 +125,14 @@ export class MetaCloudProvider implements WhatsAppProvider {
     // El destino va en el cuerpo: solo dígitos (E.164 sin «+»). Un texto vacío o más largo que el máximo de WhatsApp ni siquiera sale a la red
     if (!TO_RE.test(input.to)) throw new WhatsAppProviderError('recipient_invalid', 'El número de destino no es válido');
     if (input.text === '' || input.text.length > MAX_TEXT) throw new WhatsAppProviderError('rejected', 'El texto no es válido para WhatsApp');
+    // Una respuesta citada lleva `context.message_id` con el id del mensaje citado (v13 S3.3; sin validar contra Meta real)
+    if (input.replyTo && (input.replyTo.externalId === '' || input.replyTo.externalId.length > 256)) throw new WhatsAppProviderError('rejected', 'El mensaje citado no es válido para WhatsApp');
     let res: Response;
     try {
       res = await this.fetchFn(`${this.base}/${this.version}/${phoneNumberId}/messages`, {
         method: 'POST',
         headers: { authorization: `Bearer ${credentials.accessToken}`, 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: input.to, type: 'text', text: { preview_url: false, body: input.text } }),
+        body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: input.to, ...(input.replyTo ? { context: { message_id: input.replyTo.externalId } } : {}), type: 'text', text: { preview_url: false, body: input.text } }),
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {

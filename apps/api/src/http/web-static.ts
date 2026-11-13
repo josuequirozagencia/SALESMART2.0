@@ -80,7 +80,8 @@ export function buildCsp(mediaOrigins: readonly string[] = []): string {
     "frame-src https://challenges.cloudflare.com",
     "style-src 'self' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com",
-    withExtra("img-src 'self' data:"),
+    // Las miniaturas de mapa de las ubicaciones (v13 S3.2) son baldosas de OpenStreetMap que carga el navegador: solo su servidor de baldosas, solo en img-src
+    withExtra("img-src 'self' data: https://tile.openstreetmap.org"),
     withExtra("media-src 'self'"),
     "connect-src 'self'",
     "base-uri 'self'",

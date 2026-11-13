@@ -1,3 +1,4 @@
+import { readLocation } from './location';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedReferral, NormalizedStatus } from '../conversations';
 import type { ParsedWebhook } from './whatsapp.port';
@@ -85,9 +86,8 @@ function parseMessage(m: Record<string, unknown>, names: ReadonlyMap<string, str
   } else if (type === 'location') {
     kind = 'location';
     const l = isObj(m['location']) ? m['location'] : {};
-    const lat = typeof l['latitude'] === 'number' ? l['latitude'] : null;
-    const lng = typeof l['longitude'] === 'number' ? l['longitude'] : null;
-    if (lat !== null && lng !== null) extra['location'] = { latitude: lat, longitude: lng, name: str(l['name']), address: str(l['address']) };
+    const loc = readLocation(l['latitude'], l['longitude'], l['name'], l['address']);
+    if (loc) extra['location'] = loc;
   } else if (type === 'contacts') {
     kind = 'contacts';
     extra['contacts_count'] = arr(m['contacts']).length;
@@ -102,9 +102,12 @@ function parseMessage(m: Record<string, unknown>, names: ReadonlyMap<string, str
   }
   // Cualquier otro tipo (pedidos, tipos nuevos, `unsupported`) llega como `unsupported`
 
+  // Si el cliente respondió citando un mensaje, Meta lo informa en `context.id` (v13 S3.3). `context.forwarded` y los datos de producto no son una cita
+  const replyTo = isObj(m['context']) ? str(m['context']['id']) : null;
+
   return {
     skipped: false,
-    message: { externalId: id, from: phone, fromRaw: from, profileName: names.get(from) ?? null, kind, text, media, extra, sentAt: toDate(m['timestamp'], now), referral: referralOf(m['referral']) },
+    message: { externalId: id, from: phone, fromRaw: from, profileName: names.get(from) ?? null, kind, text, media, extra, sentAt: toDate(m['timestamp'], now), referral: referralOf(m['referral']), ...(replyTo ? { replyToExternalId: replyTo } : {}) },
   };
 }
 

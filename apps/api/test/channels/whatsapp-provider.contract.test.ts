@@ -201,6 +201,15 @@ function contract(name: string, make: () => Subject): void {
       expect(sent.externalId.length).toBeGreaterThan(3);
     });
 
+    it('sendText con replyTo (v13 S3.3) devuelve el identificador igual; una cita con identificador vacío o enorme se rechaza antes de salir a la red', async () => {
+      const s = make();
+      const quoted = { externalId: 'wamid.CITADO', fromMe: false, text: 'Hola' };
+      const sent = await s.provider.sendText({ accessToken: s.validToken }, s.knownId, { ...s.send.ok, replyTo: quoted });
+      expect(sent.externalId.length).toBeGreaterThan(3);
+      expect(await code(s.provider.sendText({ accessToken: s.validToken }, s.knownId, { ...s.send.ok, replyTo: { ...quoted, externalId: '' } }))).toBe('rejected');
+      expect(await code(s.provider.sendText({ accessToken: s.validToken }, s.knownId, { ...s.send.ok, replyTo: { ...quoted, externalId: 'x'.repeat(300) } }))).toBe('rejected');
+    });
+
     it('sendText traduce cada fallo a un código propio; solo la caída y el límite de envíos son reintentables', async () => {
       const s = make();
       const run = (token: string, input: SendTextInput, id = s.knownId) => code(s.provider.sendText({ accessToken: token }, id, input));
@@ -549,6 +558,19 @@ describe('MetaCloudProvider · detalles de la Graph API', () => {
     expect(sent).toEqual({ externalId: 'wamid.HBgMNTkzOTg0MjE3NzMwFQIAERgS' });
     expect(seen).toEqual([{ url: '/v21.0/1090123456789/messages', auth: `Bearer ${VALID}` }]);
     expect(sentBodies).toEqual([{ messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'text', text: { preview_url: false, body: 'Hola Ana, ¿te agendo?' } }]);
+  });
+
+  it('una respuesta citada lleva context.message_id con el id del mensaje citado (v13 S3.3); sin cita el cuerpo no cambia', async () => {
+    mode = 'normal';
+    seen.length = 0;
+    sentBodies.length = 0;
+    const p = new MetaCloudProvider({ baseUrl: `${origin}/` });
+    await p.sendText({ accessToken: VALID }, '1090123456789', { to: '593984217730', text: 'Sí, a las 10', replyTo: { externalId: 'wamid.CITADO1', fromMe: false, text: '¿Atienden mañana?' } });
+    await p.sendText({ accessToken: VALID }, '1090123456789', { to: '593984217730', text: 'Sin cita' });
+    expect(sentBodies).toEqual([
+      { messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', context: { message_id: 'wamid.CITADO1' }, type: 'text', text: { preview_url: false, body: 'Sí, a las 10' } },
+      { messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'text', text: { preview_url: false, body: 'Sin cita' } },
+    ]);
   });
 
   it('envía una reacción como type reaction con el id del mensaje y el emoji (vacío para quitarla)', async () => {

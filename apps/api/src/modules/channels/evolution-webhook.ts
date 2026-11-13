@@ -1,3 +1,4 @@
+import { readLocation } from './location';
 import { timingSafeEqual } from 'node:crypto';
 import type { DeliveryState, InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedStatus } from '../conversations';
 import { stripNul } from './meta-webhook';
@@ -128,9 +129,8 @@ function contentOf(id: string, message: Record<string, unknown>): Content | 'rea
   }
   const loc = isObj(message['locationMessage']) ? message['locationMessage'] : null;
   if (loc) {
-    const lat = typeof loc['degreesLatitude'] === 'number' ? loc['degreesLatitude'] : null;
-    const lng = typeof loc['degreesLongitude'] === 'number' ? loc['degreesLongitude'] : null;
-    return { kind: 'location', text: null, media: null, extra: lat !== null && lng !== null ? { location: { latitude: lat, longitude: lng, name: str(loc['name']), address: str(loc['address']) } } : {}, inline: null };
+    const where = readLocation(loc['degreesLatitude'], loc['degreesLongitude'], loc['name'], loc['address']);
+    return { kind: 'location', text: null, media: null, extra: where ? { location: where } : {}, inline: null };
   }
   if (isObj(message['contactMessage']) || isObj(message['contactsArrayMessage'])) {
     const many = isObj(message['contactsArrayMessage']) && Array.isArray(message['contactsArrayMessage']['contacts']) ? message['contactsArrayMessage']['contacts'].length : 1;
@@ -153,6 +153,17 @@ function contentOf(id: string, message: Record<string, unknown>): Content | 'rea
 
 /** Los estados de Evolution (los de Baileys) → los nuestros. `PENDING` no es un estado de entrega: se ignora. */
 const STATUS_MAP: Readonly<Record<string, DeliveryState>> = { SERVER_ACK: 'sent', DELIVERY_ACK: 'delivered', READ: 'read', PLAYED: 'read', ERROR: 'failed' };
+
+/** El mensaje que este cita (v13 S3.3): Evolution lo informa en `contextInfo.stanzaId` del contenido (texto extendido, imagen, audio…). */
+function quotedIdOf(message: Record<string, unknown>): string | null {
+  for (const v of Object.values(message)) {
+    if (isObj(v) && isObj(v['contextInfo'])) {
+      const id = str(v['contextInfo']['stanzaId']);
+      if (id) return id;
+    }
+  }
+  return null;
+}
 
 function upsert(instance: string, data: Record<string, unknown>, now: Date): Omit<ParsedEvolution, 'instance'> {
   const key = isObj(data['key']) ? data['key'] : null;
@@ -177,6 +188,7 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
   // El teléfono sale del identificador de teléfono; si solo hay un `@lid`, se usa la variante `remoteJidAlt` que Evolution da en los chats 1:1
   const from = phoneFromJid(remote) ?? phoneFromJid(key['remoteJidAlt']);
   if (!from) return { ...EMPTY, ignored: 1 };
+  const quotedId = quotedIdOf(message);
   const msg: NormalizedMessage = {
     externalId: id,
     from,
@@ -189,6 +201,7 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
     extra: content.extra,
     sentAt: toDate(data['messageTimestamp'], now),
     ...(fromMe ? { origin: 'device' as const } : {}),
+    ...(quotedId ? { replyToExternalId: quotedId } : {}),
   };
   const inline = new Map<string, string>();
   if (content.inline && content.media) inline.set(id, content.inline);

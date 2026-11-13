@@ -244,7 +244,23 @@ function avatarFor(m: ChatMessage, first: boolean, contactName: string, photos: 
   return <Avatar name={personName(m.author?.name)} src={m.author ? photos.user(m.author.id) : undefined} size={28} tone="accent" />;
 }
 
-function Messages({ c }: { c: Conversation }) {
+/** ¿Se puede responder citando este mensaje? Solo uno que ya salió o llegó (el proveedor necesita su identificador), de una conversación en la que se puede escribir, abierta, con la ventana
+ *  de 24 h abierta y que no sea de GoHighLevel (no tiene citas). El servidor lo vuelve a verificar. */
+export function canQuote(c: Conversation, m: ChatMessage): boolean {
+  return !m.is_note && m.status !== 'queued' && m.status !== 'failed' && c.status !== 'closed' && c.can.reply && c.window.open && c.channel.kind !== 'ghl';
+}
+
+/** Salta al mensaje citado y lo remarca un instante. Si no está cargado en el hilo, no hace nada. */
+function jumpTo(id: string): void {
+  const el = document.getElementById(`msg-${id}`);
+  if (!el) return;
+  const reduced = typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  el.scrollIntoView?.({ block: 'center', behavior: reduced ? 'auto' : 'smooth' });
+  el.classList.add('flash-msg');
+  window.setTimeout(() => el.classList.remove('flash-msg'), 1400);
+}
+
+function Messages({ c, onReply }: { c: Conversation; onReply: (m: ChatMessage) => void }) {
   const q = useMessages(c.id);
   const retry = useRetryMessage(c.id);
   const reactMut = useReact(c.id);
@@ -317,6 +333,9 @@ function Messages({ c }: { c: Conversation }) {
               m={m}
               spacing={i === 0 ? '' : senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? 'mt-2.5' : 'mt-1'}
               avatar={m.is_note ? undefined : avatarFor(m, i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at), c.contact.name, photos, c.contact.id)}
+              contactName={c.contact.name}
+              onReply={canQuote(c, m) ? onReply : undefined}
+              onJump={jumpTo}
               canRetry={c.can.reply}
               retrying={retry.isPending && retry.variables === m.id}
               onRetry={(id) => { setRetryError(undefined); retry.mutate(id, { onError: (e) => setRetryError(friendlyError(e, 'No pudimos reintentar el envío.')) }); }}
@@ -346,6 +365,10 @@ export function Thread({ id, meId, layout }: { id: string; meId: string; layout:
   const { mutate: markRead } = useMarkRead(id);
   const tried = useRef('');
   const [actionError, setActionError] = useState<string>();
+  // v13 S3.3: el mensaje al que se está respondiendo (cita sobre el redactor); cambiar de conversación lo descarta
+  const [reply, setReply] = useState<{ conversationId: string; message: ChatMessage } | null>(null);
+  const replyTo = reply && reply.conversationId === id ? reply.message : null;
+  const setReplyTo = (m: ChatMessage | null): void => setReply(m ? { conversationId: id, message: m } : null);
   const c = q.data;
   const unread = c && c.owner?.id === meId ? c.unread_count : 0;
 
@@ -374,8 +397,8 @@ export function Thread({ id, meId, layout }: { id: string; meId: string; layout:
     <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <Header c={c} meId={meId} onBackError={setActionError} layout={layout} />
       {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
-      <Messages c={c} />
-      <Composer key={c.id} c={c} />
+      <Messages c={c} onReply={setReplyTo} />
+      <Composer key={c.id} c={c} replyTo={replyTo} onReplyDone={() => setReplyTo(null)} />
     </section>
   );
 }

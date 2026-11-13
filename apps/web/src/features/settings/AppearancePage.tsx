@@ -19,7 +19,7 @@ function ChatPreview() {
   return (
     <div aria-label="Vista previa del chat" role="img" style={bg.style} className={`grid gap-2 rounded-xl border border-line p-4 ${bg.className}`}>
       <span className="max-w-[70%] rounded-lg rounded-tl-sm border border-line bg-[var(--bubble-in)] px-3 py-2 text-[13px] text-fg shadow-sm">Hola, ¿qué servicios ofrecen?</span>
-      <span className="ml-auto max-w-[70%] rounded-lg rounded-tr-sm bg-[var(--bubble-out)] px-3 py-2 text-[13px] text-fg shadow-sm">¡Hola! Con gusto te cuento.</span>
+      <span className="ml-auto max-w-[70%] rounded-lg rounded-tr-sm bubble-grad px-3 py-2 text-[13px] shadow-sm">¡Hola! Con gusto te cuento.</span>
     </div>
   );
 }

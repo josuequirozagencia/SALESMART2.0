@@ -1,4 +1,5 @@
 import type { messages } from '../../db';
+import type { QuoteView } from './message-quotes.service';
 import type { SlaView } from '../sla';
 import type { TagView } from '../tags';
 import { abilities, myAccessOf, windowOf, type Abilities, type ChannelState, type Collab, type ConversationRow, type InboxScope, type MyAccess, type WindowState } from './inbox.access';
@@ -78,6 +79,8 @@ export interface MessageView {
   is_note: boolean;
   /** Personas mencionadas con «@» en una nota (F1, ADR-57); vacío en lo demás. */
   mentions: Array<{ user_id: string; name: string }>;
+  /** Si este mensaje responde citando a otro (v13 S3.3): el citado, en pocas palabras. */
+  reply_to: QuoteView | null;
   /** Si es una plantilla (M5.6a): cuál y sus botones. El texto armado va en `text`. */
   template: { name: string; language: string; category: string; buttons: Array<{ type: string; text: string; url: string | null; phone: string | null }> } | null;
 }
@@ -104,7 +107,7 @@ const KIND_LABEL: Readonly<Record<string, string>> = {
   video: 'Video',
   document: 'Documento',
   sticker: 'Sticker',
-  location: 'Ubicación',
+  location: '📍 Ubicación',
   contacts: 'Contacto',
   interactive: 'Respuesta',
   button: 'Botón',
@@ -187,7 +190,7 @@ function templateOf(meta: Record<string, unknown>): MessageView['template'] {
   };
 }
 
-export function messageView(m: MessageRow, author: { id: string; name: string } | null, attachment: MessageView['attachment'] = null, mentions: MessageView['mentions'] = []): MessageView {
+export function messageView(m: MessageRow, author: { id: string; name: string } | null, attachment: MessageView['attachment'] = null, mentions: MessageView['mentions'] = [], quote: QuoteView | null = null): MessageView {
   const media = m.media as { mime_type?: unknown; filename?: unknown } | null;
   const extra = Object.fromEntries(Object.entries(m.meta).filter(([k]) => !HIDDEN_META.has(k)));
   return {
@@ -209,6 +212,7 @@ export function messageView(m: MessageRow, author: { id: string; name: string } 
     read_at: iso(m.readAt),
     is_note: m.kind === 'note',
     mentions,
+    reply_to: quote,
     template: m.kind === 'template' ? templateOf(m.meta) : null,
   };
 }

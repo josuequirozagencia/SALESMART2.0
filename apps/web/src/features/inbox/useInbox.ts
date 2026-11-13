@@ -100,7 +100,8 @@ function useRefresh(id: string) {
 /** Escribe al cliente. El mensaje vuelve con su estado (`queued`, `sent` o `failed`). */
 export function useSendReply(id: string) {
   const refresh = useRefresh(id);
-  return useMutation({ mutationFn: (text: string) => api<ChatMessage>(`/conversations/${id}/messages`, { method: 'POST', body: { text } }), onSettled: refresh });
+  // `reply_to_message_id` (v13 S3.3): cita un mensaje de la conversación; sin él, el cuerpo es el de siempre
+  return useMutation({ mutationFn: (input: string | { text: string; reply_to_message_id?: string | undefined }) => api<ChatMessage>(`/conversations/${id}/messages`, { method: 'POST', body: typeof input === 'string' ? { text: input } : { text: input.text, ...(input.reply_to_message_id ? { reply_to_message_id: input.reply_to_message_id } : {}) } }), onSettled: refresh });
 }
 
 /** Las plantillas que se pueden enviar en esta conversación (las de su conexión). Solo se piden al abrir el selector. */

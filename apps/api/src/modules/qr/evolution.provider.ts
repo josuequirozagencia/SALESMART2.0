@@ -1,6 +1,6 @@
 import type { EvolutionConnectionState } from '../channels';
 import type { SentMessage } from '../channels';
-import { QrSessionError, type QrCodeResult, type QrCredentials, type QrSendMedia, type QrSessionProvider } from './qr-session.port';
+import { QrSessionError, type QrCodeResult, type QrCredentials, type QrQuoted, type QrSendMedia, type QrSessionProvider } from './qr-session.port';
 
 const TIMEOUT_MS = 20_000;
 /** Los eventos que Evolution debe mandar a nuestro webhook (los que lee `parseEvolutionWebhook`). */
@@ -107,8 +107,10 @@ export class EvolutionProvider implements QrSessionProvider {
     }
   }
 
-  async sendText(c: QrCredentials, instance: string, input: { to: string; text: string }): Promise<SentMessage> {
-    return this.idOf(await this.call(c, 'POST', `/message/sendText/${encodeURIComponent(instance)}`, { number: input.to, text: input.text }));
+  async sendText(c: QrCredentials, instance: string, input: { to: string; text: string; replyTo?: QrQuoted | undefined }): Promise<SentMessage> {
+    // Una respuesta citada lleva `quoted` con la clave del mensaje citado (v13 S3.3; forma de la API v2 de Evolution, sin validar contra un servidor real)
+    const quoted = input.replyTo ? { quoted: { key: { id: input.replyTo.externalId, fromMe: input.replyTo.fromMe, remoteJid: `${input.to}@s.whatsapp.net` }, message: { conversation: input.replyTo.text ?? '' } } } : {};
+    return this.idOf(await this.call(c, 'POST', `/message/sendText/${encodeURIComponent(instance)}`, { number: input.to, text: input.text, ...quoted }));
   }
 
   async sendMedia(c: QrCredentials, instance: string, input: QrSendMedia): Promise<SentMessage> {
