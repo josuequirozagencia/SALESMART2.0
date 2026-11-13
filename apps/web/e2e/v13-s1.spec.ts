@@ -100,7 +100,7 @@ test.describe('390 × 844', () => {
     await expect(pop.getByText('Venta', { exact: true })).toBeVisible();
     await expect(pop.getByRole('checkbox', { name: 'Venta' })).toHaveCount(0);
     const mine = pop.getByRole('checkbox', { name: 'Interesado' });
-    await mine.check();
+    await mine.click(); // el cambio llega cuando el servidor responde (no es síncrono)
     await expect(mine).toBeChecked();
     await expect(chat.getByRole('button', { name: 'Etiquetas de la conversación (2)' })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -133,6 +133,6 @@ test.describe('390 × 844', () => {
     await expect(box).toHaveValue('Te escribo mañana temprano'); // no se envió
     await send.click();
     await expect(box).toHaveValue('');
-    await expect(page.getByText('Te escribo mañana temprano')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Conversación con Cliente Activo' }).getByText('Te escribo mañana temprano', { exact: true })).toBeVisible();
   });
 });

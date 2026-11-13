@@ -1803,7 +1803,7 @@ test('SLA: el administrador configura objetivo, horario y feriado; el cronómetr
     await thread.getByRole('button', { name: 'Aceptar' }).click();
     await thread.getByRole('textbox', { name: 'Mensaje' }).fill('Hola, claro: ¿mañana a las 10?');
     await thread.getByRole('textbox', { name: 'Mensaje' }).press('Enter');
-    await expect(thread.getByText(/Respondió en (2[4-6]) min/)).toBeVisible();
+    await expect(thread.getByLabel(/Respondió en (2[4-6]) min/)).toBeVisible();
     const done = (await db.query(`SELECT stop_reason, response_seconds FROM response_timers WHERE conversation_id = $1`, [one.id])).rows[0] as { stop_reason: string; response_seconds: number };
     expect(done.stop_reason).toBe('human_reply');
     expect(done.response_seconds).toBeGreaterThanOrEqual(24 * 60);
