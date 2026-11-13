@@ -701,4 +701,35 @@ describe('Súper Admin: dar de alta un modelo de chat (v11 S4)', () => {
     await admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input, usd_per_minute) VALUES ('whisper-x', 'transcription', 0, 0.006)`);
     await admin.query(`DELETE FROM ai_model_prices WHERE model IN ('gpt-vision-x', 'gpt-plain-x', 'whisper-x')`);
   });
+
+  it('modelos de transcripción (v13 S5b): se cargan con su precio por MINUTO, no aparecen como modelos de chat de los agentes y exigen su precio', async () => {
+    const ok = await call('POST', '/platform/ai/models', T.root, { model: 'whisper-1', kind: 'transcription', usd_per_minute: '0.006' });
+    expect(ok.status).toBe(201);
+    expect(await json(ok)).toMatchObject({ model: 'whisper-1', kind: 'transcription', usd_per_minute: '0.006000', vision: false });
+    const list = await call('GET', '/platform/ai/models', T.root).then((r) => json<Array<Row>>(r));
+    expect(list.find((m) => m['model'] === 'whisper-1')).toMatchObject({ kind: 'transcription', usd_per_minute: '0.006000' });
+    const opts = await call('GET', '/agents/options', T.alice).then((r) => json<{ models: string[]; transcription_available: boolean }>(r));
+    expect(opts.models).not.toContain('whisper-1'); // no es un modelo de chat
+    expect(opts.transcription_available).toBe(true);
+    expect((await call('POST', '/platform/ai/models', T.root, { model: 'whisper-1', kind: 'transcription', usd_per_minute: '0.006' })).status).toBe(409);
+    for (const bad of [
+      { model: 'w2', kind: 'transcription' }, // sin precio por minuto
+      { model: 'w2', kind: 'transcription', usd_per_minute: '0.006', usd_per_1m_input: '1', usd_per_1m_output: '1' }, // un modelo de transcripción no lleva precios por tokens
+      { model: 'w2', kind: 'transcription', usd_per_minute: '0.006', vision: true },
+      { model: 'w2', usd_per_1m_input: '1', usd_per_1m_output: '1', usd_per_minute: '0.006' }, // el precio por minuto es de transcripción
+      { model: 'w2', kind: 'transcription', usd_per_minute: '10001' },
+    ]) expect((await call('POST', '/platform/ai/models', T.root, bad)).status, JSON.stringify(bad)).toBe(400);
+    const audit = (await admin.query(`SELECT details FROM platform_audit WHERE action = 'ai.model_price.create' AND details->>'model' = 'whisper-1'`)).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].details).toMatchObject({ kind: 'transcription', per_minute: '0.006' });
+    // el precio por minuto se cambia después; con precios por tokens o sin precio por minuto se rechaza, y un modelo de chat no acepta precio por minuto
+    const upd = await call('PUT', '/platform/ai/models/whisper-1', T.root, { usd_per_minute: '0.01' });
+    expect(upd.status).toBe(200);
+    expect(await json(upd)).toMatchObject({ kind: 'transcription', usd_per_minute: '0.010000' });
+    for (const bad of [{ usd_per_1m_input: '1', usd_per_1m_output: '1' }, {}, { usd_per_minute: '0.01', vision: true }]) expect((await call('PUT', '/platform/ai/models/whisper-1', T.root, bad)).status, JSON.stringify(bad)).toBe(400);
+    expect((await call('PUT', '/platform/ai/models/gpt-4o-mini', T.root, { usd_per_1m_input: '0.15', usd_per_1m_output: '0.6', usd_per_minute: '0.01' })).status).toBe(400);
+    expect((await call('PUT', '/platform/ai/models/gpt-4o-mini', T.root, { usd_per_minute: '0.01' })).status).toBe(400);
+    expect((await admin.query(`SELECT details FROM platform_audit WHERE action = 'ai.model_price.update' AND details->>'model' = 'whisper-1'`)).rows[0].details).toMatchObject({ before: { per_minute: '0.006000' }, after: { per_minute: '0.01' } });
+    await admin.query(`DELETE FROM ai_model_prices WHERE model = 'whisper-1'`);
+  });
 });

@@ -89,6 +89,26 @@ export interface ChatResult {
   readonly toolCalls?: readonly ToolCall[];
 }
 
+/** Un audio del cliente para transcribir (ADR-70): los bytes viajan en memoria; `filename` solo da al proveedor la extensión que reconoce el formato. */
+export interface TranscribeRequest {
+  readonly model: string;
+  readonly audio: Uint8Array;
+  readonly mimeType: string;
+  readonly filename: string;
+  /** Idioma esperado (ISO 639-1); sin él, el proveedor lo detecta. */
+  readonly language?: string;
+}
+
+export interface TranscribeResult {
+  readonly text: string;
+  /** Duración real del audio según el proveedor, en segundos. */
+  readonly seconds: number;
+  readonly language: string | null;
+}
+
+/** Formatos de audio que el puerto acepta (decididos por el contenido real antes de llegar aquí): nota de voz de WhatsApp (OGG/Opus), MP3, MP4/M4A y WebM. */
+export const AUDIO_MIME_TYPES = ['audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/webm'] as const;
+
 export interface AIProvider {
   /** `none` = sin adaptador configurado. */
   readonly kind: 'none' | 'fake' | 'openai';
@@ -98,6 +118,8 @@ export interface AIProvider {
   embed(credentials: AiCredentials, request: EmbedRequest): Promise<EmbedResult>;
   /** Genera una respuesta de chat. Lanza `AiProviderError`. */
   chat(credentials: AiCredentials, request: ChatRequest): Promise<ChatResult>;
+  /** Transcribe un audio. Lanza `AiProviderError`. */
+  transcribe(credentials: AiCredentials, request: TranscribeRequest): Promise<TranscribeResult>;
 }
 
 export const AI_PROVIDER = Symbol('AI_PROVIDER');
@@ -110,6 +132,9 @@ export class NoAiProvider implements AIProvider {
     return Promise.reject(new AiProviderError('No hay adaptador de IA configurado', false));
   }
   chat(): Promise<ChatResult> {
+    return Promise.reject(new AiProviderError('No hay adaptador de IA configurado', false));
+  }
+  transcribe(): Promise<TranscribeResult> {
     return Promise.reject(new AiProviderError('No hay adaptador de IA configurado', false));
   }
 }

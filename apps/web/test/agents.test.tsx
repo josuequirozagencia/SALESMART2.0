@@ -26,6 +26,7 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   tasks_enabled: false,
   suggestions_enabled: false,
   read_images: false,
+  transcribe_audio: false,
   document_ids: [],
   channel_ids: [],
   readiness: { instructions: true, documents: false, channel: false },
@@ -35,6 +36,7 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
 const OPTIONS: AgentOptions = {
   models: ['gpt-4o-mini', 'gpt-4.1-mini'],
   vision_models: ['gpt-4o-mini'],
+  transcription_available: true,
   covers: ['violet', 'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'slate'],
   limits: { max_agents: 20, max_photo_bytes: 2 * 1024 * 1024, max_chunks: 5000, max_capture_fields: 10 },
   variables: [{ key: 'primer_nombre', label: 'Primer nombre del contacto', example: 'Ana', kind: 'builtin' }, { key: 'contact.ciudad', label: 'Ciudad', example: '', kind: 'custom' }],
@@ -317,7 +319,7 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(d.getByLabelText(/Responder a toda hora/));
     await userEvent.click(conns.getByRole('checkbox', { name: 'Atender «WhatsApp Norte»' }));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false, read_images: false }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false, read_images: false, transcribe_audio: false }));
     await waitFor(() => expect(w.calls['channels']![0]!.body).toEqual({ channel_ids: ['c1'] }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
   });
@@ -338,6 +340,33 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ read_images: true }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('«Escuchar audios» (v13 S5b): se activa y se guarda; sin modelo de transcripción en la plataforma queda desactivado y lo explica; el aviso de privacidad cubre imágenes y audios', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    const sec = within(await d.findByRole('region', { name: 'Qué puede entender el cliente' }));
+    const sw = sec.getByRole('switch', { name: 'Escuchar audios' });
+    expect(sw).not.toBeChecked();
+    expect(sw).toBeEnabled();
+    expect(sec.getByText(/Las imágenes y los audios que el cliente envíe se enviarán al proveedor de IA \(OpenAI\)/)).toBeInTheDocument();
+    await userEvent.click(sw);
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ transcribe_audio: true }));
+  });
+
+  it('sin modelo de transcripción cargado «Escuchar audios» queda desactivado y dice qué falta', async () => {
+    const w = world({ options: { ...OPTIONS, transcription_available: false } });
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    const sec = within(await d.findByRole('region', { name: 'Qué puede entender el cliente' }));
+    expect(sec.getByRole('switch', { name: 'Escuchar audios' })).toBeDisabled();
+    expect(sec.getByText(/Todavía no hay un modelo de transcripción cargado/)).toBeInTheDocument();
   });
 
   it('con un modelo sin visión «Leer imágenes» queda desactivado y explica qué hacer', async () => {

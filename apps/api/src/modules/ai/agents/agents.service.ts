@@ -59,6 +59,7 @@ export interface AgentDetail extends AgentCard {
   tasks_enabled: boolean;
   suggestions_enabled: boolean;
   read_images: boolean;
+  transcribe_audio: boolean;
   document_ids: string[];
   channel_ids: string[];
   /** Qué le falta para poder responder (la pantalla lo muestra como lista de pendientes). */
@@ -74,6 +75,8 @@ export interface AgentOptions {
   models: string[];
   /** De esos, los que entienden imágenes (solo con ellos se puede activar «Leer imágenes»). */
   vision_models: string[];
+  /** ¿Hay un modelo de transcripción con precio cargado? Sin él no se puede activar «Escuchar audios». */
+  transcription_available: boolean;
   covers: readonly Cover[];
   limits: { max_agents: number; max_photo_bytes: number; max_chunks: number; max_capture_fields: number };
   /** Variables que se pueden usar en las instrucciones. */
@@ -134,6 +137,7 @@ export class AgentsService {
   async options(): Promise<AgentOptions> {
     const models = await this.prices.chatModels(); // plataforma: se lee ANTES de la transacción de negocio
     const visionModels = await this.prices.visionModels();
+    const transcriptionAvailable = (await this.prices.transcriptionModel()) !== null;
     return this.db.withTenant(async (tx) => {
       const labels = await this.custom.labels(tx, 'contact');
       const orgAgents = await tx.select({ id: agents.id, name: agents.name }).from(agents).where(isNull(agents.deletedAt));
@@ -146,6 +150,7 @@ export class AgentsService {
       return {
         models,
         vision_models: visionModels,
+        transcription_available: transcriptionAvailable,
         covers: COVERS,
         limits: { max_agents: MAX_AGENTS, max_photo_bytes: MAX_PHOTO_BYTES, max_chunks: MAX_CHUNKS_PER_AGENT, max_capture_fields: MAX_CAPTURE_FIELDS },
         variables: [...AGENT_BUILT_IN.map((v) => ({ key: v.key, label: v.label, example: v.example, kind: 'builtin' as const })), ...labels.map((f) => ({ key: `contact.${f.key}`, label: f.name, example: '', kind: 'custom' as const }))],
@@ -184,6 +189,7 @@ export class AgentsService {
   async update(id: string, patch: UpdateAgentDto): Promise<AgentDetail> {
     const models = patch.model !== undefined ? await this.prices.chatModels() : [];
     const visionModels = patch.model !== undefined || patch.read_images === true ? await this.prices.visionModels() : [];
+    const transcriptionReady = patch.transcribe_audio === true ? (await this.prices.transcriptionModel()) !== null : true;
     await this.db
       .withTenant(async (tx) => {
         const cur = await this.byId(tx, id, true);
@@ -193,6 +199,7 @@ export class AgentsService {
         if ((patch.read_images ?? cur.readImages) && (patch.read_images !== undefined || patch.model !== undefined) && !visionModels.includes(modelAfter)) {
           throw new ConflictError('MODEL_NO_VISION', patch.read_images === true ? 'El modelo de este agente no entiende imágenes: elige uno con visión para activar «Leer imágenes»' : 'Ese modelo no entiende imágenes y el agente tiene «Leer imágenes» activado: apágalo primero');
         }
+        if (!transcriptionReady) throw new ConflictError('NO_TRANSCRIPTION_MODEL', 'Todavía no hay un modelo de transcripción cargado: pídele al administrador de la plataforma que lo agregue en «Modelos de IA»');
         if (patch.transfer_queue_id) {
           const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, patch.transfer_queue_id), isNull(queues.deletedAt))).limit(1);
           if (!q) throw new ValidationError([{ path: 'transfer_queue_id', code: 'not_found', message: 'El departamento no existe' }]);
@@ -244,6 +251,7 @@ export class AgentsService {
         if (patch.tasks_enabled !== undefined) note('tasks_enabled', cur.tasksEnabled, patch.tasks_enabled, () => (set.tasksEnabled = patch.tasks_enabled!));
         if (patch.suggestions_enabled !== undefined) note('suggestions_enabled', cur.suggestionsEnabled, patch.suggestions_enabled, () => (set.suggestionsEnabled = patch.suggestions_enabled!));
         if (patch.read_images !== undefined) note('read_images', cur.readImages, patch.read_images, () => (set.readImages = patch.read_images!));
+        if (patch.transcribe_audio !== undefined) note('transcribe_audio', cur.transcribeAudio, patch.transcribe_audio, () => (set.transcribeAudio = patch.transcribe_audio!));
         if (changes.length === 0) return;
         await tx.update(agents).set(set).where(eq(agents.id, id));
         for (const c of changes) await writeAudit(tx, { entityType: 'agent', entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
@@ -403,9 +411,9 @@ export class AgentsService {
   }
 
   /** Los ajustes que necesita el simulador (y, después, el agente en vivo): modelo, límites y cómo dividir. 404 si no existe. */
-  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; suggestionsEnabled: boolean; readImages: boolean; transferQueueId: string | null }> {
+  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; suggestionsEnabled: boolean; readImages: boolean; transcribeAudio: boolean; transferQueueId: string | null }> {
     const r = await this.db.withTenant((tx) => this.byId(tx, id, false));
-    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, suggestionsEnabled: r.suggestionsEnabled, readImages: r.readImages, transferQueueId: r.transferQueueId };
+    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, suggestionsEnabled: r.suggestionsEnabled, readImages: r.readImages, transcribeAudio: r.transcribeAudio, transferQueueId: r.transferQueueId };
   }
 
   // ------------------------------------------------------------------ interno
@@ -446,6 +454,7 @@ export class AgentsService {
       tasks_enabled: r.tasksEnabled,
       suggestions_enabled: r.suggestionsEnabled,
       read_images: r.readImages,
+      transcribe_audio: r.transcribeAudio,
       document_ids: rel.documentIds,
       channel_ids: rel.channels.map((c) => c.id),
       readiness: { instructions: r.personality.trim() !== '' || r.objective.trim() !== '', documents: rel.documentIds.length > 0, channel: rel.channels.length > 0 },

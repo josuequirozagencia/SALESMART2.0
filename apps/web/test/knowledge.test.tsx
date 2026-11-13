@@ -206,7 +206,7 @@ describe('Configuración › Conocimiento · probar la búsqueda', () => {
 });
 
 describe('Plataforma › Modelos de IA', () => {
-  interface PW { models: Array<{ model: string; kind: 'embedding' | 'chat'; usd_per_1m_input: string; usd_per_1m_output: string; vision: boolean; usd_per_minute: string | null; updated_at: string }>; puts: unknown[] }
+  interface PW { models: Array<{ model: string; kind: 'embedding' | 'chat' | 'transcription'; usd_per_1m_input: string; usd_per_1m_output: string; vision: boolean; usd_per_minute: string | null; updated_at: string }>; puts: unknown[] }
   const pw = (): PW => ({ models: [{ model: 'gpt-4o-mini', kind: 'chat', usd_per_1m_input: '0.150000', usd_per_1m_output: '0.600000', vision: true, usd_per_minute: null, updated_at: AT }, { model: 'text-embedding-3-small', kind: 'embedding', usd_per_1m_input: '0.020000', usd_per_1m_output: '0.000000', vision: false, usd_per_minute: null, updated_at: AT }], puts: [] });
   const srv = (w: PW): Record<string, Handler> => ({
     ...authed(ME_ROOT),
@@ -281,5 +281,37 @@ describe('Plataforma › Modelos de IA', () => {
     await userEvent.click(add.getByRole('checkbox', { name: 'Entiende imágenes (visión)' }));
     await userEvent.click(add.getByRole('button', { name: 'Agregar modelo' }));
     await waitFor(() => expect(posts).toEqual([{ model: 'gpt-4.1', usd_per_1m_input: '2', usd_per_1m_output: '8', vision: true }]));
+  });
+
+  it('transcripción (v13 S5b): se agrega con su precio por MINUTO (sin precios por tokens) y su fila solo cambia el precio por minuto', async () => {
+    const w = pw();
+    const posts: unknown[] = [];
+    mockApi({
+      ...srv(w),
+      'POST /platform/ai/models': (c) => { posts.push(c.body); const b = c.body as { model: string; usd_per_minute: string }; w.models.push({ model: b.model, kind: 'transcription', usd_per_1m_input: '0.000000', usd_per_1m_output: '0.000000', vision: false, usd_per_minute: b.usd_per_minute, updated_at: AT }); return { status: 201, body: w.models.at(-1) }; },
+      'PUT /platform/ai/models/whisper-1': (c) => { w.puts.push(c.body); return { body: { ...w.models.at(-1), ...(c.body as object) } }; },
+    });
+    renderApp('/platform/ai');
+    const add = within(await screen.findByRole('form', { name: 'Agregar un modelo de chat' }));
+    await userEvent.click(add.getByRole('radio', { name: 'Transcripción de audio' }));
+    expect(add.queryByLabelText('Entrada (USD por millón de tokens)')).not.toBeInTheDocument();
+    expect(add.queryByRole('checkbox', { name: 'Entiende imágenes (visión)' })).not.toBeInTheDocument();
+    await userEvent.type(add.getByLabelText('Nombre del modelo'), 'whisper-1');
+    await userEvent.type(add.getByLabelText('Por minuto de audio (USD)'), '99999');
+    await userEvent.click(add.getByRole('button', { name: 'Agregar modelo' }));
+    expect(await add.findByRole('alert')).toHaveTextContent(/de 0 a 10000/);
+    expect(posts).toHaveLength(0);
+    await userEvent.clear(add.getByLabelText('Por minuto de audio (USD)'));
+    await userEvent.type(add.getByLabelText('Por minuto de audio (USD)'), '0.006');
+    await userEvent.click(add.getByRole('button', { name: 'Agregar modelo' }));
+    await waitFor(() => expect(posts).toEqual([{ model: 'whisper-1', kind: 'transcription', usd_per_minute: '0.006' }]));
+    expect(await add.findByText(/los agentes ya pueden escuchar audios/)).toBeInTheDocument();
+    const row = within(await screen.findByRole('form', { name: 'Precio de whisper-1' }));
+    expect(row.getByText('Transcripción')).toBeInTheDocument();
+    expect(row.queryByLabelText('Entrada (USD por millón de tokens)')).not.toBeInTheDocument();
+    await userEvent.clear(row.getByLabelText('Por minuto de audio (USD)'));
+    await userEvent.type(row.getByLabelText('Por minuto de audio (USD)'), '0.01');
+    await userEvent.click(row.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.puts).toEqual([{ usd_per_minute: '0.01' }]));
   });
 });

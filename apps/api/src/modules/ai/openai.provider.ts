@@ -1,4 +1,4 @@
-import { AiProviderError, IMAGE_MIME_TYPES, type ContentPart, type AiCredentials, type AIProvider, type ToolCall, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+import { AUDIO_MIME_TYPES, AiProviderError, IMAGE_MIME_TYPES, type TranscribeRequest, type TranscribeResult, type ContentPart, type AiCredentials, type AIProvider, type ToolCall, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
 
 const DEFAULT_BASE = 'https://api.openai.com';
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -106,13 +106,37 @@ export class OpenAiProvider implements AIProvider {
     }
   }
 
+  /** `POST /v1/audio/transcriptions` (multipart): el audio, el modelo y `verbose_json`, que devuelve la duración REAL. Jamás se registra el audio ni el texto. */
+  async transcribe(credentials: AiCredentials, request: TranscribeRequest): Promise<TranscribeResult> {
+    if (!MODEL.test(request.model)) throw new AiProviderError('El modelo de transcripción no es válido', false);
+    if (request.audio.byteLength === 0) throw new AiProviderError('El audio está vacío', false);
+    if (!(AUDIO_MIME_TYPES as readonly string[]).includes(request.mimeType)) throw new AiProviderError('El formato de audio no es válido', false);
+    if (!/^[A-Za-z0-9._-]{1,60}$/.test(request.filename)) throw new AiProviderError('El nombre del audio no es válido', false);
+    const form = new FormData();
+    form.append('file', new Blob([Buffer.from(request.audio)], { type: request.mimeType }), request.filename);
+    form.append('model', request.model);
+    form.append('response_format', 'verbose_json');
+    if (request.language && /^[a-z]{2}$/.test(request.language)) form.append('language', request.language);
+    const res = await this.call('/v1/audio/transcriptions', credentials, form);
+    try {
+      const body = (await res.json()) as { text?: unknown; duration?: unknown; language?: unknown };
+      const seconds = Number(body.duration);
+      if (typeof body.text !== 'string' || !Number.isFinite(seconds) || seconds < 0) throw new AiProviderError('El proveedor de IA respondió algo que no se entiende', true);
+      return { text: body.text, seconds, language: typeof body.language === 'string' ? body.language.slice(0, 20) : null };
+    } catch (e) {
+      if (e instanceof AiProviderError) throw e;
+      throw new AiProviderError('El proveedor de IA respondió algo que no se entiende', true);
+    }
+  }
+
   private async call(path: string, credentials: AiCredentials, body: unknown): Promise<Response> {
     let res: Response;
     try {
       res = await fetch(`${this.baseUrl}${path}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${credentials.apiKey}` },
-        body: JSON.stringify(body),
+        // Con un formulario (audio) el navegador/Node pone el `content-type` con su límite; solo el JSON lo lleva a mano
+        headers: { ...(body instanceof FormData ? {} : { 'content-type': 'application/json' }), accept: 'application/json', authorization: `Bearer ${credentials.apiKey}` },
+        body: body instanceof FormData ? body : JSON.stringify(body),
         redirect: 'error',
         signal: AbortSignal.timeout(this.timeoutMs),
       });

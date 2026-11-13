@@ -869,3 +869,258 @@ describe('«Leer imágenes» en la configuración del agente (v13 S5a)', () => {
     expect((await call('PATCH', `/agents/${id}`, T.bob, { read_images: true })).status).toBe(404);
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════ v13 S5b — el agente escucha audios (ADR-70)
+const OGG = Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc(400, 3)]);
+const AMR = Buffer.concat([Buffer.from('#!AMR\n', 'latin1'), Buffer.alloc(400, 3)]);
+
+/** Un mensaje de audio del cliente con su adjunto (por omisión, listo y revisado). `meta`: lo que el canal informó (por QR, `seconds`). */
+async function inboundAudio(conv: string, o: { bytes?: Buffer; state?: string; scan?: string; at?: Date; size?: number; meta?: Record<string, unknown> } = {}): Promise<string> {
+  extSeq += 1;
+  const msg = (await admin.query(
+    `INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, external_id, direction, sender_type, kind, body, status, sent_at, meta) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'in', 'contact', 'audio', NULL, 'received', $5, $6::jsonb) RETURNING id`,
+    [ORG_A, conv, channelA, `wamid.AUD${extSeq}`, o.at ?? new Date(), JSON.stringify(o.meta ?? {})],
+  )).rows[0].id as string;
+  const state = o.state ?? 'ready';
+  const bytes = o.bytes ?? OGG;
+  const attId = (await admin.query(`SELECT gen_random_uuid() AS id`)).rows[0].id as string;
+  let key: string | null = null;
+  if (state === 'ready') key = (await inOrg(ORG_A, () => app.get(AttachmentsService).scanAndStore(ORG_A, attId, { bytes, mime: 'audio/ogg' }))).key;
+  await admin.query(
+    `INSERT INTO message_attachments(id, organization_id, conversation_id, message_id, direction, kind, mime_type, size_bytes, storage_key, state, scan_status) VALUES ($1, $2, $3, $4, 'in', 'audio', 'audio/ogg', $5, $6, $7, $8)`,
+    [attId, ORG_A, conv, msg, state === 'ready' ? (o.size ?? bytes.length) : null, key, state, o.scan ?? (state === 'ready' ? 'clean' : 'pending')],
+  );
+  return msg;
+}
+const transcribes = () => ai.calls.filter((c) => c.kind === 'transcribe');
+const useTranscription = async (): Promise<void> => {
+  await admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input, usd_per_1m_output, usd_per_minute) VALUES ('whisper-test', 'transcription', 0, 0, 0.006) ON CONFLICT (model) DO NOTHING`);
+  app.get(AiModelPricesService).invalidate();
+};
+const audioAgent = (patch: Record<string, unknown> = {}) => liveAgent({ docs: true, patch: { transcribe_audio: true, ...patch } });
+const transcriptOf = async (msg: string) => ((await admin.query(`SELECT meta->'transcript' AS t FROM messages WHERE id = $1`, [msg])).rows[0] as { t: { text: string; seconds: number; model: string } | null }).t;
+
+describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
+  beforeEach(async () => {
+    await admin.query(`UPDATE ai_limits SET transcriptions_per_day = 200, audio_max_seconds = 120`);
+    app.get(AiLimitsService).invalidate();
+    await useTranscription();
+    ai.transcribeResult = () => ({ text: 'Hola, quiero agendar una cita para mañana', seconds: 7 });
+  });
+  afterAll(async () => { await admin.query(`DELETE FROM ai_model_prices WHERE model = 'whisper-test'`); });
+
+  it('transcribe la nota de voz, la entrega rotulada como lo dicho por el cliente, contesta, guarda la transcripción en el mensaje y anota solo metadatos', async () => {
+    await audioAgent();
+    ai.calls.length = 0;
+    const c = await mkConv();
+    const msg = await inboundAudio(c.id);
+    const before = (await ledger()).filter((l) => l['kind'] === 'use').length;
+    expect(await tick()).toBe(1);
+    expect(transcribes()).toHaveLength(1);
+    expect(transcribes()[0]).toMatchObject({ kind: 'transcribe', model: 'whisper-test', mimeType: 'audio/ogg', filename: 'audio.ogg', bytes: OGG.length });
+    expect(lastUser()).toBe('[Audio del cliente, transcrito] Hola, quiero agendar una cita para mañana');
+    expect(await aiMessages(c.id)).toHaveLength(1);
+    expect(await transcriptOf(msg)).toMatchObject({ text: 'Hola, quiero agendar una cita para mañana', seconds: 7, model: 'whisper-test' });
+    const runs = (await mediaRuns()).filter((r) => r['kind'] === 'audio');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ seconds: 7, outcome: 'ok', model: 'whisper-test', mime_type: 'audio/ogg', bytes: OGG.length });
+    // los créditos se cobraron por la duración real (7 s a 0,006/min = 0,0007 USD → 1 crédito mínimo) y la transcripción tiene su propio asiento
+    const after = (await ledger()).filter((l) => l['kind'] === 'use');
+    expect(after.length).toBeGreaterThan(before);
+    expect(after.some((l) => String(l['ref']).includes('audio'))).toBe(true);
+  });
+
+  it('con el chat caído se reintenta SIN volver a transcribir ni cobrar de nuevo (la transcripción ya está guardada)', async () => {
+    await audioAgent();
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    const t0 = new Date();
+    ai.chatReply = () => { throw new AiProviderError('ocupado', true); };
+    await tick(t0);
+    expect(transcribes()).toHaveLength(1);
+    expect(await aiMessages(c.id)).toHaveLength(0);
+    ai.chatReply = () => 'Con gusto te ayudo';
+    await tick(new Date(t0.getTime() + 5 * MIN));
+    expect(transcribes()).toHaveLength(1);
+    expect(await aiMessages(c.id)).toHaveLength(1);
+    expect((await mediaRuns()).filter((r) => r['kind'] === 'audio')).toHaveLength(1);
+  });
+
+  it('con la opción apagada (la de siempre) el audio pasa a una persona sin transcribir', async () => {
+    await liveAgent({ docs: true });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(transcribes()).toHaveLength(0);
+  });
+
+  it('sin modelo de transcripción cargado el audio sigue yendo a una persona', async () => {
+    await audioAgent();
+    await admin.query(`DELETE FROM ai_model_prices WHERE model = 'whisper-test'`);
+    app.get(AiModelPricesService).invalidate();
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(transcribes()).toHaveLength(0);
+  });
+
+  it('un audio más largo que el máximo de la plataforma pasa a una persona: por la duración que informa el canal (QR) antes de gastar, o por la real tras transcribir (queda guardada)', async () => {
+    await audioAgent();
+    await admin.query(`UPDATE ai_limits SET audio_max_seconds = 60`);
+    app.get(AiLimitsService).invalidate();
+    const a = await mkConv();
+    await inboundAudio(a.id, { meta: { seconds: 200 } });
+    await tick();
+    expect(await state(a.id)).toMatchObject({ status: 'handed_off', reason: 'audio_too_long' });
+    expect(transcribes()).toHaveLength(0);
+    const b = await mkConv();
+    ai.transcribeResult = () => ({ text: 'un audio larguísimo', seconds: 90 });
+    const msg = await inboundAudio(b.id);
+    await tick(new Date(Date.now() + 5000));
+    expect(await state(b.id)).toMatchObject({ status: 'handed_off', reason: 'audio_too_long' });
+    expect(transcribes()).toHaveLength(1);
+    expect(await transcriptOf(msg)).toMatchObject({ seconds: 90 });
+    expect(chats()).toHaveLength(0);
+  });
+
+  it('un audio de más de 2 MB o en un formato que no se transcribe (AMR) pasa a una persona sin transcribir', async () => {
+    await audioAgent();
+    const big = await mkConv();
+    await inboundAudio(big.id, { size: 3 * 1024 * 1024 });
+    const amr = await mkConv();
+    await inboundAudio(amr.id, { bytes: AMR });
+    await tick();
+    expect(await state(big.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(await state(amr.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(transcribes()).toHaveLength(0);
+  });
+
+  it('infectado, fallido o sin registrar: nada sale hacia el proveedor y pasa a una persona (media_blocked); descargándose espera sin gastar intentos', async () => {
+    await audioAgent();
+    for (const k of [{ state: 'infected', scan: 'infected' }, { state: 'failed', scan: 'pending' }]) {
+      const c = await mkConv();
+      await inboundAudio(c.id, k);
+      await tick();
+      expect(await state(c.id), k.state).toMatchObject({ status: 'handed_off', reason: 'media_blocked' });
+    }
+    const w = await mkConv();
+    await inboundAudio(w.id, { state: 'pending' });
+    await tick(new Date());
+    expect(await state(w.id)).toMatchObject({ status: 'active', attempts: 0 });
+    expect(transcribes()).toHaveLength(0);
+  });
+
+  it('el tope diario de transcripciones por empresa: al llegar, el audio pasa a una persona (daily_limit) sin gastar', async () => {
+    await audioAgent();
+    await admin.query(`UPDATE ai_limits SET transcriptions_per_day = 1`);
+    app.get(AiLimitsService).invalidate();
+    const a = await mkConv();
+    await inboundAudio(a.id);
+    await tick();
+    expect(await aiMessages(a.id)).toHaveLength(1);
+    const before = (await ledger()).length;
+    const b = await mkConv();
+    await inboundAudio(b.id);
+    await tick(new Date(Date.now() + 5000));
+    expect(await state(b.id)).toMatchObject({ status: 'handed_off', reason: 'daily_limit' });
+    expect(transcribes()).toHaveLength(1);
+    expect((await ledger()).length).toBe(before);
+  });
+
+  it('un audio en silencio (texto vacío) pasa a una persona; lo transcrito sí se cobró', async () => {
+    await audioAgent();
+    ai.transcribeResult = () => ({ text: '   ', seconds: 3 });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(chats()).toHaveLength(0);
+    expect(transcribes()).toHaveLength(1);
+  });
+
+  it('si en el audio el cliente pide una persona, se le pasa con el aviso de siempre', async () => {
+    await audioAgent();
+    ai.transcribeResult = () => ({ text: 'Quiero hablar con un asesor por favor', seconds: 4 });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'requested' });
+    expect((await aiMessages(c.id)).map((m) => m['body'])).toEqual([HANDOFF_MESSAGE]);
+    expect(chats()).toHaveLength(0);
+  });
+
+  it('solo se transcribe cuando el agente de verdad va a contestar: con el máximo de respuestas seguidas pasa a una persona SIN transcribir', async () => {
+    await audioAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'Hola');
+    await tick();
+    await admin.query(`UPDATE ai_conversation_state SET turns = $2 WHERE conversation_id = $1`, [c.id, MAX_AGENT_TURNS]);
+    await inboundAudio(c.id, { at: new Date(Date.now() + 5000) });
+    await tick(new Date(Date.now() + 10_000));
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'turn_limit' });
+    expect(transcribes()).toHaveLength(0);
+  });
+
+  it('con texto y audio en el mismo turno entran los dos; si el audio falla pero hay texto, el agente igual atiende el texto', async () => {
+    await audioAgent();
+    const c = await mkConv();
+    await inbound(c.id, 'horario de atención');
+    await inboundAudio(c.id, { at: new Date(Date.now() + 100) });
+    await tick();
+    expect(lastUser()).toBe('horario de atención\n[Audio del cliente, transcrito] Hola, quiero agendar una cita para mañana');
+    const d = await mkConv();
+    await inbound(d.id, 'horario de atención');
+    await inboundAudio(d.id, { bytes: AMR, at: new Date(Date.now() + 100) });
+    await tick(new Date(Date.now() + 5000));
+    expect(await aiMessages(d.id)).toHaveLength(1);
+    expect(lastUser()).toBe('horario de atención');
+  });
+
+  it('un fallo pasajero del proveedor de transcripción reintenta sin cobrar ni guardar nada', async () => {
+    await audioAgent();
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    const t0 = new Date();
+    ai.failNext(new AiProviderError('ocupado', true)); // la primera llamada es la transcripción
+    await tick(t0);
+    expect(await state(c.id)).toMatchObject({ status: 'active', attempts: 1 });
+    expect(await mediaRuns()).toHaveLength(0);
+    expect(await transcriptOf((await admin.query(`SELECT id FROM messages WHERE conversation_id = $1`, [c.id])).rows[0].id as string)).toBeNull();
+    await tick(new Date(t0.getTime() + 5 * MIN));
+    expect(await aiMessages(c.id)).toHaveLength(1);
+  });
+
+  it('sin créditos pausa al agente (no_credits) y no transcribe', async () => {
+    await admin.query(`UPDATE trial_config SET welcome_credits = 0`);
+    app.get(OrgDirectoryService).invalidate();
+    await liveAgent({ patch: { transcribe_audio: true } });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect(await state(c.id)).toMatchObject({ status: 'paused', reason: 'no_credits' });
+    expect(transcribes()).toHaveLength(0);
+  });
+});
+
+describe('«Escuchar audios» en la configuración del agente (v13 S5b)', () => {
+  it('solo se activa si la plataforma cargó un modelo de transcripción (409 si no) y queda auditado; las opciones lo informan', async () => {
+    await admin.query(`DELETE FROM ai_model_prices WHERE kind = 'transcription'`);
+    app.get(AiModelPricesService).invalidate();
+    const id = ((await (await call('POST', '/agents', T.alice, { name: 'Vera' })).json()) as { id: string }).id;
+    expect(((await (await call('GET', '/agents/options', T.alice)).json()) as { transcription_available: boolean }).transcription_available).toBe(false);
+    const no = await call('PATCH', `/agents/${id}`, T.alice, { transcribe_audio: true });
+    expect(no.status).toBe(409);
+    expect(JSON.stringify(await no.json())).toContain('NO_TRANSCRIPTION_MODEL');
+    await useTranscription();
+    expect(((await (await call('GET', '/agents/options', T.alice)).json()) as { transcription_available: boolean }).transcription_available).toBe(true);
+    expect((await call('PATCH', `/agents/${id}`, T.alice, { transcribe_audio: true })).status).toBe(200);
+    expect(((await (await call('GET', `/agents/${id}`, T.alice)).json()) as { transcribe_audio: boolean }).transcribe_audio).toBe(true);
+    expect((await admin.query(`SELECT 1 FROM audit_logs WHERE entity_type = 'agent' AND entity_id = $1 AND field = 'transcribe_audio'`, [id])).rows.length).toBeGreaterThan(0);
+    expect((await call('PATCH', `/agents/${id}`, T.carol, { transcribe_audio: false })).status).toBe(403);
+    expect((await call('PATCH', `/agents/${id}`, T.bob, { transcribe_audio: false })).status).toBe(404);
+    await admin.query(`DELETE FROM ai_model_prices WHERE model = 'whisper-test'`);
+    app.get(AiModelPricesService).invalidate();
+  });
+});
