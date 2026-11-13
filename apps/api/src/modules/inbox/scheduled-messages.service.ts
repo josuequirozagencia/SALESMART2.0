@@ -16,6 +16,8 @@ import { OutboundService } from './outbound.service';
 /** Lo más pronto que se puede programar (la tarea corre cada pocos segundos) y cuánto antes de cerrarse la ventana de 24 h debe salir. */
 export const MIN_LEAD_MS = 60_000;
 export const WINDOW_MARGIN_MS = 60_000;
+/** Canales sin ventana de 24 h (WhatsApp por QR): hasta cuántos días hacia adelante se puede programar. */
+export const MAX_AHEAD_NO_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 /** Pendientes por conversación y mensajes programados que una pasada envía por empresa. */
 export const MAX_PENDING_PER_CONVERSATION = 10;
 export const SCHEDULED_BATCH = 50;
@@ -159,12 +161,18 @@ export class ScheduledMessagesService {
     const row = await this.db.withTenant(async (tx) => {
       const { c, channel, collab } = await loadConversation(tx, scope, conversationId, true);
       assertCanReply(scope, c, channel.state, collab, channel.provider);
-      if (!hasWindow(channel.provider)) throw new ConflictError('GHL_SCHEDULE_UNSUPPORTED', 'Por ahora los mensajes programados solo funcionan en WhatsApp');
-      assertWindowOpen(c.lastInboundAt, now);
-      const limit = new Date(c.lastInboundAt!.getTime() + WINDOW_MS - WINDOW_MARGIN_MS);
-      if (sendAt.getTime() > limit.getTime()) {
-        const shown = new Intl.DateTimeFormat('es', { timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(limit);
-        throw new ConflictError('SCHEDULE_OUTSIDE_WINDOW', `WhatsApp solo permite escribir libremente durante las 24 h siguientes al último mensaje del cliente: programa antes del ${shown}`);
+      // GoHighLevel sigue sin programados (decisión de M7.4). WhatsApp por QR no tiene ventana de 24 h ni plantillas: se programa texto libre sin ese límite (v13, S0.1)
+      if (channel.provider === 'ghl') throw new ConflictError('GHL_SCHEDULE_UNSUPPORTED', 'Por ahora los mensajes programados solo funcionan en WhatsApp');
+      if (hasWindow(channel.provider)) {
+        // Solo WhatsApp oficial: la ventana se evalúa con SU regla (el mismo `hasWindow` de responder)
+        assertWindowOpen(c.lastInboundAt, now, channel.provider);
+        const limit = new Date(c.lastInboundAt!.getTime() + WINDOW_MS - WINDOW_MARGIN_MS);
+        if (sendAt.getTime() > limit.getTime()) {
+          const shown = new Intl.DateTimeFormat('es', { timeZone, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(limit);
+          throw new ConflictError('SCHEDULE_OUTSIDE_WINDOW', `WhatsApp solo permite escribir libremente durante las 24 h siguientes al último mensaje del cliente: programa antes del ${shown}`);
+        }
+      } else if (sendAt.getTime() > now.getTime() + MAX_AHEAD_NO_WINDOW_MS) {
+        throw new ValidationError([{ path: 'send_at', code: 'too_far', message: 'Por este canal se puede programar hasta 30 días hacia adelante' }]);
       }
       const [{ n } = { n: 0 }] = await tx.select({ n: count() }).from(scheduledMessages).where(and(eq(scheduledMessages.conversationId, conversationId), eq(scheduledMessages.status, 'scheduled')));
       if (n >= MAX_PENDING_PER_CONVERSATION) throw new ConflictError('SCHEDULE_LIMIT', `Esta conversación ya tiene ${MAX_PENDING_PER_CONVERSATION} mensajes programados: cancela alguno para programar otro`);

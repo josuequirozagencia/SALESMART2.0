@@ -16,9 +16,16 @@ const pad = (n: number): string => String(n).padStart(2, '0');
 /** Valor de un `<input type="datetime-local">` (hora local, sin zona). */
 export const toLocalInput = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 
-/** Hasta cuándo se puede programar: un minuto antes de que cierre la ventana de 24 h de WhatsApp; null si ya está cerrada. */
-export function scheduleLimit(c: Pick<Conversation, 'window'>): Date | null {
-  return c.window.open && c.window.expires_at ? new Date(new Date(c.window.expires_at).getTime() - MARGIN_MS) : null;
+/** Canales sin ventana de 24 h (WhatsApp por QR): hasta cuántos días hacia adelante se puede programar (igual que el servidor). */
+const MAX_AHEAD_MS = 30 * 24 * 60 * MIN;
+
+/**
+ * Hasta cuándo se puede programar. WhatsApp oficial: un minuto antes de que cierre la ventana de 24 h, y null si ya está cerrada. Un canal SIN ventana (QR: la ventana viene abierta y sin
+ * fecha de cierre) no tiene ese límite: se puede programar hasta 30 días adelante. «Sin fecha de cierre» NO significa «cerrada».
+ */
+export function scheduleLimit(c: Pick<Conversation, 'window'>, now: Date = new Date()): Date | null {
+  if (!c.window.open) return null;
+  return c.window.expires_at ? new Date(new Date(c.window.expires_at).getTime() - MARGIN_MS) : new Date(now.getTime() + MAX_AHEAD_MS);
 }
 
 /** Atajos de hora que caen dentro de la ventana: en 30 minutos, 1 hora, 3 horas y mañana a las 9:00. */
@@ -37,8 +44,9 @@ export function quickTimes(now: Date, limit: Date): Array<{ label: string; at: D
 /** Elegir cuándo debe salir el mensaje que se escribió. Solo cabe dentro de la ventana de 24 h; el servidor lo vuelve a comprobar. */
 export function ScheduleDialog({ c, text, onClose, onDone }: { c: Conversation; text: string; onClose: () => void; onDone: () => void }) {
   const schedule = useScheduleMessage(c.id);
-  const limit = scheduleLimit(c);
   const [now] = useState(() => new Date());
+  const limit = scheduleLimit(c, now);
+  const hasWindow = c.window.expires_at !== null;
   const options = limit ? quickTimes(now, limit) : [];
   const [value, setValue] = useState(options[0] ? toLocalInput(options[0].at) : '');
   const [fieldError, setFieldError] = useState<string>();
@@ -51,7 +59,7 @@ export function ScheduleDialog({ c, text, onClose, onDone }: { c: Conversation; 
     const at = value ? new Date(value) : null;
     if (!at || Number.isNaN(at.getTime())) return setFieldError('Elige el día y la hora');
     if (at.getTime() < earliest.getTime()) return setFieldError('Elige una hora al menos dos minutos en el futuro');
-    if (limit && at.getTime() > limit.getTime()) return setFieldError(`WhatsApp solo permite escribir libremente hasta ${shortDateTime(limit.toISOString())}`);
+    if (limit && at.getTime() > limit.getTime()) return setFieldError(hasWindow ? `WhatsApp solo permite escribir libremente hasta ${shortDateTime(limit.toISOString())}` : `Por este canal se puede programar hasta ${shortDateTime(limit.toISOString())}`);
     schedule.mutate(
       { text, send_at: at.toISOString() },
       {
@@ -79,7 +87,7 @@ export function ScheduleDialog({ c, text, onClose, onDone }: { c: Conversation; 
               ))}
             </div>
           ) : null}
-          <Field label="Día y hora" required error={fieldError} hint={`Puedes programarlo hasta ${shortDateTime(limit.toISOString())}: después, WhatsApp solo permite plantillas.`}>
+          <Field label="Día y hora" required error={fieldError} hint={hasWindow ? `Puedes programarlo hasta ${shortDateTime(limit.toISOString())}: después, WhatsApp solo permite plantillas.` : `Puedes programarlo hasta ${shortDateTime(limit.toISOString())} (30 días).`}>
             {(p) => <Input {...p} type="datetime-local" value={value} min={toLocalInput(earliest)} max={toLocalInput(limit)} onChange={(e) => { setValue(e.target.value); setFieldError(undefined); }} />}
           </Field>
           <Alert kind="info">Si el cliente te escribe antes de esa hora, el mensaje se cancela solo. Lo puedes cancelar tú cuando quieras.</Alert>

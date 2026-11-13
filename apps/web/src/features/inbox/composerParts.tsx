@@ -42,6 +42,24 @@ export interface Recorder {
 }
 
 /**
+ * Formatos de grabación por orden de preferencia (v13, S0.2). Chrome y Firefox graban WebM/Opus (el servidor lo convierte a OGG/Opus, que es lo que WhatsApp entiende como nota de voz); Firefox
+ * también OGG/Opus; iOS Safari NO sabe WebM: graba MP4/AAC, que WhatsApp acepta tal cual. Pedir siempre `audio/webm` hacía fallar la grabación en iPhone. Sin ninguno, el navegador elige.
+ */
+export const RECORDING_TYPES = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/aac', 'audio/webm'] as const;
+
+/** El primer formato de `RECORDING_TYPES` que este navegador sabe grabar, o `undefined` si ninguno (se deja que el navegador decida). */
+export function pickRecordingType(isSupported: (t: string) => boolean): string | undefined {
+  return RECORDING_TYPES.find((t) => isSupported(t));
+}
+
+/** Extensión del archivo según el tipo que realmente grabó el navegador. */
+export function recordingFilename(type: string): string {
+  const base = type.split(';')[0]!.trim().toLowerCase();
+  const ext = base === 'audio/mp4' ? 'm4a' : base === 'audio/ogg' ? 'ogg' : base === 'audio/aac' ? 'aac' : 'webm';
+  return `grabacion.${ext}`;
+}
+
+/**
  * Grabación de notas de voz desde el micrófono (M5.8): cuenta los segundos, se corta sola a los 5 minutos y entrega un archivo a `onFile`. Al cancelar o salir de la pantalla el
  * micrófono se libera siempre (si no, el navegador seguiría mostrando que graba).
  */
@@ -80,16 +98,16 @@ export function useVoiceRecorder(onFile: (f: File) => void): Recorder {
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') { setError('Este navegador no permite grabar audio.'); return; }
     try {
       const s = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-      const r = new MediaRecorder(s, { mimeType });
+      const mimeType = pickRecordingType((t) => MediaRecorder.isTypeSupported(t));
+      const r = mimeType ? new MediaRecorder(s, { mimeType }) : new MediaRecorder(s);
       chunks.current = [];
       discard.current = false;
       r.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.current.push(ev.data); };
       r.onstop = () => {
         const keep = !discard.current && chunks.current.length > 0;
-        const blob = new Blob(chunks.current, { type: r.mimeType });
+        const blob = new Blob(chunks.current, { type: r.mimeType || mimeType || 'audio/webm' });
         release();
-        if (keep) cb.current(new File([blob], 'grabacion.webm', { type: blob.type }));
+        if (keep) cb.current(new File([blob], recordingFilename(blob.type), { type: blob.type }));
       };
       stream.current = s;
       rec.current = r;
