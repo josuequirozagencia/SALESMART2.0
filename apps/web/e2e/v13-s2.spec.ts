@@ -116,7 +116,9 @@ test.describe('cabecera estrecha', () => {
     expect(all).toBeGreaterThanOrEqual(4);
     await expect(chat.getByRole('button', { name: 'Más acciones' })).toHaveCount(0);
     // se estrecha la columna del chat (el ancho de la ventana depende del diseño; así la prueba no depende de él): el ResizeObserver de la cabecera debe reaccionar
-    await page.addStyleTag({ content: 'section[aria-label^="Conversación con"] { flex: none !important; width: 440px !important; }' });
+    // (con el DOM, no con una etiqueta de estilo: la política de contenido de la aplicación no permite estilos en línea inyectados)
+    const resizeChat = (width: number) => page.evaluate((w) => { const el = document.querySelector<HTMLElement>('section[aria-label^="Conversación con"]')!; el.style.flex = 'none'; el.style.width = `${w}px`; }, width);
+    await resizeChat(440);
     const more = chat.getByRole('button', { name: 'Más acciones' });
     await expect(more).toBeVisible();
     await more.click();
@@ -125,7 +127,7 @@ test.describe('cabecera estrecha', () => {
     await page.keyboard.press('Escape');
     await expect(more).toBeFocused();
     // al ensanchar todo cabe y el «⋮» desaparece
-    await page.addStyleTag({ content: 'section[aria-label^="Conversación con"] { width: 1000px !important; }' });
+    await resizeChat(1000);
     await expect(chat.getByRole('button', { name: 'Más acciones' })).toHaveCount(0);
     await expect(chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button')).toHaveCount(all);
   });
