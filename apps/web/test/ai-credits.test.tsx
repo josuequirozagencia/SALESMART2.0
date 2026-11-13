@@ -65,8 +65,8 @@ describe('Configuración › Créditos IA (cliente)', () => {
 
 describe('Plataforma › Créditos IA (Súper Admin)', () => {
   const org = (over: Partial<AiOrg> = {}): AiOrg => ({ id: ORG_A, name: 'Barbería Norte', state: 'trial', balance: 1000, held: 0, granted: 1000, used: 0, margin_pct: '100.00', margin_override: false, ...over });
-  interface World { limits: { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; updated_at: string }; orgs: AiOrg[]; pricing: { usd_per_credit: string; global_margin_pct: string; updated_at: string }; calls: Record<string, Call[]>; ledger: PlatformLedgerItem[]; grantFails?: () => ReturnType<Handler> }
-  const world = (over: Partial<World> = {}): World => ({ limits: { tests_per_day: 100, suggestions_per_day: 50, follow_ups_per_day: 200, updated_at: AT }, orgs: [org(), org({ id: ORG_B, name: 'Estudio Luna', balance: 0, granted: 0 })], pricing: { usd_per_credit: '0.010000', global_margin_pct: '100.00', updated_at: AT }, calls: {}, ledger: [], ...over });
+  interface World { limits: { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; transcriptions_per_day: number; images_per_day: number; audio_max_seconds: number; updated_at: string }; orgs: AiOrg[]; pricing: { usd_per_credit: string; global_margin_pct: string; updated_at: string }; calls: Record<string, Call[]>; ledger: PlatformLedgerItem[]; grantFails?: () => ReturnType<Handler> }
+  const world = (over: Partial<World> = {}): World => ({ limits: { tests_per_day: 100, suggestions_per_day: 50, follow_ups_per_day: 200, transcriptions_per_day: 200, images_per_day: 300, audio_max_seconds: 120, updated_at: AT }, orgs: [org(), org({ id: ORG_B, name: 'Estudio Luna', balance: 0, granted: 0 })], pricing: { usd_per_credit: '0.010000', global_margin_pct: '100.00', updated_at: AT }, calls: {}, ledger: [], ...over });
   const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
   function server(w: World): Record<string, Handler> {
     return {
@@ -123,7 +123,7 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     expect(await form.findByText('Precio guardado.')).toBeInTheDocument();
   });
 
-  it('límites diarios de la IA: muestra los vigentes, valida números enteros de 1 a 10 000 y manda los tres valores', async () => {
+  it('límites diarios de la IA: muestra los vigentes, valida números enteros de 1 a 10 000 y manda los cuatro valores', async () => {
     const w = world();
     mockApi(server(w));
     renderApp('/platform/ai');
@@ -131,6 +131,7 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     expect(form.getByLabelText('Mensajes de prueba del agente por día')).toHaveValue('100');
     expect(form.getByLabelText('Sugerencias de respuesta por día')).toHaveValue('50');
     expect(form.getByLabelText('Seguimientos automáticos por día')).toHaveValue('200');
+    expect(form.getByLabelText('Imágenes que leen los agentes por día')).toHaveValue('300');
     for (const bad of ['0', '10001', '1.5', 'abc', '']) {
       await userEvent.clear(form.getByLabelText('Sugerencias de respuesta por día'));
       if (bad) await userEvent.type(form.getByLabelText('Sugerencias de respuesta por día'), bad);
@@ -143,7 +144,7 @@ describe('Plataforma › Créditos IA (Súper Admin)', () => {
     await userEvent.clear(form.getByLabelText('Seguimientos automáticos por día'));
     await userEvent.type(form.getByLabelText('Seguimientos automáticos por día'), '500');
     await userEvent.click(form.getByRole('button', { name: 'Guardar límites' }));
-    await waitFor(() => expect(w.calls['limits']![0]!.body).toEqual({ tests_per_day: 100, suggestions_per_day: 80, follow_ups_per_day: 500 }));
+    await waitFor(() => expect(w.calls['limits']![0]!.body).toEqual({ tests_per_day: 100, suggestions_per_day: 80, follow_ups_per_day: 500, images_per_day: 300 }));
     expect(await form.findByText('Límites guardados.')).toBeInTheDocument();
   });
 

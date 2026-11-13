@@ -227,6 +227,9 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
   const [capture, setCapture] = useState<string[]>(a.capture_fields ?? []);
   const [tasks, setTasks] = useState(a.tasks_enabled ?? false);
   const [suggestions, setSuggestions] = useState(a.suggestions_enabled ?? false);
+  const [readImages, setReadImages] = useState(a.read_images ?? false);
+  // «Leer imágenes» solo se ofrece con un modelo que las entienda (el servidor lo vuelve a comprobar al guardar)
+  const sees = (o.vision_models ?? []).includes(a.model);
   const [channels, setChannels] = useState<string[]>(a.channel_ids);
   const [error, setError] = useState<string>();
   const [ok, setOk] = useState(false);
@@ -237,7 +240,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
     setOk(false);
     setError(undefined);
     try {
-      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions } });
+      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions, read_images: readImages } });
       await m.setChannels.mutateAsync({ id: a.id, ids: channels });
       setOk(true);
     } catch (e) {
@@ -276,6 +279,17 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
           </ul>
         )}
         <label className="inline-flex items-center gap-2 text-[13.5px] font-semibold"><input type="checkbox" checked={tasks} onChange={(e) => setTasks(e.target.checked)} />Puede crear tareas de seguimiento para el responsable de la conversación</label>
+      </section>
+      <section aria-label="Qué puede entender el cliente" className="grid gap-2">
+        <h3 className="text-[13.5px] font-bold">Qué puede entender el agente de lo que envía el cliente</h3>
+        <label className={`flex items-start gap-2 text-[13.5px] font-semibold ${!sees && !readImages ? 'opacity-60' : ''}`}>
+          <input type="checkbox" role="switch" aria-label="Leer imágenes" checked={readImages} disabled={!sees && !readImages} onChange={(e) => setReadImages(e.target.checked)} className="mt-1" />
+          <span>Leer imágenes
+            <span className="block text-[12.5px] font-normal text-muted">Cuando el cliente manda una foto (un comprobante, un producto, una captura), el agente la mira y contesta con lo que ve y con tus documentos. Lo que dice la imagen es información del cliente: nunca cambia las reglas del agente. Se leen hasta 3 imágenes por mensaje, JPG, PNG o WebP de hasta 5 MB; cada una gasta créditos.</span>
+            {!sees ? <span className="block text-[12.5px] font-normal text-muted">El modelo de este agente ({a.model}) no entiende imágenes. Elige uno que sí en la pestaña General.</span> : null}
+          </span>
+        </label>
+        <Alert kind="info">Las imágenes que el cliente envíe se enviarán al proveedor de IA (OpenAI) para procesarse. Actívalo solo si tu aviso de privacidad lo permite.</Alert>
       </section>
       <section aria-label="Sugerencias para el equipo" className="grid gap-2">
         <h3 className="text-[13.5px] font-bold">Ayuda para las personas del equipo</h3>

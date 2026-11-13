@@ -191,7 +191,7 @@ export class AgentsService {
         // «Leer imágenes» solo con un modelo que las entienda (ADR-70): se valida con el modelo que quedaría guardado
         const modelAfter = patch.model ?? cur.model;
         if ((patch.read_images ?? cur.readImages) && (patch.read_images !== undefined || patch.model !== undefined) && !visionModels.includes(modelAfter)) {
-          throw new ValidationError([{ path: patch.read_images === true ? 'read_images' : 'model', code: 'model_no_vision', message: patch.read_images === true ? 'El modelo de este agente no entiende imágenes: elige uno con visión para activar «Leer imágenes»' : 'Ese modelo no entiende imágenes y el agente tiene «Leer imágenes» activado: apágalo primero' }]);
+          throw new ConflictError('MODEL_NO_VISION', patch.read_images === true ? 'El modelo de este agente no entiende imágenes: elige uno con visión para activar «Leer imágenes»' : 'Ese modelo no entiende imágenes y el agente tiene «Leer imágenes» activado: apágalo primero');
         }
         if (patch.transfer_queue_id) {
           const [q] = await tx.select({ id: queues.id }).from(queues).where(and(eq(queues.id, patch.transfer_queue_id), isNull(queues.deletedAt))).limit(1);

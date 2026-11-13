@@ -844,13 +844,13 @@ describe('«Leer imágenes» en la configuración del agente (v13 S5a)', () => {
     const id = ((await (await call('POST', '/agents', T.alice, { name: 'Vera' })).json()) as { id: string }).id;
     expect((await call('PATCH', `/agents/${id}`, T.alice, { model: 'gpt-sin-vision' })).status).toBe(200);
     const bad = await call('PATCH', `/agents/${id}`, T.alice, { read_images: true });
-    expect(bad.status).toBe(400);
-    expect(JSON.stringify(await bad.json())).toContain('model_no_vision');
+    expect(bad.status).toBe(409);
+    expect(JSON.stringify(await bad.json())).toContain('MODEL_NO_VISION');
     expect((await call('PATCH', `/agents/${id}`, T.alice, { model: 'gpt-4o-mini', read_images: true })).status).toBe(200);
     const det = (await (await call('GET', `/agents/${id}`, T.alice)).json()) as { read_images: boolean };
     expect(det.read_images).toBe(true);
     const back = await call('PATCH', `/agents/${id}`, T.alice, { model: 'gpt-sin-vision' });
-    expect(back.status).toBe(400);
+    expect(back.status).toBe(409);
     expect((await call('PATCH', `/agents/${id}`, T.alice, { model: 'gpt-sin-vision', read_images: false })).status).toBe(200);
     const opts = (await (await call('GET', '/agents/options', T.alice)).json()) as { models: string[]; vision_models: string[] };
     expect(opts.models).toContain('gpt-sin-vision');

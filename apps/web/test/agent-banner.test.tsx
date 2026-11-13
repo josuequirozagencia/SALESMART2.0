@@ -69,6 +69,10 @@ describe('Inbox · agente de IA en la conversación', () => {
     ['no_credits', 'la empresa se quedó sin créditos de IA'],
     ['no_support', 'no encontró en sus documentos'],
     ['ai_error', 'El servicio de IA no estuvo disponible.'],
+    ['unsupported_media', 'algo que el agente no puede leer'],
+    ['media_blocked', 'no pudo leer la imagen o el audio del cliente'],
+    ['daily_limit', 'límite diario de imágenes o audios'],
+    ['audio_too_long', 'audio demasiado largo'],
   ])('cuando el agente pasó la conversación a una persona (%s) dice por qué', async (reason, text) => {
     mockApi(server({ status: STATUS({ state: reason === 'no_credits' ? 'paused' : 'handed_off', reason }), posts: [] }));
     await renderChat();
