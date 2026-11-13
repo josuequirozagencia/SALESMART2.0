@@ -1,7 +1,7 @@
-import { AiProviderError, imageCount, messageText, type ToolCall, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+import { AUDIO_MIME_TYPES, AiProviderError, imageCount, messageText, type TranscribeRequest, type TranscribeResult, type ToolCall, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
 
 /** Lo que el fake «hizo», en orden (las pruebas lo leen). Sin la clave: nunca se guarda. */
-export type FakeAiCall = { kind: 'embed'; model: string; inputs: string[]; dimensions: number } | { kind: 'chat'; request: ChatRequest };
+export type FakeAiCall = { kind: 'embed'; model: string; inputs: string[]; dimensions: number } | { kind: 'chat'; request: ChatRequest } | { kind: 'transcribe'; model: string; mimeType: string; filename: string; bytes: number };
 
 const WORD = /[\p{L}\p{N}]{2,}/gu;
 /** Palabras vacías del español: no dicen de qué trata un texto, así que el vector falso las ignora (como haría un modelo de verdad). */
@@ -47,6 +47,8 @@ export class FakeAiProvider implements AIProvider {
   chatResult: ((request: ChatRequest) => { text?: string; toolCalls?: ToolCall[] }) | null = null;
   /** Si es verdadero, `embed` cuenta un token por cada 4 caracteres; si no, exactamente `tokensPerInput` por texto. */
   tokensPerInput: number | null = null;
+  /** Lo que transcribe el fake (las pruebas lo cambian): texto y duración en segundos. */
+  transcribeResult: (request: TranscribeRequest) => { text: string; seconds: number } = () => ({ text: 'Transcripción de prueba', seconds: 5 });
   /** Tokens de entrada que el fake cuenta por cada imagen recibida (el proveedor real cobra la imagen como tokens de entrada). */
   tokensPerImage = 800;
 
@@ -68,6 +70,17 @@ export class FakeAiProvider implements AIProvider {
     if (request.inputs.length === 0) return Promise.reject(new AiProviderError('No hay textos que vectorizar', false));
     const tokens = request.inputs.reduce((n, s) => n + (this.tokensPerInput ?? Math.ceil(s.length / 4)), 0);
     return Promise.resolve({ vectors: request.inputs.map((s) => fakeVector(s, request.dimensions)), tokens });
+  }
+
+  transcribe(credentials: AiCredentials, request: TranscribeRequest): Promise<TranscribeResult> {
+    const fail = this.failures.shift();
+    if (fail) return Promise.reject(fail);
+    this.keysSeen.push(credentials.apiKey);
+    this.calls.push({ kind: 'transcribe', model: request.model, mimeType: request.mimeType, filename: request.filename, bytes: request.audio.byteLength });
+    if (request.audio.byteLength === 0) return Promise.reject(new AiProviderError('El audio está vacío', false));
+    if (!(AUDIO_MIME_TYPES as readonly string[]).includes(request.mimeType)) return Promise.reject(new AiProviderError('El formato de audio no es válido', false));
+    const r = this.transcribeResult(request);
+    return Promise.resolve({ text: r.text, seconds: r.seconds, language: 'es' });
   }
 
   chat(credentials: AiCredentials, request: ChatRequest): Promise<ChatResult> {

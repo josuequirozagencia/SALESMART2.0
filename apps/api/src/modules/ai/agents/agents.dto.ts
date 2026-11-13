@@ -38,6 +38,8 @@ export const updateAgentSchema = z
     suggestions_enabled: z.boolean(),
     /** El agente lee las imágenes del cliente (v13 S5, ADR-70): se envían al proveedor de IA. Solo con un modelo con visión. */
     read_images: z.boolean(),
+    /** El agente transcribe las notas de voz del cliente (v13 S5b, ADR-70): el audio se envía al proveedor de IA. */
+    transcribe_audio: z.boolean(),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');

@@ -71,6 +71,8 @@ export interface MessageView {
   reaction: string | null;
   /** Reacción NUESTRA a este mensaje del cliente (M5.8), o null. */
   my_reaction: string | null;
+  /** Transcripción por IA de una nota de voz del cliente (v13 S5b, ADR-70), o null. Puede contener errores. */
+  transcript: { text: string; seconds: number } | null;
   status: string;
   error: string | null;
   sent_at: string;
@@ -173,7 +175,7 @@ export function conversationView(p: ConversationParts, scope: InboxScope, now: D
 type MessageRow = typeof messages.$inferSelect;
 
 /** `wa_id`, el código del último error de envío y la hora de la reacción son de uso interno: no se muestran (la reacción se muestra aparte). */
-const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'my_reaction', 'my_reaction_at', 'template', 'auto', 'ghl_type']);
+const HIDDEN_META = new Set(['wa_id', 'error_code', 'reaction', 'reaction_at', 'my_reaction', 'my_reaction_at', 'template', 'auto', 'ghl_type', 'transcript']);
 
 /** De lo que guarda una plantilla enviada, solo lo que se muestra (nunca los datos de envío). */
 function templateOf(meta: Record<string, unknown>): MessageView['template'] {
@@ -188,6 +190,14 @@ function templateOf(meta: Record<string, unknown>): MessageView['template'] {
     category: typeof o['category'] === 'string' ? o['category'] : 'other',
     buttons: buttons.map((b) => ({ type: typeof b['type'] === 'string' ? b['type'] : 'other', text: typeof b['text'] === 'string' ? b['text'] : '', url: typeof b['url'] === 'string' ? b['url'] : null, phone: typeof b['phone'] === 'string' ? b['phone'] : null })),
   };
+}
+
+/** La transcripción por IA de una nota de voz: solo el texto y la duración (el modelo y la hora son internos). */
+function transcriptOf(meta: Record<string, unknown>): MessageView['transcript'] {
+  const t = meta['transcript'];
+  if (t === null || typeof t !== 'object') return null;
+  const o = t as Record<string, unknown>;
+  return typeof o['text'] === 'string' && o['text'] !== '' && typeof o['seconds'] === 'number' ? { text: o['text'], seconds: o['seconds'] } : null;
 }
 
 export function messageView(m: MessageRow, author: { id: string; name: string } | null, attachment: MessageView['attachment'] = null, mentions: MessageView['mentions'] = [], quote: QuoteView | null = null): MessageView {
@@ -205,6 +215,7 @@ export function messageView(m: MessageRow, author: { id: string; name: string } 
     extra: Object.keys(extra).length > 0 ? extra : null,
     reaction: typeof m.meta['reaction'] === 'string' ? m.meta['reaction'] : null,
     my_reaction: typeof m.meta['my_reaction'] === 'string' ? m.meta['my_reaction'] : null,
+    transcript: transcriptOf(m.meta),
     status: m.status,
     error: m.error,
     sent_at: m.sentAt.toISOString(),

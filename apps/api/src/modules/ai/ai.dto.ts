@@ -50,13 +50,34 @@ export type AdminOrganizationsQuery = z.infer<typeof adminOrganizationsQuerySche
 export const idempotencyKeySchema = z.string().trim().min(8).max(100).regex(/^[A-Za-z0-9_.:-]+$/, 'solo letras, números y _ . : -');
 
 export const modelPriceSchema = z.strictObject({
-  usd_per_1m_input: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000'),
-  usd_per_1m_output: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000'),
+  /** Un modelo de chat o de embeddings lleva los dos precios por tokens; uno de transcripción, solo `usd_per_minute` (se comprueba contra el tipo del modelo en el servicio). */
+  usd_per_1m_input: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000').optional(),
+  usd_per_1m_output: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000').optional(),
+  usd_per_minute: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000').optional(),
   /** ¿El modelo de chat entiende imágenes? (ADR-70). Si no viene, se conserva. */
   vision: z.boolean().optional(),
 });
 export type ModelPriceDto = z.infer<typeof modelPriceSchema>;
 export const modelParamSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);
 /** Dar de alta un modelo de chat (v11 S4): su nombre exacto en el proveedor y su precio. */
-export const createModelSchema = modelPriceSchema.extend({ model: modelParamSchema });
+export const createModelSchema = z
+  .strictObject({
+    model: modelParamSchema,
+    /** `chat` (por omisión) o `transcription` (v13 S5b, ADR-70: se cobra por minuto de audio). */
+    kind: z.enum(['chat', 'transcription']).default('chat'),
+    usd_per_1m_input: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000').optional(),
+    usd_per_1m_output: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000').optional(),
+    vision: z.boolean().optional(),
+    usd_per_minute: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000').optional(),
+  })
+  .superRefine((b, ctx) => {
+    if (b.kind === 'chat') {
+      if (b.usd_per_1m_input === undefined) ctx.addIssue({ code: 'custom', path: ['usd_per_1m_input'], message: 'Falta el precio de entrada' });
+      if (b.usd_per_1m_output === undefined) ctx.addIssue({ code: 'custom', path: ['usd_per_1m_output'], message: 'Falta el precio de salida' });
+      if (b.usd_per_minute !== undefined) ctx.addIssue({ code: 'custom', path: ['usd_per_minute'], message: 'El precio por minuto es solo de los modelos de transcripción' });
+    } else {
+      if (b.usd_per_minute === undefined) ctx.addIssue({ code: 'custom', path: ['usd_per_minute'], message: 'Falta el precio por minuto de audio' });
+      if (b.usd_per_1m_input !== undefined || b.usd_per_1m_output !== undefined || b.vision !== undefined) ctx.addIssue({ code: 'custom', path: ['kind'], message: 'Un modelo de transcripción solo lleva su precio por minuto' });
+    }
+  });
 export type CreateModelDto = z.infer<typeof createModelSchema>;
