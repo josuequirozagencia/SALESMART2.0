@@ -206,8 +206,8 @@ describe('Configuración › Conocimiento · probar la búsqueda', () => {
 });
 
 describe('Plataforma › Modelos de IA', () => {
-  interface PW { models: Array<{ model: string; kind: 'embedding' | 'chat'; usd_per_1m_input: string; usd_per_1m_output: string; updated_at: string }>; puts: unknown[] }
-  const pw = (): PW => ({ models: [{ model: 'gpt-4o-mini', kind: 'chat', usd_per_1m_input: '0.150000', usd_per_1m_output: '0.600000', updated_at: AT }, { model: 'text-embedding-3-small', kind: 'embedding', usd_per_1m_input: '0.020000', usd_per_1m_output: '0.000000', updated_at: AT }], puts: [] });
+  interface PW { models: Array<{ model: string; kind: 'embedding' | 'chat'; usd_per_1m_input: string; usd_per_1m_output: string; vision: boolean; usd_per_minute: string | null; updated_at: string }>; puts: unknown[] }
+  const pw = (): PW => ({ models: [{ model: 'gpt-4o-mini', kind: 'chat', usd_per_1m_input: '0.150000', usd_per_1m_output: '0.600000', vision: true, usd_per_minute: null, updated_at: AT }, { model: 'text-embedding-3-small', kind: 'embedding', usd_per_1m_input: '0.020000', usd_per_1m_output: '0.000000', vision: false, usd_per_minute: null, updated_at: AT }], puts: [] });
   const srv = (w: PW): Record<string, Handler> => ({
     ...authed(ME_ROOT),
     'GET /platform/trials': () => ({ body: NO_TRIALS }),
@@ -232,14 +232,14 @@ describe('Plataforma › Modelos de IA', () => {
     await userEvent.clear(form.getByLabelText('Entrada (USD por millón de tokens)'));
     await userEvent.type(form.getByLabelText('Entrada (USD por millón de tokens)'), '0.2');
     await userEvent.click(form.getByRole('button', { name: 'Guardar' }));
-    await waitFor(() => expect(w.puts).toEqual([{ usd_per_1m_input: '0.2', usd_per_1m_output: '0.6' }]));
+    await waitFor(() => expect(w.puts).toEqual([{ usd_per_1m_input: '0.2', usd_per_1m_output: '0.6', vision: true }])); // un modelo de chat manda también si entiende imágenes
     expect(await form.findByText('Precio guardado.')).toBeInTheDocument();
   });
 
   it('«Agregar un modelo de chat»: valida el nombre y los precios, lo manda al servidor y avisa que los agentes ya pueden elegirlo (v11 S4)', async () => {
     const w = pw();
     const posts: unknown[] = [];
-    mockApi({ ...srv(w), 'POST /platform/ai/models': (c) => { posts.push(c.body); const b = c.body as { model: string; usd_per_1m_input: string; usd_per_1m_output: string }; w.models.push({ model: b.model, kind: 'chat', usd_per_1m_input: b.usd_per_1m_input, usd_per_1m_output: b.usd_per_1m_output, updated_at: AT }); return { status: 201, body: w.models[w.models.length - 1] }; } });
+    mockApi({ ...srv(w), 'POST /platform/ai/models': (c) => { posts.push(c.body); const b = c.body as { model: string; usd_per_1m_input: string; usd_per_1m_output: string }; w.models.push({ model: b.model, kind: 'chat', usd_per_1m_input: b.usd_per_1m_input, usd_per_1m_output: b.usd_per_1m_output, vision: false, usd_per_minute: null, updated_at: AT }); return { status: 201, body: w.models[w.models.length - 1] }; } });
     renderApp('/platform/ai');
     const form = within(await screen.findByRole('form', { name: 'Agregar un modelo de chat' }));
     await userEvent.type(form.getByLabelText('Nombre del modelo'), 'modelo con espacios');
@@ -260,5 +260,26 @@ describe('Plataforma › Modelos de IA', () => {
     await waitFor(() => expect(posts).toEqual([{ model: 'gpt-4.1-mini', usd_per_1m_input: '0.4', usd_per_1m_output: '1.6' }]));
     expect(await form.findByText(/Modelo gpt-4.1-mini agregado/)).toBeInTheDocument();
     expect(await screen.findByRole('form', { name: 'Precio de gpt-4.1-mini' })).toBeInTheDocument();
+  });
+
+  it('visión (v13 S5): cada modelo de chat muestra si entiende imágenes y se cambia; los de embeddings no lo ofrecen; al agregar un modelo se marca la visión', async () => {
+    const w = pw();
+    const posts: unknown[] = [];
+    mockApi({ ...srv(w), 'POST /platform/ai/models': (c) => { posts.push(c.body); const b = c.body as { model: string; usd_per_1m_input: string; usd_per_1m_output: string; vision?: boolean }; w.models.push({ model: b.model, kind: 'chat', usd_per_1m_input: b.usd_per_1m_input, usd_per_1m_output: b.usd_per_1m_output, vision: b.vision === true, usd_per_minute: null, updated_at: AT }); return { status: 201, body: w.models.at(-1) }; } });
+    renderApp('/platform/ai');
+    const form = within(await screen.findByRole('form', { name: 'Precio de gpt-4o-mini' }));
+    const box = form.getByRole('checkbox', { name: 'gpt-4o-mini entiende imágenes' });
+    expect(box).toBeChecked();
+    expect(within(screen.getByRole('form', { name: 'Precio de text-embedding-3-small' })).queryByRole('checkbox')).not.toBeInTheDocument();
+    await userEvent.click(box);
+    await userEvent.click(form.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.puts).toEqual([{ usd_per_1m_input: '0.15', usd_per_1m_output: '0.6', vision: false }]));
+    const add = within(screen.getByRole('form', { name: 'Agregar un modelo de chat' }));
+    await userEvent.type(add.getByLabelText('Nombre del modelo'), 'gpt-4.1');
+    await userEvent.type(add.getByLabelText('Entrada (USD por millón de tokens)'), '2');
+    await userEvent.type(add.getByLabelText('Salida (USD por millón de tokens)'), '8');
+    await userEvent.click(add.getByRole('checkbox', { name: 'Entiende imágenes (visión)' }));
+    await userEvent.click(add.getByRole('button', { name: 'Agregar modelo' }));
+    await waitFor(() => expect(posts).toEqual([{ model: 'gpt-4.1', usd_per_1m_input: '2', usd_per_1m_output: '8', vision: true }]));
   });
 });

@@ -360,7 +360,16 @@ describe('Súper Admin: precio, margen, regalos y saldos', () => {
     expect(audit).toHaveLength(1);
     expect(audit[0].details).toMatchObject({ before: { tests_per_day: 100, suggestions_per_day: 50, follow_ups_per_day: 200 }, after: { tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500 } });
     // los topes que ven los servicios cambian al instante en esta instancia
-    expect(await app.get(AiLimitsService).resolve()).toEqual({ testsPerDay: 30, suggestionsPerDay: 80, followUpsPerDay: 500 });
+    expect(await app.get(AiLimitsService).resolve()).toEqual({ testsPerDay: 30, suggestionsPerDay: 80, followUpsPerDay: 500, transcriptionsPerDay: 200, imagesPerDay: 300, audioMaxSeconds: 120 });
+    // v13 S5 (ADR-70): imágenes, transcripciones y duración del audio; si no vienen se conserva lo actual, y el audio va de 15 a 300 s
+    expect(await call('GET', '/platform/ai/limits', T.root).then((r) => json(r))).toMatchObject({ transcriptions_per_day: 200, images_per_day: 300, audio_max_seconds: 120 });
+    const media = await call('PUT', '/platform/ai/limits', T.root, { tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500, images_per_day: 40, audio_max_seconds: 60 });
+    expect(media.status).toBe(200);
+    expect(await json(media)).toMatchObject({ transcriptions_per_day: 200, images_per_day: 40, audio_max_seconds: 60 });
+    for (const bad of [{ audio_max_seconds: 14 }, { audio_max_seconds: 301 }, { images_per_day: 0 }, { transcriptions_per_day: 10001 }]) {
+      expect((await call('PUT', '/platform/ai/limits', T.root, { tests_per_day: 30, suggestions_per_day: 80, follow_ups_per_day: 500, ...bad })).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(await app.get(AiLimitsService).resolve()).toMatchObject({ imagesPerDay: 40, audioMaxSeconds: 60, transcriptionsPerDay: 200 });
   });
 
   it('POST /platform/ai/organizations/:id/grants: regala con llave de idempotencia, lo ve el cliente (sin costo) y queda auditado en las dos auditorías', async () => {

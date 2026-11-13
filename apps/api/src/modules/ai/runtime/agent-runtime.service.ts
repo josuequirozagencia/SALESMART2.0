@@ -15,6 +15,7 @@ import { isOpenAt, SlaService } from '../../sla';
 import { AgentTurnService } from '../agents/agent-turn.service';
 import { AgentsService } from '../agents/agents.service';
 import { AgentToolsService } from '../tools/agent-tools.service';
+import { AgentMediaService, type MediaImage } from './agent-media.service';
 import { AgentReplyBus } from './agent-reply.bus';
 import { hasTools } from '../tools/tool-defs';
 import { asksForPerson, HANDOFF_MESSAGE, handoffNote, MAX_AGENT_TURNS, MAX_UNSUPPORTED_STREAK, type HandoffReason } from './handoff';
@@ -81,6 +82,7 @@ export class AgentRuntimeService {
     @Inject(AgentTurnService) private readonly turns: AgentTurnService,
     @Inject(AgentsService) private readonly agents: AgentsService,
     @Inject(AgentToolsService) private readonly tools: AgentToolsService,
+    @Inject(AgentMediaService) private readonly media: AgentMediaService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(AiCreditsService) private readonly credits: AiCreditsService,
@@ -168,7 +170,7 @@ export class AgentRuntimeService {
       // 1) Lo que hay que contestar: los mensajes del cliente posteriores a lo ya atendido, y la conversación reciente como historial
       const recent = await this.db.withTenant((tx) =>
         tx
-          .select({ direction: messages.direction, sender: messages.senderType, kind: messages.kind, body: messages.body, status: messages.status, at: messages.sentAt })
+          .select({ id: messages.id, direction: messages.direction, sender: messages.senderType, kind: messages.kind, body: messages.body, status: messages.status, at: messages.sentAt })
           .from(messages)
           .where(and(eq(messages.conversationId, job.conversationId), sql`${messages.status} <> 'internal'`, sql`${messages.kind} <> 'note'`))
           .orderBy(sql`${messages.sentAt} DESC`, sql`${messages.id} DESC`)
@@ -178,8 +180,28 @@ export class AgentRuntimeService {
       const since = job.handledUntil;
       const pending = ordered.filter((m) => m.direction === 'in' && (since === null || m.at > since));
       const newest = pending.reduce<Date | null>((d, m) => (d === null || m.at > d ? m.at : d), null) ?? now;
-      const text = pending.filter((m) => m.kind === 'text' && m.body).map((m) => m.body!).join('\n');
-      if (text.trim() === '') return await this.handoff(job, settings.name, 'unsupported_media', newest, false, now, route);
+      // v13 S5 (ADR-70): con «Leer imágenes» y un modelo con visión, las imágenes del cliente (y su pie de foto) entran al turno; con la opción apagada todo sigue como antes
+      const imageMessages = pending.filter((m) => m.kind === 'image');
+      const readsImages = settings.readImages && imageMessages.length > 0 && (await this.media.modelSeesImages(settings.model));
+      const text = pending.filter((m) => (m.kind === 'text' || (readsImages && m.kind === 'image')) && m.body).map((m) => m.body!).join('\n');
+      let images: MediaImage[] = [];
+      let mention = '';
+      if (readsImages) {
+        const plan = await this.media.prepareImages(job.conversationId, imageMessages.map((m) => ({ id: m.id, at: m.at })), now);
+        if (plan.status === 'waiting') {
+          // El archivo aún se descarga: se vuelve a mirar en unos segundos (sin gastar intentos)
+          await this.db.withTenant((tx) => tx.update(aiConversationState).set({ processingStartedAt: null, nextAttemptAt: new Date(now.getTime() + 10_000), updatedAt: now }).where(eq(aiConversationState.conversationId, job.conversationId)));
+          return 'retry';
+        }
+        if (plan.images.length > 0) {
+          if ((await this.media.imagesLeftToday(now)) < plan.images.length) return await this.handoff(job, settings.name, 'daily_limit', newest, false, now, route);
+          images = plan.images;
+          if (plan.extra > 0) mention = ` (El cliente envió ${plan.extra} ${plan.extra === 1 ? 'imagen' : 'imágenes'} más que no puedes ver.)`;
+        } else if (text.trim() === '') {
+          return await this.handoff(job, settings.name, plan.blocked > 0 ? 'media_blocked' : 'unsupported_media', newest, false, now, route);
+        }
+      }
+      if (text.trim() === '' && images.length === 0) return await this.handoff(job, settings.name, 'unsupported_media', newest, false, now, route);
       if (job.turns >= MAX_AGENT_TURNS) return await this.handoff(job, settings.name, 'turn_limit', newest, false, now, route);
       if (settings.transferEnabled && asksForPerson(text)) return await this.handoff(job, settings.name, 'requested', newest, true, now, route);
       // 2) Fuera de horario con «a toda hora» apagado: no contesta (la cola avisa); no se vuelve a intentar con este mensaje
@@ -197,7 +219,9 @@ export class AgentRuntimeService {
       // Herramientas del agente (M8.5b): se ejecutan en el servidor con lo que el agente tiene permitido
       const config = await this.tools.configFor(job.agentId);
       const tools = hasTools(config) ? { config, execute: (call: Parameters<AgentToolsService['execute']>[2]) => this.tools.execute(config, { agentId: job.agentId, agentName: settings.name, conversationId: job.conversationId, contactId: job.contactId, dryRun: false, now }, call) } : undefined;
-      const turn = await this.turns.run({ agentId: job.agentId, message: text.slice(0, 1000), history, contactId: job.contactId, kind: 'use', ...(tools ? { tools } : {}) });
+      const turn = await this.turns.run({ agentId: job.agentId, message: `${text.slice(0, 1000)}${mention}`, history, contactId: job.contactId, kind: 'use', ...(images.length > 0 ? { images } : {}), ...(tools ? { tools } : {}) });
+      // Solo metadatos de lo que se leyó (nunca el contenido): cuenta para el tope diario
+      await this.media.record(job.agentId, job.conversationId, settings.model, images, 'ok');
       const notes = turn.toolCalls.flatMap((c) => (c.summary ? [`El agente ${settings.name} ${c.summary}.`] : []));
       const extra = { notes, transfer: turn.transfer };
       if (turn.replies.length === 0 && !turn.transfer && notes.length === 0) {

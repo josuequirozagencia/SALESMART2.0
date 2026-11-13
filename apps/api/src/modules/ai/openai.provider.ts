@@ -1,10 +1,21 @@
-import { AiProviderError, type AiCredentials, type AIProvider, type ToolCall, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+import { AiProviderError, IMAGE_MIME_TYPES, type ContentPart, type AiCredentials, type AIProvider, type ToolCall, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
 
 const DEFAULT_BASE = 'https://api.openai.com';
 const DEFAULT_TIMEOUT_MS = 60_000;
 /** Textos por llamada de embeddings (el proveedor admite hasta 2048; se acota para que una llamada no sea enorme). */
 export const MAX_EMBED_INPUTS = 100;
 const MODEL = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+/** El contenido de un mensaje del cliente para la API de chat: texto plano, o partes de texto e imagen con la imagen como data URL base64 (los bytes no se publican ni se firman). */
+function userContent(content: string | ReadonlyArray<ContentPart>): string | Array<Record<string, unknown>> {
+  if (typeof content === 'string') return content;
+  return content.map((p) => {
+    if (p.type === 'text') return { type: 'text', text: p.text };
+    if (!(IMAGE_MIME_TYPES as readonly string[]).includes(p.mimeType)) throw new AiProviderError('El tipo de imagen no es válido', false);
+    if (p.bytes.byteLength === 0) throw new AiProviderError('La imagen está vacía', false);
+    return { type: 'image_url', image_url: { url: `data:${p.mimeType};base64,${Buffer.from(p.bytes).toString('base64')}` } };
+  });
+}
 
 /** Texto del proveedor apto para mostrarse: sin saltos de línea, acotado y sin nada parecido a una clave (`sk-…`) ni a un correo. El contenido enviado por el cliente no se repite. */
 const safeText = (v: unknown): string =>
@@ -67,7 +78,7 @@ export class OpenAiProvider implements AIProvider {
           ? { role: 'tool', tool_call_id: m.toolCallId, content: m.content }
           : m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0
             ? { role: 'assistant', content: m.content === '' ? null : m.content, tool_calls: m.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.arguments } })) }
-            : { role: m.role, content: m.content },
+            : { role: m.role, content: m.role === 'user' ? userContent(m.content) : m.content },
       ),
       temperature: Math.min(Math.max(request.temperature, 0), 2),
       max_completion_tokens: Math.min(Math.max(Math.floor(request.maxTokens), 1), 16_000),

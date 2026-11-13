@@ -1,5 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { AppError } from '../../../errors';
+import { AppError, ConflictError } from '../../../errors';
 import { TenantContext } from '../../../tenant';
 import { AiPricingService } from '../../platform';
 import { AiCreditsService } from '../ai-credits.service';
@@ -8,7 +8,7 @@ import type { ChatMessage, ToolCall } from '../ai.ports';
 import type { ToolResult } from '../tools/agent-tools.service';
 import { MAX_CALLS_PER_ROUND, MAX_TOOL_ROUNDS, toolDefinitions, toolGuidance, type ToolConfig } from '../tools/tool-defs';
 import { creditsFor } from '../credits';
-import { KnowledgeService } from '../knowledge/knowledge.service';
+import { KnowledgeService, type SearchView } from '../knowledge/knowledge.service';
 import { buildChatMessages, estimateInputTokens, splitReply, trimReply } from './agent-chat';
 import { AgentsService } from './agents.service';
 
@@ -17,8 +17,10 @@ export const FRAGMENTS_PER_TURN = 4;
 
 export interface TurnRequest {
   readonly agentId: string;
-  /** Lo que escribió el cliente (o la persona que prueba). */
+  /** Lo que escribió el cliente (o la persona que prueba). Puede ir vacío si solo mandó imágenes. */
   readonly message: string;
+  /** Imágenes del cliente para este turno (ADR-70, S5a): ya validadas por quien llama (tipo real, tamaño, antivirus, límites). Solo con un modelo con visión. */
+  readonly images?: ReadonlyArray<{ readonly mimeType: string; readonly bytes: Uint8Array }>;
   /** Turnos anteriores de la conversación, del más antiguo al más reciente. */
   readonly history: ReadonlyArray<{ role: 'user' | 'assistant'; text: string }>;
   /** El contacto con cuyos datos se llenan las variables; sin él, un ejemplo. */
@@ -71,15 +73,18 @@ export class AgentTurnService {
     const settings = await this.agents.runtimeSettings(req.agentId); // 404 antes de gastar nada
     const message = req.message.trim();
     const prompt = await this.agents.preview({ agent_id: req.agentId, ...(req.contactId ? { contact_id: req.contactId } : {}) });
-    const found = await this.knowledge.search({ query: (req.searchQuery ?? message).trim() || message, limit: FRAGMENTS_PER_TURN, agentId: req.agentId, kind: req.kind });
+    const query = (req.searchQuery ?? message).trim();
+    // Sin texto (solo imágenes) no hay con qué buscar en los documentos: se sigue sin respaldo, con la regla de siempre
+    const found: Pick<SearchView, 'hits' | 'credits_used'> = query === '' ? { hits: [], credits_used: 0 } : await this.knowledge.search({ query, limit: FRAGMENTS_PER_TURN, agentId: req.agentId, kind: req.kind });
     const fragments = found.hits.map((h) => ({ document: h.document.name, content: h.content }));
     const defs = req.tools ? toolDefinitions(req.tools.config) : [];
     const guidance = [req.guidance?.trim() ?? '', req.tools ? toolGuidance(req.tools.config) : ''].filter((x) => x !== '').join('\n\n');
     const messages: ChatMessage[] = buildChatMessages({ system: guidance ? `${prompt.system}
 
-${guidance}` : prompt.system, fragments, history: req.history, message });
+${guidance}` : prompt.system, fragments, history: req.history, message, ...(req.images && req.images.length > 0 ? { images: req.images } : {}) });
     const price = await this.gateway.chatPrice(settings.model);
     if (!price) throw this.unavailable(new AiUnavailableError('failed', 'El precio del modelo de IA no está cargado'));
+    if (req.images && req.images.length > 0 && !price.vision) throw new ConflictError('MODEL_NO_VISION', 'El modelo de este agente no entiende imágenes');
     const rate = await this.pricing.resolve(TenantContext.current().organizationId);
     const ref = `${req.kind === 'test' ? 'Prueba del agente' : req.kind === 'suggest' ? 'Sugerencia de respuesta' : req.kind === 'follow_up' ? 'Seguimiento' : 'Agente'} ${settings.name}`.slice(0, 200);
     const defsChars = JSON.stringify(defs).length;

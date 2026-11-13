@@ -2,7 +2,7 @@
  * Cuándo el agente pasa la conversación a una persona (M8.5, ADR-53). Reglas DETERMINISTAS, no del modelo: no dependen de que la IA «decida» bien. Hoy: el cliente pide hablar con una persona,
  * se llegó al máximo de turnos del agente en la conversación o hubo un problema (sin créditos, IA caída, mensaje que no es de texto).
  */
-export type HandoffReason = 'requested' | 'turn_limit' | 'unsupported_media' | 'ai_error' | 'no_support' | 'agent_decision' | 'empty_reply';
+export type HandoffReason = 'requested' | 'turn_limit' | 'unsupported_media' | 'ai_error' | 'no_support' | 'agent_decision' | 'empty_reply' | 'audio_too_long' | 'media_blocked' | 'daily_limit';
 
 /** Máximo de respuestas seguidas del agente en una conversación sin que una persona intervenga: pasado esto, la pasa a una persona (evita bucles y gasto sin fin). */
 export const MAX_AGENT_TURNS = 20;
@@ -36,6 +36,9 @@ export function handoffNote(agent: string, reason: HandoffReason | 'human_messag
     case 'requested': return `El agente ${agent} pasó la conversación a una persona: el cliente pidió hablar con alguien del equipo.`;
     case 'turn_limit': return `El agente ${agent} pasó la conversación a una persona: llegó al máximo de respuestas seguidas.`;
     case 'unsupported_media': return `El agente ${agent} pasó la conversación a una persona: el cliente envió algo que no es texto (imagen, audio o archivo) y el agente solo lee texto.`;
+    case 'audio_too_long': return `El agente ${agent} pasó la conversación a una persona: el cliente envió un audio demasiado largo para transcribirlo.`;
+    case 'media_blocked': return `El agente ${agent} pasó la conversación a una persona: no se pudo leer la imagen o el audio del cliente (no terminó de descargarse o el antivirus no lo dio por seguro).`;
+    case 'daily_limit': return `El agente ${agent} pasó la conversación a una persona: la empresa llegó al límite diario de imágenes o audios que el agente puede leer.`;
     case 'ai_error': return `El agente ${agent} pasó la conversación a una persona: el servicio de IA no estuvo disponible.`;
     case 'no_support': return `El agente ${agent} pasó la conversación a una persona: no encontró en sus documentos lo que el cliente preguntó.`;
     case 'agent_decision': return `El agente ${agent} pasó la conversación a una persona: lo decidió con su herramienta de transferencia.`;

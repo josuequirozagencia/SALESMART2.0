@@ -74,6 +74,11 @@ async function aiProviderContract(make: () => { provider: AIProvider; failNext: 
   expect(c.text.length).toBeGreaterThan(0);
   expect(c.tokensIn).toBeGreaterThanOrEqual(0);
   expect(c.tokensOut).toBeGreaterThanOrEqual(0);
+  // 2b) chat con una imagen del cliente (ADR-70): el puerto acepta partes de texto e imagen y devuelve texto y consumo
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const img = await p.chat(creds, { model: 'gpt-4o-mini', messages: [{ role: 'system', content: 'Eres amable' }, { role: 'user', content: [{ type: 'text', text: 'Mira esto' }, { type: 'text', text: '[Imagen del cliente]' }, { type: 'image', mimeType: 'image/png', bytes: png }] }], temperature: 0.2, maxTokens: 100 });
+  expect(img.text.length).toBeGreaterThan(0);
+  expect(img.tokensIn).toBeGreaterThanOrEqual(0);
   // 3) fallos: llegan como AiProviderError con sus banderas y sin perder el motivo; después todo vuelve a funcionar
   failNext(new AiProviderError('clave rechazada', false, true));
   expect(await fail(p.embed(creds, { model: 'text-embedding-3-small', inputs: ['x'], dimensions: 64 }))).toMatchObject({ retryable: false, credentials: true });
@@ -271,5 +276,49 @@ describe('OpenAiProvider · errores', () => {
     expect(await fail(embed())).toMatchObject({ retryable: true });
     reply = () => undefined; // nunca contesta
     expect(await fail(provider(300).embed(creds, { model: 'text-embedding-3-small', inputs: ['x'], dimensions: 16 }))).toMatchObject({ retryable: true });
+  });
+});
+
+describe('chat con imágenes del cliente (v13 S5a, ADR-70)', () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4]);
+  const ask = (content: Parameters<OpenAiProvider['chat']>[1]['messages'][number]['content']) =>
+    provider().chat(creds, { model: 'gpt-4o-mini', messages: [{ role: 'user', content } as never], temperature: 0.2, maxTokens: 50 });
+
+  it('manda la imagen como data URL base64 en una parte image_url junto a las partes de texto; los bytes no van en ninguna otra parte', async () => {
+    reply = happy;
+    await ask([{ type: 'text', text: 'Hola' }, { type: 'text', text: '[Imagen del cliente]' }, { type: 'image', mimeType: 'image/jpeg', bytes: jpeg }]);
+    const messages = seen.at(-1)!.body!['messages'] as Array<{ role: string; content: unknown }>;
+    expect(messages[0]!.content).toEqual([
+      { type: 'text', text: 'Hola' },
+      { type: 'text', text: '[Imagen del cliente]' },
+      { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${jpeg.toString('base64')}` } },
+    ]);
+  });
+
+  it('un mensaje de solo texto sigue yendo como texto plano (sin cambios para quien no usa imágenes)', async () => {
+    reply = happy;
+    await ask('Hola');
+    expect((seen.at(-1)!.body!['messages'] as Array<{ content: unknown }>)[0]!.content).toBe('Hola');
+  });
+
+  it('rechaza antes de llamar un tipo de imagen que no se lee (GIF, SVG) o una imagen vacía', async () => {
+    reply = happy;
+    for (const mimeType of ['image/gif', 'image/svg+xml', 'application/pdf']) expect(await fail(ask([{ type: 'image', mimeType, bytes: jpeg }]))).toMatchObject({ retryable: false });
+    expect(await fail(ask([{ type: 'image', mimeType: 'image/png', bytes: Buffer.alloc(0) }]))).toMatchObject({ retryable: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('el mensaje de un error NO lleva los bytes de la imagen', async () => {
+    reply = (_q, res) => json(res, 400, { error: { message: 'bad image' } });
+    const e = await fail(ask([{ type: 'image', mimeType: 'image/jpeg', bytes: jpeg }]));
+    expect(e.message).not.toContain(jpeg.toString('base64'));
+  });
+
+  it('el fake registra las imágenes que recibió y las cuenta como tokens de entrada', async () => {
+    const fake = new FakeAiProvider();
+    const text = await fake.chat(creds, { model: 'm', messages: [{ role: 'user', content: 'Hola' }], temperature: 0, maxTokens: 10 });
+    const withImage = await fake.chat(creds, { model: 'm', messages: [{ role: 'user', content: [{ type: 'text', text: 'Hola' }, { type: 'image', mimeType: 'image/jpeg', bytes: jpeg }] }], temperature: 0, maxTokens: 10 });
+    expect(withImage.tokensIn).toBe(text.tokensIn + fake.tokensPerImage);
+    expect(JSON.stringify(fake.keysSeen)).not.toContain('base64');
   });
 });

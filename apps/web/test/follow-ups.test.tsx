@@ -11,7 +11,7 @@ const AT = '2026-11-11T15:00:00.000Z';
 const AGENT = {
   id: 'a1', name: 'Sofía', role: null, photo_url: null, cover: 'violet', active: true, model: 'gpt-4o-mini', channels: [], documents: 0, chunks: 0, created_at: AT,
   temperature: 0.3, max_tokens: 500, max_chars: 800, personality: 'Cálida', objective: '', extra_info: '', show_source: false, split_enabled: false, split_blocks: 2, transfer_enabled: true, transfer_queue_id: null, always_on: true,
-  capture_fields: [], tasks_enabled: false, suggestions_enabled: false, document_ids: [], channel_ids: [], readiness: { instructions: true, documents: true, channel: true }, updated_at: AT,
+  capture_fields: [], tasks_enabled: false, suggestions_enabled: false, read_images: false, document_ids: [], channel_ids: [], readiness: { instructions: true, documents: true, channel: true }, updated_at: AT,
 } as Agent;
 const OPTIONS = { models: ['gpt-4o-mini'], covers: ['violet'], limits: { max_agents: 20, max_photo_bytes: 1, max_chunks: 5000, max_capture_fields: 10 }, variables: [], channels: [], queues: [], capture_options: [], documents: [] };
 const FU = (over: Partial<FollowUps> = {}): FollowUps => ({ scenario: 'stopped_replying', enabled: false, steps: [], variables: ['primer_nombre', 'nombre', 'mi_nombre'], automations: [{ id: 'au1', name: 'Bienvenida' }], summary: { sent: 0, skipped: 0, cancelled: 0, pending: 0, reasons: {} }, updated_at: null, ...over });

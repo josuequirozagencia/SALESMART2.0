@@ -38,6 +38,8 @@ export interface Agent extends AgentCard {
   tasks_enabled: boolean;
   /** Las personas del equipo pueden pedirle un borrador de respuesta en el Inbox (v11 S4). */
   suggestions_enabled: boolean;
+  /** El agente lee las imágenes del cliente (v13 S5, ADR-70). */
+  read_images: boolean;
   document_ids: string[];
   channel_ids: string[];
   readiness: { instructions: boolean; documents: boolean; channel: boolean };
@@ -46,6 +48,8 @@ export interface Agent extends AgentCard {
 
 export interface AgentOptions {
   models: string[];
+  /** De esos, los que entienden imágenes (solo con ellos se puede activar «Leer imágenes»). */
+  vision_models: string[];
   covers: Cover[];
   limits: { max_agents: number; max_photo_bytes: number; max_chunks: number; max_capture_fields: number };
   variables: Array<{ key: string; label: string; example: string; kind: 'builtin' | 'custom' }>;
@@ -96,6 +100,7 @@ export type AgentPatch = Partial<{
   capture_fields: string[];
   tasks_enabled: boolean;
   suggestions_enabled: boolean;
+  read_images: boolean;
 }>;
 
 export function useAgents() {

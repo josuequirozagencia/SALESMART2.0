@@ -79,7 +79,7 @@ export function useAiPlatformMutations() {
 }
 
 /** Topes diarios de la IA por empresa (cada uno cuenta las últimas 24 horas). SOLO plataforma. */
-export interface AiLimits { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; updated_at: string }
+export interface AiLimits { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; transcriptions_per_day: number; images_per_day: number; audio_max_seconds: number; updated_at: string }
 
 export function useAiLimits() {
   return useQuery({ queryKey: ['platform', 'ai', 'limits'], retry: false, queryFn: () => api<AiLimits>('/platform/ai/limits') });
@@ -88,13 +88,13 @@ export function useAiLimits() {
 export function useSetAiLimits() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: Pick<AiLimits, 'tests_per_day' | 'suggestions_per_day' | 'follow_ups_per_day'>) => api<AiLimits>('/platform/ai/limits', { method: 'PUT', body: b }),
+    mutationFn: (b: Pick<AiLimits, 'tests_per_day' | 'suggestions_per_day' | 'follow_ups_per_day'> & Partial<Pick<AiLimits, 'transcriptions_per_day' | 'images_per_day' | 'audio_max_seconds'>>) => api<AiLimits>('/platform/ai/limits', { method: 'PUT', body: b }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'limits'] }),
   });
 }
 
 /** Precio de un modelo de IA (dólares por millón de tokens). SOLO plataforma. */
-export interface AiModelPrice { model: string; kind: 'embedding' | 'chat'; usd_per_1m_input: string; usd_per_1m_output: string; updated_at: string }
+export interface AiModelPrice { model: string; kind: 'embedding' | 'chat' | 'transcription'; usd_per_1m_input: string; usd_per_1m_output: string; /** ¿Entiende imágenes? (solo modelos de chat; ADR-70). */ vision: boolean; usd_per_minute: string | null; updated_at: string }
 
 export function useAiModels() {
   return useQuery({ queryKey: ['platform', 'ai', 'models'], retry: false, queryFn: () => api<AiModelPrice[]>('/platform/ai/models') });
@@ -104,7 +104,7 @@ export function useAiModels() {
 export function useAddModel() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (b: { model: string; usd_per_1m_input: string; usd_per_1m_output: string }) => api<AiModelPrice>('/platform/ai/models', { method: 'POST', body: b }),
+    mutationFn: (b: { model: string; usd_per_1m_input: string; usd_per_1m_output: string; vision?: boolean }) => api<AiModelPrice>('/platform/ai/models', { method: 'POST', body: b }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
   });
 }
@@ -112,7 +112,7 @@ export function useAddModel() {
 export function useSetModelPrice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ model, usd_per_1m_input, usd_per_1m_output }: { model: string; usd_per_1m_input: string; usd_per_1m_output: string }) => api<AiModelPrice>(`/platform/ai/models/${encodeURIComponent(model)}`, { method: 'PUT', body: { usd_per_1m_input, usd_per_1m_output } }),
+    mutationFn: ({ model, usd_per_1m_input, usd_per_1m_output, vision }: { model: string; usd_per_1m_input: string; usd_per_1m_output: string; vision?: boolean }) => api<AiModelPrice>(`/platform/ai/models/${encodeURIComponent(model)}`, { method: 'PUT', body: { usd_per_1m_input, usd_per_1m_output, ...(vision !== undefined ? { vision } : {}) } }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
   });
 }

@@ -110,6 +110,12 @@ export const aiLimits = platformTable(
     testsPerDay: integer('tests_per_day').notNull().default(100),
     suggestionsPerDay: integer('suggestions_per_day').notNull().default(50),
     followUpsPerDay: integer('follow_ups_per_day').notNull().default(200),
+    /** Transcripciones de audio por día y empresa (v13 S5, ADR-70). */
+    transcriptionsPerDay: integer('transcriptions_per_day').notNull().default(200),
+    /** Imágenes que los agentes pueden leer por día y empresa (v13 S5, ADR-70). */
+    imagesPerDay: integer('images_per_day').notNull().default(300),
+    /** Duración máxima de un audio que el agente transcribe, en segundos (15 a 300). */
+    audioMaxSeconds: integer('audio_max_seconds').notNull().default(120),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     updatedBy: uuid('updated_by'),
   },
@@ -118,6 +124,9 @@ export const aiLimits = platformTable(
     check('ai_limits_tests_valid', sql`${t.testsPerDay} >= 1 AND ${t.testsPerDay} <= 10000`),
     check('ai_limits_suggestions_valid', sql`${t.suggestionsPerDay} >= 1 AND ${t.suggestionsPerDay} <= 10000`),
     check('ai_limits_follow_ups_valid', sql`${t.followUpsPerDay} >= 1 AND ${t.followUpsPerDay} <= 10000`),
+    check('ai_limits_transcriptions_valid', sql`${t.transcriptionsPerDay} >= 1 AND ${t.transcriptionsPerDay} <= 10000`),
+    check('ai_limits_images_valid', sql`${t.imagesPerDay} >= 1 AND ${t.imagesPerDay} <= 10000`),
+    check('ai_limits_audio_seconds_valid', sql`${t.audioMaxSeconds} >= 15 AND ${t.audioMaxSeconds} <= 300`),
   ],
 );
 
