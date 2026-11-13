@@ -130,7 +130,7 @@ async function saleFixture(request: APIRequestContext): Promise<{ email: string;
   const adm = json(await apiLogin(request, email));
   const queue = (await (await request.post(`${apiBase}/v1/queues`, { headers: adm, data: { name: 'Ventas' } })).json()) as { id: string };
   expect((await request.post(`${apiBase}/v1/queues/${queue.id}/products`, { headers: adm, data: { name: 'Corte E2E', price: '12.50' } })).status()).toBe(201);
-  const ch = await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea venta', waba_id: '1234567890123', phone_number_id: `10901234502${String(Math.floor(Math.random() * 90) + 10)}`, access_token: 'fake-valid-token', queue_id: queue.id } });
+  const ch = await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea venta', waba_id: '1234567890123', phone_number_id: `${Date.now()}${Math.floor(Math.random() * 1000)}`, access_token: 'fake-valid-token', queue_id: queue.id } });
   expect(ch.status(), await ch.text()).toBe(201);
   const channel = (await ch.json()) as { id: string };
   const conversationId = await withDb(async (db) => {
