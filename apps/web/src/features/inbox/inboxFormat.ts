@@ -104,15 +104,50 @@ function span(ms: number, at: string): string {
   return shortDateTime(at);
 }
 
+/** El tiempo del cronómetro en corto, siempre con unidad: «5 min», «8 h 10 min», «2 d 3 h». Al menos 1 minuto (la cuenta se redondea hacia arriba). */
+export function compactSpan(ms: number): string {
+  const m = Math.max(1, Math.ceil(ms / 60_000));
+  if (m < 60) return `${m} min`;
+  if (m < 1440) return m % 60 === 0 ? `${m / 60} h` : `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')} min`;
+  const d = Math.floor(m / 1440);
+  const h = Math.floor((m % 1440) / 60);
+  return h === 0 ? `${d} d` : `${d} d ${h} h`;
+}
+
+export interface SlaChip {
+  kind: PillKind;
+  /** Texto completo (la explicación corta del estado y su tiempo). */
+  text: string;
+  title: string;
+  /** Lo que se ve dentro del chip (v13 S1.4): solo el tiempo, sin palabras; vacío si no hay tiempo que mostrar. */
+  time: string;
+  /** Nombre accesible completo: el estado NO depende del color ni del icono. */
+  label: string;
+  icon: 'clock' | 'moon' | 'check';
+}
+
 /** Cómo se ve el cronómetro de respuesta: el texto corto, su color y la explicación (al pasar el cursor). */
-export function slaChip(sla: ConversationSla, now: number): { kind: PillKind; text: string; title: string } {
+export function slaChip(sla: ConversationSla, now: number): SlaChip {
   const what = sla.kind === 'first' ? 'Primera respuesta' : 'Respuesta al último mensaje del cliente';
   const due = sla.due_at ? Date.parse(sla.due_at) : null;
   switch (sla.state) {
-    case 'done': return { kind: 'muted', text: `Respondió en ${durationLabel(sla.response_seconds ?? 0)}`, title: `${what}: tiempo que tardó, contando solo el horario de atención` };
-    case 'late': return { kind: 'crit', text: due === null ? 'Vencida' : `Vencida hace ${span(now - due, sla.due_at!)}`, title: `${what}: venció${sla.due_at ? ` el ${shortDateTime(sla.due_at)}` : ''}` };
-    case 'risk': return { kind: 'warn', text: due === null ? 'En riesgo' : `Vence en ${span(due - now, sla.due_at!)}`, title: `${what}: está por vencer` };
-    case 'paused': return { kind: 'muted', text: 'En pausa · fuera de horario', title: `${what}: el reloj no corre fuera del horario de atención${sla.due_at ? `; vence ${shortDateTime(sla.due_at)} si no cambia` : ''}` };
-    default: return { kind: 'ok', text: due === null ? 'Al día' : `Responder en ${span(due - now, sla.due_at!)}`, title: `${what}: vence${sla.due_at ? ` el ${shortDateTime(sla.due_at)}` : ''}` };
+    case 'done': {
+      const t = durationLabel(sla.response_seconds ?? 0);
+      return { kind: 'muted', text: `Respondió en ${t}`, title: `${what}: tiempo que tardó, contando solo el horario de atención`, time: t, label: `Respondió en ${t}`, icon: 'check' };
+    }
+    case 'late': {
+      const t = due === null ? '' : compactSpan(now - due);
+      return { kind: 'crit', text: due === null ? 'Vencida' : `Vencida hace ${span(now - due, sla.due_at!)}`, title: `${what}: venció${sla.due_at ? ` el ${shortDateTime(sla.due_at)}` : ''}`, time: t, label: due === null ? 'SLA vencido' : `SLA vencido hace ${t}`, icon: 'clock' };
+    }
+    case 'risk': {
+      const t = due === null ? '' : compactSpan(due - now);
+      return { kind: 'warn', text: due === null ? 'En riesgo' : `Vence en ${span(due - now, sla.due_at!)}`, title: `${what}: está por vencer`, time: t, label: due === null ? 'SLA en riesgo' : `SLA en riesgo: vence en ${t}`, icon: 'clock' };
+    }
+    case 'paused':
+      return { kind: 'muted', text: 'En pausa · fuera de horario', title: `${what}: el reloj no corre fuera del horario de atención${sla.due_at ? `; vence ${shortDateTime(sla.due_at)} si no cambia` : ''}`, time: '', label: 'SLA en pausa: fuera de horario', icon: 'moon' };
+    default: {
+      const t = due === null ? '' : compactSpan(due - now);
+      return { kind: 'ok', text: due === null ? 'Al día' : `Responder en ${span(due - now, sla.due_at!)}`, title: `${what}: vence${sla.due_at ? ` el ${shortDateTime(sla.due_at)}` : ''}`, time: t, label: due === null ? 'SLA al día' : `SLA al día: responder en ${t}`, icon: 'clock' };
+    }
   }
 }

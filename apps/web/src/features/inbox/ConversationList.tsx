@@ -18,7 +18,7 @@ import { NotificationsBell } from '../notifications/NotificationsBell';
 import { chatTime, firstName, listPreview, STATUS_PILL } from './inboxFormat';
 import { SlaPill } from './SlaPill';
 import { usePhotos } from '../photos/usePhotos';
-import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversations, useFavorite, useInboxOptions } from './useInbox';
+import { activeFilterCount, DEFAULT_INBOX_FILTERS, useConversationAction, useConversations, useFavorite, useInboxOptions } from './useInbox';
 import { SWIPE_ACTION_W, useRowGestures } from './useRowGestures';
 
 const TABS: Array<{ id: InboxTab; label: string; hint: string }> = [
@@ -45,7 +45,7 @@ function ChannelMark({ kind }: { kind: Conversation['channel']['kind'] }) {
   return null;
 }
 
-function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boolean; now: number; mobile: boolean; photo?: string | undefined }) {
+function Row({ c, active, now, mobile, photo, onNotice }: { c: Conversation; active: boolean; now: number; mobile: boolean; photo?: string | undefined; onNotice: (n: { kind: 'ok' | 'error'; text: string }) => void }) {
   const status = STATUS_PILL[c.status];
   const last = c.last_message;
   const unread = c.unread_count > 0;
@@ -57,6 +57,15 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
   const [sheet, setSheet] = useState(false);
   const g = useRowGestures({ enabled: mobile, onLongPress: () => setSheet(true) });
   const toggle = (): void => fav.mutate(!c.favorite);
+  // v13 S1.1: en móvil, «Aceptar» se puede tocar sin abrir el chat (solo en las «por aceptar» que esta persona puede aceptar; el servidor lo vuelve a verificar). Sigue dentro del chat.
+  const act = useConversationAction(c.id);
+  const canAccept = mobile && c.status === 'pending' && c.can.accept;
+  const accept = (): void => {
+    act.mutate('accept', {
+      onSuccess: () => onNotice({ kind: 'ok', text: `Aceptaste la conversación de ${c.contact.name}. Ahora está en «Trabajando».` }),
+      onError: (e) => onNotice({ kind: 'error', text: friendlyError(e, `No pudimos aceptar la conversación de ${c.contact.name}.`) }),
+    });
+  };
   const starLabel = c.favorite ? `Quitar de destacadas la conversación de ${c.contact.name}` : `Destacar la conversación de ${c.contact.name}`;
   return (
     <li className="group relative overflow-hidden">
@@ -74,7 +83,7 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
         {...g.handlers}
         aria-current={active ? 'true' : undefined}
         aria-label={`${c.contact.name}${unread ? `, ${c.unread_count} sin leer` : ''}${c.favorite ? ', destacada' : ''}`}
-        className={`grid gap-2.5 border-b border-line px-3 hover:bg-surface2 ${mobile ? 'min-h-[72px] grid-cols-[48px_minmax(0,1fr)] gap-3 py-3 active:bg-accent-soft' : 'grid-cols-[42px_minmax(0,1fr)] py-2.5'} ${active ? 'bg-accent-soft' : mobile ? 'relative bg-surface' : ''}`}
+        className={`grid gap-2.5 border-b border-line px-3 hover:bg-surface2 ${mobile ? 'min-h-[76px] grid-cols-[48px_minmax(0,1fr)] gap-3 py-[14px] active:bg-accent-soft' : 'grid-cols-[42px_minmax(0,1fr)] py-2.5'} ${active ? 'bg-accent-soft' : mobile ? 'relative bg-surface' : ''}`}
       >
         <Avatar name={c.contact.name} src={photo} size={mobile ? 48 : 42} className="self-start" />
         <span className="grid min-w-0 gap-0.5">
@@ -83,14 +92,14 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
             {c.favorite ? <Icon name="star" size={14} fill="currentColor" className="shrink-0 text-warn" aria-hidden="true" /> : null}
             <time dateTime={c.last_message_at ?? undefined} className={`shrink-0 text-[11px] ${unread ? 'font-semibold text-ok' : 'text-muted'}`}>{chatTime(c.last_message_at, now)}</time>
           </span>
-          <span className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted">
+          <span className={`flex min-w-0 items-center gap-1.5 text-[12.5px] text-muted ${canAccept ? 'mr-[84px]' : ''}`}>
             <span className={`min-w-0 flex-1 truncate ${unread && mobile ? 'font-semibold text-fg' : ''}`}>
               {delivery ? <span aria-label={`Tú: ${delivery.text}. `} title={delivery.text} className={`mr-1 ${last?.status === 'read' ? 'text-accent' : last?.status === 'failed' ? 'text-crit' : ''}`}>{delivery.mark}</span> : null}
               {last ? listPreview(last) : 'Sin mensajes'}
             </span>
             {unread ? <span aria-hidden="true" className="grid min-w-[19px] place-items-center rounded-full bg-ok px-1.5 text-[11px] font-bold text-white">{c.unread_count}</span> : null}
           </span>
-          <span className={mobile ? 'mt-1 flex h-5 min-w-0 flex-nowrap items-center gap-1 overflow-hidden [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap [&>*]:leading-[18px]' : 'mt-1 flex flex-wrap items-center gap-1'}>
+          <span className={`${mobile ? 'mt-1 flex h-5 min-w-0 flex-nowrap items-center gap-1 overflow-hidden [&>*]:max-w-full [&>*]:truncate [&>*]:whitespace-nowrap [&>*]:leading-[18px]' : 'mt-1 flex flex-wrap items-center gap-1'} ${canAccept ? 'mr-[84px]' : ''}`}>
             {mobile ? null : <Pill kind={status.kind}>{status.label}</Pill>}
             <SlaPill sla={c.sla} now={now} hideDone />
             <ChannelMark kind={c.channel.kind} />
@@ -102,6 +111,11 @@ function Row({ c, active, now, mobile, photo }: { c: Conversation; active: boole
           </span>
         </span>
       </Link>
+      {canAccept ? (
+        <button type="button" aria-label={`Aceptar la conversación de ${c.contact.name}`} aria-busy={act.isPending || undefined} disabled={act.isPending} onClick={accept} className="absolute bottom-[14px] right-3 inline-flex h-11 min-w-[76px] items-center justify-center rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink disabled:opacity-60">
+          {act.isPending ? 'Aceptando…' : 'Aceptar'}
+        </button>
+      ) : null}
       {mobile ? null : (
         <button
           type="button"
@@ -232,6 +246,13 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
   const [search, setSearch] = useState(filters.q);
   const [panel, setPanel] = useState(false);
   const [sheet, setSheet] = useState(false);
+  // Aviso de lo que pasó al aceptar desde la lista (la fila desaparece de «Esperando», así que el aviso vive aquí); se retira solo
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), notice.kind === 'ok' ? 4000 : 8000);
+    return () => clearTimeout(t);
+  }, [notice]);
   const loaded = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
   const photos = usePhotos(loaded.map((c) => c.contact.id), []);
   const counts = q.data?.pages[0]?.counts ?? null;
@@ -329,9 +350,12 @@ export function ConversationList({ filters, onFilters, activeId, className = '' 
             {filtered || filters.q ? <Button variant="link" className="text-[12.5px]" onClick={() => { setSearch(''); onFilters({ ...DEFAULT_INBOX_FILTERS, tab: filters.tab }); }}>Quitar búsqueda y filtros</Button> : null}
           </div>
         ) : null}
-        <ul>{items.map((c) => <Row key={c.id} c={c} active={c.id === activeId} now={now} mobile={mobile} photo={photos.contact(c.contact.id)} />)}</ul>
+        <ul>{items.map((c) => <Row key={c.id} c={c} active={c.id === activeId} now={now} mobile={mobile} photo={photos.contact(c.contact.id)} onNotice={setNotice} />)}</ul>
         {q.hasNextPage ? <div className="grid place-items-center p-3"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
       </div>
+      {notice ? (
+        <div role={notice.kind === 'error' ? 'alert' : 'status'} className={`mx-3 mb-3 rounded-xl border px-3 py-2 text-[13px] font-semibold ${notice.kind === 'error' ? 'border-crit bg-crit-soft text-crit' : 'border-ok bg-ok-soft text-ok'}`}>{notice.text}</div>
+      ) : null}
       {mobile && sheet ? (
         <Drawer label="Filtros" placement="bottom" onClose={() => setSheet(false)}>
           <div className="grid w-full gap-3 p-4">

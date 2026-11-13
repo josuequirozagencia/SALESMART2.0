@@ -16,7 +16,7 @@ import { Pill } from '../../ui/Pill';
 import { usePhotos } from '../photos/usePhotos';
 import { AgentBanner, AgentSwitch } from './AgentBanner';
 import { Composer } from './Composer';
-import { ConversationTags } from './ConversationTags';
+import { ConversationTags, TagsPopoverButton } from './ConversationTags';
 import { ScheduledButton } from './ScheduledList';
 import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, personName, STATUS_PILL } from './inboxFormat';
@@ -117,10 +117,11 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
             <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[15px] font-bold">{c.contact.name}</span>
-              <span className="block truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}</span>
+              <span className="block truncate text-[12.5px] text-muted" title={c.channel.name}>{c.contact.phone ?? 'Sin teléfono'} · {c.channel.kind === 'qr' ? 'QR' : c.channel.kind === 'ghl' ? 'GoHighLevel' : c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}</span>
             </span>
           </button>
-          {c.channel.kind === 'qr' ? <span className="shrink-0 rounded-full border border-accent bg-accent-soft px-1.5 py-px text-[11px] font-semibold text-accent" title="WhatsApp por QR">QR</span> : null}
+          {/* v13 S1.2: el chip «QR» deja su lugar al icono de etiquetas; el canal sigue a la vista en el subtítulo */}
+          <TagsPopoverButton c={c} />
           <AgentSwitch c={c} compact onError={onBackError} />
           <button type="button" aria-label="Más acciones" aria-haspopup="dialog" onClick={onToggleContact} className="relative grid size-11 shrink-0 place-items-center rounded-full text-fg hover:bg-surface2">
             <Icon name="more" size={22} strokeWidth={3.2} />

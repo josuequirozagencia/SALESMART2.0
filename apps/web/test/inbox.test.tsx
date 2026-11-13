@@ -575,33 +575,35 @@ describe('Inbox · SLA', () => {
     });
     mockApi(server(w));
     renderApp('/inbox');
-    expect(within(await screen.findByRole('link', { name: 'Ana Torres' })).getByText('Responder en 10 min')).toBeInTheDocument();
-    expect(within(screen.getByRole('link', { name: 'Bruno Díaz' })).getByText('Vence en 2 min')).toBeInTheDocument();
-    expect(within(screen.getByRole('link', { name: 'Carla Ruiz' })).getByText('Vencida hace 5 min')).toBeInTheDocument();
-    expect(within(screen.getByRole('link', { name: 'Diego Paz' })).getByText('En pausa · fuera de horario')).toBeInTheDocument();
-    expect(within(screen.getByRole('link', { name: 'Elena Vega' })).queryByText(/Respondió en/)).not.toBeInTheDocument();
-    expect(within(screen.getByRole('link', { name: 'Fabio Ríos' })).queryByText(/Responder|Vence|Vencida|pausa/)).not.toBeInTheDocument();
+    expect(within(await screen.findByRole('link', { name: 'Ana Torres' })).getByLabelText('SLA al día: responder en 10 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Bruno Díaz' })).getByLabelText('SLA en riesgo: vence en 2 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Carla Ruiz' })).getByLabelText('SLA vencido hace 5 min')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Diego Paz' })).getByLabelText('SLA en pausa: fuera de horario')).toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Elena Vega' })).queryByLabelText(/Respondió en/)).not.toBeInTheDocument();
+    expect(within(screen.getByRole('link', { name: 'Fabio Ríos' })).queryByLabelText(/SLA/)).not.toBeInTheDocument();
   });
 
   it('el encabezado del hilo muestra el cronómetro, también el tiempo que tardó en responder, con la explicación al pasar el cursor', async () => {
     const w = world({ convs: [conv({ sla: sla('late', -11.5 * MIN) })] });
     mockApi(server(w));
     renderApp('/inbox/c1');
-    const chip = await screen.findByText('Vencida hace 12 min');
-    expect(chip.closest('span[title]')).toHaveAttribute('title', expect.stringContaining('Primera respuesta'));
+    const chip = await screen.findByLabelText('SLA vencido hace 12 min');
+    expect(chip).toHaveAttribute('title', expect.stringContaining('Primera respuesta'));
+    expect(chip).toHaveTextContent('12 min'); // solo el tiempo, sin palabras (v13 S1.4)
+    expect(chip).not.toHaveTextContent(/Vencida/);
   });
 
   it('una respuesta ya dada se ve en el hilo como «Respondió en…» (tiempo abierto)', async () => {
     mockApi(server(world({ convs: [conv({ status: 'waiting', sla: sla('done', null, { response_seconds: 720 }) })] })));
     renderApp('/inbox/c1');
-    expect(await screen.findByText('Respondió en 12 min')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Respondió en 12 min')).toBeInTheDocument();
   });
 
   it('el cronómetro de una respuesta posterior se explica distinto al de la primera', async () => {
     mockApi(server(world({ convs: [conv({ sla: sla('risk', 2 * MIN, { kind: 'followup' }) })] })));
     renderApp('/inbox/c1');
-    const chip = await screen.findByText(/Vence en \d+ min/);
-    expect(chip.closest('span[title]')).toHaveAttribute('title', expect.stringContaining('Respuesta al último mensaje del cliente'));
+    const chip = await screen.findByLabelText(/SLA en riesgo: vence en \d+ min/);
+    expect(chip).toHaveAttribute('title', expect.stringContaining('Respuesta al último mensaje del cliente'));
   });
 
   it('el filtro «Tiempo de respuesta» pide al servidor justo eso y cuenta como filtro puesto', async () => {
