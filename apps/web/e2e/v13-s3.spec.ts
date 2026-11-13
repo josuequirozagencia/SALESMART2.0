@@ -105,7 +105,7 @@ test.describe('escritorio 1440 × 900', () => {
     const row = await withDb(async (db) => (await db.query(`SELECT m.body, q.external_id AS quoted FROM messages m JOIN messages q ON q.id = m.reply_to_message_id WHERE m.conversation_id = $1`, [convId])).rows as Array<{ body: string; quoted: string }>);
     expect(row).toEqual([{ body: 'Sí, mañana abrimos a las 9', quoted: 'wamid.S3.1' }]);
     await quoted.click();
-    await expect(chat.locator('#msg-' + (await withDb(async (db) => (await db.query(`SELECT id FROM messages WHERE external_id = 'wamid.S3.1'`)).rows[0].id as string)))).toHaveClass(/flash-msg/);
+    await expect(chat.locator('#msg-' + (await withDb(async (db) => (await db.query(`SELECT id FROM messages WHERE conversation_id = $1 AND external_id = 'wamid.S3.1'`, [convId])).rows[0].id as string)))).toHaveClass(/flash-msg/);
   });
 });
 

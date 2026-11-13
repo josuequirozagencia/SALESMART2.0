@@ -1520,7 +1520,7 @@ test('inbox: un cliente escribe, el asesor acepta, responde (sale por el proveed
     await expect(log.getByText(/Nota interna · Carlos E2E/)).toBeVisible({ timeout: 15_000 });
     await expect(log.getByText('Prefiere las mañanas')).toBeVisible({ timeout: 15_000 });
     expect((await db.query(`SELECT status FROM messages WHERE organization_id = $1 AND kind = 'note'`, [orgId])).rows).toEqual([{ status: 'internal' }]);
-    await thread.getByRole('button', { name: 'Responder' }).click();
+    await thread.getByRole('button', { name: 'Responder', exact: true }).click(); // exact: hay un botón «Responder a este mensaje» en cada burbuja (v13 S3.3)
 
     // 5) El cliente contesta: aparece SIN recargar (la pantalla se actualiza sola) y la conversación vuelve a «Trabajando»
     await incoming('wamid.INBOX2', 'Perfecto, a las 10 me viene bien', Math.floor(Date.now() / 1000) + 1);

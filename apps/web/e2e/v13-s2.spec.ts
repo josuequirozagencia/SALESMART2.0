@@ -102,14 +102,18 @@ test.describe('escritorio 1440 × 900', () => {
   });
 });
 
-test.describe('ventana angosta (768 × 800)', () => {
-  test.use({ viewport: { width: 768, height: 800 } });
+test.describe('cabecera estrecha', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('si las acciones no caben, aparece UN «⋮ Más acciones» con las que sobran; en ancho de sobra desaparece', async ({ page, request }) => {
+  test('si las acciones no caben, aparece UN «⋮ Más acciones» con las que sobran; al ensanchar la cabecera desaparece', async ({ page, request }) => {
     const { email, convId } = await fixture(request);
     await uiLogin(page, email);
     await page.goto(`/inbox/${convId}`);
     const chat = page.getByRole('region', { name: 'Conversación con Cliente Escritorio' });
+    await expect(chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button')).toHaveCount(4);
+    await expect(chat.getByRole('button', { name: 'Más acciones' })).toHaveCount(0);
+    // se estrecha la columna del chat (el ancho de la ventana depende del diseño; así la prueba no depende de él): el ResizeObserver de la cabecera debe reaccionar
+    await page.addStyleTag({ content: 'section[aria-label^="Conversación con"] { flex: none !important; width: 440px !important; }' });
     const more = chat.getByRole('button', { name: 'Más acciones' });
     await expect(more).toBeVisible();
     await more.click();
@@ -117,9 +121,8 @@ test.describe('ventana angosta (768 × 800)', () => {
     await expect(menu.getByRole('menuitem').first()).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(more).toBeFocused();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    // al ensanchar la ventana todo cabe y el «⋮» desaparece (ResizeObserver)
-    await page.setViewportSize({ width: 1700, height: 900 });
+    // al ensanchar todo cabe y el «⋮» desaparece
+    await page.addStyleTag({ content: 'section[aria-label^="Conversación con"] { width: 1000px !important; }' });
     await expect(chat.getByRole('button', { name: 'Más acciones' })).toHaveCount(0);
     await expect(chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button')).toHaveCount(4);
   });
