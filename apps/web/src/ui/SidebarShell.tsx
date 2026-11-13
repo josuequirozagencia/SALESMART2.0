@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { ROLE_LABEL } from '../lib/format';
 import type { Me } from '../lib/types';
-import { Logo } from './AuthShell';
+import { useBrand, useDocumentTitle } from '../lib/platformBrand';
+import { BrandMark, Logo } from './AuthShell';
 import { Avatar } from './Avatar';
 import { useBreakpoint } from './breakpoints';
 import { Icon, type IconName } from './Icon';
@@ -95,6 +96,8 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
   }, [open]);
 
   const current = groups.flatMap((g) => g.items).find((i) => isNavActive(i, pathname));
+  const brand = useBrand();
+  useDocumentTitle(current?.label); // «Sección · Nombre» en la pestaña del navegador
   const name = me.user.full_name ?? me.user.email;
   const extraNode = typeof extra === 'function' ? extra(compact) : extra;
   // v6 fase B: en escritorio la página NO se desplaza. El marco mide exactamente la ventana (`h-dvh`): banners arriba, y debajo el menú y el contenido, que se desplaza por dentro
@@ -113,7 +116,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
             <button type="button" aria-label="Abrir el menú" aria-expanded={open} aria-controls="side-menu" onClick={() => setOpen(true)} className="grid size-11 place-items-center rounded-xl text-fg hover:bg-surface2">
               <Icon name="menu" size={22} />
             </button>
-            <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{current?.label ?? 'Sales Smart'}</span>
+            <span className="min-w-0 flex-1 truncate text-[15px] font-bold">{current?.label ?? brand.name}</span>
             {me.viewing_as ? <span className="shrink-0 rounded-full border border-warn bg-warn-soft px-2.5 py-1 text-[11.5px] font-bold text-warn">Viendo como {ROLE_LABEL[me.viewing_as] ?? me.viewing_as}</span> : null}
           </div>
         )}
@@ -121,7 +124,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
         <aside id="side-menu" aria-label="Menú principal" className={`${asideCls} min-w-0 flex-col overflow-hidden text-white [background:var(--side-bg)]`}>
           <div className={`flex gap-2 pb-3 pt-4 ${compact ? 'flex-col items-center px-2' : 'items-center justify-between px-4'}`}>
             {compact ? (
-              <i aria-label="Sales Smart" role="img" className="grid size-[34px] place-items-center rounded-[10px] text-[17px] font-bold not-italic text-[color:var(--on-grad)] [background:var(--grad)]">S</i>
+              <BrandMark />
             ) : (
               <span className="min-w-0 text-white [&_i]:text-[color:var(--on-grad)]"><Logo /></span>
             )}

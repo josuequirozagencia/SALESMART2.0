@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
-import { configureApp, Public, HttpModule } from '../../src/http';
+import { configureApp, Public, HttpModule, WEB_BRAND } from '../../src/http';
 import { buildCsp, CSP } from '../../src/http/web-static';
 import { TEST_AUTH_KEY } from '../support/constants';
 
@@ -168,5 +168,59 @@ describe('web servida por la API — producción y errores de configuración', (
     expect(csp).toContain("script-src 'self' https://challenges.cloudflare.com;");
     expect(csp).toContain("connect-src 'self';");
     expect(buildCsp([])).toBe(CSP);
+  });
+});
+
+// v11 §3 — la marca (nombre e iconos) se escribe en el HTML al servirlo
+let brandFn: () => Promise<{ name: string; version: string }> = () => Promise.resolve({ name: 'Sales Smart 2.0', version: 'default-1' });
+@Module({ providers: [{ provide: WEB_BRAND, useValue: () => brandFn() }] })
+class BrandStub {}
+@Module({ imports: [CoreModule, HttpModule.forRoot({ imports: [BrandStub] })], controllers: [HealthProbe] })
+class BrandedAppModule {}
+
+describe('web servida con la marca de la plataforma', () => {
+  let app: INestApplication;
+  let base = '';
+  let brandDist = '';
+  const ORIGINAL = '<!doctype html><html><head><title>Sales Smart 2.0</title><!--brand-head--></head><body><div id="root">APP</div></body></html>';
+  beforeAll(async () => {
+    brandDist = mkdtempSync(path.join(os.tmpdir(), 'ss-web-brand-'));
+    writeFileSync(path.join(brandDist, 'index.html'), ORIGINAL);
+    Object.assign(process.env, {
+      NODE_ENV: 'test', LOG_LEVEL: 'silent', AUTH_THROTTLE_KEY: TEST_AUTH_KEY, WEB_DIST_DIR: brandDist,
+      DATABASE_URL_APP: 'postgresql://app_rw:x@127.0.0.1:1/x', DATABASE_URL_PLATFORM: 'postgresql://app_platform:x@127.0.0.1:1/x', DATABASE_URL_IDENTITY: 'postgresql://app_identity:x@127.0.0.1:1/x',
+    });
+    delete process.env['DATABASE_URL_OWNER'];
+    app = await NestFactory.create(BrandedAppModule, { logger: false, abortOnError: false });
+    configureApp(app);
+    await app.listen(0, '127.0.0.1');
+    base = await app.getUrl();
+  });
+  afterAll(async () => { await app.close(); rmSync(brandDist, { recursive: true, force: true }); });
+
+  it('escribe el nombre (escapado) en el título y los enlaces del manifest y del icono con su versión; sigue sin caché', async () => {
+    brandFn = () => Promise.resolve({ name: 'Mi Marca <script>', version: 'v-77' });
+    const r = await fetch(`${base}/inbox`, { headers: { accept: 'text/html' } });
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    expect(r.headers.get('content-type')).toMatch(/text\/html/);
+    const html = await r.text();
+    expect(html).toContain('<title>Mi Marca &lt;script&gt;</title>');
+    expect(html).not.toContain('<script>');
+    expect(html).toContain('/v1/branding/manifest.webmanifest?v=v-77');
+    expect(html).toContain('/v1/branding/apple-touch-icon.png?v=v-77');
+    expect(html).toContain('APP');
+  });
+
+  it('un cambio de nombre se ve en la siguiente petición (el HTML no se guarda)', async () => {
+    brandFn = () => Promise.resolve({ name: 'Otra Marca', version: 'v-78' });
+    expect(await (await fetch(`${base}/`, { headers: { accept: 'text/html' } })).text()).toContain('<title>Otra Marca</title>');
+  });
+
+  it('si la marca no se puede leer, la web se sirve igual con los valores por defecto del archivo', async () => {
+    brandFn = () => Promise.reject(new Error('base de datos caída'));
+    const r = await fetch(`${base}/login`, { headers: { accept: 'text/html' } });
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe(ORIGINAL);
   });
 });

@@ -7,5 +7,6 @@ export { CredentialVault, VaultOpenError } from './providers/credential-vault';
 export { AiPricingService, type AiPrice, type AiPricingView } from './ai-pricing.service';
 export { AiLimitsService, DEFAULT_AI_LIMITS, type AiLimits, type AiLimitsView } from './ai-limits.service';
 export { AiModelPricesService, type ModelPrice, type ModelPriceView } from './ai-model-prices.service';
-export { BrandingStore, type FaviconRef } from './branding/branding.store';
-export { checkFavicon, FAVICON_MAX_BYTES, FAVICON_MIN_PX, FAVICON_MAX_PX, type FaviconCheck, type FaviconType } from './branding/favicon-image';
+export { BrandingStore, type AssetRef, type AssetChange, type BrandSnapshot } from './branding/branding.store';
+export { BRANDING_ASSETS, ICON_VARIANTS, ICON_VARIANT_NAMES, BADGE_PX, IMAGE_MAX_BYTES, ICON_MIN_PX, ICON_MAX_PX, LOGO_MAX_WIDTH, DEFAULT_APP_NAME, NAME_MIN, NAME_MAX, SHORT_NAME_MAX, checkName, type BrandingAsset, type IconVariant, type NameCheck } from './branding/brand-files';
+export { buildIcon, buildLogo, defaultImages, type BuiltIcon, type BuiltLogo, type ImageFailure } from './branding/brand-images';

@@ -8,7 +8,7 @@ import { APP_CONFIG } from '../tokens';
 import { AccessGuard } from './access.guard';
 import { AccessResolver, DenyAllAccessResolver } from './access-resolver';
 import { ContextInterceptor } from './context.interceptor';
-import { mountWeb, WEB_MEDIA_ORIGINS, type MediaOrigins } from './web-static';
+import { mountWeb, WEB_BRAND, WEB_MEDIA_ORIGINS, type MediaOrigins, type WebBrand } from './web-static';
 
 export interface HttpModuleOptions {
   /** Implementación del puerto de acceso. Por defecto DENIEGA todo (hasta M1). */
@@ -41,7 +41,14 @@ export class HttpModule implements OnApplicationBootstrap {
       } catch {
         mediaOrigins = undefined;
       }
-      return mountWeb(express, { distDir: this.cfg.web.distDir, production: this.cfg.nodeEnv === 'production', ...(mediaOrigins ? { mediaOrigins } : {}) });
+      // La marca de la plataforma (nombre e iconos) la ofrece el módulo de marca si está cargado
+      let brand: WebBrand | undefined;
+      try {
+        brand = this.refs.get<WebBrand>(WEB_BRAND, { strict: false });
+      } catch {
+        brand = undefined;
+      }
+      return mountWeb(express, { distDir: this.cfg.web.distDir, production: this.cfg.nodeEnv === 'production', ...(mediaOrigins ? { mediaOrigins } : {}), ...(brand ? { brand } : {}) });
     }
     express.use((req: Request & { requestId?: string }, res: Response, _next: NextFunction) => {
       res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Recurso no encontrado', request_id: req.requestId ?? 'unknown', details: [] } });
