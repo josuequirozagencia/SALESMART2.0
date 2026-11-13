@@ -7,6 +7,7 @@ import { ContactsTabs } from '../contacts/ContactsTabs';
 import { useOwners } from '../contacts/useContacts';
 import { CompanyDialog } from './CompanyDialog';
 import { useCompanies } from './useCrm';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 /**
  * Empresas (M3.6, ADR-48). Compartidas por toda la organización; el número de contactos de cada una es el de los contactos que la persona puede ver.
@@ -29,7 +30,7 @@ export function ClientCompaniesPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Contactos</h1>
+        <h1 className={PAGE_TITLE}>Contactos</h1>
         {access.manage ? <Button variant="primary" onClick={() => setDialog({})}>Nueva empresa</Button> : null}
       </div>
       <ContactsTabs />

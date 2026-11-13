@@ -2,10 +2,12 @@ import { useRef, useState } from 'react';
 import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import type { QuickReply } from '../../lib/types';
+import { useSession } from '../../lib/session';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { useCustomFields } from '../custom-fields/useCustomFields';
+import { previewParts, sampleValues, SAMPLE_CONTACT, splitVariables } from './preview';
 import { useCreateQuickReply, useDeleteQuickReply, useQuickReplies, useUpdateQuickReply } from './useQuickReplies';
 
 const MAX = 4096;
@@ -13,6 +15,24 @@ const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 
 /** Cómo se escribe una variable en el texto. */
 const token = (key: string): string => `{{${key}}}`;
+
+/** El texto con las variables reemplazadas por valores de ejemplo, en color; lo que no se puede resolver, marcado (v13 S6, como el prototipo). */
+function Preview({ body }: { body: string }) {
+  const { state } = useSession();
+  const me = state.status === 'authed' ? state.me : null;
+  const values = sampleValues({ firstName: (me?.user.full_name ?? me?.user.email ?? 'Tú').split(/\s+/)[0] ?? 'Tú', organization: me?.organization.name ?? 'Tu empresa' });
+  const parts = previewParts(body, values);
+  const missing = parts.some((p) => p.kind === 'missing');
+  return (
+    <div className="grid gap-1.5">
+      <span className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-muted">Vista previa con {SAMPLE_CONTACT}</span>
+      <div aria-label="Vista previa del mensaje" role="group" className="whitespace-pre-wrap break-words rounded-lg bg-surface2 p-2.5 text-[12.5px]">
+        {parts.length === 0 ? <span className="text-muted">Escribe el mensaje para ver cómo queda.</span> : parts.map((p, i) => (p.kind === 'text' ? <span key={i}>{p.text}</span> : p.kind === 'value' ? <b key={i} className="font-semibold text-accent">{p.text}</b> : <mark key={i} className="rounded bg-warn-soft px-1 text-warn">{p.text}</mark>))}
+      </div>
+      {missing ? <span className="text-[12px] text-muted">Lo marcado depende de cada contacto: si no tiene ese dato, lo verás para completarlo antes de enviar.</span> : null}
+    </div>
+  );
+}
 
 /** Alta o cambio de una respuesta: atajo, texto con variables que se insertan con un clic y, si la persona puede, compartirla con toda la empresa. */
 function QuickReplyForm({ reply, canShare, variables, onClose }: { reply?: QuickReply; canShare: boolean; variables: Array<{ key: string; label: string }>; onClose: () => void }) {
@@ -93,13 +113,14 @@ function QuickReplyForm({ reply, canShare, variables, onClose }: { reply?: Quick
         <span className="text-[12.5px] font-semibold">Insertar un dato que cambia con cada cliente</span>
         <span className="flex flex-wrap gap-1.5">
           {all.map((v) => (
-            <button key={v.key} type="button" aria-label={`Insertar ${v.label}`} title={token(v.key)} onClick={() => insert(v.key)} className="rounded-full border border-line px-2.5 py-1 text-[12px] font-semibold text-muted hover:border-accent hover:text-accent">
-              {v.label}
+            <button key={v.key} type="button" aria-label={`Insertar ${v.label}`} title={v.label} onClick={() => insert(v.key)} className="rounded-[5px] border border-line bg-surface px-1.5 py-0.5 font-mono text-[11.5px] text-fg hover:border-accent hover:text-accent">
+              {token(v.key)}
             </button>
           ))}
         </span>
         <span className="text-[12px] text-muted">Se reemplazan al usar la respuesta en una conversación. Si el contacto no tiene el dato, lo verás marcado para completarlo antes de enviar.</span>
       </div>
+      <Preview body={body} />
       {canShare ? (
         <label className="flex items-start gap-2 text-[13px]">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="mt-0.5 size-4" />
@@ -152,25 +173,31 @@ export function QuickRepliesPanel() {
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar las respuestas rápidas.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
       {q.isSuccess && items.length === 0 ? <p className="rounded-2xl border border-dashed border-line p-5 text-center text-[13.5px] text-muted">Aún no tienes respuestas rápidas. Crea la primera con «Nueva respuesta».</p> : null}
       {items.length > 0 ? (
-        <ul aria-label="Respuestas rápidas" className="grid gap-2">
-          {items.map((r) => (
-            <li key={r.id} className="grid gap-1.5 rounded-xl border border-line p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <b className="font-mono text-[13.5px]">/{r.shortcut}</b>
-                  {r.shared ? <Pill kind="info">Compartida</Pill> : <Pill kind="muted">Solo mía</Pill>}
+        // v13 S6: como la tabla del prototipo —atajo · mensaje · ámbito · acciones—, con las variables resaltadas en el mensaje; en pantallas angostas cada fila se apila
+        <div className="overflow-hidden rounded-xl border border-line bg-surface">
+          <div aria-hidden="true" className="hidden grid-cols-[140px_minmax(0,1fr)_110px_150px] gap-3 border-b border-line bg-surface2 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.06em] text-muted md:grid">
+            <span>Atajo</span><span>Mensaje</span><span>Ámbito</span><span className="text-right">Acciones</span>
+          </div>
+          <ul aria-label="Respuestas rápidas" className="grid divide-y divide-line">
+            {items.map((r) => (
+              <li key={r.id} className="grid items-start gap-x-3 gap-y-1.5 px-3 py-2.5 md:grid-cols-[140px_minmax(0,1fr)_110px_150px]">
+                <span><span className="inline-block rounded-[5px] bg-surface2 px-1.5 py-0.5 font-mono text-[12px] font-semibold">/{r.shortcut}</span></span>
+                <p className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-[13px]">
+                  {splitVariables(r.body).map((p, i) => (p.variable ? <span key={i} className="font-mono text-[12px] text-accent">{p.text}</span> : <span key={i}>{p.text}</span>))}
+                </p>
+                <span>{r.shared ? <Pill kind="accent">Compartida</Pill> : <Pill kind="muted">Solo mía</Pill>}</span>
+                <span className="flex gap-1.5 md:justify-end">
+                  {r.can_edit ? (
+                    <>
+                      <Button className={SMALL} aria-label={`Cambiar /${r.shortcut}`} onClick={() => setEditing(r)}>Cambiar</Button>
+                      <Button className={SMALL} aria-label={`Borrar /${r.shortcut}`} onClick={() => setDeleting(r)}>Borrar</Button>
+                    </>
+                  ) : null}
                 </span>
-                {r.can_edit ? (
-                  <span className="flex gap-1.5">
-                    <Button className={SMALL} aria-label={`Cambiar /${r.shortcut}`} onClick={() => setEditing(r)}>Cambiar</Button>
-                    <Button className={SMALL} aria-label={`Borrar /${r.shortcut}`} onClick={() => setDeleting(r)}>Borrar</Button>
-                  </span>
-                ) : null}
-              </div>
-              <p className="line-clamp-3 whitespace-pre-wrap text-[13px] text-muted">{r.body}</p>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+        </div>
       ) : null}
       {editing && q.data ? <QuickReplyForm key={editing === 'new' ? 'new' : editing.id} {...(editing === 'new' ? {} : { reply: editing })} canShare={q.data.access.share} variables={q.data.built_in_variables} onClose={() => setEditing(undefined)} /> : null}
       {deleting ? <ConfirmDelete reply={deleting} onClose={() => setDeleting(undefined)} /> : null}

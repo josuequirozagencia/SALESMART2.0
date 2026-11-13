@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { Me } from '../../lib/types';
 import { SidebarShell, type NavGroup } from '../../ui/SidebarShell';
 import { usePendingBadge } from './usePlatformTrials';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 /**
  * Marco de la consola de plataforma (Súper Admin), con menú lateral. Secciones: Empresas, Agencias, Planes, Proveedores, Marca, Créditos IA, Accesos y Pruebas.
@@ -26,7 +27,7 @@ export function PlatformShell({ me, onLogout, children }: { me: Me; onLogout: ()
   ];
   return (
     <SidebarShell me={me} groups={groups} navLabel="Secciones de la consola" onLogout={onLogout}>
-      <h1 className="text-[22px] font-bold">Consola de plataforma</h1>
+      <h1 className={PAGE_TITLE}>Consola de plataforma</h1>
       <main>{children}</main>
     </SidebarShell>
   );

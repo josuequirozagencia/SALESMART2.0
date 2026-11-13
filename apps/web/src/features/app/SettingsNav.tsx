@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`;
 
@@ -6,7 +7,7 @@ const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex
 export function SettingsNav() {
   return (
     <div className="grid gap-3">
-      <h1 className="text-[22px] font-bold">Configuración</h1>
+      <h1 className={PAGE_TITLE}>Configuración</h1>
       <nav aria-label="Secciones de configuración" className="flex flex-wrap gap-1 border-b border-line">
         <NavLink to="/settings/fields" className={tab}>Campos personalizados</NavLink>
         <NavLink to="/settings/tags" className={tab}>Etiquetas</NavLink>

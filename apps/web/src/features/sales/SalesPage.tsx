@@ -6,6 +6,7 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { METHOD_LABEL, useAddPayment, useIdempotencyKey, useCancelSale, useChangeRequests, useCorrectPayment, useRequestChange, useResolveRequest, useSale, useSales, useSalesSettings, useSetCurrency, type PaymentMethod, type Sale, type SaleFilters } from './useSales';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
@@ -222,7 +223,7 @@ export function SalesPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[20px] font-bold">Ventas</h1>
+        <h1 className={PAGE_TITLE}>Ventas</h1>
         {admin ? <CurrencyBar /> : null}
       </div>
       {admin ? <RequestsPanel /> : null}

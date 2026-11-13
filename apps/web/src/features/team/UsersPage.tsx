@@ -4,6 +4,7 @@ import { initials, shortDateTime } from '../../lib/format';
 import { useSession } from '../../lib/session';
 import type { InviteResult, TeamInvitation, TeamMember } from '../../lib/types';
 import { Alert, Button, Input, Spinner } from '../../ui/controls';
+import { PageHeader } from '../../ui/PageHeader';
 import { CopyField } from '../../ui/CopyField';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
@@ -100,13 +101,7 @@ export function UsersPage() {
 
   return (
     <div className="grid gap-4">
-      <h1 className="text-[22px] font-bold">Usuarios</h1>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-[680px] text-[13.5px] text-muted">
-          Las personas de tu empresa. Un asesor ve solo lo suyo; puedes ajustar sus funciones, sus departamentos y su horario. Quien necesite ver todo es administrador.
-        </p>
-        {team.isSuccess ? <Button variant="primary" onClick={() => setInviting(true)}>Invitar persona</Button> : null}
-      </div>
+      <PageHeader title="Usuarios" description={<>Las personas de tu empresa. Un asesor ve solo lo suyo; puedes ajustar sus funciones, sus departamentos y su horario. Quien necesite ver todo es administrador.</>} actions={team.isSuccess ? <Button variant="primary" onClick={() => setInviting(true)}>Invitar persona</Button> : null} />
 
       {team.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando usuarios" /></div> : null}
       {team.isError ? <Alert>{friendlyError(team.error, 'Solo el administrador de la empresa puede ver y cambiar a los usuarios.')} <Button variant="link" onClick={() => void team.refetch()}>Reintentar</Button></Alert> : null}
