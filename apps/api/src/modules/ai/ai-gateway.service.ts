@@ -90,8 +90,8 @@ export class AiGateway {
   }
 
   /** Precios (USD por millón de tokens) de un modelo de chat; null si no está cargado. SOLO servidor. */
-  chatPrice(model: string): Promise<{ usdPer1mInput: number; usdPer1mOutput: number } | null> {
-    return this.prices.price(model).then((p) => (p && p.kind === 'chat' ? { usdPer1mInput: p.usdPer1mInput, usdPer1mOutput: p.usdPer1mOutput } : null));
+  chatPrice(model: string): Promise<{ usdPer1mInput: number; usdPer1mOutput: number; vision: boolean } | null> {
+    return this.prices.price(model).then((p) => (p && p.kind === 'chat' ? { usdPer1mInput: p.usdPer1mInput, usdPer1mOutput: p.usdPer1mOutput, vision: p.vision } : null));
   }
 
   /** Genera una respuesta de chat y calcula su costo real. Se llama FUERA de toda transacción de negocio. */

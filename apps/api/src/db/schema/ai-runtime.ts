@@ -42,7 +42,7 @@ export const aiConversationState = tenantTable(
     foreignKey({ name: 'ai_conversation_state_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'ai_conversation_state_agent_fk', columns: [t['organizationId']!, t['agentId']!], foreignColumns: [agents.organizationId, agents.id] }),
     check('ai_conversation_state_status_valid', sql`${t['status']!} IN ('active', 'paused', 'handed_off')`),
-    check('ai_conversation_state_reason_valid', sql`${t['reason']!} IS NULL OR ${t['reason']!} IN ('requested', 'turn_limit', 'unsupported_media', 'ai_error', 'no_support', 'agent_decision', 'empty_reply', 'human_message', 'human_took', 'manual', 'no_credits')`),
+    check('ai_conversation_state_reason_valid', sql`${t['reason']!} IS NULL OR ${t['reason']!} IN ('requested', 'turn_limit', 'unsupported_media', 'ai_error', 'no_support', 'agent_decision', 'empty_reply', 'human_message', 'human_took', 'manual', 'no_credits', 'audio_too_long', 'media_blocked', 'daily_limit')`),
     check('ai_conversation_state_outcome_valid', sql`${t['lastOutcome']!} IS NULL OR ${t['lastOutcome']!} = 'out_of_hours'`),
     check('ai_conversation_state_empty_valid', sql`${t['emptyReplies']!} >= 0`),
     check('ai_conversation_state_reason_by_status', sql`(${t['status']!} = 'active') = (${t['reason']!} IS NULL)`),
