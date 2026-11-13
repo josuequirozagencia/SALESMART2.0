@@ -40,6 +40,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/platform/branding/logo-light', kind: 'platform', test: '../../platform/branding.test.ts' },
   { route: 'PUT /v1/platform/branding/logo-dark', kind: 'platform', test: '../../platform/branding.test.ts' },
   { route: 'DELETE /v1/platform/branding/logo-dark', kind: 'platform', test: '../../platform/branding.test.ts' },
+  { route: 'PUT /v1/platform/branding/sound', kind: 'platform', test: '../../platform/branding.test.ts' },
+  { route: 'DELETE /v1/platform/branding/sound', kind: 'platform', test: '../../platform/branding.test.ts' },
   { route: 'GET /v1/branding', kind: 'public' },
   { route: 'GET /v1/branding/manifest.webmanifest', kind: 'public' },
   { route: 'GET /v1/branding/favicon', kind: 'public' },

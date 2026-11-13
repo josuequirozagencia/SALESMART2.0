@@ -9,6 +9,7 @@ import {
   buildIcon,
   buildLogo,
   checkName,
+  checkSound,
   defaultImages,
   DEFAULT_APP_NAME,
   ICON_VARIANT_NAMES,
@@ -27,6 +28,8 @@ export interface BrandingView {
   icon: { custom: boolean; version: string | null; px: number | null; has_badge: boolean; updated_at: string | null };
   logo_light: { version: string; bytes: number; content_type: string; px: number | null } | null;
   logo_dark: { version: string; bytes: number; content_type: string; px: number | null } | null;
+  /** El sonido propio de mensaje nuevo; `null` = el tono por omisión de la aplicación. */
+  sound: { version: string; bytes: number; content_type: string } | null;
   updated_at: string | null;
 }
 
@@ -38,6 +41,8 @@ export interface PublicBranding {
   version: string;
   icon: { custom: boolean; favicon: string; apple_touch: string; icon_192: string; icon_512: string; badge_96: string };
   logo: { light: string | null; dark: string | null };
+  /** Dirección del sonido propio (con su versión) o `null`. */
+  sound: string | null;
 }
 
 export interface ServedFile {
@@ -46,7 +51,7 @@ export interface ServedFile {
   readonly version: string;
 }
 
-export type PublicFile = 'favicon' | 'icon-32' | 'icon-48' | 'icon-180' | 'icon-192' | 'icon-512' | 'badge-96' | 'logo-light' | 'logo-dark';
+export type PublicFile = 'favicon' | 'icon-32' | 'icon-48' | 'icon-180' | 'icon-192' | 'icon-512' | 'badge-96' | 'logo-light' | 'logo-dark' | 'sound';
 
 /** El icono por omisión de la pestaña (SVG propio, de confianza; nunca viene de una subida). */
 const DEFAULT_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#4f46e5"/><path d="M42 21c-2-3-5-4.5-9.5-4.5C26.5 16.5 22.5 19.5 22.5 24c0 11 20.5 5.5 20.5 16 0 4.8-4.2 7.5-10.5 7.5-4.8 0-8.5-1.7-11-5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/></svg>';
@@ -107,6 +112,7 @@ export class BrandingService {
       icon: { custom: icon !== undefined, version: icon?.version ?? null, px: icon?.px ?? null, has_badge: a.has('badge-96'), updated_at: icon?.updatedAt.toISOString() ?? null },
       logo_light: meta(a.get('logo-light')),
       logo_dark: meta(a.get('logo-dark')),
+      sound: ((r) => (r ? { version: r.version, bytes: r.bytes, content_type: r.contentType } : null))(a.get('sound')),
       updated_at: s.updatedAt?.toISOString() ?? null,
     };
   }
@@ -128,13 +134,14 @@ export class BrandingService {
       version: v,
       icon: { custom: s.assets.has('icon-192'), favicon: url('favicon', v), apple_touch: url('apple-touch-icon.png', v), icon_192: url('icon-192.png', v), icon_512: url('icon-512.png', v), badge_96: url('badge-96.png', s.assets.get('badge-96')?.version ?? DEFAULT_VERSION) },
       logo: { light: light ? url('logo-light', light.version) : null, dark: dark || light ? url(dark ? 'logo-dark' : 'logo-light', (dark ?? light)!.version) : null },
+      sound: s.assets.has('sound') ? url('sound', s.assets.get('sound')!.version) : null,
     };
   }
 
   /** Lo que se escribe en el HTML al servirlo: el nombre (el servidor lo escapa), la versión de los iconos y los logos para el primer pintado de la interfaz. */
-  async indexBrand(): Promise<{ name: string; short_name: string; version: string; logo: PublicBranding['logo']; icon: { custom: boolean; icon_192: string; badge_96: string } }> {
+  async indexBrand(): Promise<{ name: string; short_name: string; version: string; logo: PublicBranding['logo']; sound: string | null; icon: { custom: boolean; icon_192: string; badge_96: string } }> {
     const p = await this.publicInfo();
-    return { name: p.name, short_name: p.short_name, version: p.version, logo: p.logo, icon: { custom: p.icon.custom, icon_192: p.icon.icon_192, badge_96: p.icon.badge_96 } };
+    return { name: p.name, short_name: p.short_name, version: p.version, logo: p.logo, sound: p.sound, icon: { custom: p.icon.custom, icon_192: p.icon.icon_192, badge_96: p.icon.badge_96 } };
   }
 
   /** El manifest de la aplicación instalable. */
@@ -180,7 +187,7 @@ export class BrandingService {
         this.log.warn({ asset, err: e instanceof Error ? e.message : 'desconocido' }, 'no se pudo leer un archivo de la marca');
       }
     }
-    if (file === 'logo-light' || file === 'logo-dark') return null;
+    if (file === 'logo-light' || file === 'logo-dark' || file === 'sound') return null;
     const d = await defaultImages();
     return { bytes: file === 'badge-96' ? d.badge : d.icons[file], contentType: 'image/png', version: DEFAULT_VERSION };
   }
@@ -239,6 +246,22 @@ export class BrandingService {
   async clearLogo(which: 'light' | 'dark'): Promise<BrandingView> {
     const asset: BrandingAsset = which === 'light' ? 'logo-light' : 'logo-dark';
     await this.commit({ set: [], remove: [asset], audit: { action: 'branding.logo.cleared', details: { asset } } }, [], [asset]);
+    return this.view();
+  }
+
+  /** Valida el MP3 o M4A por su contenido, lo guarda y fija la referencia; después borra el anterior. */
+  async setSound(bytes: Buffer): Promise<BrandingView> {
+    const checked = checkSound(bytes);
+    if (!checked.ok) throw new AppError(checked.status, checked.code, checked.message);
+    const version = randomUUID();
+    const key = `platform/branding/sound-${version}`;
+    await this.put(key, bytes, checked.contentType);
+    await this.commit({ set: [{ asset: 'sound', key, contentType: checked.contentType, bytes: bytes.length, px: null, version }], remove: [], audit: { action: 'branding.sound.set', details: { content_type: checked.contentType, bytes: bytes.length, version } } }, [key], ['sound']);
+    return this.view();
+  }
+
+  async clearSound(): Promise<BrandingView> {
+    await this.commit({ set: [], remove: ['sound'], audit: { action: 'branding.sound.cleared', details: {} } }, [], ['sound']);
     return this.view();
   }
 

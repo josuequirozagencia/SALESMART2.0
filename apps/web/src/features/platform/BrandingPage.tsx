@@ -1,10 +1,11 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { shortDateTime } from '../../lib/format';
+import { testSound, type SoundTestResult } from '../../lib/notifySound';
 import { DEFAULT_BRAND_NAME, useBrand } from '../../lib/platformBrand';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { showTestNotification, type TestNotificationResult } from './testNotification';
-import { ICON_ACCEPT, iconProblem, LOGO_ACCEPT, logoProblem, useBranding, useClearIcon, useClearLogo, useSetName, useUploadIcon, useUploadLogo, type BrandingFile, type BrandingView } from './useBranding';
+import { ICON_ACCEPT, iconProblem, LOGO_ACCEPT, logoProblem, SOUND_ACCEPT, SOUND_ADVISED_SECONDS, soundDuration, soundProblem, useBranding, useClearIcon, useClearLogo, useClearSound, useSetName, useUploadIcon, useUploadLogo, useUploadSound, type BrandingFile, type BrandingView } from './useBranding';
 
 const kb = (bytes: number): number => Math.max(1, Math.round(bytes / 1024));
 
@@ -176,6 +177,75 @@ function LogoSection({ v }: { v: BrandingView }) {
   );
 }
 
+const SOUND_TEST: Record<Exclude<SoundTestResult, 'ok'>, { kind: 'error'; text: string }> = {
+  unsupported: { kind: 'error', text: 'Este navegador no puede reproducir audio de la página.' },
+  error: { kind: 'error', text: 'No se pudo reproducir el sonido. Si acabas de subirlo, espera un momento y vuelve a probar; si sigue igual, prueba con otro archivo MP3.' },
+};
+
+function SoundSection({ v }: { v: BrandingView }) {
+  const upload = useUploadSound();
+  const clear = useClearSound();
+  const input = useRef<HTMLInputElement>(null);
+  const [problem, setProblem] = useState<string>();
+  const [done, setDone] = useState<string>();
+  const [note, setNote] = useState<string>();
+  const [testing, setTesting] = useState(false);
+  const sound = v.sound;
+  const pick = (f: File | undefined): void => {
+    if (!f) return;
+    setDone(undefined);
+    setNote(undefined);
+    const bad = soundProblem(f);
+    if (bad) return setProblem(bad);
+    setProblem(undefined);
+    void soundDuration(f).then((secs) => {
+      if (secs !== null && secs > SOUND_ADVISED_SECONDS) setNote(`El archivo dura ${secs.toFixed(1)} s. Se subió, pero un sonido de mensaje debería durar de 1 a 3 segundos: uno largo molesta si llegan muchos mensajes.`);
+    });
+    upload.mutate(f, { onSuccess: () => setDone('Sonido actualizado. Quien ya tenga la aplicación abierta lo oirá al recargar la página.'), onError: (e) => setProblem(friendlyError(e, 'No pudimos subir el sonido.')) });
+  };
+  const remove = (): void => {
+    setProblem(undefined);
+    setDone(undefined);
+    setNote(undefined);
+    clear.mutate(undefined, { onSuccess: () => setDone('Sonido quitado: la aplicación vuelve al tono por omisión.'), onError: (e) => setProblem(friendlyError(e, 'No pudimos quitar el sonido.')) });
+  };
+  const test = (): void => {
+    setTesting(true);
+    setProblem(undefined);
+    void testSound(sound ? `/v1/branding/sound?v=${encodeURIComponent(sound.version)}` : null).then((r) => {
+      setTesting(false);
+      if (r !== 'ok') setProblem(SOUND_TEST[r].text);
+    });
+  };
+  return (
+    <section aria-label="Sonido de notificación" className={card}>
+      <h3 className="text-[15px] font-bold">Sonido de notificación</h3>
+      <p className="max-w-[70ch] text-[12.5px] text-muted">Suena cuando llega un mensaje nuevo con la aplicación abierta. No suena por los mensajes propios ni al cargar el historial, y respeta el ajuste de sonido de cada persona (Configuración › Notificaciones).</p>
+      <p className="text-[12.5px] text-muted">
+        {sound ? <>Sonido propio · {sound.content_type === 'audio/mp4' ? 'M4A' : 'MP3'} · {kb(sound.bytes)} KB</> : 'Sin sonido propio: se usa el tono por omisión de la aplicación.'}
+      </p>
+      <ul className="grid gap-1 text-[12.5px] text-muted" aria-label="Requisitos del sonido">
+        <li>Formato: MP3 (recomendado) o M4A (AAC), a 128 kbps, estéreo o mono.</li>
+        <li>Duración: de 1 a 3 segundos.</li>
+        <li>Peso: hasta 100 KB recomendado; el máximo aceptado es 200 KB.</li>
+      </ul>
+      <ul className="grid gap-1 text-[12.5px] text-muted" aria-label="Limitaciones del sonido">
+        <li>Con la aplicación cerrada, la notificación del navegador usa el sonido del sistema, no este archivo.</li>
+        <li>El navegador no deja sonar a una página hasta que la persona la toca una vez: el primer sonido puede no oírse hasta el primer clic.</li>
+      </ul>
+      <div className="flex flex-wrap items-center gap-2">
+        <input ref={input} type="file" accept={SOUND_ACCEPT} aria-label="Elegir un sonido" className="sr-only" onChange={(e) => { pick(e.target.files?.[0]); e.target.value = ''; }} />
+        <Button variant="primary" loading={upload.isPending} onClick={() => input.current?.click()}>{sound ? 'Cambiar sonido' : 'Subir sonido'}</Button>
+        <Button loading={testing} onClick={test}>Probar sonido</Button>
+        {sound ? <RemoveButton label="Restaurar sonido por defecto" question="¿Quitar el sonido propio y volver al tono por omisión?" busy={clear.isPending} onConfirm={remove} /> : null}
+      </div>
+      {problem ? <Alert>{problem}</Alert> : null}
+      {note ? <Alert kind="info">{note}</Alert> : null}
+      {done ? <Alert kind="ok">{done}</Alert> : null}
+    </section>
+  );
+}
+
 const TEST_MESSAGE: Record<TestNotificationResult, { kind: 'ok' | 'error' | 'info'; text: string }> = {
   ok: { kind: 'ok', text: 'Listo: debería aparecer una notificación del sistema con el icono. Si no la ves, revisa que el sistema operativo no tenga las notificaciones silenciadas.' },
   unsupported: { kind: 'error', text: 'Este navegador no permite notificaciones. Prueba con Chrome, Edge o Firefox; en iPhone, instala primero la aplicación en la pantalla de inicio.' },
@@ -215,7 +285,7 @@ function NotificationSection() {
 }
 
 /**
- * Plataforma › Marca (v11 §3, solo Súper Admin): el nombre de la plataforma, el icono de la aplicación (favicon, instalación y notificaciones) y los logos. Todo es global de la plataforma. Las
+ * Plataforma › Marca (v11 §3, solo Súper Admin): el nombre de la plataforma, el icono de la aplicación (favicon, instalación y notificaciones), los logos y el sonido de mensaje nuevo. Todo es global de la plataforma. Las
  * imágenes las valida el servidor por su contenido real; aquí solo se evita subir lo que ya se sabe que no sirve.
  */
 export function BrandingPage() {
@@ -233,6 +303,7 @@ export function BrandingPage() {
       <IconSection v={v} />
       <LogoSection v={v} />
       <NotificationSection />
+      <SoundSection v={v} />
     </div>
   );
 }

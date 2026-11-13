@@ -38,6 +38,7 @@ export interface WebBrandInfo {
   version: string;
   short_name?: string;
   logo?: { light: string | null; dark: string | null };
+  sound?: string | null;
   icon?: { custom: boolean; icon_192: string; badge_96: string };
 }
 export type WebBrand = () => Promise<WebBrandInfo>;
@@ -52,7 +53,7 @@ export function applyBrand(html: string, brand: WebBrandInfo): string {
   const v = encodeURIComponent(brand.version);
   // Los datos de la marca para la interfaz van como un bloque de DATOS (type=application/json: no se ejecuta y la política de contenido no lo bloquea), así el logo y el nombre están desde el primer
   // pintado sin una petición más. Se escapan `<`, `>`, `&` y los separadores de línea de Unicode: nada del contenido puede cerrar la etiqueta.
-  const data = JSON.stringify({ name: brand.name, short_name: brand.short_name ?? null, version: brand.version, logo: brand.logo ?? { light: null, dark: null }, icon: brand.icon ?? null })
+  const data = JSON.stringify({ name: brand.name, short_name: brand.short_name ?? null, version: brand.version, logo: brand.logo ?? { light: null, dark: null }, sound: brand.sound ?? null, icon: brand.icon ?? null })
     .replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
   return html
     .replace(/<title>[^<]*<\/title>/, `<title>${esc(brand.name)}</title>`)

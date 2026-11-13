@@ -29,8 +29,8 @@ describe('parseBrand: solo se acepta lo que tiene la forma esperada', () => {
     expect(parseBrand({}).logo).toEqual({ light: null, dark: null });
   });
   it('lee nombre, logos e icono propios', () => {
-    expect(parseBrand({ name: 'Mi Marca', short_name: 'MiMarca', version: 'v7', logo: { light: '/v1/branding/logo-light?v=a', dark: '/v1/branding/logo-dark?v=b' }, icon: { custom: true, icon_192: '/v1/branding/icon-192.png?v=v7', badge_96: '/v1/branding/badge-96.png?v=v7' } })).toEqual({
-      name: 'Mi Marca', shortName: 'MiMarca', version: 'v7', logo: { light: '/v1/branding/logo-light?v=a', dark: '/v1/branding/logo-dark?v=b' }, iconCustom: true, icon192: '/v1/branding/icon-192.png?v=v7', badge96: '/v1/branding/badge-96.png?v=v7',
+    expect(parseBrand({ name: 'Mi Marca', short_name: 'MiMarca', version: 'v7', logo: { light: '/v1/branding/logo-light?v=a', dark: '/v1/branding/logo-dark?v=b' }, sound: '/v1/branding/sound?v=s1', icon: { custom: true, icon_192: '/v1/branding/icon-192.png?v=v7', badge_96: '/v1/branding/badge-96.png?v=v7' } })).toEqual({
+      name: 'Mi Marca', shortName: 'MiMarca', version: 'v7', logo: { light: '/v1/branding/logo-light?v=a', dark: '/v1/branding/logo-dark?v=b' }, iconCustom: true, icon192: '/v1/branding/icon-192.png?v=v7', badge96: '/v1/branding/badge-96.png?v=v7', sound: '/v1/branding/sound?v=s1',
     });
   });
   it('una dirección que no es de la propia aplicación (otro sitio, javascript:, protocolo relativo) se descarta', () => {
@@ -38,6 +38,8 @@ describe('parseBrand: solo se acepta lo que tiene la forma esperada', () => {
     expect(b.logo).toEqual({ light: null, dark: null });
     expect(b.icon192).toBeNull();
     expect(b.badge96).toBeNull();
+    for (const bad of ['https://evil.test/x.mp3', '//evil.test/x.mp3', 'javascript:alert(1)', '/otra/ruta.mp3', 5]) expect(parseBrand({ name: 'X', sound: bad }).sound, String(bad)).toBeNull();
+    expect(parseBrand({ name: 'X' }).sound).toBeNull();
   });
 });
 

@@ -36,16 +36,16 @@ describe('applyBrand: el nombre y los enlaces del icono se escriben en el HTML',
     expect(out.match(/<title>/g)).toHaveLength(1);
   });
   it('escribe los datos de la marca como un bloque JSON de datos que el nombre no puede cerrar', () => {
-    const out = applyBrand(html, { name: '</script><b>&amp;', version: 'v1', short_name: 'Corto', logo: { light: '/v1/branding/logo-light?v=a', dark: null }, icon: { custom: true, icon_192: '/v1/branding/icon-192.png?v=v1', badge_96: '/v1/branding/badge-96.png?v=v1' } });
+    const out = applyBrand(html, { name: '</script><b>&amp;', version: 'v1', short_name: 'Corto', logo: { light: '/v1/branding/logo-light?v=a', dark: null }, sound: '/v1/branding/sound?v=s1', icon: { custom: true, icon_192: '/v1/branding/icon-192.png?v=v1', badge_96: '/v1/branding/badge-96.png?v=v1' } });
     const m = /<script id="brand-data" type="application\/json">([\s\S]*?)<\/script>/.exec(out);
     expect(m).not.toBeNull();
     expect(m![1]).not.toMatch(/[<>&]/); // nada que cierre la etiqueta ni abra otra
-    expect(JSON.parse(m![1]!)).toEqual({ name: '</script><b>&amp;', short_name: 'Corto', version: 'v1', logo: { light: '/v1/branding/logo-light?v=a', dark: null }, icon: { custom: true, icon_192: '/v1/branding/icon-192.png?v=v1', badge_96: '/v1/branding/badge-96.png?v=v1' } });
+    expect(JSON.parse(m![1]!)).toEqual({ name: '</script><b>&amp;', short_name: 'Corto', version: 'v1', logo: { light: '/v1/branding/logo-light?v=a', dark: null }, sound: '/v1/branding/sound?v=s1', icon: { custom: true, icon_192: '/v1/branding/icon-192.png?v=v1', badge_96: '/v1/branding/badge-96.png?v=v1' } });
     expect(out.match(/<script/g)).toHaveLength(1);
   });
   it('sin logos ni icono el bloque lleva los valores vacíos', () => {
     const m = /<script id="brand-data" type="application\/json">([\s\S]*?)<\/script>/.exec(applyBrand(html, { name: 'M', version: 'v' }));
-    expect(JSON.parse(m![1]!)).toEqual({ name: 'M', short_name: null, version: 'v', logo: { light: null, dark: null }, icon: null });
+    expect(JSON.parse(m![1]!)).toEqual({ name: 'M', short_name: null, version: 'v', logo: { light: null, dark: null }, sound: null, icon: null });
   });
   it('la versión se codifica para la dirección', () => {
     expect(applyBrand(html, { name: 'M', version: 'a b&c' })).toContain('?v=a%20b%26c');
