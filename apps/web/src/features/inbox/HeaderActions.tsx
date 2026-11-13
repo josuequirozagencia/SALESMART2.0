@@ -1,4 +1,4 @@
-import { Fragment, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { Icon, type IconName } from '../../ui/Icon';
 import { Menu, type MenuItem } from '../../ui/Menu';
 
@@ -33,16 +33,15 @@ export function fitCount(total: number, available: number): number {
 
 /**
  * Acciones de la conversación como iconos en la cabecera del chat de escritorio (v13 S2.2; antes eran el botón «Más ⋯»). Cada icono lleva `title` y `aria-label`. Las acciones frecuentes
- * van primero y un separador las aparta de las demás. Cuando el ancho no alcanza —se mide con `ResizeObserver` sobre la fila de la cabecera, `rowRef`— las últimas pasan a un único «⋮»
+ * van primero y un separador las aparta de las demás. Cuando el ancho no alcanza —se mide con `ResizeObserver` sobre la fila de la cabecera, `row`— las últimas pasan a un único «⋮»
  * (que NO existe mientras todo cabe). Los hijos de la fila con `data-flex` son los que se estiran (el nombre): cuentan con su ancho mínimo, no con el que tengan ahora.
  */
-export function HeaderActionBar({ actions, rowRef }: { actions: HeaderAction[]; rowRef: RefObject<HTMLElement | null> }) {
+export function HeaderActionBar({ actions, row }: { actions: HeaderAction[]; /** La fila de la cabecera, ya montada (el padre la recibe con un `ref` en estado: en el primer montaje un `RefObject` todavía es `null` cuando corre este efecto y el observador nunca se engancharía). */ row: HTMLElement | null }) {
   const box = useRef<HTMLDivElement>(null);
   const total = actions.length;
   const [fit, setFit] = useState(() => fitCount(total, Number.POSITIVE_INFINITY));
 
   useLayoutEffect(() => {
-    const row = rowRef.current;
     const measure = (): void => {
       // Sin medidas reales (pruebas con jsdom, pestaña oculta) no se pliega nada: se ven todas las que permite el máximo
       if (!row || row.clientWidth === 0) return setFit(fitCount(total, Number.POSITIVE_INFINITY));
@@ -63,7 +62,7 @@ export function HeaderActionBar({ actions, rowRef }: { actions: HeaderAction[]; 
     ro.observe(row);
     for (const child of Array.from(row.children)) if (child !== box.current) ro.observe(child);
     return () => ro.disconnect();
-  }, [total, rowRef]);
+  }, [total, row]);
 
   if (total === 0) return null;
   const shown = actions.slice(0, fit);
