@@ -52,8 +52,9 @@ async function fixture(request: APIRequestContext): Promise<{ email: string; con
   return { email, convId };
 }
 
-test.describe('escritorio 1440 × 900', () => {
-  test.use({ viewport: { width: 1440, height: 900 } });
+test.describe('escritorio 1920 × 1080', () => {
+  // 1920 de ancho: con el panel de contacto abierto la columna del chat mide ~1090 px y todas las acciones caben (a 1440 el chat queda cerca de su mínimo y es CORRECTO que algunas pasen al «⋮»)
+  test.use({ viewport: { width: 1920, height: 1080 } });
 
   test('las acciones son iconos con nombre y ayuda, sin botón «Más»; sin el reloj de programados ni la barra del agente', async ({ page, request }) => {
     const { email, convId } = await fixture(request);
@@ -103,7 +104,8 @@ test.describe('escritorio 1440 × 900', () => {
 });
 
 test.describe('cabecera estrecha', () => {
-  test.use({ viewport: { width: 1440, height: 900 } });
+  // 1920 de ancho: con el panel de contacto abierto la columna del chat mide ~1090 px y todas las acciones caben (a 1440 el chat queda cerca de su mínimo y es CORRECTO que algunas pasen al «⋮»)
+  test.use({ viewport: { width: 1920, height: 1080 } });
 
   test('si las acciones no caben, aparece UN «⋮ Más acciones» con las que sobran; al ensanchar la cabecera desaparece', async ({ page, request }) => {
     const { email, convId } = await fixture(request);
