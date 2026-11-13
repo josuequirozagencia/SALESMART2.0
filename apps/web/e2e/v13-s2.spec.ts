@@ -91,17 +91,19 @@ test.describe('escritorio 1440 × 900', () => {
     await expect(pending.getByText(/Mensaje programado · /)).toBeVisible();
     await expect(pending.getByText('Te escribo más tarde')).toBeVisible();
     const log = chat.getByRole('log', { name: 'Mensajes' });
-    await expect(log.getByText('Te escribo más tarde')).toHaveCount(0); // todavía no es un mensaje del hilo
+    // los programados se ven DENTRO del registro del chat, pero en su propia lista: la de los mensajes del hilo es la que no lleva nombre
+    const thread = log.locator('ul:not([aria-label])');
+    await expect(thread.getByText('Te escribo más tarde')).toHaveCount(0); // todavía no es un mensaje del hilo
     await pending.getByRole('button', { name: /^Enviar ahora/ }).click();
     await expect(pending).toHaveCount(0);
-    await expect(log.getByText('Te escribo más tarde')).toBeVisible({ timeout: 30_000 });
+    await expect(thread.getByText('Te escribo más tarde')).toBeVisible({ timeout: 30_000 });
     const rows = await withDb(async (db) => (await db.query(`SELECT status FROM scheduled_messages WHERE conversation_id = $1`, [convId])).rows as Array<{ status: string }>);
     expect(rows).toEqual([{ status: 'sent' }]);
   });
 });
 
-test.describe('ventana angosta (900 × 800)', () => {
-  test.use({ viewport: { width: 900, height: 800 } });
+test.describe('ventana angosta (768 × 800)', () => {
+  test.use({ viewport: { width: 768, height: 800 } });
 
   test('si las acciones no caben, aparece UN «⋮ Más acciones» con las que sobran; en ancho de sobra desaparece', async ({ page, request }) => {
     const { email, convId } = await fixture(request);
