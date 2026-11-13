@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
+import { PageHeader } from '../../ui/PageHeader';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { SamplePill } from '../../ui/SamplePill';
@@ -47,11 +48,7 @@ export function FormsPage() {
   const max = q.data?.limits.max_forms ?? 50;
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Formularios</h1>
-        <Button variant="primary" disabled={items.length >= max} onClick={() => setOpen('new')}>Nuevo formulario</Button>
-      </div>
-      <p className="max-w-[70ch] text-[13px] text-muted">Un formulario capta clientes desde tu página web. Cada persona que lo llena queda como contacto, con su consentimiento, en el departamento y el pipeline que elijas.</p>
+      <PageHeader title="Formularios" description={<>Un formulario capta clientes desde tu página web. Cada persona que lo llena queda como contacto, con su consentimiento, en el departamento y el pipeline que elijas.</>} actions={<Button variant="primary" disabled={items.length >= max} onClick={() => setOpen('new')}>Nuevo formulario</Button>} />
       {q.isLoading ? <Spinner label="Cargando formularios" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')}</Alert> : null}
       {q.data && items.length === 0 ? <p className="text-[13px] text-muted">Aún no tienes formularios. Crea el primero para empezar a captar clientes.</p> : null}

@@ -8,6 +8,7 @@ import { ScheduledMessagesPanel } from '../inbox/ScheduledOverviewPage';
 import { TaskDialog } from './TaskDialog';
 import { completionNotice, TaskRow } from './TasksPanel';
 import { DEFAULT_TASK_FILTERS, useTask, useTasks, type TaskFilters, type TaskStatusFilter } from './useCrm';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 const STATUS_LABEL: Record<TaskStatusFilter, string> = { open: 'Pendientes', done: 'Hechas', all: 'Todas' };
@@ -43,7 +44,7 @@ export function TasksPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Tareas</h1>
+        <h1 className={PAGE_TITLE}>Tareas</h1>
         {canWrite && tab === 'tasks' ? <Button variant="primary" onClick={() => setDialog({})}>Nueva tarea</Button> : null}
       </div>
       <div role="tablist" aria-label="Sección" className="flex gap-1.5 border-b border-line pb-2">

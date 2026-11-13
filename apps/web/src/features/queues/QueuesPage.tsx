@@ -3,6 +3,8 @@ import { friendlyError } from '../../lib/errors';
 import { initials } from '../../lib/format';
 import type { Queue } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { PageHeader } from '../../ui/PageHeader';
+import { Icon } from '../../ui/Icon';
 import { Pill } from '../../ui/Pill';
 import { SamplePill } from '../../ui/SamplePill';
 import { DepartmentWizard } from './DepartmentWizard';
@@ -52,13 +54,7 @@ export function QueuesPage() {
 
   return (
     <div className="grid gap-4">
-      <h1 className="text-[22px] font-bold">Departamentos</h1>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-[680px] text-[13.5px] text-muted">
-          Un departamento es un equipo: define sus asesores y cómo se reparten las conversaciones nuevas. Cada conexión de WhatsApp envía sus conversaciones a un departamento (se elige en Conexiones) y el departamento decide el asesor.
-        </p>
-        {q.isSuccess ? <Button variant="primary" disabled={max !== undefined && items.length >= max} onClick={() => setCreating(true)}>Nuevo departamento</Button> : null}
-      </div>
+      <PageHeader title="Departamentos" description={<>Un departamento es un equipo: define sus asesores y cómo se reparten las conversaciones nuevas. Cada conexión de WhatsApp envía sus conversaciones a un departamento (se elige en Conexiones) y el departamento decide el asesor.</>} actions={q.isSuccess ? <Button variant="primary" disabled={max !== undefined && items.length >= max} onClick={() => setCreating(true)}>Nuevo departamento</Button> : null} />
 
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando departamentos" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar los departamentos.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
@@ -69,6 +65,16 @@ export function QueuesPage() {
         ) : (
           <ul aria-label="Departamentos" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {items.map((x) => <li key={x.id}><QueueCard q={x} onOpen={() => setOpenId(x.id)} /></li>)}
+            {/* v13 S6: la tarjeta punteada «nueva» del prototipo (mismo efecto que el botón de arriba) */}
+            {max === undefined || items.length < max ? (
+              <li>
+                <button type="button" aria-label="Nuevo departamento: nombre, color, asesores y regla de reparto" onClick={() => setCreating(true)} className="grid h-full min-h-[132px] w-full place-content-center justify-items-center gap-1 rounded-2xl border-2 border-dashed border-line p-4 text-center text-muted transition hover:border-accent hover:text-accent">
+                  <Icon name="plus" size={18} />
+                  <b className="text-[13px] font-bold">Nuevo departamento</b>
+                  <span className="text-[11.5px]">Nombre, color, asesores y regla de reparto</span>
+                </button>
+              </li>
+            ) : null}
           </ul>
         )
       ) : null}

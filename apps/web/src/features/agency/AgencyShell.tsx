@@ -3,6 +3,7 @@ import { ContextBanner } from '../context/ContextBanner';
 import { ViewAsBar, ViewAsMenu } from '../context/ViewAs';
 import type { Me } from '../../lib/types';
 import { SidebarShell, type NavGroup } from '../../ui/SidebarShell';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const GROUPS: NavGroup[] = [{ title: 'Agencia', items: [{ to: '/agency/clients', label: 'Mis clientes', icon: 'swap' }] }];
 
@@ -13,7 +14,7 @@ const GROUPS: NavGroup[] = [{ title: 'Agencia', items: [{ to: '/agency/clients',
 export function AgencyShell({ me, onLogout, children }: { me: Me; onLogout: () => void; children: ReactNode }) {
   return (
     <SidebarShell me={me} groups={GROUPS} navLabel="Secciones de la agencia" onLogout={onLogout} banner={<><ContextBanner me={me} /><ViewAsBar me={me} /></>} extra={<ViewAsMenu me={me} />}>
-      <h1 className="text-[22px] font-bold">Mis clientes</h1>
+      <h1 className={PAGE_TITLE}>Mis clientes</h1>
       <main>{children}</main>
     </SidebarShell>
   );

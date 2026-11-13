@@ -4,6 +4,7 @@ import { friendlyError } from '../../lib/errors';
 import { money, shortDate, shortDateTime } from '../../lib/format';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { exportReport, PERIODS, useAdvisorExport, useExportsLog, usePeriod, useRefreshExports, useReport, useSetAdvisorExport, type Report, type ReportColumn, type ReportName, type WinningMode } from './useAnalytics';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
 type TabName = ReportName | 'downloads';
@@ -145,7 +146,7 @@ export function AnalyticsPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[20px] font-bold">Analítica</h1>
+        <h1 className={PAGE_TITLE}>Analítica</h1>
         {tab !== 'downloads' ? (
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-[13px]">Periodo

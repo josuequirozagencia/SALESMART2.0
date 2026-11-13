@@ -11,6 +11,7 @@ import { useCalendarConnection } from '../calendar/useCalendar';
 import { CalendarMark } from './CalendarToggle';
 import { AgendaCalendar, periodLabel, shiftMonth, visibleDays, type AgendaView } from './AgendaCalendar';
 import { offsetLabel, useAgenda, useAppointment, useCancelAppointment, useCompleteAppointment, useUpdateAppointment, type AgendaFilters, type Appointment, type Reminder } from './useAppointments';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
 const STATUS: Record<Appointment['status'], { label: string; kind: PillKind }> = { scheduled: { label: 'Agendada', kind: 'info' }, completed: { label: 'Completada', kind: 'ok' }, cancelled: { label: 'Cancelada', kind: 'crit' } };
@@ -215,7 +216,7 @@ export function AgendaPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[20px] font-bold">Agenda</h1>
+        <h1 className={PAGE_TITLE}>Agenda</h1>
         <div className="flex flex-wrap items-center gap-2">
           <div role="group" aria-label="Vista del calendario" className="flex gap-1">
             {(['month', 'week'] as const).map((v) => (

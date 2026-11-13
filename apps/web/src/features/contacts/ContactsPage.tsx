@@ -17,6 +17,7 @@ import { ImportDialog } from './ImportDialog';
 import { ListDialog, type ListMode } from './ListDialog';
 import { NO_CONTACT_FILTERS, SORT_LABEL, SORT_PARAMS, hasFilters, useContacts, useOwners, type ContactFilters, type SortKey } from './useContacts';
 import { useAddMembers, useLists, useUpdateList } from './useLists';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
 // Mientras llega la primera página no se sabe qué puede hacer la persona: no se ofrece nada
@@ -148,7 +149,7 @@ export function ContactsPage() {
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Contactos</h1>
+        <h1 className={PAGE_TITLE}>Contactos</h1>
         <div className="flex flex-wrap items-center gap-2">
           <ColumnMenu catalog={catalog} selected={columns} onChange={changeColumns} />
           {access.export ? <Button onClick={() => setExporting(true)}>Exportar</Button> : null}

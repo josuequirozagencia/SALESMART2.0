@@ -352,3 +352,46 @@ describe('Respuestas rápidas · gestión', () => {
     expect(await screen.findByRole('link', { name: 'Respuestas rápidas' })).toHaveAttribute('href', '/settings/quick-replies');
   });
 });
+
+// ═════════════════════════════════════════════════════════════════════════════ v13 S6 — alineación con el prototipo
+describe('Respuestas rápidas · estructura del prototipo (v13 S6)', () => {
+  it('la lista es una tabla de filas de rejilla (atajo · mensaje · ámbito · acciones) y resalta las variables del mensaje', async () => {
+    const w = world({ managed: [managed({ id: 'm1', shortcut: 'hola', body: 'Hola {{primer_nombre}}, bienvenido a {{empresa}}' }), managed({ id: 'm2', shortcut: 'sede', body: 'Estamos en Quito', shared: true, mine: false, can_edit: false })], share: true });
+    mockApi(server(w, ME_ADMIN));
+    renderApp('/settings/quick-replies');
+    const list = await screen.findByRole('list', { name: 'Respuestas rápidas' });
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).getByText('/hola').className).toMatch(/font-mono/);
+    // las variables llevan su propio estilo (mono + color de acento); el resto es texto normal
+    const vars = Array.from(rows[0]!.querySelectorAll('span.font-mono')).map((e) => e.textContent);
+    expect(vars).toEqual(expect.arrayContaining(['{{primer_nombre}}', '{{empresa}}']));
+    expect(within(rows[1]!).getByText('Compartida')).toBeInTheDocument();
+    expect(screen.getAllByText(/^(Atajo|Mensaje|Ámbito|Acciones)$/)).toHaveLength(4); // los encabezados de la tabla
+  });
+
+  it('las variables del formulario son fichas con la variable escrita (mono) y la vista previa muestra los valores de ejemplo en color y marca lo que depende del contacto', async () => {
+    const w = world({ fields: [{ id: 'f1', name: 'Ciudad', key: 'ciudad' }], share: true });
+    mockApi(server(w, ME_ADMIN));
+    renderApp('/settings/quick-replies');
+    await userEvent.click(await screen.findByRole('button', { name: 'Nueva respuesta' }));
+    const form = await screen.findByRole('dialog', { name: 'Nueva respuesta rápida' });
+    const preview = within(form).getByRole('group', { name: 'Vista previa del mensaje' });
+    expect(preview).toHaveTextContent('Escribe el mensaje para ver cómo queda.');
+    const chip = within(form).getByRole('button', { name: 'Insertar Primer nombre del contacto' });
+    expect(chip).toHaveTextContent('{{primer_nombre}}');
+    expect(chip.className).toMatch(/font-mono/);
+    await userEvent.type(within(form).getByLabelText(/Mensaje/), 'Hola ');
+    await userEvent.click(chip);
+    await userEvent.type(within(form).getByLabelText(/Mensaje/), ' de ');
+    await userEvent.click(await within(form).findByRole('button', { name: 'Insertar Ciudad' }));
+    expect(within(form).getByText('Vista previa con Juan Pérez')).toBeInTheDocument();
+    expect(preview).toHaveTextContent('Hola Juan de {{contact.ciudad}}');
+    const value = within(preview).getByText('Juan');
+    expect(value.tagName).toBe('B'); // resuelto: en color
+    expect(value.className).toMatch(/text-accent/);
+    const missing = within(preview).getByText('{{contact.ciudad}}');
+    expect(missing.tagName).toBe('MARK'); // sin resolver: marcado
+    expect(within(form).getByText(/Lo marcado depende de cada contacto/)).toBeInTheDocument();
+  });
+});

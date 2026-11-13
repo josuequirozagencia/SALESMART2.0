@@ -32,10 +32,11 @@ export interface NavGroup {
 export const isNavActive = (item: NavItem, pathname: string): boolean => (item.end ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`));
 
 const link = (compact: boolean) => ({ isActive }: { isActive: boolean }): string =>
-  `relative flex min-h-10 items-center rounded-[10px] text-[13px] font-semibold transition-colors ${compact ? 'justify-center px-0' : 'gap-2.5 px-3'} ${
+  // v13 S6: en pantallas ≥ 768 px los valores del prototipo (botón de 6 × 10 px, texto de 12,5 px, icono de 16 px; el de la barra plegada, 18 px). En móvil se conserva el área táctil de 40 px.
+  `relative flex min-h-10 items-center rounded-xl text-[13px] transition-colors md:min-h-0 md:py-1.5 md:text-[12.5px] ${compact ? 'justify-center px-0' : 'gap-2.5 px-3 md:px-2.5'} ${
     isActive
-      ? 'text-[color:var(--on-grad)] [background:var(--grad)] shadow-[0_8px_18px_var(--glow)]'
-      : 'text-white/75 hover:bg-white/10 hover:text-white'
+      ? 'font-semibold text-[color:var(--on-grad)] [background:var(--grad)] shadow-[0_8px_18px_var(--glow)]'
+      : 'font-medium text-white/75 hover:bg-white/10 hover:text-white'
   }`;
 
 /** Insignia de una sección: número (barra expandida) o punto sobre el icono (barra plegada). */
@@ -157,7 +158,7 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
                 <div className="grid gap-0.5">
                   {g.items.map((i) => (
                     <NavLink key={i.to} to={i.to} end={i.end} className={link(compact)} title={compact ? i.label : i.badge && !i.badge.label ? `${i.badge.text} sin leer` : undefined}>
-                      <Icon name={i.icon} />
+                      <Icon name={i.icon} className={compact ? 'shrink-0 md:size-[18px]' : 'shrink-0 md:size-4'} />
                       {compact ? <span className="sr-only">{i.label}</span> : <span className="min-w-0 flex-1 truncate">{i.label}</span>}
                       {i.badge ? <Badge badge={i.badge} compact={compact} /> : null}
                     </NavLink>

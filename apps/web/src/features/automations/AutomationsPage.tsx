@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import { reason } from './reason';
 import { Alert, Button, Spinner } from '../../ui/controls';
+import { PageHeader } from '../../ui/PageHeader';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { SamplePill } from '../../ui/SamplePill';
@@ -86,14 +87,10 @@ function List() {
   const max = q.data?.limits.max_automations ?? 50;
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Automatizaciones</h1>
-        <span className="flex flex-wrap gap-2">
+      <PageHeader title="Automatizaciones" description={<>Una automatización hace por ti lo repetitivo: <b>cuando ocurre</b> algo (llega un contacto, un mensaje, cambia una etapa…), <b>si se cumple</b> lo que pidas, <b>hace</b> esto otro (asignar, etiquetar, crear una tarea, enviar un mensaje…).</>} actions={<>
           <Button onClick={() => setHosts(true)}>Destinos permitidos</Button>
           <Button variant="primary" disabled={items.length >= max} onClick={() => nav('/automations/new')}>Nueva automatización</Button>
-        </span>
-      </div>
-      <p className="max-w-[70ch] text-[13px] text-muted">Una automatización hace por ti lo repetitivo: <b>cuando ocurre</b> algo (llega un contacto, un mensaje, cambia una etapa…), <b>si se cumple</b> lo que pidas, <b>hace</b> esto otro (asignar, etiquetar, crear una tarea, enviar un mensaje…).</p>
+      </>} />
       {q.isLoading ? <Spinner label="Cargando automatizaciones" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')}</Alert> : null}
       {q.data && items.length === 0 ? <p className="text-[13px] text-muted">Aún no tienes automatizaciones. Crea la primera, pruébala con un contacto y luego actívala.</p> : null}

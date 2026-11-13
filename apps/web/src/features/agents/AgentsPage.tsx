@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
+import { PageHeader } from '../../ui/PageHeader';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { SamplePill } from '../../ui/SamplePill';
@@ -59,11 +60,7 @@ export function AgentsPage() {
   const max = q.data?.limits.max_agents ?? 20;
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-[22px] font-bold">Agentes IA</h1>
-        <Button variant="primary" disabled={items.length >= max} onClick={() => setOpen('new')}>Nuevo agente</Button>
-      </div>
-      <p className="max-w-[70ch] text-[13px] text-muted">Un agente es un asistente que atiende a tus clientes con lo que tú le enseñas: su personalidad, sus documentos y las conexiones donde responde. Hoy puedes configurarlos y probarlos en el simulador; empezarán a contestar mensajes a tus clientes en una próxima versión.</p>
+      <PageHeader title="Agentes IA" description={<>Un agente es un asistente que atiende a tus clientes con lo que tú le enseñas: su personalidad, sus documentos y las conexiones donde responde. Hoy puedes configurarlos y probarlos en el simulador; empezarán a contestar mensajes a tus clientes en una próxima versión.</>} actions={<Button variant="primary" disabled={items.length >= max} onClick={() => setOpen('new')}>Nuevo agente</Button>} />
       {q.isLoading ? <Spinner label="Cargando agentes" /> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'Solo el administrador de la empresa puede ver y cambiar esto.')}</Alert> : null}
       {q.data && items.length === 0 ? <p className="text-[13px] text-muted">Aún no tienes agentes. Crea el primero para empezar.</p> : null}

@@ -16,6 +16,7 @@ import { StageColumn } from './StageColumn';
 import { StagesDialog } from './StagesDialog';
 import { countOppFilters, NO_OPP_FILTERS, useMoveOpportunity, usePipelineSummary, type OpportunityFilters } from './useOpportunities';
 import { usePipelines } from './usePipelines';
+import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const STORE = 'ss:pipeline';
 const loadChoice = (): string | null => {
@@ -109,7 +110,7 @@ export function OpportunitiesPage() {
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-[22px] font-bold">Oportunidades</h1>
+          <h1 className={PAGE_TITLE}>Oportunidades</h1>
           {current ? (
             <p className="text-[12.5px] text-muted">
               Pipeline {current.name} · {filtered > 0 ? `${shown} de ` : ''}{current.opportunity_count} oportunidad{current.opportunity_count === 1 ? '' : 'es'}
