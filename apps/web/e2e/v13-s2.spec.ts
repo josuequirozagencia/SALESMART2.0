@@ -110,7 +110,10 @@ test.describe('cabecera estrecha', () => {
     await uiLogin(page, email);
     await page.goto(`/inbox/${convId}`);
     const chat = page.getByRole('region', { name: 'Conversación con Cliente Escritorio' });
-    await expect(chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button')).toHaveCount(4);
+    const icons = chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button');
+    await expect(icons.first()).toBeVisible();
+    const all = await icons.count(); // los que tiene esta persona (el administrador, también «Eliminar conversación»)
+    expect(all).toBeGreaterThanOrEqual(4);
     await expect(chat.getByRole('button', { name: 'Más acciones' })).toHaveCount(0);
     // se estrecha la columna del chat (el ancho de la ventana depende del diseño; así la prueba no depende de él): el ResizeObserver de la cabecera debe reaccionar
     await page.addStyleTag({ content: 'section[aria-label^="Conversación con"] { flex: none !important; width: 440px !important; }' });
@@ -124,6 +127,6 @@ test.describe('cabecera estrecha', () => {
     // al ensanchar todo cabe y el «⋮» desaparece
     await page.addStyleTag({ content: 'section[aria-label^="Conversación con"] { width: 1000px !important; }' });
     await expect(chat.getByRole('button', { name: 'Más acciones' })).toHaveCount(0);
-    await expect(chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button')).toHaveCount(4);
+    await expect(chat.getByRole('group', { name: 'Acciones de la conversación' }).getByRole('button')).toHaveCount(all);
   });
 });
