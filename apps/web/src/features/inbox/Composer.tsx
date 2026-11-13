@@ -8,7 +8,7 @@ import { Icon } from '../../ui/Icon';
 import { Pill } from '../../ui/Pill';
 import { QuickRepliesDialog } from '../quick-replies/QuickRepliesPanel';
 import { AttachmentPicker } from './AttachmentPicker';
-import { ClipIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
+import { ClipIcon, ClockIcon, IconButton, MicIcon, mmss, SmileIcon, StopIcon, useVoiceRecorder, XIcon } from './composerParts';
 import { readDraft, writeDraft } from './draftStore';
 import { SuggestButton, SuggestionCard, useReplySuggestion } from './ReplySuggestion';
 import { EmojiPicker } from './EmojiPicker';
@@ -415,7 +415,8 @@ export function Composer({ c }: { c: Conversation }) {
           {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
           {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
           {!noteMode && !pendingAttachment ? <SuggestButton s={suggestion} /> : null}
-          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <Button aria-label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}>Programar</Button> : null}
+          {/* v13 S2.4: «Programar» es solo el icono del reloj (con su nombre accesible y su aviso) */}
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <IconButton label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}><ClockIcon /></IconButton> : null}
           <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
 
           </>

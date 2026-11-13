@@ -72,8 +72,7 @@ function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
 
 const tomorrow = (): string => addDays(todayIn(TZ), 1);
 const openDialog = async () => {
-  await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
-  await screen.findByRole('complementary', { name: 'Datos del contacto' });
+  // v13 S2.2: «Agendar» es un icono de la cabecera del chat (también sigue en la ficha del contacto)
   await userEvent.click(await screen.findByRole('button', { name: 'Agendar' }));
   return within(await screen.findByRole('dialog', { name: 'Agendar cita' }));
 };

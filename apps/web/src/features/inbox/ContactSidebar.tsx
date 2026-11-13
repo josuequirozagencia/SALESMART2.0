@@ -181,7 +181,8 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
         </div>
       </div>
 
-      {actions ? <AgentPanelBlock c={c} /> : null}
+      {/* v13 S2.1: el estado del agente (y por qué se pausó) vive aquí en todos los tamaños; ya no hay barra amarilla sobre el chat */}
+      <AgentPanelBlock c={c} />
 
       <QuickActions
         c={c}

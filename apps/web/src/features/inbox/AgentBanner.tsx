@@ -5,8 +5,6 @@ import { Alert, Button } from '../../ui/controls';
 import { Icon } from '../../ui/Icon';
 import { useAgentControl, useAgentStatus } from './useInbox';
 
-const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
-
 /** Por qué el agente ya no contesta, dicho para quien atiende. */
 const REASONS: Record<string, string> = {
   manual: 'Pausaste al agente en esta conversación.',
@@ -29,6 +27,29 @@ const WHOLE: Record<string, string> = {
   empty_reply: 'El agente no pudo responder. Revisa esta conversación.',
 };
 
+/** Por qué está en pausa, en pocas palabras (para el aviso del interruptor: «Agente en pausa: …»). */
+const SHORT: Record<string, string> = {
+  manual: 'lo pausaron en esta conversación',
+  human_message: 'una persona intervino',
+  human_took: 'una persona intervino',
+  no_credits: 'la empresa se quedó sin créditos de IA',
+  requested: 'el cliente pidió hablar con una persona',
+  turn_limit: 'llegó al máximo de respuestas seguidas',
+  unsupported_media: 'el cliente envió algo que no es texto',
+  ai_error: 'el servicio de IA no estuvo disponible',
+  no_support: 'no encontró en sus documentos lo que se preguntó',
+  empty_reply: 'no pudo responder',
+};
+
+/** El estado del agente en una frase corta (v13 S2.1): «Agente en pausa: una persona intervino», «Agente de IA atendiendo», … `null` si no hay nada que decir. */
+function stateText(s: AgentStatus): string | null {
+  if (!s.agent) return null;
+  if (s.state === 'active') return s.outcome === 'out_of_hours' ? 'El agente espera el horario de atención' : 'Agente de IA atendiendo';
+  if (s.state === 'idle') return null;
+  const why = s.reason ? SHORT[s.reason] : undefined;
+  return s.state === 'handed_off' ? `Agente en pausa: pasó la conversación a una persona${why ? ` (${why})` : ''}` : `Agente en pausa${why ? `: ${why}` : ''}`;
+}
+
 /** Lo que se dice del agente según su estado (el mismo texto en el aviso de arriba y en el panel del contacto). */
 function line(s: AgentStatus): ReactNode {
   const name = s.agent?.name ?? '';
@@ -50,7 +71,10 @@ export function AgentSwitch({ c, compact = false, onError }: { c: Conversation; 
   const hasAgent = !!s.agent;
   const on = hasAgent && (s.state === 'active' || s.state === 'idle');
   const blocked = !on && s.resume_blocked === 'no_credits';
-  const reason = !hasAgent ? 'Sin agente en esta conversación' : !s.can_control ? 'Solo quien atiende la conversación puede controlar al agente' : blocked ? NO_CREDITS_HINT : on ? 'Pausar al agente de IA en esta conversación' : 'Reanudar al agente de IA en esta conversación';
+  const action = !hasAgent ? 'Sin agente en esta conversación' : !s.can_control ? 'Solo quien atiende la conversación puede controlar al agente' : blocked ? NO_CREDITS_HINT : on ? 'Pausar al agente de IA en esta conversación' : 'Reanudar al agente de IA en esta conversación';
+  // v13 S2.1: sin la barra amarilla sobre el chat, el estado y el motivo se dicen aquí (apagado + aviso) y en la ficha del contacto
+  const state = stateText(s);
+  const reason = state && !on ? `${state}. ${action}` : action;
   const disabled = !hasAgent || !s.can_control || blocked || control.isPending;
   const toggle = (): void => {
     onError(undefined);
@@ -72,7 +96,7 @@ export function AgentSwitch({ c, compact = false, onError }: { c: Conversation; 
       <span aria-hidden="true" className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${on ? 'bg-accent' : 'bg-line'}`}>
         <span className={`absolute top-0.5 size-4 rounded-full bg-white shadow transition-[left] duration-150 ${on ? 'left-[18px]' : 'left-0.5'}`} />
       </span>
-      {!hasAgent ? <span className="sr-only">Sin agente en esta conversación</span> : null}
+      {!hasAgent ? <span className="sr-only">Sin agente en esta conversación</span> : state ? <span className="sr-only">{state}</span> : null}
     </button>
   );
 }
@@ -100,36 +124,6 @@ export function AgentPanelBlock({ c }: { c: Conversation }) {
       ) : null}
       {s.resume_blocked ? <p className="text-[12px]">{NO_CREDITS_HINT}</p> : null}
       {error ? <Alert>{error}</Alert> : null}
-    </div>
-  );
-}
-
-/**
- * Qué hace el agente de IA en esta conversación (M8.5, ADR-53; F17): si atiende, quien responde puede tomar el control; si se pausó o pasó la conversación a una persona, ve por qué y puede reanudarlo.
- * No se muestra si la conexión no tiene agente o el agente no ha intervenido.
- */
-export function AgentBanner({ c }: { c: Conversation }) {
-  const q = useAgentStatus(c.id);
-  const control = useAgentControl(c.id);
-  const [error, setError] = useState<string>();
-  const s = q.data;
-  if (!s || !s.agent || s.state === 'idle' || c.status === 'closed') return null;
-  const act = (a: 'pause' | 'resume'): void => {
-    setError(undefined);
-    control.mutate(a, { onError: (e) => setError(friendlyError(e, a === 'pause' ? 'No pudimos pausar al agente.' : 'No pudimos reanudar al agente.')) });
-  };
-  const active = s.state === 'active';
-  return (
-    <div role="status" aria-label="Agente de IA" className={`flex flex-wrap items-center gap-2 border-b border-line px-3 py-2 text-[13px] ${active ? 'bg-accent-soft text-fg' : 'bg-warn-soft text-warn'}`}>
-      <span aria-hidden="true">🤖</span>
-      <span className="min-w-0 flex-1">
-        {line(s)}
-      </span>
-      {s.can_control ? (
-        active ? <Button className={SMALL} loading={control.isPending} onClick={() => act('pause')}>Tomar control</Button> : <Button className={SMALL} loading={control.isPending} disabled={!!s.resume_blocked} title={s.resume_blocked ? NO_CREDITS_HINT : undefined} onClick={() => act('resume')}>Reanudar agente</Button>
-      ) : null}
-      {s.resume_blocked ? <div className="basis-full text-[12px]">{NO_CREDITS_HINT}</div> : null}
-      {error ? <div className="basis-full"><Alert>{error}</Alert></div> : null}
     </div>
   );
 }

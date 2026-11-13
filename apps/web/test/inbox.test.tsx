@@ -867,7 +867,7 @@ describe('Inbox · canal de GoHighLevel (M7.4)', () => {
       },
     });
     const open = async (): Promise<ReturnType<typeof within>> => {
-      await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+      // v13 S2.2: «Inscribir en un flujo» es un icono de la cabecera del chat (también sigue en la ficha del contacto)
       await userEvent.click(await screen.findByRole('button', { name: 'Inscribir en un flujo' }));
       return within(await screen.findByRole('dialog', { name: 'Inscribir a Ana Torres en un flujo' }));
     };

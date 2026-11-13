@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { shortDateTime } from '../../lib/format';
 import type { ScheduledMessage } from '../../lib/types';
@@ -54,8 +53,8 @@ export function ScheduledList({ conversationId }: { conversationId: string }) {
 }
 
 /**
- * Botón de reloj de la cabecera del hilo (M5.9): SIEMPRE está, con el contador de los pendientes, y abre la lista de mensajes programados de la conversación (o el aviso de que no
- * hay ninguno). Antes la lista solo aparecía sobre el redactor cuando había alguno.
+ * Los mensajes programados de la conversación en una ventana (la tarjeta «Mensajes programados» del panel del contacto en móvil). Desde v13 S2.4 los de cada conversación también se ven
+ * dentro del chat; el reloj de la cabecera de escritorio ya no existe (la lista global vive en Tareas).
  */
 export function ScheduledDialog({ conversationId, onClose }: { conversationId: string; onClose: () => void }) {
   return (
@@ -63,27 +62,5 @@ export function ScheduledDialog({ conversationId, onClose }: { conversationId: s
       <ScheduledList conversationId={conversationId} />
       <div className="flex justify-end"><Button onClick={onClose}>Cerrar</Button></div>
     </Modal>
-  );
-}
-
-export function ScheduledButton({ conversationId }: { conversationId: string }) {
-  const q = useScheduledMessages(conversationId);
-  const [open, setOpen] = useState(false);
-  const pending = (q.data?.items ?? []).filter((s) => s.status === 'scheduled').length;
-  return (
-    <>
-      <button
-        type="button"
-        aria-label={pending > 0 ? `Mensajes programados (${pending} pendientes)` : 'Mensajes programados'}
-        title="Mensajes programados"
-        aria-haspopup="dialog"
-        onClick={() => setOpen(true)}
-        className="relative grid size-11 place-items-center rounded-full border border-transparent text-muted transition hover:bg-surface2 hover:text-fg"
-      >
-        <svg aria-hidden="true" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18z" /><path d="M12 7v5l3 2" /></svg>
-        {pending > 0 ? <span aria-hidden="true" className="absolute right-0.5 top-0.5 grid min-w-[18px] place-items-center rounded-full bg-accent px-1 text-[10.5px] font-bold leading-[18px] text-accent-ink">{pending}</span> : null}
-      </button>
-      {open ? <ScheduledDialog conversationId={conversationId} onClose={() => setOpen(false)} /> : null}
-    </>
   );
 }

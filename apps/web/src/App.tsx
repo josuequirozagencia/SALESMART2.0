@@ -8,7 +8,6 @@ import { NotificationsSettingsPage } from './features/settings/NotificationsSett
 import { AnalyticsPage } from './features/analytics/AnalyticsPage';
 import { AttributionPage } from './features/attribution/AttributionPage';
 import { InboxPage } from './features/inbox/InboxPage';
-import { ScheduledOverviewPage } from './features/inbox/ScheduledOverviewPage';
 import { AgendaPage } from './features/appointments/AgendaPage';
 import { MetaPage } from './features/meta/MetaPage';
 import { AgentsPage } from './features/agents/AgentsPage';
@@ -124,7 +123,8 @@ export function App() {
       <Route element={<AppGate />}>
         <Route path="/" element={<Home />} />
         <Route path="/menu" element={<MenuPage />} />
-        <Route path="/inbox/scheduled" element={<ScheduledOverviewPage />} />
+        {/* v13 S2.3: la lista global de mensajes programados es una pestaña de Tareas; la dirección de antes redirige */}
+        <Route path="/inbox/scheduled" element={<Navigate to="/tasks?tab=scheduled" replace />} />
         <Route path="/inbox/:id?" element={<InboxPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />

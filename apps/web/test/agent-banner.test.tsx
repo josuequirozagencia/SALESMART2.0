@@ -41,13 +41,20 @@ function server(w: { status: AgentStatus | 'error'; posts: string[]; messages?: 
   return routes;
 }
 
+/** La barra amarilla sobre el chat ya no existe (v13 S2.1): el estado del agente y sus botones viven en la ficha del contacto, que se abre con «Datos del contacto». */
+async function renderChat(): Promise<void> {
+  renderApp('/inbox/c1');
+  await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
+}
+
 describe('Inbox · agente de IA en la conversación', () => {
   it('con el agente atendiendo avisa quién es y deja «Tomar control»; al pulsarlo lo pausa y ofrece reanudarlo', async () => {
     const w = { status: STATUS(), posts: [] as string[] };
     mockApi(server(w));
-    renderApp('/inbox/c1');
+    await renderChat();
     const banner = await screen.findByRole('status', { name: 'Agente de IA' });
     expect(banner).toHaveTextContent('Agente de IA atendiendo');
+    expect(screen.getByRole('switch', { name: 'Agente de IA' })).toBeChecked();
     await userEvent.click(screen.getByRole('button', { name: 'Tomar control' }));
     await waitFor(() => expect(w.posts).toEqual(['pause']));
     expect(await screen.findByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
@@ -64,7 +71,7 @@ describe('Inbox · agente de IA en la conversación', () => {
     ['ai_error', 'El servicio de IA no estuvo disponible.'],
   ])('cuando el agente pasó la conversación a una persona (%s) dice por qué', async (reason, text) => {
     mockApi(server({ status: STATUS({ state: reason === 'no_credits' ? 'paused' : 'handed_off', reason }), posts: [] }));
-    renderApp('/inbox/c1');
+    await renderChat();
     const banner = await screen.findByRole('status', { name: 'Agente de IA' });
     expect(banner).toHaveTextContent(text);
     expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
@@ -76,14 +83,14 @@ describe('Inbox · agente de IA en la conversación', () => {
     ['empty_reply', 'handed_off', 'El agente no pudo responder. Revisa esta conversación.'],
   ] as const)('texto aprobado para %s', async (reason, state, text) => {
     mockApi(server({ status: STATUS({ state, reason }), posts: [] }));
-    renderApp('/inbox/c1');
+    await renderChat();
     expect(await screen.findByRole('status', { name: 'Agente de IA' })).toHaveTextContent(text);
     expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeInTheDocument();
   });
 
   it('sin créditos disponibles, «Reanudar agente» queda desactivado y dice por qué', async () => {
     mockApi(server({ status: STATUS({ state: 'paused', reason: 'no_credits', resume_blocked: 'no_credits' }), posts: [] }));
-    renderApp('/inbox/c1');
+    await renderChat();
     const banner = await screen.findByRole('status', { name: 'Agente de IA' });
     expect(banner).toHaveTextContent('la empresa no tiene créditos de IA disponibles');
     expect(screen.getByRole('button', { name: 'Reanudar agente' })).toBeDisabled();
@@ -91,36 +98,60 @@ describe('Inbox · agente de IA en la conversación', () => {
 
   it('con el agente activo fuera del horario dice que espera el horario de atención y deja «Tomar control»', async () => {
     mockApi(server({ status: STATUS({ outcome: 'out_of_hours' }), posts: [] }));
-    renderApp('/inbox/c1');
+    await renderChat();
     expect(await screen.findByRole('status', { name: 'Agente de IA' })).toHaveTextContent('El agente espera el horario de atención.');
     expect(screen.getByRole('button', { name: 'Tomar control' })).toBeInTheDocument();
   });
 
   it('no se muestra si la conexión no tiene agente, si no ha intervenido o si la conversación está finalizada', async () => {
     mockApi(server({ status: STATUS({ agent: null, state: 'idle', can_control: false }), posts: [] }));
-    renderApp('/inbox/c1');
-    await screen.findByRole('heading', { name: 'Ana Torres' });
+    await renderChat();
+    await screen.findAllByRole('heading', { name: 'Ana Torres' });
     expect(screen.queryByRole('status', { name: 'Agente de IA' })).not.toBeInTheDocument();
   });
 
   it('si la consulta del agente falla, la conversación se ve igual sin el aviso', async () => {
     mockApi(server({ status: 'error', posts: [] }));
-    renderApp('/inbox/c1');
-    await screen.findByRole('heading', { name: 'Ana Torres' });
+    await renderChat();
+    await screen.findAllByRole('heading', { name: 'Ana Torres' });
     expect(screen.queryByRole('status', { name: 'Agente de IA' })).not.toBeInTheDocument();
   });
 
   it('sin permiso de control muestra el aviso pero no los botones', async () => {
     mockApi(server({ status: STATUS({ can_control: false }), posts: [] }));
-    renderApp('/inbox/c1');
+    await renderChat();
     await screen.findByRole('status', { name: 'Agente de IA' });
     expect(screen.queryByRole('button', { name: 'Tomar control' })).not.toBeInTheDocument();
   });
 
   it('los mensajes del agente llevan la etiqueta «Agente de IA» y no el nombre de una persona', async () => {
     mockApi(server({ status: STATUS(), posts: [], messages: [msg(), msg({ id: 'm2', direction: 'out', sender_type: 'ai', text: 'Abrimos de 9 a 18', status: 'sent', sent_at: ago(5 * MIN) })] }));
-    renderApp('/inbox/c1');
+    await renderChat();
     expect(await screen.findByText('Abrimos de 9 a 18')).toBeInTheDocument();
     expect(screen.getAllByText('Agente de IA').length).toBeGreaterThan(0);
+  });
+
+  it('v13 S2.1: sin barra sobre el chat; el interruptor queda apagado y dice por qué («Agente en pausa: una persona intervino»)', async () => {
+    mockApi(server({ status: STATUS({ state: 'paused', reason: 'human_message' }), posts: [] }));
+    renderApp('/inbox/c1');
+    const sw = await screen.findByRole('switch', { name: 'Agente de IA' });
+    expect(sw).not.toBeChecked();
+    expect(sw).toHaveAttribute('title', expect.stringContaining('Agente en pausa: una persona intervino'));
+    expect(sw).toHaveTextContent('Agente en pausa: una persona intervino'); // para quien usa lector de pantalla (texto solo visual para ellos)
+    // nada de la barra: ni el aviso ni sus botones sobre el chat (el panel del contacto está cerrado)
+    expect(screen.queryByRole('status', { name: 'Agente de IA' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reanudar agente' })).not.toBeInTheDocument();
+  });
+
+  it('v13 S2.1: atendiendo, el interruptor está encendido y pausarlo desde la cabecera manda la pausa', async () => {
+    const w = { status: STATUS(), posts: [] as string[] };
+    mockApi(server(w));
+    renderApp('/inbox/c1');
+    const sw = await screen.findByRole('switch', { name: 'Agente de IA' });
+    expect(sw).toBeChecked();
+    await userEvent.click(sw);
+    await waitFor(() => expect(w.posts).toEqual(['pause']));
+    await waitFor(() => expect(screen.getByRole('switch', { name: 'Agente de IA' })).not.toBeChecked());
+    expect(screen.getByRole('switch', { name: 'Agente de IA' })).toHaveAttribute('title', expect.stringContaining('Agente en pausa: lo pausaron en esta conversación'));
   });
 });

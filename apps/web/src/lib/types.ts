@@ -1004,7 +1004,7 @@ export interface ScheduledPageData {
   items: ScheduledListItem[];
   next_cursor: string | null;
   /** Solo en la primera página. */
-  counts: { scheduled: number; not_sent: number } | null;
+  counts: { scheduled: number; not_sent: number; sent: number } | null;
 }
 
 /** Respuesta rápida (M5.6b, ADR-50): texto guardado que se inserta con `/atajo`. El texto trae las variables sin resolver. */

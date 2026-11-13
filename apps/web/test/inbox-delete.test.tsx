@@ -34,18 +34,16 @@ function server(canDelete: boolean, deletes: string[]) {
 }
 
 describe('Inbox · eliminar conversación (ADR-63)', () => {
-  it('con permiso: «Más › Eliminar conversación» pide confirmación (que dice que los mensajes se conservan) y, al confirmar, la elimina y vuelve a la lista', async () => {
+  it('con permiso: el icono «Eliminar conversación» pide confirmación (que dice que los mensajes se conservan) y, al confirmar, la elimina y vuelve a la lista', async () => {
     const deletes: string[] = [];
     mockApi(server(true, deletes));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Eliminar conversación' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Eliminar conversación' }));
     const dialog = screen.getByRole('dialog', { name: 'Eliminar la conversación' });
     expect(dialog).toHaveTextContent('Los mensajes se conservan');
     await userEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
     expect(deletes).toEqual([]);
-    await userEvent.click(screen.getByRole('button', { name: 'Más acciones' }));
-    await userEvent.click(screen.getByRole('menuitem', { name: 'Eliminar conversación' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Eliminar conversación' }));
     await userEvent.click(screen.getByRole('button', { name: 'Sí, eliminar' }));
     await waitFor(() => expect(deletes).toEqual(['c1']));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Eliminar la conversación' })).not.toBeInTheDocument());
@@ -54,7 +52,7 @@ describe('Inbox · eliminar conversación (ADR-63)', () => {
   it('sin permiso no aparece la opción', async () => {
     mockApi(server(false, []));
     renderApp('/inbox/c1');
-    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
-    expect(screen.queryByRole('menuitem', { name: 'Eliminar conversación' })).not.toBeInTheDocument();
+    await screen.findByRole('button', { name: 'Finalizar' }); // la cabecera ya cargó
+    expect(screen.queryByRole('button', { name: 'Eliminar conversación' })).not.toBeInTheDocument();
   });
 });

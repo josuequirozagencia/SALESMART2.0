@@ -4,6 +4,7 @@ import { friendlyError } from '../../lib/errors';
 import type { Task } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { useOwners } from '../contacts/useContacts';
+import { ScheduledMessagesPanel } from '../inbox/ScheduledOverviewPage';
 import { TaskDialog } from './TaskDialog';
 import { completionNotice, TaskRow } from './TasksPanel';
 import { DEFAULT_TASK_FILTERS, useTask, useTasks, type TaskFilters, type TaskStatusFilter } from './useCrm';
@@ -21,6 +22,9 @@ export function TasksPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [params, setParams] = useSearchParams();
   const wanted = params.get('task');
+  // v13 S2.3: los mensajes programados (antes, la pantalla `/inbox/scheduled`) son una pestaña de esta pantalla: `?tab=scheduled`
+  const tab: 'tasks' | 'scheduled' = params.get('tab') === 'scheduled' ? 'scheduled' : 'tasks';
+  const pickTab = (t: 'tasks' | 'scheduled'): void => setParams(t === 'scheduled' ? { tab: 'scheduled' } : {}, { replace: true });
   const one = useTask(wanted);
   const q = useTasks(filters);
   const items = useMemo(() => q.data?.pages.flatMap((p) => p.items) ?? [], [q.data]);
@@ -40,8 +44,16 @@ export function TasksPage() {
     <div className="grid gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-[22px] font-bold">Tareas</h1>
-        {canWrite ? <Button variant="primary" onClick={() => setDialog({})}>Nueva tarea</Button> : null}
+        {canWrite && tab === 'tasks' ? <Button variant="primary" onClick={() => setDialog({})}>Nueva tarea</Button> : null}
       </div>
+      <div role="tablist" aria-label="Sección" className="flex gap-1.5 border-b border-line pb-2">
+        {([['tasks', 'Tareas'], ['scheduled', 'Mensajes programados']] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => pickTab(id)} className={`rounded-full border px-4 py-1.5 text-[13px] font-semibold ${tab === id ? 'border-accent bg-accent-soft text-accent' : 'border-line text-muted hover:text-fg'}`}>{label}</button>
+        ))}
+      </div>
+      {tab === 'scheduled' ? <ScheduledMessagesPanel /> : null}
+      {tab === 'tasks' ? (
+      <>
       <div className="flex flex-wrap items-end gap-3">
         <div role="tablist" aria-label="Estado de las tareas" className="flex gap-1.5">
           {(Object.keys(STATUS_LABEL) as TaskStatusFilter[]).map((s) => (
@@ -75,6 +87,8 @@ export function TasksPage() {
       <ul className="grid gap-2">{items.map((t) => <TaskRow key={t.id} task={t} onOpen={(task) => setDialog({ task })} onCompleted={(done) => setNotice(completionNotice(done))} />)}</ul>
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
       {shown ? <TaskDialog key={shown.task?.id ?? 'new'} {...(shown.task ? { task: shown.task } : {})} owners={owners.data ?? []} canAssign={viewAll} onClose={closeDialog} /> : null}
+      </>
+      ) : null}
     </div>
   );
 }

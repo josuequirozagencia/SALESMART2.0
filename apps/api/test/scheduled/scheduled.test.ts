@@ -2,6 +2,7 @@
 //   GET /v1/conversations/:id/scheduled
 //   POST /v1/conversations/:id/scheduled
 //   DELETE /v1/conversations/:id/scheduled/:scheduledId
+//   POST /v1/conversations/:id/scheduled/:scheduledId/send
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
@@ -317,6 +318,41 @@ describe('listar y cancelar', () => {
     await runDue();
     expect(await code(await call('DELETE', `/conversations/${conv}/scheduled/${sent.id}`, T.carol))).toBe('SCHEDULE_NOT_PENDING');
     expect((await call('DELETE', `/conversations/${conv}/scheduled/${NOBODY}`, T.carol)).status).toBe(404);
+  });
+
+  it('«Enviar ahora» (v13 S2.4): lo saca al instante como mensaje normal; solo quien lo programó o quien ve todo; repetir da 409; A↔B 404', async () => {
+    const conv = await mkConv();
+    await ok(await call('POST', `/conversations/${conv}/share`, T.carol, { user_id: IDS.eve, permission: 'reply' }));
+    const a = await mk(T.carol, conv, 'Te mando la ubicación', 30 * MIN);
+    expect((await call('POST', `/conversations/${conv}/scheduled/${a.id}/send`, undefined)).status).toBe(401);
+    expect((await call('POST', `/conversations/${conv}/scheduled/${a.id}/send`, T.bob)).status).toBe(404); // otra empresa
+    const forbidden = await call('POST', `/conversations/${conv}/scheduled/${a.id}/send`, T.eve); // colaboradora con permiso, pero no lo programó
+    expect(forbidden.status).toBe(403);
+    expect(await code(forbidden)).toBe('SCHEDULE_NOT_YOURS');
+    expect(await msgs(conv)).toEqual([]);
+    const done = await ok<Sch>(await call('POST', `/conversations/${conv}/scheduled/${a.id}/send`, T.carol));
+    expect(done).toMatchObject({ status: 'sent', can_cancel: false });
+    expect(await msgs(conv)).toMatchObject([{ sender_type: 'human', body: 'Te mando la ubicación', created_by: IDS.carol }]);
+    expect((await row(a.id)).message_id).not.toBeNull();
+    expect(fake().outbox.length).toBe(1);
+    expect(await code(await call('POST', `/conversations/${conv}/scheduled/${a.id}/send`, T.carol))).toBe('SCHEDULE_NOT_PENDING');
+    expect(await runDue()).toBe(0); // la tarea ya no lo toca
+    expect(fake().outbox.length).toBe(1);
+    expect((await audit('scheduled_message', a.id)).map((r) => r.field)).toEqual([null, 'status']);
+    // quien ve todo (administrador) lo envía en su nombre
+    const b = await mk(T.carol, conv, 'Otro', 40 * MIN);
+    await ok(await call('POST', `/conversations/${conv}/scheduled/${b.id}/send`, T.alice));
+    expect((await msgs(conv)).map((m) => m.created_by)).toEqual([IDS.carol, IDS.alice]);
+    expect((await call('POST', `/conversations/${conv}/scheduled/${NOBODY}/send`, T.carol)).status).toBe(404);
+  });
+
+  it('«Enviar ahora» con la ventana de 24 h cerrada: 409 WINDOW_CLOSED y el mensaje sigue programado', async () => {
+    const conv = await mkConv();
+    const a = await mk(T.carol, conv, 'Texto', 30 * MIN);
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '30 hours' WHERE id = $1`, [conv]);
+    expect(await code(await call('POST', `/conversations/${conv}/scheduled/${a.id}/send`, T.carol))).toBe('WINDOW_CLOSED');
+    expect((await row(a.id)).status).toBe('scheduled');
+    expect(await msgs(conv)).toEqual([]);
   });
 
   it('un mensaje cancelado nunca sale', async () => {
