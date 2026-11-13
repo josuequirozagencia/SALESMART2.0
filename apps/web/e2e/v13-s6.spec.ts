@@ -11,6 +11,8 @@ test.describe('escritorio 1440 × 900', () => {
 
   test('la barra lateral usa los valores del prototipo: icono de 16 px, texto de 12,5 px y botón compacto', async ({ page, request }) => {
     const email = await createAccount(request, uniqueEmail('v13s6side'));
+    // «Cómodo»: con el «Compacto» de escritorio (por omisión, v11) la escala baja 3 px con piso de 10 px y el texto mediría 10 px; aquí se mide el valor del prototipo
+    await page.addInitScript(() => window.localStorage.setItem('ss.textsize.v1', 'comfortable'));
     await uiLogin(page, email);
     await expect(page.getByRole('heading', { name: /Hola, / })).toBeVisible();
     const nav = page.getByRole('navigation', { name: /Secciones/ });

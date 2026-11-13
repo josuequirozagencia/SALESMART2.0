@@ -1366,7 +1366,7 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     await page.getByRole('link', { name: 'Departamentos' }).click();
     // Desde M10.6 la empresa nace con el departamento de ejemplo «General» (con reparto apagado)
     await expect(page.getByRole('button', { name: 'Configurar General' })).toBeVisible();
-    await page.getByRole('button', { name: 'Nuevo departamento' }).click();
+    await page.getByRole('button', { name: 'Nuevo departamento', exact: true }).click(); // exact: la tarjeta punteada «Nuevo departamento: nombre, color…» también coincide por subcadena
     const nuevo = page.getByRole('dialog', { name: 'Nuevo departamento' });
     // Asistente (M10.1): nombre → equipo → horario (el de la empresa) → reparto
     await nuevo.getByLabel('Nombre').fill('Ventas');
