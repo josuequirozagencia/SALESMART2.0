@@ -57,7 +57,7 @@ describe('HeaderActionBar · desbordamiento con ResizeObserver', () => {
     const host = document.createElement('div');
     define(host, 'offsetWidth', () => 0);
     row.append(host);
-    return render(<HeaderActionBar actions={acts(total)} rowRef={{ current: row }} />, { container: host });
+    return render(<HeaderActionBar actions={acts(total)} row={row} />, { container: host });
   }
   const resize = (): void => { act(() => { for (const cb of observers) cb(); }); };
   const labels = (): Array<string | null> => within(screen.getByRole('group', { name: 'Acciones de la conversación' })).getAllByRole('button').map((b) => b.getAttribute('aria-label'));
@@ -102,6 +102,33 @@ describe('HeaderActionBar · desbordamiento con ResizeObserver', () => {
     cleanup();
     mount(8, width);
     expect(labels()).toHaveLength(MAX_VISIBLE + 1); // 6 iconos y el «⋮»
+  });
+
+  it('la fila llega DESPUÉS del primer montaje (como en la cabecera real: el padre la recibe con un ref en estado): al llegar se mide y el observador se engancha', () => {
+    observers = [];
+    vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+    const width = { v: 600 };
+    const row = document.createElement('div');
+    document.body.append(row);
+    define(row, 'clientWidth', () => width.v);
+    const title = document.createElement('div');
+    title.dataset['flex'] = '';
+    row.append(title);
+    const fixed = document.createElement('div');
+    define(fixed, 'offsetWidth', () => 300);
+    row.append(fixed);
+    const host = document.createElement('div');
+    define(host, 'offsetWidth', () => 0);
+    row.append(host);
+    const view = render(<HeaderActionBar actions={acts(4)} row={null} />, { container: host });
+    expect(labels()).toEqual(['Acción 1', 'Acción 2', 'Acción 3', 'Acción 4']); // sin fila todavía no se pliega nada
+    expect(observers).toHaveLength(0);
+    view.rerender(<HeaderActionBar actions={acts(4)} row={row} />);
+    expect(labels()).toEqual(['Acción 1', 'Más acciones']); // con la fila medida: caben 1 y el «⋮»
+    expect(observers.length).toBeGreaterThan(0); // y quedó observando los cambios de tamaño
+    width.v = 1400;
+    resize();
+    expect(labels()).toEqual(['Acción 1', 'Acción 2', 'Acción 3', 'Acción 4']);
   });
 
   it('sin acciones no pinta nada; un separador aparta las frecuentes de las demás', () => {

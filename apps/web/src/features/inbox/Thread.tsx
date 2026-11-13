@@ -95,7 +95,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const [sale, setSale] = useState(false);
   const [appointment, setAppointment] = useState(false);
   const [flows, setFlows] = useState(false);
-  const rowRef = useRef<HTMLDivElement>(null);
+  const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
   const goBack = useGoBack();
@@ -150,14 +150,14 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   }
   return (
     <header className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line bg-surface px-3 py-2.5">
-      <div ref={rowRef} className="flex items-center gap-2.5">
+      <div ref={setRowEl} className="flex items-center gap-2.5">
         <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 md:hidden">←</Link>
         <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
         <div data-flex="" className="min-w-0 flex-1">
           <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR</span> : null}</p>
         </div>
-        <HeaderActionBar actions={actions} rowRef={rowRef} />
+        <HeaderActionBar actions={actions} row={rowEl} />
         <div className="flex shrink-0 items-center gap-1">
           {onToggleList ? (
             <button
