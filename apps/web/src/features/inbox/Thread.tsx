@@ -10,14 +10,17 @@ import { useChatBackground } from '../../ui/chatBackground';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
-import { Menu, type MenuItem } from '../../ui/Menu';
 import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { Pill } from '../../ui/Pill';
+import { AppointmentDialog } from '../appointments/AppointmentDialog';
+import { GhlFlowsDialog } from '../ghl/GhlFlowsPanel';
+import { SaleDialog } from '../sales/SaleDialog';
 import { usePhotos } from '../photos/usePhotos';
-import { AgentBanner, AgentSwitch } from './AgentBanner';
+import { AgentSwitch } from './AgentBanner';
 import { Composer } from './Composer';
 import { ConversationTags, TagsPopoverButton } from './ConversationTags';
-import { ScheduledButton } from './ScheduledList';
+import { HeaderActionBar, type HeaderAction } from './HeaderActions';
+import { ScheduledBubbles, useThreadScheduled } from './ScheduledBubbles';
 import { SlaPill } from './SlaPill';
 import { dayKey, dayLabel, personName, STATUS_PILL } from './inboxFormat';
 import { MessageBubble } from './MessageBubble';
@@ -89,6 +92,10 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const [confirm, setConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [dialog, setDialog] = useState(false);
+  const [sale, setSale] = useState(false);
+  const [appointment, setAppointment] = useState(false);
+  const [flows, setFlows] = useState(false);
+  const rowRef = useRef<HTMLDivElement>(null);
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
   const goBack = useGoBack();
@@ -96,12 +103,16 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const scheduledPending = (scheduled.data?.items ?? []).filter((m) => m.status === 'scheduled').length;
   const collaborator = c.my_access === 'collaborator_reply' || c.my_access === 'collaborator_view';
   const status = STATUS_PILL[c.status];
-  // «⋯ Más» (M5.10): lo que no se usa a cada rato —transferir, dejar de participar, finalizar— sale de la cabecera y se junta en un menú; Aceptar y Asignarme siguen a la vista
-  const more: MenuItem[] = [];
-  if (c.can.transfer || c.can.share) more.push({ label: 'Transferir', onSelect: () => setDialog(true) });
-  if (collaborator) more.push({ label: 'Dejar de participar', onSelect: () => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); } });
-  if (c.can.close) more.push({ label: 'Finalizar', danger: true, onSelect: () => setConfirm(true) });
-  if (c.can.delete) more.push({ label: 'Eliminar conversación', danger: true, onSelect: () => setDeleting(true) });
+  // v13 S2.2: las acciones de la conversación son iconos de la cabecera (antes, el botón «Más ⋯»), las frecuentes primero; si no caben, un único «⋮» recoge las últimas. Aceptar y Asignarme siguen a la vista.
+  // «Registrar venta», «Agendar» y el flujo de GoHighLevel los pide quien atiende la conversación (su dueño o quien ve todo), igual que en la ficha del contacto; el servidor vuelve a verificarlo
+  const attends = c.owner !== null && (c.my_access === 'owner' || c.my_access === 'supervisor');
+  const actions: HeaderAction[] = [];
+  if (attends) actions.push({ id: 'sale', label: 'Registrar venta', icon: 'dollar', group: 1, onSelect: () => setSale(true) }, { id: 'appointment', label: 'Agendar', icon: 'calendar', group: 1, onSelect: () => setAppointment(true) });
+  if (c.can.transfer || c.can.share) actions.push({ id: 'transfer', label: 'Transferir o compartir', icon: 'swap', group: 1, onSelect: () => setDialog(true) });
+  if (c.can.close) actions.push({ id: 'close', label: 'Finalizar', icon: 'check', group: 1, danger: true, onSelect: () => setConfirm(true) });
+  if (attends && c.channel.kind === 'ghl') actions.push({ id: 'flows', label: 'Inscribir en un flujo', icon: 'bolt', group: 2, onSelect: () => setFlows(true) });
+  if (collaborator) actions.push({ id: 'leave', label: 'Dejar de participar', icon: 'logout', group: 2, onSelect: () => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); } });
+  if (c.can.delete) actions.push({ id: 'delete', label: 'Eliminar conversación', icon: 'trash', group: 2, danger: true, onSelect: () => setDeleting(true) });
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
     onBackError(undefined);
     act.mutate(a, { onSettled: () => setConfirm(false), onError: (e) => onBackError(friendlyError(e, fallback)) });
@@ -139,13 +150,14 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   }
   return (
     <header className="grid grid-cols-[minmax(0,1fr)] gap-2 border-b border-line bg-surface px-3 py-2.5">
-      <div className="flex items-center gap-2.5">
+      <div ref={rowRef} className="flex items-center gap-2.5">
         <Link to="/inbox" aria-label="Volver a las conversaciones" className="grid size-11 shrink-0 place-items-center rounded-full text-muted hover:bg-surface2 md:hidden">←</Link>
         <Avatar name={c.contact.name} src={headPhotos.contact(c.contact.id)} size={40} />
-        <div className="min-w-0 flex-1">
+        <div data-flex="" className="min-w-0 flex-1">
           <h2 onClick={onToggleContact} title="Ver los datos del contacto" className="cursor-pointer truncate text-[15px] font-bold hover:underline">{c.contact.name}</h2>
           <p className="truncate text-[12.5px] text-muted">{c.contact.phone ?? 'Sin teléfono'} · {c.channel.name}{c.queue ? ` · ${c.queue.name}` : ''}{c.channel.kind === 'qr' ? <span className="ml-1.5 rounded-full border border-warn bg-warn-soft px-1.5 py-px text-[10.5px] font-semibold text-warn">QR</span> : null}</p>
         </div>
+        <HeaderActionBar actions={actions} rowRef={rowRef} />
         <div className="flex shrink-0 items-center gap-1">
           {onToggleList ? (
             <button
@@ -166,7 +178,6 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
           ) : null}
           <AgentSwitch c={c} onError={onBackError} />
           <FavoriteButton c={c} />
-          <ScheduledButton conversationId={c.id} />
           <button
             type="button"
             aria-label="Datos del contacto"
@@ -199,12 +210,14 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
           <>
             {c.can.accept ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('accept', 'No pudimos aceptar la conversación.')}>Aceptar</Button> : null}
             {c.can.take ? <Button variant="primary" className={SMALL} loading={act.isPending} onClick={() => run('take', 'No pudimos asignarte la conversación.')}>Asignarme</Button> : null}
-            <Menu label="Más acciones" items={more}>Más <span aria-hidden="true">⋯</span></Menu>
           </>
         )}
         </div>
         {deleting ? <DeleteConversationDialog c={c} onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); navigate('/inbox'); }} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
+        {sale ? <SaleDialog c={c} onClose={() => setSale(false)} /> : null}
+        {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
+        {flows ? <GhlFlowsDialog contact={c.contact} onClose={() => setFlows(false)} /> : null}
       </div>
     </header>
   );
@@ -249,12 +262,14 @@ function Messages({ c }: { c: Conversation }) {
   const authorIds = useMemo(() => items.flatMap((m) => (m.author && m.direction === 'out' && !m.is_note ? [m.author.id] : [])), [items]);
   const photos = usePhotos([c.contact.id], authorIds);
   const last = items[items.length - 1]?.id;
+  // v13 S2.4: los mensajes programados se ven al final del hilo, con su hora y sus acciones
+  const scheduled = useThreadScheduled(c.id);
 
   // Se queda al final mientras la persona no haya subido a leer lo anterior
   useLayoutEffect(() => {
     const el = box.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [last, items.length]);
+  }, [last, items.length, scheduled.items.length]);
   useEffect(() => {
     const added = items.length - counted.current;
     const hadSome = counted.current > 0;
@@ -310,6 +325,7 @@ function Messages({ c }: { c: Conversation }) {
           </Fragment>
         ))}
       </ul>
+      <ScheduledBubbles c={c} items={scheduled.items} timeZone={scheduled.timeZone} />
     </div>
     {newCount > 0 ? (
       <button type="button" onClick={toBottom} className="absolute bottom-3 right-3 z-[2] inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-semibold text-accent-ink shadow-[var(--shadow)]">
@@ -330,7 +346,6 @@ export function Thread({ id, meId, layout }: { id: string; meId: string; layout:
   const { mutate: markRead } = useMarkRead(id);
   const tried = useRef('');
   const [actionError, setActionError] = useState<string>();
-  const mobile = useBreakpoint() === 'mobile';
   const c = q.data;
   const unread = c && c.owner?.id === meId ? c.unread_count : 0;
 
@@ -359,7 +374,6 @@ export function Thread({ id, meId, layout }: { id: string; meId: string; layout:
     <section aria-label={`Conversación con ${c.contact.name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <Header c={c} meId={meId} onBackError={setActionError} layout={layout} />
       {actionError ? <div className="px-3 pt-2"><Alert>{actionError}</Alert></div> : null}
-      {mobile ? null : <AgentBanner c={c} />}
       <Messages c={c} />
       <Composer key={c.id} c={c} />
     </section>

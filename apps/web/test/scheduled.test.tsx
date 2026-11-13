@@ -130,10 +130,10 @@ describe('Redactor · programar', () => {
     expect(Math.abs(new Date(sent.send_at).getTime() - (before + HOUR))).toBeLessThan(2 * MIN);
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Programar mensaje' })).not.toBeInTheDocument());
     await waitFor(() => expect(input.value).toBe(''));
-    // el pendiente aparece en la lista de la conversación
-    const list = await openScheduled();
-    expect(within(list).getByText('Programado')).toBeInTheDocument();
-    expect(within(list).getByText('Hola Ana, ¿pudiste ver la propuesta?')).toBeInTheDocument();
+    // el pendiente aparece dentro del chat (v13 S2.4)
+    const list = within(await screen.findByRole('list', { name: 'Mensajes programados de esta conversación' }));
+    expect(list.getByText(/Mensaje programado · /)).toBeInTheDocument();
+    expect(list.getByText('Hola Ana, ¿pudiste ver la propuesta?')).toBeInTheDocument();
   });
 
   it('con la ventana por cerrarse solo ofrece horas que caben, y avisa hasta cuándo se puede', async () => {
@@ -221,64 +221,4 @@ describe('Redactor · programar', () => {
   });
 });
 
-/** Abre la lista de mensajes programados con el reloj de la cabecera del hilo (M5.9). */
-const openScheduled = async () => {
-  await userEvent.click(await screen.findByRole('button', { name: /^Mensajes programados/ }));
-  return screen.findByRole('region', { name: 'Mensajes programados' });
-};
-
-describe('Mensajes programados de la conversación', () => {
-  it('lista los pendientes con su hora; cancelar manda el DELETE y el mensaje queda como cancelado', async () => {
-    const w = world({ scheduled: [sch()] });
-    mockApi(server(w));
-    renderApp('/inbox/c1');
-    const list = await openScheduled();
-    expect(within(list).getByText('Programado')).toBeInTheDocument();
-    expect(within(list).getByText('Te escribo luego')).toBeInTheDocument();
-    await userEvent.click(within(list).getByRole('button', { name: /Cancelar el mensaje programado para/ }));
-    await waitFor(() => expect(w.posts).toEqual([{ method: 'DELETE', path: '/conversations/c1/scheduled/s1', body: undefined }]));
-    expect(await within(list).findByText('Cancelado')).toBeInTheDocument();
-    expect(within(list).getByText('Se canceló.')).toBeInTheDocument();
-    expect(within(list).queryByRole('button', { name: /Cancelar el mensaje/ })).not.toBeInTheDocument();
-  });
-
-  it('los de otra persona muestran quién los dejó y, si no puedo cancelarlos, no hay botón', async () => {
-    mockApi(server(world({ scheduled: [sch({ mine: false, can_cancel: false, author: { id: 'u9', name: 'Eva Mora' } })] })));
-    renderApp('/inbox/c1');
-    const list = await openScheduled();
-    expect(within(list).getByText(/Eva Mora/)).toBeInTheDocument();
-    expect(within(list).queryByRole('button', { name: /Cancelar el mensaje/ })).not.toBeInTheDocument();
-  });
-
-  it('los que no salieron explican por qué', async () => {
-    mockApi(server(world({ scheduled: [
-      sch({ id: 'a', status: 'cancelled', reason: 'customer_replied', can_cancel: false, text: 'Uno' }),
-      sch({ id: 'b', status: 'failed', reason: 'window_closed', can_cancel: false, text: 'Dos' }),
-      sch({ id: 'c', status: 'failed', reason: 'channel_unavailable', can_cancel: false, text: 'Tres' }),
-    ] })));
-    renderApp('/inbox/c1');
-    const list = await openScheduled();
-    expect(within(list).getByText('Se canceló porque el cliente escribió antes.')).toBeInTheDocument();
-    expect(within(list).getByText(/se cerró la ventana de 24 h de WhatsApp/)).toBeInTheDocument();
-    expect(within(list).getByText('No salió: la conexión de WhatsApp estaba desactivada.')).toBeInTheDocument();
-  });
-
-  it('el reloj de la cabecera SIEMPRE está: con pendientes muestra el contador y sin ninguno la lista vacía explica cómo programar', async () => {
-    mockApi(server(world({ scheduled: [sch(), sch({ id: 's2', text: 'Otro' }), sch({ id: 's3', status: 'cancelled', reason: 'customer_replied', can_cancel: false, text: 'Viejo' })] })));
-    renderApp('/inbox/c1');
-    const btn = await screen.findByRole('button', { name: 'Mensajes programados (2 pendientes)' });
-    expect(within(btn).getByText('2')).toBeInTheDocument();
-    expect(screen.queryByRole('region', { name: 'Mensajes programados' })).not.toBeInTheDocument(); // cerrada hasta que se pide
-    await userEvent.click(btn);
-    expect(within(await screen.findByRole('dialog', { name: 'Mensajes programados' })).getAllByText('Programado')).toHaveLength(2);
-  });
-
-  it('sin mensajes programados el reloj sigue ahí y la lista dice que no hay ninguno', async () => {
-    mockApi(server(world()));
-    renderApp('/inbox/c1');
-    await box();
-    const list = await openScheduled();
-    expect(within(list).getByText('No hay mensajes programados. Usa «Programar» en el redactor.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Mensajes programados' })).toBeInTheDocument();
-  });
-});
+// La lista de los programados de cada conversación vive ahora DENTRO del chat (v13 S2.4) y la global en Tareas: sus pruebas están en `inbox-v13-s2.test.tsx`.

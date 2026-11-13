@@ -141,10 +141,9 @@ describe('Inbox · transferir', () => {
     mockApi(server(world({ conv: conv({ can: { ...FULL, transfer: false, share: false } }) })));
     renderApp('/inbox/c1');
     await screen.findByRole('heading', { name: 'Ana Torres' });
-    // el menú «⋯ Más» queda con lo que sí puede (finalizar), sin «Transferir»
-    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
-    expect(await screen.findByRole('menuitem', { name: 'Finalizar' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'Transferir' })).not.toBeInTheDocument();
+    // la cabecera queda con lo que sí puede (finalizar), sin el icono de transferir
+    expect(await screen.findByRole('button', { name: 'Finalizar' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Transferir o compartir' })).not.toBeInTheDocument();
   });
 });
 
@@ -202,9 +201,9 @@ describe('Inbox · como colaborador', () => {
     expect(await screen.findByText('Te compartieron esta conversación solo para ver y dejar notas: no puedes escribirle al cliente.')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: 'Mensaje' })).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Nota interna' })).toBeEnabled();
-    // el menú «⋯ Más» solo le deja salirse: ni transferir ni finalizar
-    await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
-    expect((await screen.findAllByRole('menuitem')).map((i) => i.textContent)).toEqual(['Dejar de participar']);
+    // la cabecera solo le deja salirse: ni transferir ni finalizar
+    const group = within(await screen.findByRole('group', { name: 'Acciones de la conversación' }));
+    expect(group.getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Dejar de participar']);
   });
 
   it('con permiso de responder escribe, salvo mientras el dueño no acepta (lo explica)', async () => {

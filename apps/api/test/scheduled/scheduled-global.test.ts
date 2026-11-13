@@ -131,7 +131,7 @@ beforeEach(async () => {
 
 // ═════════════════════════════════════════════════════════════════════════════
 interface Item extends Sch { conversation: { id: string; channel_name: string; contact: { id: string; name: string } } }
-interface Page { items: Item[]; next_cursor: string | null; counts: { scheduled: number; not_sent: number } | null }
+interface Page { items: Item[]; next_cursor: string | null; counts: { scheduled: number; not_sent: number; sent: number } | null }
 const all = (token: string | undefined, qs = ''): Promise<Response> => call('GET', `/scheduled${qs}`, token);
 const page = async (token: string, qs = ''): Promise<Page> => ok<Page>(await all(token, qs));
 const share = (conv: string, user: string, permission: 'reply' | 'view' = 'view') =>
@@ -144,7 +144,7 @@ describe('GET /scheduled — acceso, validación y aislamiento', () => {
   });
 
   it('parámetros inválidos: 400 (estado, límite, cursor, filtro)', async () => {
-    for (const qs of ['?status=sent', '?limit=0', '?limit=51', '?cursor=zzz', '?mine=no', '?extra=1']) expect((await all(T.alice, qs)).status, qs).toBe(400);
+    for (const qs of ['?status=all', '?contact_id=zzz', '?from=ayer', '?to=2026-13-01', '?limit=0', '?limit=51', '?cursor=zzz', '?mine=no', '?extra=1']) expect((await all(T.alice, qs)).status, qs).toBe(400);
   });
 
   it('A↔B: cada empresa ve solo lo suyo, también en la otra pestaña y con el contador', async () => {
@@ -156,8 +156,8 @@ describe('GET /scheduled — acceso, validación y aislamiento', () => {
     const pb = await page(T.bob);
     expect(pa.items.map((x) => x.id)).toEqual([a.id]);
     expect(pb.items.map((x) => x.id)).toEqual([b.id]);
-    expect(pa.counts).toEqual({ scheduled: 1, not_sent: 0 });
-    expect(pb.counts).toEqual({ scheduled: 1, not_sent: 0 });
+    expect(pa.counts).toEqual({ scheduled: 1, not_sent: 0, sent: 0 });
+    expect(pb.counts).toEqual({ scheduled: 1, not_sent: 0, sent: 0 });
     // lo cancelado de A no aparece en las «no salieron» de B
     expect((await call('DELETE', `/conversations/${convA}/scheduled/${a.id}`, T.alice)).status).toBe(200);
     expect((await page(T.bob, '?status=not_sent')).items).toEqual([]);
@@ -176,7 +176,7 @@ describe('alcance por persona', () => {
     expect((await page(T.carol)).items.map((x) => x.id)).toEqual([c.id]);
     expect((await page(T.eve)).items.map((x) => x.id)).toEqual([e.id]);
     expect((await page(T.alice)).items.map((x) => x.id).sort()).toEqual([c.id, e.id].sort());
-    expect((await page(T.alice)).counts).toEqual({ scheduled: 2, not_sent: 0 });
+    expect((await page(T.alice)).counts).toEqual({ scheduled: 2, not_sent: 0, sent: 0 });
     // Eva ve lo de Carolina si se lo comparten (solo para ver), pero no lo puede cancelar
     await share(convCarol, IDS.eve, 'view');
     const seen = (await page(T.eve)).items;
@@ -193,7 +193,7 @@ describe('alcance por persona', () => {
     const a = await mk(T.alice, conv, 'Del administrador', 20 * MIN);
     expect((await page(T.alice)).items.map((x) => x.id).sort()).toEqual([c.id, a.id].sort());
     expect((await page(T.alice, '?mine=1')).items.map((x) => x.id)).toEqual([a.id]);
-    expect((await page(T.alice, '?mine=true')).counts).toEqual({ scheduled: 1, not_sent: 0 });
+    expect((await page(T.alice, '?mine=true')).counts).toEqual({ scheduled: 1, not_sent: 0, sent: 0 });
     expect((await page(T.carol, '?mine=1')).items.map((x) => x.id)).toEqual([c.id]);
   });
 
@@ -203,7 +203,7 @@ describe('alcance por persona', () => {
     await admin.query(`UPDATE contacts SET deleted_at = now() WHERE id = (SELECT contact_id FROM conversations WHERE id = $1)`, [conv]);
     const p = await page(T.alice);
     expect(p.items).toEqual([]);
-    expect(p.counts).toEqual({ scheduled: 0, not_sent: 0 });
+    expect(p.counts).toEqual({ scheduled: 0, not_sent: 0, sent: 0 });
   });
 });
 
@@ -223,11 +223,17 @@ describe('pestañas, orden y paginación', () => {
     await admin.query(`UPDATE scheduled_messages SET status = 'sent', resolved_at = now(), message_id = (SELECT id FROM messages WHERE conversation_id = $2 LIMIT 1) WHERE id = $1`, [sent.id, conv]);
     const pending = await page(T.alice);
     expect(pending.items.map((x) => x.id)).toEqual([soon.id, late.id]);
-    expect(pending.counts).toEqual({ scheduled: 2, not_sent: 2 });
+    expect(pending.counts).toEqual({ scheduled: 2, not_sent: 2, sent: 1 });
     const not = await page(T.alice, '?status=not_sent');
     expect(not.items.map((x) => x.id)).toEqual([failed.id, cancelled.id]);
     expect(not.items.map((x) => x.reason)).toEqual(['window_closed', 'cancelled_by_user']);
-    expect(not.counts).toEqual({ scheduled: 2, not_sent: 2 });
+    expect(not.counts).toEqual({ scheduled: 2, not_sent: 2, sent: 1 });
+    // v13 S2.3: «sent» trae los que ya salieron en las últimas 24 h (uno más viejo no aparece)
+    await admin.query(`UPDATE scheduled_messages SET status = 'sent', resolved_at = now() - interval '30 hours', message_id = (SELECT id FROM messages WHERE conversation_id = $2 LIMIT 1) WHERE id = $1`, [old.id, conv]);
+    const sentTab = await page(T.alice, '?status=sent');
+    expect(sentTab.items.map((x) => x.id)).toEqual([sent.id]);
+    expect(sentTab.items[0]!.status).toBe('sent');
+    expect(sentTab.counts).toEqual({ scheduled: 2, not_sent: 2, sent: 1 });
   });
 
   it('el cursor recorre ambas pestañas sin repetir ni saltarse a nadie y los conteos solo vienen en la primera página', async () => {
@@ -236,7 +242,7 @@ describe('pestañas, orden y paginación', () => {
     for (let i = 1; i <= 5; i += 1) made.push(await mk(T.carol, conv, `Mensaje ${i}`, (10 + i) * MIN));
     const first = await page(T.alice, '?limit=2');
     expect(first.items.map((x) => x.id)).toEqual([made[0]!.id, made[1]!.id]);
-    expect(first.counts).toEqual({ scheduled: 5, not_sent: 0 });
+    expect(first.counts).toEqual({ scheduled: 5, not_sent: 0, sent: 0 });
     expect(first.next_cursor).toBeTruthy();
     const second = await page(T.alice, `?limit=2&cursor=${first.next_cursor}`);
     expect(second.items.map((x) => x.id)).toEqual([made[2]!.id, made[3]!.id]);
@@ -253,12 +259,31 @@ describe('pestañas, orden y paginación', () => {
     expect(n2.next_cursor).toBeNull();
   });
 
+  it('v13 S2.3: filtra por contacto y por rango de fechas (y no mezcla el contacto de otra empresa)', async () => {
+    const conv1 = await mkConv({ owner: IDS.carol });
+    const conv2 = await mkConv({ owner: IDS.carol });
+    const convB = await mkConv({ org: ORG_B, owner: IDS.bob });
+    const m1 = await mk(T.carol, conv1, 'Uno', 10 * MIN);
+    const m2 = await mk(T.carol, conv2, 'Dos', 3 * HOUR);
+    const mb = await mk(T.bob, convB, 'De B', 3 * HOUR);
+    const contactOf = async (conv: string): Promise<string> => (await admin.query(`SELECT contact_id FROM conversations WHERE id = $1`, [conv])).rows[0].contact_id as string;
+    const c1 = await contactOf(conv1);
+    expect((await page(T.alice, `?contact_id=${c1}`)).items.map((x) => x.id)).toEqual([m1.id]);
+    expect((await page(T.alice, `?contact_id=${await contactOf(convB)}`)).items).toEqual([]); // el contacto de B no existe para A
+    expect((await page(T.bob, `?contact_id=${c1}`)).items).toEqual([]);
+    const from = encodeURIComponent(inMs(2 * HOUR));
+    expect((await page(T.alice, `?from=${from}`)).items.map((x) => x.id)).toEqual([m2.id]);
+    const to = encodeURIComponent(inMs(HOUR));
+    expect((await page(T.alice, `?to=${to}`)).items.map((x) => x.id)).toEqual([m1.id]);
+    expect((await page(T.bob, `?from=${from}`)).items.map((x) => x.id)).toEqual([mb.id]);
+  });
+
   it('cancelar desde la vista global (la ruta de siempre) lo pasa a «no salieron»', async () => {
     const conv = await mkConv({ owner: IDS.carol });
     const s = await mk(T.carol, conv);
     const item = (await page(T.carol)).items[0]!;
     expect(item).toMatchObject({ id: s.id, can_cancel: true, conversation: { id: conv } });
     expect((await call('DELETE', `/conversations/${item.conversation.id}/scheduled/${item.id}`, T.carol)).status).toBe(200);
-    expect((await page(T.carol)).counts).toEqual({ scheduled: 0, not_sent: 1 });
+    expect((await page(T.carol)).counts).toEqual({ scheduled: 0, not_sent: 1, sent: 0 });
   });
 });

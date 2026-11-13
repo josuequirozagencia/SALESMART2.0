@@ -116,16 +116,30 @@ export function useConversationQuickReplies(id: string, enabled: boolean) {
 /** Los mensajes programados de la conversación (pendientes y, 24 h, los que no salieron). Se vuelven a pedir con el hilo. */
 export function useScheduledMessages(id: string) {
   const poll = usePolling();
-  return useQuery({ queryKey: ['scheduled', id], staleTime: 5_000, retry: false, refetchInterval: poll.thread, queryFn: () => api<{ items: ScheduledMessage[] }>(`/conversations/${id}/scheduled`) });
+  return useQuery({ queryKey: ['scheduled', id], staleTime: 5_000, retry: false, refetchInterval: poll.thread, queryFn: () => api<{ items: ScheduledMessage[]; time_zone?: string }>(`/conversations/${id}/scheduled`) });
 }
 
-/** Todo lo programado que la persona ve, de todas sus conversaciones (M5.10): `not_sent` trae lo que no salió en las últimas 24 h. */
-export function useAllScheduled(status: 'scheduled' | 'not_sent', mine: boolean) {
+/** Las pestañas de la lista global de programados: pendientes, los que salieron y los que no (cancelados o fallidos); los dos últimos, de las últimas 24 h. */
+export type ScheduledView = 'scheduled' | 'sent' | 'not_sent';
+/** Filtros de la lista global (v13 S2.3): solo los míos, un contacto y un rango de fechas de envío (instantes ISO). */
+export interface ScheduledFilters { mine: boolean; contactId?: string | undefined; from?: string | undefined; to?: string | undefined }
+
+/** Todo lo programado que la persona ve, de todas sus conversaciones (M5.10; v13 S2.3 añade «enviados», contacto y rango de fechas). */
+export function useAllScheduled(status: ScheduledView, filters: ScheduledFilters) {
   const poll = usePolling();
+  const { mine, contactId, from, to } = filters;
   return useInfiniteQuery({
-    queryKey: ['scheduled', 'all', status, mine],
+    queryKey: ['scheduled', 'all', status, mine, contactId ?? '', from ?? '', to ?? ''],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => api<ScheduledPageData>(`/scheduled?status=${status}${mine ? '&mine=1' : ''}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    queryFn: ({ pageParam }) => {
+      const p = new URLSearchParams({ status });
+      if (mine) p.set('mine', '1');
+      if (contactId) p.set('contact_id', contactId);
+      if (from) p.set('from', from);
+      if (to) p.set('to', to);
+      if (pageParam) p.set('cursor', pageParam);
+      return api<ScheduledPageData>(`/scheduled?${p.toString()}`);
+    },
     getNextPageParam: (last) => last.next_cursor ?? undefined,
     refetchInterval: poll.list,
   });
@@ -144,6 +158,17 @@ export function useCancelScheduledAny() {
 export function useScheduleMessage(id: string) {
   const qc = useQueryClient();
   return useMutation({ mutationFn: (input: { text: string; send_at: string }) => api<ScheduledMessage>(`/conversations/${id}/scheduled`, { method: 'POST', body: input }), onSettled: () => qc.invalidateQueries({ queryKey: ['scheduled', id] }) });
+}
+
+/** «Enviar ahora» (v13 S2.4): saca un programado pendiente antes de su hora. Refresca el hilo, los programados y la lista de conversaciones. */
+export function useSendScheduledNow(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (scheduledId: string) => api<ScheduledMessage>(`/conversations/${id}/scheduled/${scheduledId}/send`, { method: 'POST' }),
+    onSettled: () => {
+      for (const key of ['scheduled', 'messages', 'conversation', 'conversations']) void qc.invalidateQueries({ queryKey: [key] });
+    },
+  });
 }
 
 export function useCancelScheduled(id: string) {

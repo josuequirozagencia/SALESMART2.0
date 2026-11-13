@@ -386,6 +386,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'DELETE /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
   { route: 'POST /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   { route: 'DELETE /v1/conversations/:id/scheduled/:scheduledId', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
+  { route: 'POST /v1/conversations/:id/scheduled/:scheduledId/send', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Usuarios del equipo (M10.3, ADR-56). Pruebas: test/team/team.test.ts (401/403, A↔B, roles, último administrador, permisos por persona, invitar, desactivar y quitar con traspaso)
   { route: 'GET /v1/users', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'GET /v1/users/permissions/catalog', kind: 'tenant', isolationTest: '../../team/team.test.ts' },

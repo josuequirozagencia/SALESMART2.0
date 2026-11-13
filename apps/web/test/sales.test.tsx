@@ -83,8 +83,7 @@ function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
 }
 
 const openDialog = async () => {
-  await userEvent.click(await screen.findByRole('button', { name: 'Datos del contacto' }));
-  await screen.findByRole('complementary', { name: 'Datos del contacto' });
+  // v13 S2.2: «Registrar venta» es un icono de la cabecera del chat (también sigue en la ficha del contacto)
   await userEvent.click(await screen.findByRole('button', { name: 'Registrar venta' }));
   return within(await screen.findByRole('dialog', { name: 'Registrar venta' }));
 };

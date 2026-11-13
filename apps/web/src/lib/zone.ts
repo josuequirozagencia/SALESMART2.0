@@ -50,6 +50,13 @@ export function addDays(date: string, days: number): string {
 export const dayLabel = (date: string): string => new Intl.DateTimeFormat('es-EC', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${date}T00:00:00Z`));
 
 /** Hora de un instante en la zona de la empresa («15:30»). */
+/** Cuándo, para decirlo en una burbuja: «hoy 15:30», «mañana 09:00» o «lun, 17 nov 15:30», en la zona horaria dada (la de la empresa). */
+export function whenIn(iso: string, timeZone: string, now = Date.now()): string {
+  const { date, time } = isoToZoned(iso, timeZone);
+  const day = date === todayIn(timeZone, now) ? 'hoy' : date === todayIn(timeZone, now + 86_400_000) ? 'mañana' : new Intl.DateTimeFormat('es-EC', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${date}T00:00:00Z`));
+  return `${day} ${time}`;
+}
+
 export const timeIn = (iso: string, timeZone: string): string => isoToZoned(iso, timeZone).time;
 
 /** Fecha y hora completas en la zona de la empresa. */

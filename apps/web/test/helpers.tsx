@@ -113,8 +113,11 @@ export const EMPTY_SUMMARY = {
   funnel: [], response: { count: 0, avg_seconds: 0, median_seconds: 0 }, series: [], access: { export: false, manage: false },
 };
 
-/** Abre el menú «⋯ Más» de la cabecera de una conversación y elige una acción (M5.10: Transferir, Dejar de participar y Finalizar viven ahí). */
+/**
+ * Elige una acción de la conversación en la cabecera del chat de escritorio. Desde v13 S2.2 son iconos con su nombre (antes vivían en el menú «⋯ Más»): «Transferir» es el icono «Transferir o
+ * compartir»; si el ancho no alcanzara, irían al «⋮ Más acciones», pero en las pruebas (sin medidas reales) caben todos.
+ */
 export async function pickMore(item: string): Promise<void> {
-  await userEvent.click(await screen.findByRole('button', { name: 'Más acciones' }));
-  await userEvent.click(await screen.findByRole('menuitem', { name: item }));
+  const names: Record<string, string> = { Transferir: 'Transferir o compartir' };
+  await userEvent.click(await screen.findByRole('button', { name: names[item] ?? item }));
 }

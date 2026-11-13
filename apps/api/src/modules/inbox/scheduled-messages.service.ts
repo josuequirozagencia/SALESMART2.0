@@ -1,5 +1,5 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { and, asc, count, desc, eq, gt, isNull, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte, isNull, lte, or, sql, type SQL } from 'drizzle-orm';
 import { channelAccounts, contacts, conversations, Database, messages, scheduledMessages, type TenantTx } from '../../db';
 import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import type { AppLogger } from '../../logger';
@@ -51,7 +51,7 @@ export interface ScheduledPage {
   items: ScheduledListItem[];
   next_cursor: string | null;
   /** Solo en la primera página: cuántos hay en cada pestaña con el filtro puesto. */
-  counts: { scheduled: number; not_sent: number } | null;
+  counts: { scheduled: number; not_sent: number; sent: number } | null;
 }
 
 /** Códigos de error de responder → qué le pasó al mensaje programado. */
@@ -84,9 +84,13 @@ export class ScheduledMessagesService {
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
   ) {}
 
-  /** Los pendientes de la conversación y, 24 h, los que no salieron. Los enviados ya son mensajes del hilo. 404 si la persona no puede ver la conversación. */
-  async list(access: InboxAccess, conversationId: string): Promise<{ items: ScheduledView[] }> {
+  /**
+   * Los pendientes de la conversación y, 24 h, los que no salieron. Los enviados ya son mensajes del hilo. 404 si la persona no puede ver la conversación. `time_zone` es la de la empresa:
+   * en ella se muestra la hora del mensaje programado dentro del chat (v13 S2.4).
+   */
+  async list(access: InboxAccess, conversationId: string): Promise<{ items: ScheduledView[]; time_zone: string }> {
     const scope = scopeOf(access);
+    const timeZone = (await this.directory.current()).timeZone;
     const since = new Date(Date.now() - RESOLVED_VISIBLE_MS);
     const rows = await this.db.withTenant(async (tx) => {
       await loadConversation(tx, scope, conversationId);
@@ -96,7 +100,7 @@ export class ScheduledMessagesService {
         .where(and(eq(scheduledMessages.conversationId, conversationId), or(eq(scheduledMessages.status, 'scheduled'), and(sql`${scheduledMessages.status} IN ('cancelled', 'failed')`, gt(scheduledMessages.resolvedAt, since)))))
         .orderBy(asc(scheduledMessages.sendAt), asc(scheduledMessages.id));
     });
-    return { items: await this.views(rows, scope) };
+    return { items: await this.views(rows, scope), time_zone: timeZone };
   }
 
   /**
@@ -110,7 +114,15 @@ export class ScheduledMessagesService {
     const since = new Date(Date.now() - RESOLVED_VISIBLE_MS);
     const pendingSql = eq(scheduledMessages.status, 'scheduled');
     const notSentSql = and(sql`${scheduledMessages.status} IN ('cancelled', 'failed')`, gt(scheduledMessages.resolvedAt, since));
-    const common = (): (SQL | undefined)[] => [visibleTo(scope), isNull(contacts.deletedAt), q.mine ? eq(scheduledMessages.createdBy, scope.userId) : undefined];
+    const sentSql = and(eq(scheduledMessages.status, 'sent'), gt(scheduledMessages.resolvedAt, since));
+    const common = (): (SQL | undefined)[] => [
+      visibleTo(scope),
+      isNull(contacts.deletedAt),
+      q.mine ? eq(scheduledMessages.createdBy, scope.userId) : undefined,
+      q.contact_id ? eq(contacts.id, q.contact_id) : undefined,
+      q.from ? gte(scheduledMessages.sendAt, new Date(q.from)) : undefined,
+      q.to ? lte(scheduledMessages.sendAt, new Date(q.to)) : undefined,
+    ];
     const pending = q.status === 'scheduled';
     const orderKey = pending ? scheduledMessages.sendAt : scheduledMessages.resolvedAt;
     const key = sql<string>`to_char(${orderKey} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
@@ -124,7 +136,7 @@ export class ScheduledMessagesService {
       return r?.n ?? 0;
     };
     const data = await this.db.withTenant(async (tx) => {
-      const where: (SQL | undefined)[] = [...common(), pending ? pendingSql : notSentSql];
+      const where: (SQL | undefined)[] = [...common(), pending ? pendingSql : q.status === 'sent' ? sentSql : notSentSql];
       if (cursor) where.push(pending ? sql`(${scheduledMessages.sendAt}, ${scheduledMessages.id}) > (${cursor.k}::timestamptz, ${cursor.id}::uuid)` : sql`(${scheduledMessages.resolvedAt}, ${scheduledMessages.id}) < (${cursor.k}::timestamptz, ${cursor.id}::uuid)`);
       const rows = await tx
         .select({ s: scheduledMessages, key, conversationId: conversations.id, contactId: contacts.id, contactName: contacts.name, channelName: channelAccounts.name })
@@ -137,7 +149,7 @@ export class ScheduledMessagesService {
         .limit(q.limit + 1);
       let counts: ScheduledPage['counts'] = null;
       if (!cursor) {
-        counts = { scheduled: await total(tx, pendingSql), not_sent: await total(tx, notSentSql) };
+        counts = { scheduled: await total(tx, pendingSql), not_sent: await total(tx, notSentSql), sent: await total(tx, sentSql) };
       }
       return { rows, counts };
     });
@@ -196,6 +208,37 @@ export class ScheduledMessagesService {
       await writeAudit(tx, { entityType: 'scheduled_message', entityId: id, field: 'status', oldValue: 'scheduled', newValue: 'cancelled', source: 'manual' });
       return done!;
     });
+    return (await this.views([row], scope))[0]!;
+  }
+
+  /**
+   * «Enviar ahora» (v13 S2.4): saca un programado pendiente antes de su hora. Lo envía quien lo pide —con los mismos permisos y reglas de responder: dueño de la conversación o quien ve todo,
+   * ventana de 24 h en WhatsApp oficial— y puede pedirlo quien lo programó o quien ve todas las conversaciones. Pasa a «sent» y es un mensaje normal del hilo (humano, detiene el SLA).
+   */
+  async sendNow(access: InboxAccess, conversationId: string, id: string): Promise<ScheduledView> {
+    const scope = scopeOf(access);
+    if (!scope.canReply) throw new ForbiddenError();
+    const now = new Date();
+    const timeZone = (await this.directory.current()).timeZone;
+    let messageId = '';
+    const row = await this.db.withTenant(async (tx) => {
+      await loadConversation(tx, scope, conversationId);
+      const [cur] = await tx.select().from(scheduledMessages).where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.conversationId, conversationId))).limit(1).for('update');
+      if (!cur) throw new NotFoundError();
+      if (cur.status !== 'scheduled') throw new ConflictError('SCHEDULE_NOT_PENDING', cur.status === 'sent' ? 'Este mensaje ya salió' : 'Este mensaje ya no está programado');
+      if (cur.createdBy !== scope.userId && !scope.viewAll) throw new ForbiddenError('SCHEDULE_NOT_YOURS', 'Solo quien lo programó, o quien ve todas las conversaciones, puede enviarlo');
+      messageId = await this.outbound.enqueueText(tx, scope, conversationId, cur.body, now, timeZone);
+      const [done] = await tx.update(scheduledMessages).set({ status: 'sent', messageId, resolvedAt: now }).where(eq(scheduledMessages.id, id)).returning();
+      await writeAudit(tx, { entityType: 'scheduled_message', entityId: id, field: 'status', oldValue: 'scheduled', newValue: 'sent', source: 'manual' });
+      return done!;
+    });
+    // El envío al proveedor va fuera de la transacción; si falla, la tarea de envíos lo retoma
+    try {
+      await this.dispatcher.dispatchOne(messageId);
+    } catch (e) {
+      this.log.error({ message_id: messageId, err: e instanceof Error ? e.name : 'desconocido' }, 'no se pudo intentar el envío de un mensaje programado enviado ahora; lo retomará la tarea periódica');
+    }
+    this.announce(conversationId);
     return (await this.views([row], scope))[0]!;
   }
 

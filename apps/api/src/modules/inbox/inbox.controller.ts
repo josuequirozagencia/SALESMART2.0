@@ -173,6 +173,15 @@ export class InboxController {
     return this.scheduledMessages.cancel(accessOf(req), id, scheduledId);
   }
 
+  /** «Enviar ahora»: saca un mensaje programado pendiente antes de su hora (v13 S2.4). Quien lo programó, o quien ve todas las conversaciones; sale con las reglas de responder. */
+  @RequirePermission('inbox.reply')
+  @Post(':id/scheduled/:scheduledId/send')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  sendScheduledNow(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Param('scheduledId', idParam) scheduledId: string) {
+    return this.scheduledMessages.sendNow(accessOf(req), id, scheduledId);
+  }
+
   /** Las respuestas rápidas que puede usar quien escribe, ya resueltas con los datos del contacto de esta conversación (M5.6b). */
   @RequirePermission('inbox.reply')
   @Get(':id/quick-replies')

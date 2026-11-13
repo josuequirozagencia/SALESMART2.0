@@ -336,12 +336,14 @@ describe('Inbox · columna de datos del contacto', () => {
 });
 
 describe('Inbox · cabecera del hilo más liviana (M5.9)', () => {
-  it('la cabecera ya no lleva Agendar, Registrar venta ni Inscribir: «Datos del contacto» es un solo ícono con nombre, ayuda y estado, y esas acciones viven en la columna', async () => {
+  it('«Datos del contacto» es un solo ícono con nombre, ayuda y estado; Agendar y Registrar venta son iconos de la cabecera (v13 S2.2) y siguen en la columna', async () => {
     const w = world();
     await open(w);
-    expect(screen.queryByRole('button', { name: 'Agendar' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Registrar venta' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Inscribir en un flujo' })).toBeNull();
+    // v13 S2.2: las acciones frecuentes vuelven a la cabecera, pero como iconos con nombre y ayuda (no como botones con texto)
+    const bar = within(await screen.findByRole('group', { name: 'Acciones de la conversación' }));
+    expect(bar.getByRole('button', { name: 'Agendar' })).toHaveAttribute('title', 'Agendar');
+    expect(bar.getByRole('button', { name: 'Registrar venta' })).toHaveAttribute('title', 'Registrar venta');
+    expect(screen.queryByRole('button', { name: 'Inscribir en un flujo' })).toBeNull(); // solo conversaciones de GoHighLevel
     const icon = await screen.findByRole('button', { name: 'Datos del contacto' });
     expect(icon).toHaveAttribute('aria-pressed', 'false');
     expect(icon).toHaveAttribute('title', 'Ver los datos del contacto');
@@ -353,7 +355,7 @@ describe('Inbox · cabecera del hilo más liviana (M5.9)', () => {
     const side = within(await screen.findByRole('complementary', { name: 'Datos del contacto' }));
     expect(side.getByRole('button', { name: 'Agendar' })).toBeInTheDocument();
     expect(side.getByRole('button', { name: 'Registrar venta' })).toBeInTheDocument();
-    // Aceptar / Asignarme siguen en la cabecera, y el reloj de programados también
-    expect(screen.getByRole('button', { name: 'Mensajes programados' })).toBeInTheDocument();
+    // el reloj de «mensajes programados» ya no está en la cabecera (v13 S2.3: vive en Tareas, y cada mensaje se ve dentro del chat)
+    expect(screen.queryByRole('button', { name: /^Mensajes programados/ })).toBeNull();
   });
 });

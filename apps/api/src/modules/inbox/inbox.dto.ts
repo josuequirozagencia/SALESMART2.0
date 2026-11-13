@@ -48,13 +48,17 @@ export type CreateScheduledDto = z.infer<typeof createScheduledSchema>;
 
 /**
  * Vista global de mensajes programados (M5.10): `scheduled` = los pendientes, de la hora más próxima a la más lejana · `not_sent` = los que no salieron en las últimas 24 h
- * (cancelados o fallidos), los más recientes primero. `mine` deja solo los que programó la persona (útil para quien ve todas las conversaciones).
+ * (cancelados o fallidos), los más recientes primero · `sent` = los que ya salieron en las últimas 24 h (v13 S2.3). `mine` deja solo los que programó la persona (útil para quien ve todas las conversaciones).
  */
-export const SCHEDULED_VIEWS = ['scheduled', 'not_sent'] as const;
+export const SCHEDULED_VIEWS = ['scheduled', 'not_sent', 'sent'] as const;
 export const listScheduledQuerySchema = z
   .object({
     status: z.enum(SCHEDULED_VIEWS).default('scheduled'),
     mine: z.enum(['1', 'true']).transform(() => true).optional(),
+    /** v13 S2.3: solo los de un contacto, y solo los que están (o estaban) programados dentro de un rango de fechas (instantes ISO con zona). */
+    contact_id: z.uuid().optional(),
+    from: z.iso.datetime({ offset: true }).optional(),
+    to: z.iso.datetime({ offset: true }).optional(),
     cursor: z.string().min(1).max(300).optional(),
     limit: z.coerce.number().int().min(1).max(50).default(25),
   })
