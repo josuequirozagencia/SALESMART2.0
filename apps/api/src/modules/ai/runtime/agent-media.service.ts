@@ -16,6 +16,9 @@ export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /** Una imagen que sigue «pendiente» pasado este tiempo desde que llegó el mensaje se da por no disponible (la descarga ya falló o se atoró). */
 export const IMAGE_WAIT_MS = 5 * 60_000;
 
+/** Audios que se transcriben en un turno (los más recientes; los demás se mencionan). Antes era 1; el responsable lo cambió el 2026-11-16. */
+export const MAX_AUDIOS_PER_TURN = 3;
+
 /** Tamaño máximo de un audio (red de seguridad cuando no se conoce su duración; ADR-70, decisión 3). */
 export const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 
@@ -92,74 +95,94 @@ export class AgentMediaService {
   }
 
   /**
-   * Los audios del cliente de este turno como texto (ADR-70, S5b): los que ya están transcritos se reutilizan sin cobrar; del resto solo se transcribe el más reciente (1 por turno). Se mira, en orden:
-   * el tope diario de la empresa, que el adjunto esté listo y revisado, el formato REAL y los 2 MB, la duración que informe el proveedor del chat (QR) y, ya transcrito, la duración real contra el máximo
-   * de la plataforma. Los créditos se reservan por el máximo de minutos y se cobra la duración real; un fallo libera la reserva sin cobrar. Nunca se registra el audio ni el texto.
+   * Los audios del cliente de este turno como texto (ADR-70, S5b; hasta 3 por turno desde el 2026-11-16): los ya transcritos se reutilizan sin cobrar y del resto se transcriben los 3 más recientes (los demás
+   * se mencionan). ANTES de gastar nada se resuelve cada adjunto —listo y con el antivirus conforme, formato REAL, 2 MB y la duración que informe el canal (QR) contra el máximo de la plataforma— y, si alguno
+   * aún se descarga, se espera. Luego se respeta el tope diario de la empresa y cada transcripción reserva créditos por el máximo de minutos y cobra la duración real (un fallo libera la reserva sin cobrar).
+   * Si un audio no se puede leer pero otro sí, el agente atiende lo que sí se escuchó. Nunca se registra el audio ni el texto.
    */
   async transcribeForTurn(input: { agentName: string; agentId: string; conversationId: string; audios: readonly AudioMessage[]; now: Date }): Promise<AudioResult> {
-    const lines: string[] = [];
-    const todo: AudioMessage[] = [];
+    type Problem = 'media_blocked' | 'daily_limit' | 'audio_too_long' | 'unsupported_media';
+    const heard: Array<{ at: number; text: string }> = [];
+    const todoAll: AudioMessage[] = [];
     for (const a of [...input.audios].sort((x, y) => x.at.getTime() - y.at.getTime())) {
       const t = cachedTranscript(a.meta);
-      if (t) lines.push(t.text);
-      else todo.push(a);
+      if (t) heard.push({ at: a.at.getTime(), text: t.text });
+      else todoAll.push(a);
     }
-    const target = todo.at(-1); // el más reciente
-    const extra = Math.max(0, todo.length - 1);
-    if (!target) return lines.some((l) => l.trim() !== '') ? { status: 'ready', lines, extra: 0 } : { status: 'handoff', reason: 'unsupported_media' };
+    const targets = todoAll.slice(-MAX_AUDIOS_PER_TURN); // los más recientes
+    let notHeard = todoAll.length - targets.length;
+    const problems: Problem[] = [];
     const limits = await this.limits.resolve();
-    // Cuántos pidió el cliente hoy (tope por empresa en las últimas 24 h)
-    const since = new Date(input.now.getTime() - 24 * 3_600_000);
-    const [used] = await this.db.withTenant((tx) => tx.select({ n: sql<number>`count(*)::int` }).from(aiMediaRuns).where(and(eq(aiMediaRuns.kind, 'audio'), eq(aiMediaRuns.outcome, 'ok'), gte(aiMediaRuns.createdAt, since))));
-    if ((used?.n ?? 0) >= limits.transcriptionsPerDay) return { status: 'handoff', reason: 'daily_limit' };
-    // La duración que informa el canal (QR) permite rechazar un audio largo ANTES de gastar nada
-    const hint = typeof target.meta['seconds'] === 'number' ? target.meta['seconds'] : null;
-    if (hint !== null && hint > limits.audioMaxSeconds) return { status: 'handoff', reason: 'audio_too_long' };
-    const [a] = await this.db.withTenant((tx) =>
-      tx
-        .select({ state: messageAttachments.state, scan: messageAttachments.scanStatus, key: messageAttachments.storageKey, size: messageAttachments.sizeBytes })
-        .from(messageAttachments)
-        .where(and(eq(messageAttachments.conversationId, input.conversationId), eq(messageAttachments.direction, 'in'), eq(messageAttachments.messageId, target.id)))
-        .limit(1),
-    );
-    if (!a) return { status: 'handoff', reason: 'media_blocked' };
-    if (a.state === 'pending') return input.now.getTime() - target.at.getTime() < IMAGE_WAIT_MS ? { status: 'waiting' } : { status: 'handoff', reason: 'media_blocked' };
-    if (a.state !== 'ready' || !a.key || !(a.scan === 'clean' || a.scan === 'skipped')) return { status: 'handoff', reason: 'media_blocked' };
-    if (a.size === null || a.size > MAX_AUDIO_BYTES) return { status: 'handoff', reason: 'unsupported_media' };
-    let bytes: Buffer;
-    try {
-      bytes = await this.attachments.read(a.key);
-    } catch {
-      return { status: 'handoff', reason: 'media_blocked' };
+
+    // 1) Preparación sin gastar: qué adjunto sirve y cuál no
+    const ready: Array<{ msg: AudioMessage; bytes: Buffer; mime: string; ext: string }> = [];
+    for (const target of targets) {
+      const hint = typeof target.meta['seconds'] === 'number' ? target.meta['seconds'] : null;
+      if (hint !== null && hint > limits.audioMaxSeconds) { problems.push('audio_too_long'); notHeard += 1; continue; }
+      const [a] = await this.db.withTenant((tx) =>
+        tx
+          .select({ state: messageAttachments.state, scan: messageAttachments.scanStatus, key: messageAttachments.storageKey, size: messageAttachments.sizeBytes })
+          .from(messageAttachments)
+          .where(and(eq(messageAttachments.conversationId, input.conversationId), eq(messageAttachments.direction, 'in'), eq(messageAttachments.messageId, target.id)))
+          .limit(1),
+      );
+      if (!a) { problems.push('media_blocked'); notHeard += 1; continue; }
+      if (a.state === 'pending') {
+        if (input.now.getTime() - target.at.getTime() < IMAGE_WAIT_MS) return { status: 'waiting' }; // aún se descarga: no se gasta nada todavía
+        problems.push('media_blocked'); notHeard += 1; continue;
+      }
+      if (a.state !== 'ready' || !a.key || !(a.scan === 'clean' || a.scan === 'skipped')) { problems.push('media_blocked'); notHeard += 1; continue; }
+      if (a.size === null || a.size > MAX_AUDIO_BYTES) { problems.push('unsupported_media'); notHeard += 1; continue; }
+      let bytes: Buffer;
+      try {
+        bytes = await this.attachments.read(a.key);
+      } catch {
+        problems.push('media_blocked'); notHeard += 1; continue;
+      }
+      const sig = sniff(bytes);
+      const format = sig ? AUDIO_OF[sig] : undefined;
+      if (!format || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) { problems.push('unsupported_media'); notHeard += 1; continue; }
+      ready.push({ msg: target, bytes, mime: format.mime, ext: format.ext });
     }
-    const sig = sniff(bytes);
-    const format = sig ? AUDIO_OF[sig] : undefined;
-    if (!format || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) return { status: 'handoff', reason: 'unsupported_media' };
-    // Reserva por el máximo de minutos permitido; se cobra la duración real
-    const price = await this.gateway.transcriptionPrice();
-    if (!price) return { status: 'handoff', reason: 'unsupported_media' };
-    const rate = await this.pricing.resolve(TenantContext.current().organizationId);
-    const ref = `Agente ${input.agentName} · audio`.slice(0, 200);
-    const worstUsd = (limits.audioMaxSeconds / 60) * price.usdPerMinute;
-    const { holdId } = await this.credits.reserve({ credits: Math.max(1, creditsFor(worstUsd, rate.marginPct, rate.usdPerCredit)), kind: 'use', ref });
-    let out;
-    try {
-      out = await this.gateway.transcribe({ audio: bytes, mimeType: format.mime, filename: `audio.${format.ext}` });
-    } catch (e) {
-      await this.credits.release(holdId);
-      throw this.unavailable(e);
+
+    // 2) Tope diario por empresa (últimas 24 h) y transcripción de lo que sirve, de a uno
+    if (ready.length > 0) {
+      const since = new Date(input.now.getTime() - 24 * 3_600_000);
+      const [used] = await this.db.withTenant((tx) => tx.select({ n: sql<number>`count(*)::int` }).from(aiMediaRuns).where(and(eq(aiMediaRuns.kind, 'audio'), eq(aiMediaRuns.outcome, 'ok'), gte(aiMediaRuns.createdAt, since))));
+      let left = Math.max(0, limits.transcriptionsPerDay - (used?.n ?? 0));
+      const price = await this.gateway.transcriptionPrice();
+      const rate = await this.pricing.resolve(TenantContext.current().organizationId);
+      const ref = `Agente ${input.agentName} · audio`.slice(0, 200);
+      for (const r of ready) {
+        if (left <= 0) { problems.push('daily_limit'); notHeard += 1; continue; }
+        if (!price) { problems.push('unsupported_media'); notHeard += 1; continue; }
+        left -= 1;
+        // Reserva por el máximo de minutos permitido; se cobra la duración real
+        const worstUsd = (limits.audioMaxSeconds / 60) * price.usdPerMinute;
+        const { holdId } = await this.credits.reserve({ credits: Math.max(1, creditsFor(worstUsd, rate.marginPct, rate.usdPerCredit)), kind: 'use', ref });
+        let out;
+        try {
+          out = await this.gateway.transcribe({ audio: r.bytes, mimeType: r.mime, filename: `audio.${r.ext}` });
+        } catch (e) {
+          await this.credits.release(holdId);
+          throw this.unavailable(e);
+        }
+        await this.credits.settle(holdId, { costUsd: out.costUsd, ref });
+        // La transcripción se guarda en el mensaje (no se vuelve a pedir ni a cobrar) y se anota solo la constancia sin contenido
+        const transcript: Transcript = { text: out.text.trim().slice(0, 4000), seconds: out.seconds, model: out.model, at: input.now.toISOString() };
+        await this.db.withTenant(async (tx) => {
+          await tx.update(messages).set({ meta: sql`${messages.meta} || ${JSON.stringify({ transcript })}::jsonb` }).where(and(eq(messages.id, r.msg.id), eq(messages.conversationId, input.conversationId)));
+          await tx.insert(aiMediaRuns).values({ agentId: input.agentId, conversationId: input.conversationId, messageId: r.msg.id, kind: 'audio', mimeType: r.mime, bytes: r.bytes.length, model: out.model, seconds: out.seconds, outcome: 'ok' });
+        });
+        if (out.seconds > limits.audioMaxSeconds) { problems.push('audio_too_long'); notHeard += 1; continue; }
+        if (transcript.text === '') { problems.push('unsupported_media'); notHeard += 1; continue; } // silencio o ruido
+        heard.push({ at: r.msg.at.getTime(), text: transcript.text });
+      }
     }
-    await this.credits.settle(holdId, { costUsd: out.costUsd, ref });
-    // La transcripción se guarda en el mensaje (no se vuelve a pedir ni a cobrar) y se anota solo la constancia sin contenido
-    const transcript: Transcript = { text: out.text.trim().slice(0, 4000), seconds: out.seconds, model: out.model, at: input.now.toISOString() };
-    await this.db.withTenant(async (tx) => {
-      await tx.update(messages).set({ meta: sql`${messages.meta} || ${JSON.stringify({ transcript })}::jsonb` }).where(and(eq(messages.id, target.id), eq(messages.conversationId, input.conversationId)));
-      await tx.insert(aiMediaRuns).values({ agentId: input.agentId, conversationId: input.conversationId, messageId: target.id, kind: 'audio', mimeType: format.mime, bytes: bytes.length, model: out.model, seconds: out.seconds, outcome: 'ok' });
-    });
-    if (out.seconds > limits.audioMaxSeconds) return { status: 'handoff', reason: 'audio_too_long' };
-    if (transcript.text === '') return lines.some((l) => l.trim() !== '') ? { status: 'ready', lines, extra } : { status: 'handoff', reason: 'unsupported_media' }; // silencio o ruido
-    lines.push(transcript.text);
-    return { status: 'ready', lines, extra };
+
+    const lines = heard.sort((x, y) => x.at - y.at).map((h) => h.text).filter((t) => t.trim() !== '');
+    if (lines.length === 0) return { status: 'handoff', reason: problems[0] ?? 'unsupported_media' };
+    return { status: 'ready', lines, extra: notHeard };
   }
 
   /** Cómo contarle a la tarea que la IA no está disponible (los mismos códigos que el motor de turnos). */
