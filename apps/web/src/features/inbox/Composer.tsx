@@ -261,7 +261,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   };
 
   return (
-    <div className={`grid gap-2 border-t border-line px-3 ${mobile ? 'pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5' : 'py-2.5'} ${noteMode ? 'bg-warn-soft' : 'bg-surface'}`}>
+    <div className={`grid grid-cols-[minmax(0,1fr)] gap-2 border-t border-line px-3 ${mobile ? 'pb-[max(0.625rem,env(safe-area-inset-bottom))] pt-2.5' : 'py-2.5'} ${noteMode ? 'bg-warn-soft' : 'bg-surface'}`}>
       {block ? <p role="status" className="text-[12.5px] text-muted">{block}</p> : null}
       {mobile && noteMode && c.can.note ? (
         <p role="status" className="flex items-center gap-2 text-[12.5px] font-semibold text-warn">
@@ -379,7 +379,8 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
           onChange={onChange}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={onKey}
-          className={`min-h-[44px] min-w-0 flex-1 resize-none rounded-[14px] border border-line-strong bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted disabled:opacity-60 ${mobile ? 'max-h-[132px] overflow-y-auto' : 'max-h-40'}`}
+          // `w-0` + `flex-1`: el cuadro NO aporta su ancho propio (≈ 20 columnas) al mínimo de la fila; si no, en pantallas angostas empuja los botones de la derecha fuera de la ventana
+          className={`min-h-[44px] w-0 min-w-0 flex-1 resize-none rounded-[14px] border border-line-strong bg-surface px-3.5 py-2.5 text-[14px] placeholder:text-muted disabled:opacity-60 ${mobile ? 'max-h-[132px] overflow-y-auto' : 'max-h-40'}`}
         />
         {mobile ? (
           <>
