@@ -447,14 +447,18 @@ describe('rendimiento de anuncios (M3.3 §12)', () => {
 
   it('from y to aceptan fecha o fecha con hora; por omisión, los últimos 30 días; "to" con fecha es inclusivo', async () => {
     await lead({ first: { ad: 'Reciente', adId: '120006', at: new Date(Date.now() - 5 * 86_400_000).toISOString() } });
-    await lead({ first: { ad: 'Antiguo', adId: '120007', at: new Date(Date.now() - 45 * 86_400_000).toISOString() } });
+    // «Antiguo» queda fuera de los 30 días por omisión; si cayera justo en el día que se consulta por fecha más abajo (la prueba envejece), se corre dos días
+    const old = new Date(Date.now() - 45 * 86_400_000);
+    if (old.toISOString().slice(0, 10) === '2026-10-31') old.setUTCDate(old.getUTCDate() - 2);
+    await lead({ first: { ad: 'Antiguo', adId: '120007', at: old.toISOString() } });
     const def = await json<AdPerf>(await perf(T.alice, ''));
     expect(def.rows.map((x) => x.ad_id)).toEqual(['120006']);
     expect(new Date(def.period.to).getTime() - new Date(def.period.from).getTime()).toBe(30 * 86_400_000);
     await lead({ first: { ad: 'Último día', adId: '120008', at: '2026-10-31T23:00:00Z' } });
-    const byDate = await json<AdPerf>(await perf(T.alice, 'from=2026-10-01&to=2026-10-31'));
+    // un solo día: no depende de cuándo se corra la prueba (con un mes entero, «Antiguo» —45 días atrás— terminaba dentro del rango)
+    const byDate = await json<AdPerf>(await perf(T.alice, 'from=2026-10-31&to=2026-10-31'));
     expect(byDate.rows.map((x) => x.ad_id)).toEqual(['120008']); // "to" de solo fecha incluye todo ese día
-    expect(byDate.period).toEqual({ from: '2026-10-01T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z' });
+    expect(byDate.period).toEqual({ from: '2026-10-31T00:00:00.000Z', to: '2026-11-01T00:00:00.000Z' });
   });
 
   it('valida los parámetros: fechas inválidas o al revés, periodo demasiado largo y parámetros desconocidos son 400', async () => {

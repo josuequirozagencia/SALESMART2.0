@@ -31,6 +31,15 @@ export interface EmbeddingOutcome {
   readonly costUsd: number;
 }
 
+export interface TranscriptionOutcome {
+  readonly text: string;
+  /** Duración real, redondeada hacia arriba al segundo. */
+  readonly seconds: number;
+  readonly model: string;
+  /** Costo real en USD (SOLO servidor). */
+  readonly costUsd: number;
+}
+
 export interface ChatOutcome {
   readonly text: string;
   readonly tokensIn: number;
@@ -102,6 +111,26 @@ export class AiGateway {
     try {
       const out = await this.provider.chat({ apiKey }, { model: input.model, messages: input.messages, temperature: input.temperature, maxTokens: input.maxTokens, ...(input.tools ? { tools: input.tools } : {}) });
       return { ...out, toolCalls: out.toolCalls ?? [], costUsd: (out.tokensIn * price.usdPer1mInput + out.tokensOut * price.usdPer1mOutput) / 1_000_000 };
+    } catch (e) {
+      throw this.translate(e);
+    }
+  }
+
+  /** El modelo de transcripción en uso y su precio por minuto; null si el Súper Admin aún no cargó ninguno. SOLO servidor. */
+  async transcriptionPrice(): Promise<{ model: string; usdPerMinute: number } | null> {
+    const m = await this.prices.transcriptionModel();
+    return m && m.usdPerMinute !== null ? { model: m.model, usdPerMinute: m.usdPerMinute } : null;
+  }
+
+  /** Transcribe un audio y calcula su costo real: la duración REAL que informa el proveedor, redondeada hacia arriba al segundo, por el precio del minuto. Se llama FUERA de toda transacción de negocio. */
+  async transcribe(input: { audio: Uint8Array; mimeType: string; filename: string }): Promise<TranscriptionOutcome> {
+    const price = await this.transcriptionPrice();
+    if (!price) throw new AiUnavailableError('failed', 'No hay un modelo de transcripción cargado');
+    const apiKey = await this.key();
+    try {
+      const out = await this.provider.transcribe({ apiKey }, { model: price.model, audio: input.audio, mimeType: input.mimeType, filename: input.filename, language: 'es' });
+      const seconds = Math.ceil(out.seconds);
+      return { text: out.text, seconds, model: price.model, costUsd: (seconds / 60) * price.usdPerMinute };
     } catch (e) {
       throw this.translate(e);
     }

@@ -154,6 +154,18 @@ describe('reaccionar a un mensaje del cliente', () => {
     expect(m.extra).toBeNull();
   });
 
+  it('la transcripción por IA de una nota de voz (v13 S5b) se ve en el hilo como `transcript` —solo texto y duración—, no se filtra en «extra» y otra empresa no la ve', async () => {
+    const c = await mkConv();
+    await admin.query(`UPDATE messages SET kind = 'audio', body = NULL, meta = $2::jsonb WHERE id = $1`, [c.inbound, JSON.stringify({ transcript: { text: 'Quiero una cita', seconds: 5, model: 'whisper-1', at: new Date().toISOString() } })]);
+    const thread = await json<{ items: Array<{ id: string; transcript: { text: string; seconds: number } | null; extra: Record<string, unknown> | null }> }>(await call('GET', `/conversations/${c.id}/messages`, T.carol));
+    const m = thread.items.find((x) => x.id === c.inbound)!;
+    expect(m.transcript).toEqual({ text: 'Quiero una cita', seconds: 5 });
+    expect(m.extra).toBeNull();
+    const others = thread.items.filter((x) => x.id !== c.inbound);
+    expect(others.every((x) => x.transcript === null)).toBe(true);
+    expect((await call('GET', `/conversations/${c.id}/messages`, T.bob)).status).toBe(404);
+  });
+
   it('cambiar de emoji reemplaza la reacción y null la quita', async () => {
     const c = await mkConv();
     expect((await react(T.carol, c.id, c.inbound, '❤️')).status).toBe(200);

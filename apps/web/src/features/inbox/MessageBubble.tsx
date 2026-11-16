@@ -89,6 +89,12 @@ function Body({ m }: { m: ChatMessage }) {
         ) : att.scan_status === 'skipped' && m.kind !== 'text' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí · sin revisar</span>
         : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null
       ) : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null}
+      {m.transcript ? (
+        <span className="mt-1 block rounded-lg border border-line/60 bg-black/5 px-2 py-1.5 text-[12.5px]">
+          <span className="block text-[11px] font-semibold opacity-80">Transcripción por IA · puede contener errores</span>
+          <span className="block whitespace-pre-wrap break-words">{m.transcript.text}</span>
+        </span>
+      ) : null}
     </>
   );
 }

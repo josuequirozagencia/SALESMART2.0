@@ -228,6 +228,8 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
   const [tasks, setTasks] = useState(a.tasks_enabled ?? false);
   const [suggestions, setSuggestions] = useState(a.suggestions_enabled ?? false);
   const [readImages, setReadImages] = useState(a.read_images ?? false);
+  const [listens, setListens] = useState(a.transcribe_audio ?? false);
+  const canListen = o.transcription_available ?? false;
   // «Leer imágenes» solo se ofrece con un modelo que las entienda (el servidor lo vuelve a comprobar al guardar)
   const sees = (o.vision_models ?? []).includes(a.model);
   const [channels, setChannels] = useState<string[]>(a.channel_ids);
@@ -240,7 +242,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
     setOk(false);
     setError(undefined);
     try {
-      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions, read_images: readImages } });
+      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions, read_images: readImages, transcribe_audio: listens } });
       await m.setChannels.mutateAsync({ id: a.id, ids: channels });
       setOk(true);
     } catch (e) {
@@ -289,7 +291,14 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
             {!sees ? <span className="block text-[12.5px] font-normal text-muted">El modelo de este agente ({a.model}) no entiende imágenes. Elige uno que sí en la pestaña General.</span> : null}
           </span>
         </label>
-        <Alert kind="info">Las imágenes que el cliente envíe se enviarán al proveedor de IA (OpenAI) para procesarse. Actívalo solo si tu aviso de privacidad lo permite.</Alert>
+        <label className={`flex items-start gap-2 text-[13.5px] font-semibold ${!canListen && !listens ? 'opacity-60' : ''}`}>
+          <input type="checkbox" role="switch" aria-label="Escuchar audios" checked={listens} disabled={!canListen && !listens} onChange={(e) => setListens(e.target.checked)} className="mt-1" />
+          <span>Escuchar audios
+            <span className="block text-[12.5px] font-normal text-muted">Cuando el cliente manda una nota de voz, el agente la transcribe y contesta como si la hubiera escrito. Se transcribe un audio por mensaje (hasta 2 MB y el tiempo máximo que fija la plataforma); la transcripción queda visible bajo el audio para tu equipo y cada audio gasta créditos.</span>
+            {!canListen ? <span className="block text-[12.5px] font-normal text-muted">Todavía no hay un modelo de transcripción cargado: pídele al administrador de la plataforma que lo agregue.</span> : null}
+          </span>
+        </label>
+        <Alert kind="info">Las imágenes y los audios que el cliente envíe se enviarán al proveedor de IA (OpenAI) para procesarse. Actívalo solo si tu aviso de privacidad lo permite.</Alert>
       </section>
       <section aria-label="Sugerencias para el equipo" className="grid gap-2">
         <h3 className="text-[13.5px] font-bold">Ayuda para las personas del equipo</h3>

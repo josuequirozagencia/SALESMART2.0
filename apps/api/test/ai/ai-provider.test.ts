@@ -6,7 +6,7 @@ import { AiProviderError, FakeAiProvider, fakeVector, MAX_EMBED_INPUTS, OpenAiPr
 
 const KEY = 'sk-proj-ABCDEF1234567890abcdef1234567890';
 const creds = { apiKey: KEY };
-interface Seen { method: string; url: string; auth: string | undefined; contentType: string | undefined; body: Record<string, unknown> | null }
+interface Seen { method: string; url: string; auth: string | undefined; contentType: string | undefined; body: Record<string, unknown> | null; raw: string }
 
 let server: Server;
 let origin = '';
@@ -24,7 +24,7 @@ beforeAll(async () => {
     req.on('data', (c: Buffer) => chunks.push(c));
     req.on('end', () => {
       const raw = Buffer.concat(chunks).toString();
-      seen.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers['authorization'], contentType: req.headers['content-type'], body: raw ? (JSON.parse(raw) as Record<string, unknown>) : null });
+      seen.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers['authorization'], contentType: req.headers['content-type'], body: raw && String(req.headers['content-type']).startsWith('application/json') ? (JSON.parse(raw) as Record<string, unknown>) : null, raw });
       reply(req, res);
     });
   });
@@ -40,12 +40,14 @@ beforeEach(() => {
 /** Responde como OpenAI: embeddings con un vector por texto (fuera de orden, para probar que se reordenan) y chat con su uso. */
 const happy = (req: IncomingMessage, res: ServerResponse): void => {
   const body = seen.at(-1)!.body!;
+  if (req.url === '/v1/audio/transcriptions') return json(res, 200, { text: 'Hola, quiero una cita', duration: 4.2, language: 'spanish' });
   if (req.url === '/v1/embeddings') {
     const inputs = body['input'] as string[];
     const dims = body['dimensions'] as number;
     const data = inputs.map((_, index) => ({ object: 'embedding', index, embedding: vec(dims, index) })).reverse();
     return json(res, 200, { object: 'list', data, usage: { prompt_tokens: inputs.length * 5, total_tokens: inputs.length * 5 } });
   }
+  if (req.url === '/v1/audio/transcriptions') return json(res, 200, { text: 'Hola, quiero una cita', duration: 4.2, language: 'spanish' });
   return json(res, 200, { choices: [{ message: { role: 'assistant', content: 'Hola, ¿en qué te ayudo?' } }], usage: { prompt_tokens: 12, completion_tokens: 7, total_tokens: 19 } });
 };
 
@@ -79,6 +81,13 @@ async function aiProviderContract(make: () => { provider: AIProvider; failNext: 
   const img = await p.chat(creds, { model: 'gpt-4o-mini', messages: [{ role: 'system', content: 'Eres amable' }, { role: 'user', content: [{ type: 'text', text: 'Mira esto' }, { type: 'text', text: '[Imagen del cliente]' }, { type: 'image', mimeType: 'image/png', bytes: png }] }], temperature: 0.2, maxTokens: 100 });
   expect(img.text.length).toBeGreaterThan(0);
   expect(img.tokensIn).toBeGreaterThanOrEqual(0);
+  // 2c) transcripción de un audio (ADR-70): texto y duración real
+  const ogg = Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc(64, 1)]);
+  const tr = await p.transcribe(creds, { model: 'whisper-1', audio: ogg, mimeType: 'audio/ogg', filename: 'audio.ogg' });
+  expect(typeof tr.text).toBe('string');
+  expect(tr.seconds).toBeGreaterThanOrEqual(0);
+  expect(await fail(p.transcribe(creds, { model: 'whisper-1', audio: Buffer.alloc(0), mimeType: 'audio/ogg', filename: 'audio.ogg' }))).toMatchObject({ retryable: false });
+  expect(await fail(p.transcribe(creds, { model: 'whisper-1', audio: ogg, mimeType: 'audio/amr', filename: 'audio.amr' }))).toMatchObject({ retryable: false });
   // 3) fallos: llegan como AiProviderError con sus banderas y sin perder el motivo; después todo vuelve a funcionar
   failNext(new AiProviderError('clave rechazada', false, true));
   expect(await fail(p.embed(creds, { model: 'text-embedding-3-small', inputs: ['x'], dimensions: 64 }))).toMatchObject({ retryable: false, credentials: true });
@@ -320,5 +329,52 @@ describe('chat con imágenes del cliente (v13 S5a, ADR-70)', () => {
     const withImage = await fake.chat(creds, { model: 'm', messages: [{ role: 'user', content: [{ type: 'text', text: 'Hola' }, { type: 'image', mimeType: 'image/jpeg', bytes: jpeg }] }], temperature: 0, maxTokens: 10 });
     expect(withImage.tokensIn).toBe(text.tokensIn + fake.tokensPerImage);
     expect(JSON.stringify(fake.keysSeen)).not.toContain('base64');
+  });
+});
+
+describe('transcripción de audio (v13 S5b, ADR-70)', () => {
+  const ogg = Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc(64, 1)]);
+  const ask = (over: Partial<Parameters<OpenAiProvider['transcribe']>[1]> = {}) => provider().transcribe(creds, { model: 'whisper-1', audio: ogg, mimeType: 'audio/ogg', filename: 'audio.ogg', ...over });
+
+  it('POST /v1/audio/transcriptions como formulario: el archivo, el modelo y verbose_json; la clave va en la cabecera; devuelve texto y la duración real', async () => {
+    reply = happy;
+    const r = await ask({ language: 'es' });
+    expect(r).toEqual({ text: 'Hola, quiero una cita', seconds: 4.2, language: 'spanish' });
+    const q = seen.at(-1)!;
+    expect(q.url).toBe('/v1/audio/transcriptions');
+    expect(q.auth).toBe(`Bearer ${KEY}`);
+    expect(q.contentType).toMatch(/^multipart\/form-data; boundary=/);
+    expect(q.raw).toContain('name="model"');
+    expect(q.raw).toContain('whisper-1');
+    expect(q.raw).toContain('verbose_json');
+    expect(q.raw).toContain('filename="audio.ogg"');
+    expect(q.raw).toContain('name="language"');
+  });
+
+  it('valida antes de llamar: modelo, audio vacío, formato y nombre de archivo', async () => {
+    reply = happy;
+    for (const bad of [{ model: '../x' }, { audio: Buffer.alloc(0) }, { mimeType: 'audio/amr' }, { filename: '../../x.ogg' }]) expect(await fail(ask(bad)), JSON.stringify(bad)).toMatchObject({ retryable: false });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('una respuesta sin texto o sin duración falla como «no se entiende» (reintentable); los errores del proveedor se traducen como en el chat y nunca llevan la clave ni el audio', async () => {
+    reply = (_q, res) => json(res, 200, { text: 'hola' });
+    expect(await fail(ask())).toMatchObject({ retryable: true });
+    reply = (_q, res) => json(res, 401, { error: { message: `bad ${KEY}` } });
+    const e401 = await fail(ask());
+    expect(e401).toMatchObject({ retryable: false, credentials: true });
+    expect(e401.message).not.toContain(KEY);
+    reply = (_q, res) => json(res, 429, { error: { message: 'rate' } });
+    expect(await fail(ask())).toMatchObject({ retryable: true });
+    reply = (_q, res) => json(res, 400, { error: { message: 'Invalid file format' } });
+    expect(await fail(ask())).toMatchObject({ retryable: false });
+  });
+
+  it('el fake registra la llamada sin los bytes y devuelve lo que se le programe', async () => {
+    const fake = new FakeAiProvider();
+    fake.transcribeResult = () => ({ text: 'Hola', seconds: 9 });
+    const out = await fake.transcribe(creds, { model: 'whisper-1', audio: ogg, mimeType: 'audio/ogg', filename: 'audio.ogg' });
+    expect(out).toMatchObject({ text: 'Hola', seconds: 9 });
+    expect(fake.calls.at(-1)).toEqual({ kind: 'transcribe', model: 'whisper-1', mimeType: 'audio/ogg', filename: 'audio.ogg', bytes: ogg.byteLength });
   });
 });
