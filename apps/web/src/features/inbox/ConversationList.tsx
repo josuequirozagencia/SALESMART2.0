@@ -1,5 +1,6 @@
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import type { Conversation, InboxFilters, InboxOptions, InboxTab } from '../../lib/types';
 import { useNow } from '../../lib/useNow';
@@ -57,13 +58,15 @@ function Row({ c, active, now, mobile, photo, onNotice }: { c: Conversation; act
   const [sheet, setSheet] = useState(false);
   const g = useRowGestures({ enabled: mobile, onLongPress: () => setSheet(true) });
   const toggle = (): void => fav.mutate(!c.favorite);
-  // v13 S1.1: en móvil, «Aceptar» se puede tocar sin abrir el chat (solo en las «por aceptar» que esta persona puede aceptar; el servidor lo vuelve a verificar). Sigue dentro del chat.
+  // v13 S1.1: en móvil, «Aceptar» (o «Asignarme», si aún no tiene asesor) se puede tocar sin abrir el chat. Solo en «Esperando» y solo si esta persona puede (el servidor lo vuelve a verificar). Sigue dentro del chat.
   const act = useConversationAction(c.id);
-  const canAccept = mobile && c.status === 'pending' && c.can.accept;
+  const verb: 'accept' | 'take' | null = !mobile ? null : c.status === 'pending' && c.can.accept ? 'accept' : c.status === 'unassigned' && c.can.take ? 'take' : null;
+  const canAccept = verb !== null;
   const accept = (): void => {
-    act.mutate('accept', {
-      onSuccess: () => onNotice({ kind: 'ok', text: `Aceptaste la conversación de ${c.contact.name}. Ahora está en «Trabajando».` }),
-      onError: (e) => onNotice({ kind: 'error', text: friendlyError(e, `No pudimos aceptar la conversación de ${c.contact.name}.`) }),
+    if (verb === null) return;
+    act.mutate(verb, {
+      onSuccess: () => onNotice({ kind: 'ok', text: verb === 'accept' ? 'Chat aceptado' : 'Chat asignado a ti' }),
+      onError: (e) => onNotice({ kind: 'error', text: e instanceof ApiError && e.status === 409 ? (verb === 'accept' ? 'Esta conversación ya fue aceptada por otra persona' : 'Esta conversación ya fue tomada por otra persona') : friendlyError(e, verb === 'accept' ? `No pudimos aceptar la conversación de ${c.contact.name}.` : `No pudimos asignarte la conversación de ${c.contact.name}.`) }),
     });
   };
   const starLabel = c.favorite ? `Quitar de destacadas la conversación de ${c.contact.name}` : `Destacar la conversación de ${c.contact.name}`;
@@ -112,8 +115,8 @@ function Row({ c, active, now, mobile, photo, onNotice }: { c: Conversation; act
         </span>
       </Link>
       {canAccept ? (
-        <button type="button" aria-label={`Aceptar la conversación de ${c.contact.name}`} aria-busy={act.isPending || undefined} disabled={act.isPending} onClick={accept} className="absolute bottom-[14px] right-3 inline-flex h-11 min-w-[76px] items-center justify-center rounded-full bg-accent px-3 text-[13px] font-semibold text-accent-ink disabled:opacity-60">
-          {act.isPending ? 'Aceptando…' : 'Aceptar'}
+        <button type="button" aria-label={verb === 'accept' ? `Aceptar conversación con ${c.contact.name}` : `Asignarme la conversación con ${c.contact.name}`} aria-busy={act.isPending || undefined} disabled={act.isPending} onClick={accept} className="group/accept absolute bottom-[10px] right-2 inline-flex h-11 min-w-[84px] items-center justify-center rounded-[12px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-60">
+          <span className="inline-flex h-9 min-w-[76px] items-center justify-center rounded-[10px] px-3 text-[13px] font-semibold text-[color:var(--on-grad)] [background:var(--grad)]">{act.isPending ? (verb === 'accept' ? 'Aceptando…' : 'Asignando…') : verb === 'accept' ? 'Aceptar' : 'Asignarme'}</span>
         </button>
       ) : null}
       {mobile ? null : (
