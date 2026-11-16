@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { Alert, Button, Field, Spinner } from '../../ui/controls';
-import { REASON_LABEL, useFollowUps, useSaveFollowUps, type FollowUpMode, type FollowUps } from './useFollowUps';
+import { ApiError } from '../../lib/api';
+import { REASON_LABEL, useFollowUpFilePreview, useFollowUps, useRemoveFollowUpFile, useSaveFollowUps, useUploadFollowUpFile, type FollowUpFile, type FollowUpMode, type FollowUps } from './useFollowUps';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const areaCls = 'min-h-[80px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] font-normal text-fg';
@@ -15,7 +16,36 @@ type Unit = 'minutes' | 'hours' | 'days';
 const UNIT_MIN: Record<Unit, number> = { minutes: 1, hours: 60, days: 1440 };
 const UNIT_LABEL: Record<Unit, string> = { minutes: 'minutos', hours: 'horas', days: 'días' };
 
-interface Draft { amount: string; unit: Unit; mode: FollowUpMode; text: string; automation: string }
+interface Draft { amount: string; unit: Unit; mode: FollowUpMode; text: string; automation: string; files: FollowUpFile[] }
+
+const WINDOW_MINUTES = 24 * 60;
+const WINDOW_NOTICE = 'Después de 24 h por WhatsApp oficial solo puedes enviar una plantilla: este paso cae fuera de la ventana, así que no puede llevar archivos.';
+const GHL_NOTICE = 'Por GoHighLevel solo se pueden enviar mensajes de texto: este agente atiende una conexión de GoHighLevel, así que los pasos no pueden llevar archivos.';
+const KIND_NAME: Record<FollowUpFile['kind'], string> = { image: 'imagen', video: 'video', audio: 'audio', document: 'documento' };
+const KIND_ICON: Record<FollowUpFile['kind'], string> = { image: '🖼', video: '🎞', audio: '🎙', document: '📄' };
+
+/** Tamaño legible: KB hasta 1 MB y MB después. */
+export function sizeLabel(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  const mb = bytes / (1024 * 1024);
+  return `${mb < 10 ? mb.toFixed(1).replace(/\.0$/, '') : Math.round(mb)} MB`;
+}
+
+/** La espera acumulada (en minutos) hasta cada paso, contada desde que el agente respondió. */
+const cumulative = (steps: Draft[]): number[] => {
+  let total = 0;
+  return steps.map((s) => (total += minutesOf(s)));
+};
+
+/** Lo que saldría de un paso con archivos, en orden (la vista «en seco»): el texto va de pie del primer archivo salvo que sea audio, que no lleva pie. */
+export function dryRun(text: string, files: FollowUpFile[]): string[] {
+  if (files.length === 0) return [];
+  const audioFirst = files[0]!.kind === 'audio';
+  const lines: string[] = [];
+  if (audioFirst) lines.push('Un mensaje con el texto');
+  files.forEach((f, i) => lines.push(`${KIND_NAME[f.kind][0]!.toUpperCase()}${KIND_NAME[f.kind].slice(1)} «${f.filename}»${i === 0 && !audioFirst && text.trim() !== '' ? ' con el texto de pie' : ''}`));
+  return lines;
+}
 
 /** Muestra una cantidad de minutos con la unidad más grande que la divide exacto. */
 function split(minutes: number): { amount: string; unit: Unit } {
@@ -24,17 +54,22 @@ function split(minutes: number): { amount: string; unit: Unit } {
   return { amount: String(minutes), unit: 'minutes' };
 }
 
-const fromServer = (d: FollowUps): Draft[] => d.steps.map((s) => ({ ...split(s.delay_minutes), mode: s.mode, text: s.fixed_text ?? '', automation: s.start_automation_id ?? '' }));
+const fromServer = (d: FollowUps): Draft[] => d.steps.map((s) => ({ ...split(s.delay_minutes), mode: s.mode, text: s.fixed_text ?? '', automation: s.start_automation_id ?? '', files: s.files }));
 const minutesOf = (d: Draft): number => Math.round(Number(d.amount) * UNIT_MIN[d.unit]);
 
 /** Revisa lo que el servidor también revisa (la pantalla es solo ayuda). Devuelve el primer problema o `undefined`. */
-function problem(steps: Draft[]): string | undefined {
+function problem(steps: Draft[], channels: FollowUps['channels']): string | undefined {
+  const acc = cumulative(steps);
   for (const [i, s] of steps.entries()) {
     const n = i + 1;
     const m = minutesOf(s);
     if (!Number.isFinite(m) || m < MIN_MINUTES || m > MAX_MINUTES) return `Paso ${n}: la espera debe ir de 5 minutos a 7 días.`;
     if (s.mode === 'fixed_text' && s.text.trim() === '') return `Paso ${n}: escribe el texto del mensaje o deja que lo escriba la IA.`;
     if (s.mode === 'none' && s.automation === '') return `Paso ${n}: elige la automatización que se iniciará o cambia a enviar un mensaje.`;
+    if (s.mode === 'fixed_text' && s.files.length > 0) {
+      if (channels.ghl) return `Paso ${n}: ${GHL_NOTICE}`;
+      if (channels.official && acc[i]! >= WINDOW_MINUTES) return `Paso ${n}: ${WINDOW_NOTICE}`;
+    }
   }
   return undefined;
 }
@@ -53,6 +88,82 @@ function Summary({ d }: { d: FollowUps }) {
   );
 }
 
+/** Una fila de archivo: miniatura (imagen) o icono del tipo, nombre, tamaño, estado y la X para quitarlo. */
+function FileRow({ agentId, file, onRemove, removing }: { agentId: string; file: FollowUpFile; onRemove: () => void; removing: boolean }) {
+  const preview = useFollowUpFilePreview(agentId, file);
+  return (
+    <li className="flex items-center gap-2 rounded-lg border border-line bg-surface2 p-2">
+      {file.kind === 'image' && preview.data ? (
+        <img src={preview.data.url} alt={`Vista previa de ${file.filename}`} className="size-10 shrink-0 rounded-md object-cover" />
+      ) : (
+        <span aria-hidden="true" className="grid size-10 shrink-0 place-items-center rounded-md bg-surface text-[20px]">{KIND_ICON[file.kind]}</span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold" title={file.filename}>{file.filename}</span>
+        <span className="block text-[12px] text-muted">
+          {KIND_NAME[file.kind][0]!.toUpperCase()}{KIND_NAME[file.kind].slice(1)} · {sizeLabel(file.size_bytes)} ·{' '}
+          {file.scan_status === 'clean' ? <span className="text-ok">Listo (revisado)</span> : <span className="text-warn">Listo (sin revisar: no hay antivirus)</span>}
+        </span>
+      </span>
+      <button type="button" aria-label={`Quitar el archivo ${file.filename}`} title="Quitar archivo" disabled={removing} onClick={onRemove} className="grid size-11 shrink-0 place-items-center rounded-full text-[18px] text-muted hover:bg-surface hover:text-crit disabled:opacity-50">×</button>
+    </li>
+  );
+}
+
+/** Los archivos de un paso de texto fijo (v15): subir, ver y quitar, con los avisos de canal y de la ventana de 24 h. */
+function StepFiles({ agentId, data, step, minutesUntil, number, onChange }: { agentId: string; data: FollowUps; step: Draft; minutesUntil: number; number: number; onChange: (files: FollowUpFile[]) => void }) {
+  const upload = useUploadFollowUpFile(agentId);
+  const remove = useRemoveFollowUpFile(agentId);
+  const [error, setError] = useState<string>();
+  const limits = data.files_storage.limits;
+  const outside = data.channels.official && minutesUntil >= WINDOW_MINUTES;
+  const blockedBy = data.channels.ghl ? GHL_NOTICE : !data.files_storage.available ? 'Todavía no hay almacenamiento de archivos configurado en este servidor.' : outside ? WINDOW_NOTICE : null;
+  const full = step.files.length >= limits.max_per_step;
+  const onPick = async (list: FileList | null): Promise<void> => {
+    const file = list?.[0];
+    if (!file) return;
+    setError(undefined);
+    try {
+      const added = await upload.mutateAsync(file);
+      onChange([...step.files, added]);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : friendlyError(e, 'No pudimos subir el archivo.'));
+    }
+  };
+  const drop = async (f: FollowUpFile): Promise<void> => {
+    setError(undefined);
+    try {
+      await remove.mutateAsync(f.id);
+      onChange(step.files.filter((x) => x.id !== f.id));
+    } catch (e) {
+      setError(friendlyError(e, 'No pudimos quitar el archivo.'));
+    }
+  };
+  const plan = dryRun(step.text, step.files);
+  return (
+    <section aria-label={`Archivos del paso ${number}`} className="grid gap-2">
+      <h4 className="text-[13px] font-bold">Archivos de este paso</h4>
+      {step.files.length > 0 ? <ul aria-label={`Archivos adjuntos del paso ${number}`} className="grid gap-1.5">{step.files.map((f) => <FileRow key={f.id} agentId={agentId} file={f} removing={remove.isPending} onRemove={() => void drop(f)} />)}</ul> : null}
+      {plan.length > 0 ? (
+        <div className="rounded-lg bg-surface2 p-2 text-[12px] text-muted">
+          <b className="font-semibold text-fg">Se enviará, en este orden:</b>
+          <ol className="ml-4 list-decimal">{plan.map((l, i) => <li key={i}>{l}</li>)}</ol>
+        </div>
+      ) : null}
+      {blockedBy ? <Alert kind="info">{blockedBy}</Alert> : null}
+      <label className={`inline-flex w-fit items-center ${blockedBy || full ? 'pointer-events-none opacity-50' : 'cursor-pointer'}`}>
+        <span className="inline-flex min-h-11 items-center rounded-[10px] border border-line bg-surface px-3.5 text-[13px] font-semibold hover:bg-surface2">{upload.isPending ? 'Subiendo…' : 'Adjuntar archivo'}</span>
+        <input type="file" className="sr-only" aria-label={`Adjuntar archivo al paso ${number}`} disabled={Boolean(blockedBy) || full || upload.isPending} onChange={(e) => { void onPick(e.target.files); e.target.value = ''; }} />
+      </label>
+      <p className="text-[12px] text-muted">
+        Hasta {limits.max_per_step} archivos por paso: imágenes (JPG, PNG) de hasta {limits.max_mb.image} MB, videos de hasta {limits.max_mb.video} MB, audios de hasta {limits.max_mb.audio} MB y documentos (PDF, Word, Excel, PowerPoint, texto) de hasta {limits.max_mb.document} MB.
+        {full ? ' Este paso ya tiene el máximo.' : ''}
+      </p>
+      {error ? <Alert>{error}</Alert> : null}
+    </section>
+  );
+}
+
 function Editor({ agentId, data }: { agentId: string; data: FollowUps }) {
   const save = useSaveFollowUps(agentId);
   const [enabled, setEnabled] = useState(data.enabled);
@@ -60,17 +171,17 @@ function Editor({ agentId, data }: { agentId: string; data: FollowUps }) {
   const [error, setError] = useState<string>();
   const [ok, setOk] = useState(false);
   const patch = (i: number, p: Partial<Draft>): void => { setOk(false); setSteps((cur) => cur.map((s, j) => (j === i ? { ...s, ...p } : s))); };
-  const add = (): void => { setOk(false); setSteps((cur) => [...cur, { amount: cur.length === 0 ? '30' : '1', unit: cur.length === 0 ? 'minutes' : 'days', mode: 'ai', text: '', automation: '' }]); };
+  const add = (): void => { setOk(false); setSteps((cur) => [...cur, { amount: cur.length === 0 ? '30' : '1', unit: cur.length === 0 ? 'minutes' : 'days', mode: 'ai', text: '', automation: '', files: [] }]); };
   const remove = (i: number): void => { setOk(false); setSteps((cur) => cur.filter((_, j) => j !== i)); };
   const submit = async (): Promise<void> => {
     setOk(false);
-    const bad = enabled ? problem(steps) : undefined;
+    const bad = enabled ? problem(steps, data.channels) : undefined;
     if (bad) { setError(bad); return; }
     setError(undefined);
     try {
       await save.mutateAsync({
         enabled,
-        steps: steps.map((s) => ({ delay_minutes: minutesOf(s), mode: s.mode, fixed_text: s.mode === 'fixed_text' ? s.text.trim() : null, start_automation_id: s.automation || null })),
+        steps: steps.map((s) => ({ delay_minutes: minutesOf(s), mode: s.mode, fixed_text: s.mode === 'fixed_text' ? s.text.trim() : null, start_automation_id: s.automation || null, ...(s.mode === 'fixed_text' && s.files.length > 0 ? { file_ids: s.files.map((f) => f.id) } : {}) })),
       });
       setOk(true);
     } catch (e) {
@@ -103,7 +214,7 @@ function Editor({ agentId, data }: { agentId: string; data: FollowUps }) {
             </div>
             <Field label="Qué hace">
               {(f) => (
-                <select {...f} className={selectCls} value={s.mode} onChange={(e) => patch(i, { mode: e.target.value as FollowUpMode })}>
+                <select {...f} className={selectCls} value={s.mode} onChange={(e) => patch(i, { mode: e.target.value as FollowUpMode, ...(e.target.value !== 'fixed_text' ? { files: [] } : {}) })}>
                   <option value="ai">La IA escribe el mensaje</option>
                   <option value="fixed_text">Enviar un texto fijo</option>
                   <option value="none">Solo iniciar una automatización</option>
@@ -115,6 +226,7 @@ function Editor({ agentId, data }: { agentId: string; data: FollowUps }) {
                 {(f) => <textarea {...f} className={areaCls} maxLength={MAX_TEXT} value={s.text} onChange={(e) => patch(i, { text: e.target.value })} />}
               </Field>
             ) : null}
+            {s.mode === 'fixed_text' ? <StepFiles agentId={agentId} data={data} step={s} minutesUntil={cumulative(steps)[i]!} number={i + 1} onChange={(files) => patch(i, { files })} /> : null}
             <Field label={s.mode === 'none' ? 'Automatización que se inicia' : 'Además, iniciar una automatización (opcional)'}>
               {(f) => (
                 <select {...f} className={selectCls} value={s.automation} onChange={(e) => patch(i, { automation: e.target.value })}>
@@ -131,6 +243,7 @@ function Editor({ agentId, data }: { agentId: string; data: FollowUps }) {
         <Button disabled={steps.length >= MAX_STEPS} onClick={add}>Agregar paso</Button>
         {steps.length >= MAX_STEPS ? <span className="ml-2 text-[12px] text-muted">Máximo {MAX_STEPS} pasos.</span> : null}
       </div>
+      {data.files_storage.files > 0 ? <p className="text-[12.5px] text-muted">Archivos de los seguimientos de este agente: {data.files_storage.files} · {sizeLabel(data.files_storage.bytes)}.</p> : null}
       <Summary d={data} />
       {error ? <Alert>{error}</Alert> : ok ? <Alert kind="ok">Cambios guardados.</Alert> : null}
       <div><Button variant="primary" loading={save.isPending} onClick={() => void submit()}>Guardar</Button></div>

@@ -1,6 +1,8 @@
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { uuidv7 } from '@sales-smart/shared';
 import {
+  agentFollowUpFiles,
   agentFollowUpRuns,
   agentFollowUps,
   agentFollowUpSteps,
@@ -11,13 +13,17 @@ import {
   contacts,
   conversations,
   Database,
+  messageAttachments,
   messages,
   type TenantTx,
 } from '../../db';
+import { AppError } from '../../errors';
+import { TenantContext } from '../../tenant';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { AgentReplyBus, AgentRuntimeService, AgentTurnService, type AgentReplyEvent } from '../ai';
 import { writeAudit } from '../audit';
+import { AttachmentsService } from '../attachments';
 import { AutomationEnqueueService } from '../automations';
 import { windowOf } from '../inbox';
 import { OrgDirectoryService, type OrgDirectory } from '../organizations';
@@ -29,7 +35,9 @@ import {
   cancelReason,
   dueAt,
   ENDS_CHAIN,
+  FILE_UNASSIGNED_TTL_MS,
   LEASE_MS,
+  planParts,
   RETRY_MS,
   RUN_BATCH,
   SCENARIO,
@@ -77,6 +85,7 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
     @Inject(AiLimitsService) private readonly limits: AiLimitsService,
+    @Inject(AttachmentsService) private readonly files: AttachmentsService,
   ) {}
 
   onModuleInit(): void {
@@ -106,6 +115,31 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
       .insert(agentFollowUpRuns)
       .values({ agentId: e.agentId, conversationId: e.conversationId, scenario: SCENARIO, chainInboundAt: conv.lastInboundAt!, anchorAt: e.sentAt, ownerId: conv.ownerId, stepPosition: 1, dueAt: dueAt(e.sentAt, first.delay) })
       .onConflictDoNothing();
+  }
+
+  // ------------------------------------------------------------------ limpieza de archivos (v15)
+
+  /**
+   * Vence los archivos de seguimiento que ya no hacen falta —subidos hace más de 24 h y sin asignar a un paso, o de un agente borrado— y borra del almacenamiento el objeto de los vencidos (quitados de un paso
+   * también). Lo ya enviado a clientes no se toca: cada envío tiene su propia copia. Devuelve cuántos objetos borró.
+   */
+  async cleanupFiles(now: Date): Promise<number> {
+    const cutoff = new Date(now.getTime() - FILE_UNASSIGNED_TTL_MS);
+    await this.db.withTenant(async (tx) => {
+      await tx.update(agentFollowUpFiles).set({ state: 'expired', updatedAt: now }).where(and(eq(agentFollowUpFiles.state, 'ready'), isNull(agentFollowUpFiles.stepPosition), lt(agentFollowUpFiles.createdAt, cutoff)));
+      await tx
+        .update(agentFollowUpFiles)
+        .set({ state: 'expired', stepPosition: null, updatedAt: now })
+        .where(and(eq(agentFollowUpFiles.state, 'ready'), sql`${agentFollowUpFiles.followUpId} IN (SELECT f.id FROM ${agentFollowUps} f JOIN ${agents} a ON a.id = f.agent_id AND a.organization_id = f.organization_id WHERE a.deleted_at IS NOT NULL)`));
+    });
+    const gone = await this.db.withTenant((tx) =>
+      tx.select({ id: agentFollowUpFiles.id, key: agentFollowUpFiles.storageKey }).from(agentFollowUpFiles).where(and(eq(agentFollowUpFiles.state, 'expired'), sql`${agentFollowUpFiles.storageKey} IS NOT NULL`)).orderBy(asc(agentFollowUpFiles.updatedAt)).limit(50),
+    );
+    for (const g of gone) {
+      await this.files.remove(g.key!);
+      await this.db.withTenant((tx) => tx.update(agentFollowUpFiles).set({ storageKey: null, updatedAt: now }).where(eq(agentFollowUpFiles.id, g.id)));
+    }
+    return gone.length;
   }
 
   // ------------------------------------------------------------------ la tarea
@@ -160,6 +194,9 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
         const [sent] = await tx.select({ n: sql<number>`count(*)::int` }).from(agentFollowUpRuns).where(and(eq(agentFollowUpRuns.status, 'sent'), gt(agentFollowUpRuns.processedAt, new Date(now.getTime() - 24 * 3_600_000))));
         if ((sent?.n ?? 0) >= dailyMax) return { kind: 'skip' as const, reason: 'daily_limit' as SkipReason };
       }
+      // v15: los archivos del paso (solo los pasos de texto fijo los llevan). GoHighLevel es de solo texto: ese paso no puede salir
+      const stepFiles = step.mode === 'fixed_text' ? await tx.select().from(agentFollowUpFiles).where(and(eq(agentFollowUpFiles.followUpId, step.followUpId), eq(agentFollowUpFiles.stepPosition, step.position), eq(agentFollowUpFiles.state, 'ready'))).orderBy(asc(agentFollowUpFiles.sortOrder)) : [];
+      if (stepFiles.length > 0 && l.channel.provider === 'ghl') return { kind: 'skip' as const, reason: 'channel_unavailable' as SkipReason };
       let history: Array<{ role: 'user' | 'assistant'; text: string }> = [];
       if (step.mode === 'ai') {
         const recent = await tx
@@ -173,7 +210,7 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
           .filter((m) => m.kind === 'text' && m.body && (m.direction === 'in' || m.status !== 'failed'))
           .map((m) => ({ role: m.direction === 'in' ? ('user' as const) : ('assistant' as const), text: m.body!.slice(0, 1500) }));
       }
-      return { kind: 'go' as const, step, contactName: l.contactName, agentName: l.agentName, agentId: l.run.agentId, contactId: l.conv.contactId, history };
+      return { kind: 'go' as const, step, contactName: l.contactName, agentName: l.agentName, agentId: l.run.agentId, contactId: l.conv.contactId, history, stepFiles };
     });
     if (a.kind === 'gone') return 'skipped';
     if (a.kind === 'cancel') return this.finishRun(id, 'cancelled', a.reason, now);
@@ -207,18 +244,70 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
+    // B2) v15: cada archivo se COPIA a un adjunto propio de su mensaje (un archivo quitado del paso después no rompe lo ya enviado) y se revisa otra vez con el antivirus. Fuera de la transacción: leer y guardar tarda
+    const copies: Array<{ id: string; key: string; scan: 'clean' | 'skipped'; file: (typeof a.stepFiles)[number] }> = [];
+    const dropCopies = async (): Promise<void> => {
+      for (const c of copies) await this.files.remove(c.key);
+    };
+    if (a.stepFiles.length > 0) {
+      const organizationId = TenantContext.current().organizationId;
+      for (const f of a.stepFiles) {
+        try {
+          if (!f.storageKey) throw new AppError(404, 'NOT_FOUND', 'Falta el archivo');
+          const bytes = await this.files.read(f.storageKey);
+          const copyId = uuidv7();
+          const stored = await this.files.scanAndStore(organizationId, copyId, { bytes, mime: f.mimeType });
+          copies.push({ id: copyId, key: stored.key, scan: stored.scanStatus, file: f });
+        } catch (e) {
+          await dropCopies();
+          const code = (e as { code?: string } | null)?.code;
+          if (code === 'ATTACHMENT_INFECTED') return this.finishRun(id, 'skipped', 'attachment_infected', now, true);
+          if (code === 'NOT_FOUND') return this.finishRun(id, 'skipped', 'attachment_unavailable', now, true);
+          // Almacenamiento o antivirus caídos un momento: se reintenta, no se descarta el paso
+          await this.db.withTenant((tx) => tx.update(agentFollowUpRuns).set({ processingStartedAt: null, dueAt: new Date(now.getTime() + RETRY_MS), updatedAt: now }).where(and(eq(agentFollowUpRuns.id, id), eq(agentFollowUpRuns.status, 'pending'))));
+          return 'retry';
+        }
+      }
+    }
+
     // C) volver a comprobar y enviar
     return this.db.withTenant(async (tx) => {
       const l = await this.load(tx, id, true);
-      if (!l || l.run.status !== 'pending') return 'skipped' as const;
+      if (!l || l.run.status !== 'pending') {
+        await dropCopies();
+        return 'skipped' as const;
+      }
       const reason = cancelReason({ chainInboundAt: l.run.chainInboundAt, ownerId: l.run.ownerId }, l.snapshot);
       if (reason) {
+        await dropCopies();
         await this.resolve(tx, l, 'cancelled', reason, now, true); // cancelar termina la cadena
         return 'cancelled' as const;
       }
       const step = l.step!;
       let messageId: string | null = null;
-      if (text !== null) {
+      if (copies.length > 0 && text !== null) {
+        // Texto y archivos, EN ORDEN y uno por mensaje (el texto de pie del primero si lleva pie; si no, antes). Mensajes automáticos: no cuentan como respuesta humana
+        const parts = planParts(text, copies.map((c) => ({ id: c.id, kind: c.file.kind as 'image' | 'video' | 'audio' | 'document' })));
+        for (const [i, part] of parts.entries()) {
+          const at = new Date(now.getTime() + i);
+          if (part.type === 'text') {
+            const [m] = await tx
+              .insert(messages)
+              .values({ conversationId: l.conv.id, channelAccountId: l.conv.channelAccountId, direction: 'out', senderType: 'automation', kind: 'text', body: part.body, status: 'queued', sentAt: at, attempts: 0, nextAttemptAt: now, meta: { agent_id: l.run.agentId, follow_up: step.position } })
+              .returning({ id: messages.id });
+            messageId = m!.id;
+          } else {
+            const c = copies.find((x) => x.id === part.fileId)!;
+            const [m] = await tx
+              .insert(messages)
+              .values({ conversationId: l.conv.id, channelAccountId: l.conv.channelAccountId, direction: 'out', senderType: 'automation', kind: part.kind, body: part.caption, status: 'queued', sentAt: at, attempts: 0, nextAttemptAt: now, meta: { agent_id: l.run.agentId, follow_up: step.position } })
+              .returning({ id: messages.id });
+            messageId = m!.id;
+            await tx.insert(messageAttachments).values({ id: c.id, conversationId: l.conv.id, messageId: m!.id, direction: 'out', kind: c.file.kind, mimeType: c.file.mimeType, filename: c.file.filename, sizeBytes: c.file.sizeBytes, storageKey: c.key, checksum: c.file.checksum, state: 'ready', scanStatus: c.scan });
+          }
+        }
+        await tx.update(conversations).set({ lastMessageAt: sql`GREATEST(COALESCE(${conversations.lastMessageAt}, ${now}::timestamptz), ${now}::timestamptz)`, updatedAt: now }).where(eq(conversations.id, l.conv.id));
+      } else if (text !== null) {
         const [m] = await tx
           .insert(messages)
           .values({ conversationId: l.conv.id, channelAccountId: l.conv.channelAccountId, direction: 'out', senderType: 'ai', kind: 'text', body: text, status: 'queued', sentAt: now, attempts: 0, nextAttemptAt: now, meta: { agent_id: l.run.agentId, follow_up: step.position } })
@@ -228,9 +317,9 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
       }
       let automationNote = '';
       if (step.startAutomationId) automationNote = await this.startAutomation(tx, l, step.startAutomationId, id);
-      const note = `Seguimiento ${step.position} enviado por el agente ${l.agentName}${text === null ? ' (sin mensaje)' : ''}${automationNote}`;
+      const note = `Seguimiento ${step.position} enviado por el agente ${l.agentName}${text === null ? ' (sin mensaje)' : ''}${copies.length > 0 ? ` con ${copies.length} ${copies.length === 1 ? 'archivo' : 'archivos'}` : ''}${automationNote}`;
       await tx.insert(messages).values({ conversationId: l.conv.id, channelAccountId: l.conv.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: note.slice(0, 2000), status: 'internal', sentAt: now });
-      await writeAudit(tx, { entityType: 'conversation', entityId: l.conv.id, field: 'ai_follow_up', oldValue: null, newValue: { step: step.position, mode: step.mode, automation: step.startAutomationId }, source: 'ai' });
+      await writeAudit(tx, { entityType: 'conversation', entityId: l.conv.id, field: 'ai_follow_up', oldValue: null, newValue: { step: step.position, mode: step.mode, automation: step.startAutomationId, files: copies.map((c) => ({ kind: c.file.kind, size_bytes: c.file.sizeBytes })) }, source: 'ai' }); // solo tipo y tamaño: nunca el contenido
       await this.resolve(tx, l, 'sent', null, now, false);
       this.realtime.touchHere(l.conv.id, messageId ? { message: { id: messageId, kind: 'created' } } : {});
       return 'sent' as const;
@@ -243,6 +332,11 @@ export class FollowUpRunnerService implements OnModuleInit, OnModuleDestroy {
       const l = await this.load(tx, id, true);
       if (!l || l.run.status !== 'pending') return;
       await this.resolve(tx, l, status, reason, now, status === 'cancelled' ? true : endsChain);
+      // v15: si un archivo hizo fallar el paso, queda dicho en la conversación («qué hizo el agente») y los pasos siguientes no salen
+      if (reason === 'attachment_infected' || reason === 'attachment_unavailable') {
+        const why = reason === 'attachment_infected' ? 'el antivirus bloqueó uno de sus archivos' : 'falta uno de sus archivos';
+        await tx.insert(messages).values({ conversationId: l.conv.id, channelAccountId: l.conv.channelAccountId, direction: 'out', senderType: 'system', kind: 'note', body: `Seguimiento ${l.run.stepPosition} del agente ${l.agentName} no se envió: ${why}. No se enviarán los pasos siguientes.`, status: 'internal', sentAt: now });
+      }
     });
     return status;
   }

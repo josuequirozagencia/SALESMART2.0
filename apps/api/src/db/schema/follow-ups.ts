@@ -99,3 +99,43 @@ export const agentFollowUpRuns = tenantTable(
     check('agent_follow_up_runs_reason_len', sql`${t['reason']!} IS NULL OR length(${t['reason']!}) <= 80`),
   ],
 );
+
+/**
+ * Archivos de los pasos MANUALES (texto fijo) del seguimiento (v15, ADR-68). Un archivo se sube a la secuencia del agente (`follow_up_id`) y, al guardar la secuencia, se asigna a un paso por su posición
+ * (`step_position`) y orden (`sort_order`): como guardar reemplaza los pasos, el archivo NO cuelga del id del paso. Sin asignar (`step_position` nulo) vence a las 24 h. `state = 'expired'` (quitado del paso,
+ * agente borrado o sin asignar) → la tarea borra el objeto del almacenamiento y deja `storage_key` en nulo. Cada envío COPIA el archivo a un adjunto propio del mensaje (así un archivo quitado después no
+ * rompe lo que ya se envió). Sin DELETE. El contenido y el nombre nunca van a logs ni a la auditoría.
+ */
+export const agentFollowUpFiles = tenantTable(
+  'agent_follow_up_files',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    followUpId: uuid('follow_up_id').notNull(),
+    stepPosition: smallint('step_position'),
+    sortOrder: smallint('sort_order').notNull().default(0),
+    kind: text('kind').notNull(),
+    mimeType: text('mime_type').notNull(),
+    filename: text('filename').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    storageKey: text('storage_key'),
+    checksum: text('checksum').notNull(),
+    scanStatus: text('scan_status').notNull(),
+    state: text('state').notNull().default('ready'),
+    createdBy: uuid('created_by').references(() => users.id),
+    createdAt: ts('created_at').notNull().defaultNow(),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'agent_follow_up_files_follow_up_fk', columns: [t['organizationId']!, t['followUpId']!], foreignColumns: [agentFollowUps.organizationId, agentFollowUps.id] }),
+    check('agent_follow_up_files_kind_valid', sql`${t['kind']!} IN ('image', 'video', 'audio', 'document')`),
+    check('agent_follow_up_files_state_valid', sql`${t['state']!} IN ('ready', 'expired')`),
+    check('agent_follow_up_files_scan_valid', sql`${t['scanStatus']!} IN ('clean', 'skipped')`),
+    check('agent_follow_up_files_step_valid', sql`${t['stepPosition']!} IS NULL OR ${t['stepPosition']!} BETWEEN 1 AND 5`),
+    check('agent_follow_up_files_order_valid', sql`${t['sortOrder']!} BETWEEN 0 AND 2`),
+    check('agent_follow_up_files_size_valid', sql`${t['sizeBytes']!} BETWEEN 1 AND 104857600`),
+    check('agent_follow_up_files_name_len', sql`length(${t['filename']!}) BETWEEN 1 AND 200 AND length(${t['mimeType']!}) BETWEEN 3 AND 127`),
+    check('agent_follow_up_files_ready_has_key', sql`${t['state']!} <> 'ready' OR ${t['storageKey']!} IS NOT NULL`),
+    uniqueIndex('agent_follow_up_files_slot_uq').on(t['followUpId']!, t['stepPosition']!, t['sortOrder']!).where(sql`${t['state']!} = 'ready' AND ${t['stepPosition']!} IS NOT NULL`),
+    index('agent_follow_up_files_follow_up_idx').on(t['organizationId']!, t['followUpId']!, t['state']!),
+  ],
+);

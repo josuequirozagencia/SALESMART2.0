@@ -31,10 +31,10 @@ export type CancelReason =
   | 'superseded';
 
 /** Por qué un paso que sí hacía falta no pudo salir. */
-export type SkipReason = 'window_closed' | 'no_credits' | 'missing_variable' | 'automation_unavailable' | 'daily_limit' | 'channel_unavailable' | 'ai_unavailable' | 'empty_reply';
+export type SkipReason = 'window_closed' | 'no_credits' | 'missing_variable' | 'automation_unavailable' | 'daily_limit' | 'channel_unavailable' | 'ai_unavailable' | 'empty_reply' | 'attachment_unavailable' | 'attachment_infected';
 
 /** Estos motivos terminan la cadena: los pasos que faltan tampoco podrían salir (la ventana de WhatsApp no se reabre sola, no hay créditos, el canal no sirve o se llegó al tope del día). */
-export const ENDS_CHAIN: ReadonlySet<SkipReason> = new Set<SkipReason>(['window_closed', 'no_credits', 'channel_unavailable', 'daily_limit']);
+export const ENDS_CHAIN: ReadonlySet<SkipReason> = new Set<SkipReason>(['window_closed', 'no_credits', 'channel_unavailable', 'daily_limit', 'attachment_unavailable', 'attachment_infected']);
 
 export interface RunFacts {
   readonly chainInboundAt: Date;
@@ -88,4 +88,49 @@ export function dueAt(anchor: Date, delayMinutes: number): Date {
 export function disallowedVariables(names: readonly string[]): string[] {
   const ok = new Set<string>(FOLLOW_UP_VARIABLES);
   return names.filter((n) => !ok.has(n));
+}
+
+// ---------------------------------------------------------------------------------------------- archivos de los pasos (v15)
+
+/** Archivos que lleva a lo sumo un paso manual. */
+export const MAX_FILES_PER_STEP = 3;
+/** Un archivo subido que no se asignó a ningún paso al guardar la secuencia vence a las 24 h. */
+export const FILE_UNASSIGNED_TTL_MS = 24 * 60 * 60_000;
+/** Pasada esta espera acumulada, un paso por WhatsApp OFICIAL cae fuera de la ventana de 24 h del último mensaje del cliente (se cuenta desde que el agente respondió, que es segundos después). */
+export const WINDOW_MINUTES = 24 * 60;
+
+/** Lo que se le dice a quien pone un archivo en un paso que caería fuera de la ventana de WhatsApp oficial. */
+export const FILES_OUTSIDE_WINDOW_MESSAGE = 'Después de 24 h por WhatsApp oficial solo puedes enviar una plantilla: este paso cae fuera de la ventana, así que no puede llevar archivos. Quita el archivo o acorta la espera.';
+export const FILES_GHL_MESSAGE = 'Por GoHighLevel solo se pueden enviar mensajes de texto: este agente atiende una conexión de GoHighLevel, así que los pasos no pueden llevar archivos.';
+
+/** La espera acumulada (en minutos) hasta cada paso: lo que pasa desde que el agente respondió hasta que le toca. `delays` en orden de paso. */
+export function cumulativeMinutes(delays: readonly number[]): number[] {
+  let total = 0;
+  return delays.map((d) => (total += d));
+}
+
+/** ¿Este paso, por su espera acumulada, cae dentro de la ventana de 24 h de WhatsApp oficial? (cuenta desde que el agente respondió; con 24 h justas ya está fuera). */
+export function insideOfficialWindow(cumulativeMin: number): boolean {
+  return cumulativeMin < WINDOW_MINUTES;
+}
+
+export interface OutgoingFile {
+  readonly id: string;
+  readonly kind: 'image' | 'video' | 'audio' | 'document';
+}
+
+export type OutgoingPart = { readonly type: 'text'; readonly body: string } | { readonly type: 'file'; readonly fileId: string; readonly kind: OutgoingFile['kind']; readonly caption: string | null };
+
+/**
+ * Los mensajes que sale de un paso con archivos, EN ORDEN (uno por mensaje): si el primero es imagen, video o documento, el texto va como su pie; si es audio (que no lleva pie), el texto va en un
+ * mensaje aparte ANTES. Los demás archivos no llevan pie. Sin archivos, solo el texto.
+ */
+export function planParts(text: string, files: readonly OutgoingFile[]): OutgoingPart[] {
+  if (files.length === 0) return [{ type: 'text', body: text }];
+  const first = files[0]!;
+  const captionable = first.kind !== 'audio';
+  const parts: OutgoingPart[] = [];
+  if (!captionable) parts.push({ type: 'text', body: text });
+  files.forEach((f, i) => parts.push({ type: 'file', fileId: f.id, kind: f.kind, caption: i === 0 && captionable ? text : null }));
+  return parts;
 }
