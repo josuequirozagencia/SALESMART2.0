@@ -1040,6 +1040,47 @@ describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
     expect(transcribes()).toHaveLength(1);
   });
 
+  it('varios audios seguidos: se transcriben hasta 3 (los más recientes), en orden, y se avisa de los que sobran; cada uno se cobra y se anota por separado', async () => {
+    await audioAgent();
+    let n = 0;
+    ai.transcribeResult = () => { n += 1; return { text: `parte ${n}`, seconds: 3 }; };
+    const c = await mkConv();
+    const base = Date.now() + 2000;
+    for (let i = 0; i < 4; i++) await inboundAudio(c.id, { at: new Date(base + i * 100) });
+    await tick();
+    expect(transcribes()).toHaveLength(3);
+    expect(lastUser()).toBe(['[Audio del cliente, transcrito] parte 1', '[Audio del cliente, transcrito] parte 2', '[Audio del cliente, transcrito] parte 3 (El cliente envió 1 audio más que no puedes escuchar.)'].join('\n'));
+    expect((await mediaRuns()).filter((r) => r['kind'] === 'audio')).toHaveLength(3);
+    expect(await aiMessages(c.id)).toHaveLength(1);
+  });
+
+  it('con varios audios, si uno no se puede leer (AMR) el agente igual atiende los que sí; un audio ya transcrito no se cobra otra vez', async () => {
+    await audioAgent();
+    const c = await mkConv();
+    const base = Date.now() + 2000;
+    const first = await inboundAudio(c.id, { at: new Date(base) });
+    await inboundAudio(c.id, { bytes: AMR, at: new Date(base + 100) });
+    await inboundAudio(c.id, { at: new Date(base + 200) });
+    await admin.query(`UPDATE messages SET meta = meta || $2::jsonb WHERE id = $1`, [first, JSON.stringify({ transcript: { text: 'ya estaba', seconds: 2, model: 'whisper-test', at: new Date().toISOString() } })]);
+    await tick();
+    expect(transcribes()).toHaveLength(1); // el primero ya estaba transcrito, el AMR no se transcribe: solo el tercero va a OpenAI
+    expect(lastUser()).toBe(['[Audio del cliente, transcrito] ya estaba', '[Audio del cliente, transcrito] Hola, quiero agendar una cita para mañana (El cliente envió 1 audio más que no puedes escuchar.)'].join('\n'));
+    expect(await aiMessages(c.id)).toHaveLength(1);
+  });
+
+  it('con varios audios, un adjunto que todavía se descarga hace esperar a todo el turno sin gastar nada', async () => {
+    await audioAgent();
+    const c = await mkConv();
+    const base = Date.now() + 2000;
+    await inboundAudio(c.id, { at: new Date(base) });
+    await inboundAudio(c.id, { state: 'pending', at: new Date(base + 100) });
+    const before = (await ledger()).length;
+    await tick();
+    expect(transcribes()).toHaveLength(0);
+    expect((await ledger()).length).toBe(before);
+    expect(await state(c.id)).toMatchObject({ status: 'active', attempts: 0 });
+  });
+
   it('si en el audio el cliente pide una persona, se le pasa con el aviso de siempre', async () => {
     await audioAgent();
     ai.transcribeResult = () => ({ text: 'Quiero hablar con un asesor por favor', seconds: 4 });

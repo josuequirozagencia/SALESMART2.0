@@ -294,7 +294,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
         <label className={`flex items-start gap-2 text-[13.5px] font-semibold ${!canListen && !listens ? 'opacity-60' : ''}`}>
           <input type="checkbox" role="switch" aria-label="Escuchar audios" checked={listens} disabled={!canListen && !listens} onChange={(e) => setListens(e.target.checked)} className="mt-1" />
           <span>Escuchar audios
-            <span className="block text-[12.5px] font-normal text-muted">Cuando el cliente manda una nota de voz, el agente la transcribe y contesta como si la hubiera escrito. Se transcribe un audio por mensaje (hasta 2 MB y el tiempo máximo que fija la plataforma); la transcripción queda visible bajo el audio para tu equipo y cada audio gasta créditos.</span>
+            <span className="block text-[12.5px] font-normal text-muted">Cuando el cliente manda una nota de voz, el agente la transcribe y contesta como si la hubiera escrito. Se transcriben hasta 3 audios por mensaje (cada uno de hasta 2 MB y del tiempo máximo que fija la plataforma); la transcripción queda visible bajo el audio para tu equipo y cada audio gasta créditos.</span>
             {!canListen ? <span className="block text-[12.5px] font-normal text-muted">Todavía no hay un modelo de transcripción cargado: pídele al administrador de la plataforma que lo agregue.</span> : null}
           </span>
         </label>
