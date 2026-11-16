@@ -75,7 +75,8 @@ const SIZES = [
 
 for (const size of SIZES) {
   test.describe(`${size.width} × ${size.height}`, () => {
-    test.use({ viewport: size });
+    // Sin animaciones: la pantalla del chat entra con un desplazamiento de 24 px durante 180 ms y medir en pleno movimiento da posiciones falsas (en CI lo hizo)
+    test.use({ viewport: size, reducedMotion: 'reduce' });
 
     test('los tres botones del redactor quedan dentro de la pantalla, también con texto largo escrito', async ({ page, request }) => {
       const { email, conv } = await fixture(request);
