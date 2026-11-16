@@ -1,4 +1,4 @@
-import { AiProviderError, type ToolCall, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
+import { AiProviderError, imageCount, messageText, type ToolCall, type AiCredentials, type AIProvider, type ChatRequest, type ChatResult, type EmbedRequest, type EmbedResult } from './ai.ports';
 
 /** Lo que el fake «hizo», en orden (las pruebas lo leen). Sin la clave: nunca se guarda. */
 export type FakeAiCall = { kind: 'embed'; model: string; inputs: string[]; dimensions: number } | { kind: 'chat'; request: ChatRequest };
@@ -47,6 +47,8 @@ export class FakeAiProvider implements AIProvider {
   chatResult: ((request: ChatRequest) => { text?: string; toolCalls?: ToolCall[] }) | null = null;
   /** Si es verdadero, `embed` cuenta un token por cada 4 caracteres; si no, exactamente `tokensPerInput` por texto. */
   tokensPerInput: number | null = null;
+  /** Tokens de entrada que el fake cuenta por cada imagen recibida (el proveedor real cobra la imagen como tokens de entrada). */
+  tokensPerImage = 800;
 
   /** Descarta los fallos programados que no se llegaron a usar. */
   clearFailures(): void {
@@ -76,7 +78,7 @@ export class FakeAiProvider implements AIProvider {
     const scripted = this.chatResult?.(request);
     const text = scripted ? (scripted.text ?? '') : this.chatReply(request);
     const toolCalls = scripted?.toolCalls ?? [];
-    const tokensIn = Math.ceil(request.messages.reduce((n, m) => n + m.content.length, 0) / 4);
+    const tokensIn = Math.ceil(request.messages.reduce((n, m) => n + messageText(m).length, 0) / 4) + this.tokensPerImage * request.messages.reduce((n, m) => n + imageCount(m), 0);
     return Promise.resolve({ text, tokensIn, tokensOut: Math.ceil((text.length + toolCalls.reduce((n, c) => n + c.arguments.length, 0)) / 4), toolCalls });
   }
 }

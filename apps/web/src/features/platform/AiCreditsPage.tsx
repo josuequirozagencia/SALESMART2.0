@@ -45,13 +45,14 @@ const LIMIT_FIELDS = [
   { key: 'tests_per_day', label: 'Mensajes de prueba del agente por día', hint: 'El simulador «Probar» de Agentes IA.' },
   { key: 'suggestions_per_day', label: 'Sugerencias de respuesta por día', hint: 'El botón «Sugerir» del redactor del Inbox.' },
   { key: 'follow_ups_per_day', label: 'Seguimientos automáticos por día', hint: 'Mensajes que el agente envía cuando el cliente deja de responder.' },
+  { key: 'images_per_day', label: 'Imágenes que leen los agentes por día', hint: 'Las fotos de clientes que un agente con «Leer imágenes» manda a la IA.' },
 ] as const;
 const LIMIT_MAX = 10_000;
 
 /** Topes diarios de la IA: el mismo número para toda empresa, contado por empresa en las últimas 24 horas. */
 function LimitsForm({ l }: { l: AiLimits }) {
   const set = useSetAiLimits();
-  const [vals, setVals] = useState<Record<(typeof LIMIT_FIELDS)[number]['key'], string>>({ tests_per_day: String(l.tests_per_day), suggestions_per_day: String(l.suggestions_per_day), follow_ups_per_day: String(l.follow_ups_per_day) });
+  const [vals, setVals] = useState<Record<(typeof LIMIT_FIELDS)[number]['key'], string>>({ tests_per_day: String(l.tests_per_day), suggestions_per_day: String(l.suggestions_per_day), follow_ups_per_day: String(l.follow_ups_per_day), images_per_day: String(l.images_per_day) });
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const submit = (e: FormEvent): void => {
@@ -86,6 +87,7 @@ function ModelRow({ m }: { m: AiModelPrice }) {
   const set = useSetModelPrice();
   const [input, setInput] = useState(num(m.usd_per_1m_input));
   const [output, setOutput] = useState(num(m.usd_per_1m_output));
+  const [vision, setVision] = useState(m.vision);
   const [error, setError] = useState<string>();
   const [saved, setSaved] = useState(false);
   const submit = (e: FormEvent): void => {
@@ -93,7 +95,7 @@ function ModelRow({ m }: { m: AiModelPrice }) {
     setSaved(false);
     if (!DECIMAL.test(input.trim()) || Number(input) > 10000 || !DECIMAL.test(output.trim()) || Number(output) > 10000) return setError('Dos números de 0 a 10000.');
     setError(undefined);
-    set.mutate({ model: m.model, usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim() }, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar el precio.')) });
+    set.mutate({ model: m.model, usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim(), ...(m.kind === 'chat' ? { vision } : {}) }, { onSuccess: () => setSaved(true), onError: (e2) => setError(friendlyError(e2, 'No pudimos guardar el precio.')) });
   };
   return (
     <li className="py-3">
@@ -104,6 +106,7 @@ function ModelRow({ m }: { m: AiModelPrice }) {
           <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
           <div><Button type="submit" loading={set.isPending}>Guardar</Button></div>
         </div>
+        {m.kind === 'chat' ? <label className="inline-flex items-center gap-2 text-[13px] font-semibold"><input type="checkbox" checked={vision} onChange={(e) => { setVision(e.target.checked); setSaved(false); }} aria-label={`${m.model} entiende imágenes`} />Entiende imágenes (los agentes pueden activar «Leer imágenes» con este modelo)</label> : null}
         {error ? <Alert>{error}</Alert> : null}
         {saved ? <Alert kind="ok">Precio guardado.</Alert> : null}
       </form>
@@ -117,6 +120,7 @@ function AddModelForm() {
   const [model, setModel] = useState('');
   const [input, setInput] = useState('');
   const [output, setOutput] = useState('');
+  const [vision, setVision] = useState(false);
   const [error, setError] = useState<string>();
   const [done, setDone] = useState<string>();
   const submit = (e: FormEvent): void => {
@@ -125,8 +129,8 @@ function AddModelForm() {
     if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(model.trim())) return setError('Escribe el nombre exacto del modelo, sin espacios (por ejemplo, gpt-4.1-mini).');
     if (!DECIMAL.test(input.trim()) || Number(input) > 10000 || !DECIMAL.test(output.trim()) || Number(output) > 10000) return setError('Los precios son dos números de 0 a 10000.');
     setError(undefined);
-    add.mutate({ model: model.trim(), usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim() }, {
-      onSuccess: (m) => { setDone(`Modelo ${m.model} agregado: ya lo pueden elegir los agentes.`); setModel(''); setInput(''); setOutput(''); },
+    add.mutate({ model: model.trim(), usd_per_1m_input: input.trim(), usd_per_1m_output: output.trim(), ...(vision ? { vision: true } : {}) }, {
+      onSuccess: (m) => { setDone(`Modelo ${m.model} agregado: ya lo pueden elegir los agentes.`); setModel(''); setInput(''); setOutput(''); setVision(false); },
       onError: (e2) => setError(friendlyError(e2, 'No pudimos agregar el modelo.')),
     });
   };
@@ -140,6 +144,7 @@ function AddModelForm() {
         <Field label="Salida (USD por millón de tokens)">{(f) => <Input {...f} inputMode="decimal" value={output} onChange={(e) => setOutput(e.target.value)} />}</Field>
         <div><Button type="submit" variant="primary" loading={add.isPending}>Agregar modelo</Button></div>
       </div>
+      <label className="inline-flex items-center gap-2 text-[13px] font-semibold"><input type="checkbox" checked={vision} onChange={(e) => setVision(e.target.checked)} />Entiende imágenes (visión)</label>
       {error ? <Alert>{error}</Alert> : null}
       {done ? <Alert kind="ok">{done}</Alert> : null}
     </form>

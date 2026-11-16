@@ -49,10 +49,28 @@ export interface ToolCall {
   readonly arguments: string;
 }
 
+/** Una parte de un mensaje del cliente: texto o una imagen (ADR-70). Los bytes viajan en memoria del servidor al proveedor; nunca se firma ni se publica una dirección. */
+export type ContentPart = { readonly type: 'text'; readonly text: string } | { readonly type: 'image'; readonly mimeType: string; readonly bytes: Uint8Array };
+
+/** Tipos de imagen que el puerto acepta (decididos por el contenido real antes de llegar aquí). */
+export const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
 export type ChatMessage =
-  | { readonly role: 'system' | 'user'; readonly content: string }
+  | { readonly role: 'system'; readonly content: string }
+  | { readonly role: 'user'; readonly content: string | ReadonlyArray<ContentPart> }
   | { readonly role: 'assistant'; readonly content: string; readonly toolCalls?: readonly ToolCall[] }
   | { readonly role: 'tool'; readonly content: string; readonly toolCallId: string };
+
+/** El texto de un mensaje (las imágenes no cuentan como texto). */
+export function messageText(m: ChatMessage): string {
+  if (typeof m.content === 'string') return m.content;
+  return m.content.map((p) => (p.type === 'text' ? p.text : '')).join('');
+}
+
+/** ¿El mensaje lleva alguna imagen? */
+export function imageCount(m: ChatMessage): number {
+  return typeof m.content === 'string' ? 0 : m.content.filter((p) => p.type === 'image').length;
+}
 
 export interface ChatRequest {
   readonly model: string;

@@ -36,6 +36,8 @@ export const updateAgentSchema = z
     tasks_enabled: z.boolean(),
     /** Las personas del equipo pueden pedir un borrador de respuesta en el Inbox (v11 S4). */
     suggestions_enabled: z.boolean(),
+    /** El agente lee las imágenes del cliente (v13 S5, ADR-70): se envían al proveedor de IA. Solo con un modelo con visión. */
+    read_images: z.boolean(),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');

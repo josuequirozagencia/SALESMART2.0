@@ -672,4 +672,33 @@ describe('Súper Admin: dar de alta un modelo de chat (v11 S4)', () => {
     expect(opts.models).toContain('gpt-4.1-mini');
     expect(opts.models).not.toContain('text-embedding-3-small');
   });
+
+  it('visión (v13 S5, ADR-70): se carga con el modelo o después; solo un modelo de chat puede entender imágenes; los agentes solo ven como «con visión» los marcados', async () => {
+    const created = await call('POST', '/platform/ai/models', T.root, { model: 'gpt-vision-x', usd_per_1m_input: '0.4', usd_per_1m_output: '1.6', vision: true });
+    expect(created.status).toBe(201);
+    expect(await json(created)).toMatchObject({ model: 'gpt-vision-x', vision: true, usd_per_minute: null });
+    const plain = await call('POST', '/platform/ai/models', T.root, { model: 'gpt-plain-x', usd_per_1m_input: '0.4', usd_per_1m_output: '1.6' });
+    expect(await json(plain)).toMatchObject({ vision: false });
+    const list = await call('GET', '/platform/ai/models', T.root).then((r) => json<Array<Row>>(r));
+    expect(list.find((m) => m['model'] === 'gpt-4o-mini')).toMatchObject({ vision: true }); // la migración marca los que ya había y entienden imágenes
+    expect(list.find((m) => m['model'] === 'text-embedding-3-small')).toMatchObject({ vision: false });
+    const opts = await call('GET', '/agents/options', T.alice).then((r) => json<{ models: string[]; vision_models: string[] }>(r));
+    expect(opts.vision_models).toContain('gpt-vision-x');
+    expect(opts.vision_models).not.toContain('gpt-plain-x');
+    // cambiarla después, con auditoría; y un modelo de embeddings no puede tener visión (409)
+    const upd = await call('PUT', '/platform/ai/models/gpt-plain-x', T.root, { usd_per_1m_input: '0.4', usd_per_1m_output: '1.6', vision: true });
+    expect(upd.status).toBe(200);
+    expect(await json(upd)).toMatchObject({ vision: true });
+    expect((await call('PUT', '/platform/ai/models/text-embedding-3-small', T.root, { usd_per_1m_input: '0.02', usd_per_1m_output: '0', vision: true })).status).toBe(409);
+    expect((await call('PUT', '/platform/ai/models/gpt-plain-x', T.root, { usd_per_1m_input: '0.4', usd_per_1m_output: '1.6', vision: 'si' })).status).toBe(400);
+    const audit = (await admin.query(`SELECT details FROM platform_audit WHERE action = 'ai.model_price.update' AND details->>'model' = 'gpt-plain-x'`)).rows;
+    expect(audit).toHaveLength(1);
+    expect(audit[0].details).toMatchObject({ vision: { before: false, after: true } });
+    // un precio por minuto solo puede tener un modelo de transcripción (la base lo exige)
+    await expect(admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input, usd_per_minute) VALUES ('mal-minuto', 'chat', 0, 0.006)`)).rejects.toThrow();
+    await expect(admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input) VALUES ('mal-transc', 'transcription', 0)`)).rejects.toThrow();
+    await expect(admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input, vision) VALUES ('mal-vision', 'embedding', 0, true)`)).rejects.toThrow();
+    await admin.query(`INSERT INTO ai_model_prices(model, kind, usd_per_1m_input, usd_per_minute) VALUES ('whisper-x', 'transcription', 0, 0.006)`);
+    await admin.query(`DELETE FROM ai_model_prices WHERE model IN ('gpt-vision-x', 'gpt-plain-x', 'whisper-x')`);
+  });
 });

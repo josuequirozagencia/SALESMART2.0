@@ -18,7 +18,15 @@ export type PricingDto = z.infer<typeof pricingSchema>;
 
 /** Topes diarios de la IA por empresa (cada uno de 1 a 10 000; el servidor y la base los validan). */
 const limit = z.number().int().min(1).max(10_000);
-export const limitsSchema = z.strictObject({ tests_per_day: limit, suggestions_per_day: limit, follow_ups_per_day: limit });
+export const limitsSchema = z.strictObject({
+  tests_per_day: limit,
+  suggestions_per_day: limit,
+  follow_ups_per_day: limit,
+  /** Los tres siguientes son de v13 S5 (ADR-70): si no vienen, se conserva el valor actual. */
+  transcriptions_per_day: limit.optional(),
+  images_per_day: limit.optional(),
+  audio_max_seconds: z.number().int().min(15).max(300).optional(),
+});
 export type LimitsDto = z.infer<typeof limitsSchema>;
 
 export const marginSchema = z.strictObject({ margin_pct: decimal.refine((v) => Number(v) <= 1000, 'de 0 a 1000').nullable() });
@@ -44,6 +52,8 @@ export const idempotencyKeySchema = z.string().trim().min(8).max(100).regex(/^[A
 export const modelPriceSchema = z.strictObject({
   usd_per_1m_input: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000'),
   usd_per_1m_output: decimal.refine((v) => Number(v) <= 10000, 'de 0 a 10000'),
+  /** ¿El modelo de chat entiende imágenes? (ADR-70). Si no viene, se conserva. */
+  vision: z.boolean().optional(),
 });
 export type ModelPriceDto = z.infer<typeof modelPriceSchema>;
 export const modelParamSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/);

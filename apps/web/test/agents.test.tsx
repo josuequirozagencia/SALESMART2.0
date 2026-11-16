@@ -25,6 +25,7 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
   capture_fields: [],
   tasks_enabled: false,
   suggestions_enabled: false,
+  read_images: false,
   document_ids: [],
   channel_ids: [],
   readiness: { instructions: true, documents: false, channel: false },
@@ -33,6 +34,7 @@ const agent = (over: Partial<Agent> = {}): Agent => ({
 });
 const OPTIONS: AgentOptions = {
   models: ['gpt-4o-mini', 'gpt-4.1-mini'],
+  vision_models: ['gpt-4o-mini'],
   covers: ['violet', 'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'slate'],
   limits: { max_agents: 20, max_photo_bytes: 2 * 1024 * 1024, max_chunks: 5000, max_capture_fields: 10 },
   variables: [{ key: 'primer_nombre', label: 'Primer nombre del contacto', example: 'Ana', kind: 'builtin' }, { key: 'contact.ciudad', label: 'Ciudad', example: '', kind: 'custom' }],
@@ -315,9 +317,51 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(d.getByLabelText(/Responder a toda hora/));
     await userEvent.click(conns.getByRole('checkbox', { name: 'Atender «WhatsApp Norte»' }));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false, read_images: false }));
     await waitFor(() => expect(w.calls['channels']![0]!.body).toEqual({ channel_ids: ['c1'] }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('«Leer imágenes» (v13 S5): trae el aviso de privacidad, está apagado por omisión, se guarda y solo se ofrece con un modelo con visión', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    const sec = within(await d.findByRole('region', { name: 'Qué puede entender el cliente' }));
+    const sw = sec.getByRole('switch', { name: 'Leer imágenes' });
+    expect(sw).not.toBeChecked();
+    expect(sw).toBeEnabled();
+    expect(sec.getByText(/se enviarán al proveedor de IA \(OpenAI\) para procesarse/)).toBeInTheDocument();
+    expect(sec.getByText(/hasta 3 imágenes por mensaje/)).toBeInTheDocument();
+    await userEvent.click(sw);
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ read_images: true }));
+    expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
+  });
+
+  it('con un modelo sin visión «Leer imágenes» queda desactivado y explica qué hacer', async () => {
+    const w = world({ agents: [agent({ model: 'gpt-4.1-mini' })] });
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    const sec = within(await d.findByRole('region', { name: 'Qué puede entender el cliente' }));
+    expect(sec.getByRole('switch', { name: 'Leer imágenes' })).toBeDisabled();
+    expect(sec.getByText(/El modelo de este agente \(gpt-4\.1-mini\) no entiende imágenes/)).toBeInTheDocument();
+  });
+
+  it('un error del servidor al guardar «Leer imágenes» se muestra', async () => {
+    const w = world();
+    const routes = server(w);
+    routes['PATCH /agents/a1'] = () => err(409, 'MODEL_NO_VISION', 'El modelo de este agente no entiende imágenes');
+    mockApi(routes);
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    await userEvent.click(await d.findByRole('switch', { name: 'Leer imágenes' }));
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    expect(await d.findByText(/no entiende imágenes/)).toBeInTheDocument();
   });
 
   it('elegir qué campos puede llenar el agente y si crea tareas se guarda; sin campos personalizados lo explica', async () => {

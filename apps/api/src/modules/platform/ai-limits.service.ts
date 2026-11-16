@@ -16,17 +16,26 @@ export interface AiLimits {
   readonly suggestionsPerDay: number;
   /** Seguimientos automáticos enviados por los agentes. */
   readonly followUpsPerDay: number;
+  /** Transcripciones de audio de los agentes (v13 S5, ADR-70). */
+  readonly transcriptionsPerDay: number;
+  /** Imágenes que los agentes leen (v13 S5, ADR-70). */
+  readonly imagesPerDay: number;
+  /** Duración máxima de un audio que el agente transcribe, en segundos. */
+  readonly audioMaxSeconds: number;
 }
 
 export interface AiLimitsView {
   tests_per_day: number;
   suggestions_per_day: number;
   follow_ups_per_day: number;
+  transcriptions_per_day: number;
+  images_per_day: number;
+  audio_max_seconds: number;
   updated_at: string;
 }
 
 /** Los valores con que nace la plataforma (los que antes iban fijos en el código; la migración siembra los mismos). */
-export const DEFAULT_AI_LIMITS: AiLimits = { testsPerDay: 100, suggestionsPerDay: 50, followUpsPerDay: 200 };
+export const DEFAULT_AI_LIMITS: AiLimits = { testsPerDay: 100, suggestionsPerDay: 50, followUpsPerDay: 200, transcriptionsPerDay: 200, imagesPerDay: 300, audioMaxSeconds: 120 };
 
 /**
  * Topes diarios de la IA (v11): tabla de PLATAFORMA con una sola fila. El Súper Admin los cambia; los servicios de prueba, sugerencias y seguimientos los leen antes de actuar (con memoria de 30 s;
@@ -48,7 +57,7 @@ export class AiLimitsService {
     // Desde una petición o una tarea de empresa se sale de su contexto para leer como «el sistema» (los contextos no se anidan)
     const [row] = PlatformContext.currentOrNull() ? await read() : await TenantContext.detach(() => PlatformContext.run({ actorUserId: SYSTEM_ACTOR }, read));
     if (!row) throw new Error('ai_limits sin fila: la migración 0136 la siembra'); // no es un error del cliente
-    const value: AiLimits = { testsPerDay: row.testsPerDay, suggestionsPerDay: row.suggestionsPerDay, followUpsPerDay: row.followUpsPerDay };
+    const value: AiLimits = { testsPerDay: row.testsPerDay, suggestionsPerDay: row.suggestionsPerDay, followUpsPerDay: row.followUpsPerDay, transcriptionsPerDay: row.transcriptionsPerDay, imagesPerDay: row.imagesPerDay, audioMaxSeconds: row.audioMaxSeconds };
     this.cache = { at: now, value };
     return value;
   }
@@ -56,22 +65,22 @@ export class AiLimitsService {
   async get(): Promise<AiLimitsView> {
     const [r] = await this.db.withPlatform((tx) => tx.select().from(aiLimits).where(eq(aiLimits.id, 1)).limit(1));
     if (!r) throw new Error('ai_limits sin fila: la migración 0136 la siembra');
-    return { tests_per_day: r.testsPerDay, suggestions_per_day: r.suggestionsPerDay, follow_ups_per_day: r.followUpsPerDay, updated_at: r.updatedAt.toISOString() };
+    return { tests_per_day: r.testsPerDay, suggestions_per_day: r.suggestionsPerDay, follow_ups_per_day: r.followUpsPerDay, transcriptions_per_day: r.transcriptionsPerDay, images_per_day: r.imagesPerDay, audio_max_seconds: r.audioMaxSeconds, updated_at: r.updatedAt.toISOString() };
   }
 
-  async set(input: { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number }): Promise<AiLimitsView> {
+  async set(input: { tests_per_day: number; suggestions_per_day: number; follow_ups_per_day: number; transcriptions_per_day?: number; images_per_day?: number; audio_max_seconds?: number }): Promise<AiLimitsView> {
     const actor = PlatformContext.current().actorUserId;
     const before = await this.get();
     await this.db.withPlatform((tx) =>
-      tx.update(aiLimits).set({ testsPerDay: input.tests_per_day, suggestionsPerDay: input.suggestions_per_day, followUpsPerDay: input.follow_ups_per_day, updatedAt: new Date(), updatedBy: actor }).where(eq(aiLimits.id, 1)),
+      tx.update(aiLimits).set({ testsPerDay: input.tests_per_day, suggestionsPerDay: input.suggestions_per_day, followUpsPerDay: input.follow_ups_per_day, transcriptionsPerDay: input.transcriptions_per_day ?? before.transcriptions_per_day, imagesPerDay: input.images_per_day ?? before.images_per_day, audioMaxSeconds: input.audio_max_seconds ?? before.audio_max_seconds, updatedAt: new Date(), updatedBy: actor }).where(eq(aiLimits.id, 1)),
     );
     this.cache = null;
     await this.audit.record({
       action: 'ai.limits.update',
       entityType: 'ai_limits',
       details: {
-        before: { tests_per_day: before.tests_per_day, suggestions_per_day: before.suggestions_per_day, follow_ups_per_day: before.follow_ups_per_day },
-        after: input,
+        before: { tests_per_day: before.tests_per_day, suggestions_per_day: before.suggestions_per_day, follow_ups_per_day: before.follow_ups_per_day, transcriptions_per_day: before.transcriptions_per_day, images_per_day: before.images_per_day, audio_max_seconds: before.audio_max_seconds },
+        after: { transcriptions_per_day: before.transcriptions_per_day, images_per_day: before.images_per_day, audio_max_seconds: before.audio_max_seconds, ...input },
       },
     });
     return this.get();

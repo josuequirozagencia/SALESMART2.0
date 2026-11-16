@@ -28,6 +28,7 @@ import { KnowledgeService } from './knowledge/knowledge.service';
 import { PgArrayVectorStore, VECTOR_STORE } from './knowledge/vector-store';
 import { OpenAiProvider } from './openai.provider';
 import { AgentRuntimeJob } from './runtime/agent-runtime.job';
+import { AgentMediaService } from './runtime/agent-media.service';
 import { AgentRuntimeService } from './runtime/agent-runtime.service';
 import { AgentReplyBus } from './runtime/agent-reply.bus';
 import { ConversationAiController } from './runtime/conversation-ai.controller';
@@ -52,6 +53,7 @@ export function buildAiProvider(cfg: AppConfig): AIProvider {
     AgentTurnService,
     AgentToolsService,
     AgentRuntimeService,
+    AgentMediaService,
     ReplySuggestionService,
     AgentReplyBus,
     AgentRuntimeJob,

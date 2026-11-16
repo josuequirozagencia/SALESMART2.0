@@ -26,7 +26,7 @@ export { ghlEvents, ghlContactLinks, ghlOutbox, ghlEnrollments } from './ghl-eve
 export { slaPolicies, businessHours, userHours, holidays, responseTimers } from './sla';
 export { aiWallets, aiLedger, aiHolds, aiPricing, aiLimits, aiOrgPricing } from './ai';
 export { knowledgeDocuments, documentChunks, aiModelPrices } from './ai-knowledge';
-export { agents, agentDocuments, agentChannels, agentTestRuns, aiSuggestionRuns } from './ai-agents';
+export { agents, agentDocuments, agentChannels, agentTestRuns, aiSuggestionRuns, aiMediaRuns } from './ai-agents';
 export { aiConversationState, aiToolCalls } from './ai-runtime';
 export { agentFollowUps, agentFollowUpSteps, agentFollowUpRuns } from './follow-ups';
 export { calendarConnections, appointmentCalendarEvents } from './calendar';

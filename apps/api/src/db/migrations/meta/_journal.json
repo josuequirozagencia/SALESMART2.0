@@ -981,6 +981,13 @@
       "when": 1795500000000,
       "tag": "0139_v13_s4_sale_notice",
       "breakpoints": true
+    },
+    {
+      "idx": 140,
+      "version": "7",
+      "when": 1795600000000,
+      "tag": "0140_v13_s5_ai_media",
+      "breakpoints": true
     }
   ]
 }

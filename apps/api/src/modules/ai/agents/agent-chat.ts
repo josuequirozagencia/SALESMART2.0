@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../ai.ports';
+import { imageCount, messageText, type ChatMessage, type ContentPart } from '../ai.ports';
 
 /** Lo que el agente recibe de la biblioteca para responder: fragmentos con el nombre de su documento. */
 export interface SupportFragment {
@@ -12,7 +12,12 @@ export interface TurnInput {
   /** Los turnos anteriores de la conversación (los más recientes). */
   readonly history: ReadonlyArray<{ role: 'user' | 'assistant'; text: string }>;
   readonly message: string;
+  /** Imágenes del cliente para este turno (ADR-70): ya validadas (tipo real, tamaño, antivirus) por quien llama. Van en el mensaje del cliente, rotuladas como imagen del cliente. */
+  readonly images?: ReadonlyArray<{ readonly mimeType: string; readonly bytes: Uint8Array }>;
 }
+
+/** Tokens de entrada que se RESERVAN por cada imagen (estimación por exceso; OpenAI la cobra como tokens de entrada y se liquida con el uso real). Provisional: validar con OpenAI real (ADR-70). */
+export const IMAGE_TOKENS_ESTIMATE = 1500;
 
 /** Turnos anteriores que se envían al modelo (los más recientes): acota el costo y el contexto. */
 export const MAX_HISTORY_TURNS = 10;
@@ -33,13 +38,23 @@ export function buildChatMessages(input: TurnInput): ChatMessage[] {
   return [
     { role: 'system', content: `${input.system}\n\nDOCUMENTOS\n${docs}` },
     ...input.history.slice(-MAX_HISTORY_TURNS).map((h): ChatMessage => ({ role: h.role, content: h.text })),
-    { role: 'user', content: input.message },
+    { role: 'user', content: input.images && input.images.length > 0 ? userParts(input.message, input.images) : input.message },
   ];
+}
+
+/** El mensaje del cliente con imágenes: el texto (o un aviso si solo mandó imágenes) y cada imagen precedida de su rótulo, para que el modelo distinga el origen (ADR-70). */
+function userParts(message: string, images: ReadonlyArray<{ mimeType: string; bytes: Uint8Array }>): ContentPart[] {
+  const parts: ContentPart[] = [{ type: 'text', text: message.trim() === '' ? '(El cliente envió solo imágenes, sin texto.)' : message }];
+  for (const img of images) {
+    parts.push({ type: 'text', text: '[Imagen del cliente]' });
+    parts.push({ type: 'image', mimeType: img.mimeType, bytes: img.bytes });
+  }
+  return parts;
 }
 
 /** Tokens de entrada estimados por exceso (1 token ≈ 3 caracteres) para reservar créditos antes de llamar al modelo. */
 export function estimateInputTokens(messages: readonly ChatMessage[]): number {
-  return Math.ceil(messages.reduce((n, m) => n + m.content.length + 8, 0) / 3);
+  return Math.ceil(messages.reduce((n, m) => n + messageText(m).length + 8, 0) / 3) + messages.reduce((n, m) => n + imageCount(m), 0) * IMAGE_TOKENS_ESTIMATE;
 }
 
 /** Recorta una respuesta a `max` caracteres, preferentemente en un final de oración o, si no, en un espacio, y marca el corte con «…». */

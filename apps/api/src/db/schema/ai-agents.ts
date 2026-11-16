@@ -50,6 +50,10 @@ export const agents = tenantTable(
     tasksEnabled: boolean('tasks_enabled').notNull().default(false),
     /** Las personas del equipo pueden pedirle un borrador de respuesta en el Inbox (v11 S4, ADR-61): el agente no envía nada, solo sugiere. Por omisión apagado (cada sugerencia gasta créditos). */
     suggestionsEnabled: boolean('suggestions_enabled').notNull().default(false),
+    /** El agente lee las imágenes que manda el cliente (v13 S5, ADR-70): se envían al proveedor de IA; solo con un modelo con visión. Por omisión apagado. */
+    readImages: boolean('read_images').notNull().default(false),
+    /** El agente escucha las notas de voz del cliente (transcripción; ADR-70, rebanada S5b). Por omisión apagado. */
+    transcribeAudio: boolean('transcribe_audio').notNull().default(false),
     /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
     isSample: boolean('is_sample').notNull().default(false),
     /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
@@ -158,5 +162,37 @@ export const aiSuggestionRuns = tenantTable(
     foreignKey({ name: 'ai_suggestion_runs_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     check('ai_suggestion_runs_counts_valid', sql`${t['hits']!} >= 0 AND ${t['tokensIn']!} >= 0 AND ${t['tokensOut']!} >= 0 AND ${t['credits']!} >= 0`),
     index('ai_suggestion_runs_recent_idx').on(t['organizationId']!, t['createdAt']!),
+  ],
+);
+
+/**
+ * Metadatos de cada medio (imagen o audio) del cliente que un agente leyó o intentó leer (v13 S5, ADR-70). **Nunca el contenido** (ni los bytes, ni la descripción, ni la transcripción). Sirve para el tope
+ * diario por empresa y para soporte. `message_id` es nulo en las pruebas del simulador. Solo de inserción.
+ */
+export const aiMediaRuns = tenantTable(
+  'ai_media_runs',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    agentId: uuid('agent_id').notNull(),
+    conversationId: uuid('conversation_id'),
+    messageId: uuid('message_id'),
+    /** `image` o `audio`. */
+    kind: text('kind').notNull(),
+    mimeType: text('mime_type').notNull(),
+    bytes: integer('bytes').notNull(),
+    model: text('model').notNull(),
+    /** Duración del audio en segundos (nula para imágenes). */
+    seconds: integer('seconds'),
+    /** `ok`: se procesó; `failed`: el proveedor falló. */
+    outcome: text('outcome').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'ai_media_runs_agent_fk', columns: [t['organizationId']!, t['agentId']!], foreignColumns: [agents.organizationId, agents.id] }),
+    foreignKey({ name: 'ai_media_runs_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
+    check('ai_media_runs_kind_valid', sql`${t['kind']!} IN ('image', 'audio')`),
+    check('ai_media_runs_outcome_valid', sql`${t['outcome']!} IN ('ok', 'failed')`),
+    check('ai_media_runs_counts_valid', sql`${t['bytes']!} >= 0 AND (${t['seconds']!} IS NULL OR ${t['seconds']!} >= 0)`),
+    index('ai_media_runs_recent_idx').on(t['organizationId']!, t['kind']!, t['createdAt']!),
   ],
 );

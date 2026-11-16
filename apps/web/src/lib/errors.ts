@@ -27,7 +27,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Proveedores (ADR-42): el servidor ya redacta el motivo para el Súper Admin (sin datos secretos)
     case 'PROVIDER_NOT_CONFIGURED': case 'PROVIDER_ACTIVE': case 'PROVIDER_VAULT_UNAVAILABLE': case 'PROVIDER_VAULT_MISMATCH': case 'SERVICE_NOT_CONFIGURABLE': return e.message;
     // Modelos de IA de la plataforma (v11 S4): el servidor ya redacta el motivo
-    case 'MODEL_EXISTS': return e.message;
+    case 'MODEL_EXISTS': case 'MODEL_NO_VISION': case 'VISION_ONLY_CHAT': return e.message;
     // Sugerencias de respuesta (v11 S4, ADR-61): el servidor ya redacta el motivo
     case 'NO_AGENT': case 'SUGGESTIONS_DISABLED': case 'NOTHING_TO_ANSWER': case 'SUGGESTION_LIMIT': case 'SUGGESTION_EMPTY': return e.message;
     // Marca de la plataforma (ADR-69): el servidor ya redacta el motivo del nombre, del icono y de los logos
