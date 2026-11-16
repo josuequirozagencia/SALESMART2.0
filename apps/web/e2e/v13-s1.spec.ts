@@ -72,13 +72,13 @@ test.describe('390 × 844', () => {
     await expect(row).toBeVisible();
     // alto de la fila (v13 S1.3) y área táctil del botón
     expect((await row.boundingBox())!.height).toBeGreaterThanOrEqual(75.5);
-    const accept = page.getByRole('button', { name: 'Aceptar la conversación de Cliente Pendiente' });
+    const accept = page.getByRole('button', { name: 'Aceptar conversación con Cliente Pendiente' });
     const box = (await accept.boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(43.5);
     expect(box.width).toBeGreaterThanOrEqual(43.5);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await accept.click();
-    await expect(page.getByRole('status').filter({ hasText: 'Aceptaste la conversación de Cliente Pendiente' })).toBeVisible();
+    await expect(page.getByRole('status').filter({ hasText: 'Chat aceptado' })).toBeVisible();
     await expect(page).toHaveURL(/\/inbox$/);
     await expect(page.getByRole('link', { name: /Cliente Pendiente/ })).toHaveCount(0);
     await page.getByRole('tab', { name: /^Trabajando/ }).click();

@@ -99,15 +99,15 @@ describe('S1.1 · «Aceptar» en la fila de la lista (móvil)', () => {
     const w = pending();
     mockApi(server(w));
     renderApp('/inbox');
-    const btn = await screen.findByRole('button', { name: 'Aceptar la conversación de Ana Torres' });
+    const btn = await screen.findByRole('button', { name: 'Aceptar conversación con Ana Torres' });
     expect(btn).toHaveTextContent('Aceptar');
     await userEvent.click(btn);
     await waitFor(() => expect(w.posts).toEqual([{ path: '/conversations/c1/accept', body: null }]));
-    expect(await screen.findByRole('status')).toHaveTextContent('Aceptaste la conversación de Ana Torres');
+    expect(await screen.findByRole('status')).toHaveTextContent('Chat aceptado');
     // no se abrió el chat
     expect(screen.queryByRole('region', { name: /Conversación con/ })).not.toBeInTheDocument();
     // y la fila ya no ofrece «Aceptar»
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Aceptar la conversación/ })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Aceptar conversación con/ })).not.toBeInTheDocument());
   });
 
   it('si el servidor lo rechaza, la fila sigue ahí y se explica por qué', async () => {
@@ -115,9 +115,9 @@ describe('S1.1 · «Aceptar» en la fila de la lista (móvil)', () => {
     const w = pending();
     mockApi(server(w, { 'POST /conversations/c1/accept': () => err(409, 'CONVERSATION_STATE', 'La conversación ya no está pendiente') }));
     renderApp('/inbox');
-    await userEvent.click(await screen.findByRole('button', { name: 'Aceptar la conversación de Ana Torres' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('La conversación ya no está pendiente');
-    expect(screen.getByRole('button', { name: 'Aceptar la conversación de Ana Torres' })).toBeInTheDocument();
+    await userEvent.click(await screen.findByRole('button', { name: 'Aceptar conversación con Ana Torres' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Esta conversación ya fue aceptada por otra persona');
+    expect(screen.getByRole('button', { name: 'Aceptar conversación con Ana Torres' })).toBeInTheDocument();
   });
 
   it('no aparece si la persona no puede aceptarla, si la conversación no está pendiente ni en escritorio', async () => {
@@ -128,12 +128,87 @@ describe('S1.1 · «Aceptar» en la fila de la lista (móvil)', () => {
     expect(screen.queryByRole('button', { name: /Aceptar/ })).not.toBeInTheDocument();
   });
 
+  const unassigned = (): World => world({ conv: conv({ status: 'unassigned', owner: null, can: { reply: true, note: true, accept: false, take: true, close: true, transfer: true, share: false } }) });
+
+  it('una conversación SIN asignar muestra «Asignarme» en la fila; tocarlo la toma sin abrir el chat y avisa', async () => {
+    stubWidth(390);
+    const w = unassigned();
+    mockApi(server(w, {
+      'POST /conversations/c1/take': () => {
+        w.posts.push({ path: '/conversations/c1/take', body: null });
+        w.conv = { ...w.conv, status: 'working', owner: { id: 'u1', name: 'Yo' }, can: { ...w.conv.can, take: false } };
+        return { body: w.conv };
+      },
+    }));
+    renderApp('/inbox');
+    const btn = await screen.findByRole('button', { name: 'Asignarme la conversación con Ana Torres' });
+    expect(btn).toHaveTextContent('Asignarme');
+    expect(screen.queryByRole('button', { name: /Aceptar/ })).not.toBeInTheDocument();
+    await userEvent.click(btn);
+    await waitFor(() => expect(w.posts).toEqual([{ path: '/conversations/c1/take', body: null }]));
+    expect(await screen.findByRole('status')).toHaveTextContent('Chat asignado a ti');
+    expect(screen.queryByRole('region', { name: /Conversación con/ })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Asignarme/ })).not.toBeInTheDocument());
+  });
+
+  it('si otra persona ya la tomó, se dice con claridad y la lista se vuelve a pedir', async () => {
+    stubWidth(390);
+    const w = unassigned();
+    let lists = 0;
+    mockApi(server(w, {
+      'GET /conversations': () => { lists += 1; return { body: { items: [w.conv], next_cursor: null, counts: { working: 0, pending: 1, closed: 0, unread: 0 } } satisfies ConversationList }; },
+      'POST /conversations/c1/take': () => err(409, 'CONVERSATION_STATE', 'La conversación ya tiene asesor o está finalizada'),
+    }));
+    renderApp('/inbox');
+    const btn = await screen.findByRole('button', { name: 'Asignarme la conversación con Ana Torres' });
+    const before = lists;
+    await userEvent.click(btn);
+    expect(await screen.findByRole('alert')).toHaveTextContent('Esta conversación ya fue tomada por otra persona');
+    await waitFor(() => expect(lists).toBeGreaterThan(before));
+  });
+
+  it('el botón queda desactivado mientras se acepta: un doble toque no manda dos peticiones', async () => {
+    stubWidth(390);
+    const w = pending();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((r) => { release = r; });
+    mockApi(server(w, {
+      'POST /conversations/c1/accept': async () => {
+        w.posts.push({ path: '/conversations/c1/accept', body: null });
+        await gate;
+        w.conv = { ...w.conv, status: 'working', can: { ...w.conv.can, accept: false } };
+        return { body: w.conv };
+      },
+    }));
+    renderApp('/inbox');
+    const btn = await screen.findByRole('button', { name: 'Aceptar conversación con Ana Torres' });
+    await userEvent.click(btn);
+    await waitFor(() => expect(btn).toBeDisabled());
+    expect(btn).toHaveAttribute('aria-busy', 'true');
+    await userEvent.click(btn);
+    release();
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Chat aceptado'));
+    expect(w.posts.filter((x) => x.path.endsWith('/accept'))).toHaveLength(1);
+  });
+
+  it('el botón se ve con el degradado del tema y su texto, y deja un área táctil de al menos 44 px', async () => {
+    stubWidth(390);
+    mockApi(server(pending()));
+    renderApp('/inbox');
+    const btn = await screen.findByRole('button', { name: 'Aceptar conversación con Ana Torres' });
+    expect(btn.className).toContain('h-11');
+    const label = within(btn).getByText('Aceptar');
+    expect(label.className).toContain('h-9');
+    expect(label.className).toContain('var(--grad)');
+    expect(label.className).toContain('var(--on-grad)');
+  });
+
   it('en escritorio la lista no lo muestra (ahí «Aceptar» está en la cabecera del chat)', async () => {
     stubWidth(1440);
     mockApi(server(pending()));
     renderApp('/inbox');
     await screen.findByRole('link', { name: 'Ana Torres' });
-    expect(screen.queryByRole('button', { name: 'Aceptar la conversación de Ana Torres' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Aceptar conversación con Ana Torres' })).not.toBeInTheDocument();
   });
 });
 
