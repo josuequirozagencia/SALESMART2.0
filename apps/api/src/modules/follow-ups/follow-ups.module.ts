@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AiModule } from '../ai';
+import { AttachmentsModule } from '../attachments';
 import { AutomationsModule } from '../automations';
 import { OrganizationsModule } from '../organizations';
 import { PlatformModule } from '../platform';
@@ -15,7 +16,7 @@ import { FollowUpsService } from './follow-ups.service';
  * anuncia que respondió (`AgentReplyBus`); este módulo se registra al arrancar y arma los pasos.
  */
 @Module({
-  imports: [AiModule, AutomationsModule, OrganizationsModule, PlatformModule, RealtimeModule, SlaModule],
+  imports: [AiModule, AttachmentsModule, AutomationsModule, OrganizationsModule, PlatformModule, RealtimeModule, SlaModule],
   controllers: [FollowUpsController],
   providers: [FollowUpsService, FollowUpRunnerService, FollowUpsJob],
   exports: [FollowUpsJob],

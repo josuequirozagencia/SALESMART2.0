@@ -28,7 +28,7 @@ export { aiWallets, aiLedger, aiHolds, aiPricing, aiLimits, aiOrgPricing } from 
 export { knowledgeDocuments, documentChunks, aiModelPrices } from './ai-knowledge';
 export { agents, agentDocuments, agentChannels, agentTestRuns, aiSuggestionRuns, aiMediaRuns } from './ai-agents';
 export { aiConversationState, aiToolCalls } from './ai-runtime';
-export { agentFollowUps, agentFollowUpSteps, agentFollowUpRuns } from './follow-ups';
+export { agentFollowUps, agentFollowUpSteps, agentFollowUpRuns, agentFollowUpFiles } from './follow-ups';
 export { calendarConnections, appointmentCalendarEvents } from './calendar';
 export { forms, formFields, formSubmissions } from './forms';
 export { automations, automationRuns, automationRunSteps, automationSettings } from './automations';

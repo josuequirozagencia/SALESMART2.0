@@ -21,7 +21,7 @@ export class FollowUpsJob implements ScheduledJob {
   async run(now: Date): Promise<number> {
     let touched = 0;
     for (const organizationId of await this.directory.clientOrganizationIds()) {
-      touched += await TenantContext.run({ organizationId }, () => this.runner.runDue(now));
+      touched += await TenantContext.run({ organizationId }, async () => (await this.runner.runDue(now)) + (await this.runner.cleanupFiles(now)));
     }
     return touched;
   }

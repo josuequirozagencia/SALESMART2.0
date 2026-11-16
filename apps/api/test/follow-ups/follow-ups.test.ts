@@ -1,6 +1,9 @@
 // v11 S5 — Seguimientos automáticos del agente (ADR-68). Rutas cubiertas (el registro de endpoints exige que este archivo las escriba tal cual):
 //   GET /v1/agents/:id/follow-ups
 //   PUT /v1/agents/:id/follow-ups
+//   POST /v1/agents/:id/follow-ups/files
+//   DELETE /v1/agents/:id/follow-ups/files/:fileId
+//   GET /v1/agents/:id/follow-ups/files/:fileId/url
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -11,7 +14,8 @@ import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AgentRuntimeService, AI_PROVIDER, AiModule, AiProviderError, FakeAiProvider, KnowledgeProcessorService } from '../../src/modules/ai';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
-import { FollowUpRunnerService, FollowUpsModule } from '../../src/modules/follow-ups';
+import { EICAR, StorageGateway } from '../../src/modules/attachments';
+import { cumulativeMinutes, FollowUpRunnerService, FollowUpsModule, insideOfficialWindow, planParts } from '../../src/modules/follow-ups';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { AiLimitsService, AiModelPricesService, AiPricingService } from '../../src/modules/platform';
 import { Argon2idHasher } from '../../src/security';
@@ -77,9 +81,9 @@ const runtime = () => app.get(AgentRuntimeService);
 const tick = (at: Date = new Date(), org = ORG_A) => TenantContext.run({ organizationId: org }, () => runtime().runDue(at));
 
 /** Un agente activo atendiendo la conexión de la empresa A (con la biblioteca de horarios si se pide). */
-async function liveAgent(opts: { docs?: boolean; patch?: Record<string, unknown>; token?: string; channel?: string } = {}): Promise<string> {
+async function liveAgent(opts: { docs?: boolean; patch?: Record<string, unknown>; token?: string; channel?: string; name?: string } = {}): Promise<string> {
   const token = opts.token ?? T.alice;
-  const id = ((await (await call('POST', '/agents', token, { name: 'Sofía' })).json()) as { id: string }).id;
+  const id = ((await (await call('POST', '/agents', token, { name: opts.name ?? 'Sofía' })).json()) as { id: string }).id;
   expect((await call('PATCH', `/agents/${id}`, token, { personality: 'Cálida y cercana.', objective: 'Ayudar con horarios', active: true, ...opts.patch })).status).toBe(200);
   if (opts.docs) {
     const r = await fetch(`${base}/knowledge/documents`, { method: 'POST', headers: { 'content-type': 'application/octet-stream', 'x-filename': encodeURIComponent('horarios.txt'), authorization: `Bearer ${token}` }, body: Buffer.from(HORARIOS) });
@@ -199,8 +203,8 @@ describe('configuración de los seguimientos (GET y PUT)', () => {
     const v = await json<Cfg>(r);
     expect(v.enabled).toBe(true);
     expect(v.steps).toEqual([
-      { position: 1, delay_minutes: 5, mode: 'ai', fixed_text: null, start_automation_id: null },
-      { position: 2, delay_minutes: 60, mode: 'fixed_text', fixed_text: 'Hola {{primer_nombre}}, soy {{mi_nombre}}. ¿Sigues interesado?', start_automation_id: null },
+      { position: 1, delay_minutes: 5, mode: 'ai', fixed_text: null, start_automation_id: null, files: [] },
+      { position: 2, delay_minutes: 60, mode: 'fixed_text', fixed_text: 'Hola {{primer_nombre}}, soy {{mi_nombre}}. ¿Sigues interesado?', start_automation_id: null, files: [] },
     ]);
     // reemplazar: queda solo lo nuevo
     const v2 = await json<Cfg>(await put(agent, { enabled: false, steps: [{ delay_minutes: 15, mode: 'ai' }] }));
@@ -413,5 +417,280 @@ describe('la cadena de seguimientos', () => {
     expect(await followTick(t)).toBe(1);
     const r = await runs();
     expect(r.map((x) => [x['step_position'], x['status'], x['reason']])).toEqual([[1, 'skipped', 'ai_unavailable'], [2, 'pending', null]]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════ v15 — archivos en los pasos de texto fijo
+const JPEG_BYTES = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(400, 5)]);
+const PNG_BYTES = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(400, 5)]);
+const PDF_BYTES = Buffer.concat([Buffer.from('%PDF-1.4\n', 'latin1'), Buffer.alloc(600, 7)]);
+const OGG_BYTES = Buffer.concat([Buffer.from('OggS', 'latin1'), Buffer.alloc(400, 3)]);
+const MP4_BYTES = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypmp42', 'latin1'), Buffer.alloc(400, 1)]);
+
+interface FileView { id: string; kind: string; mime_type: string; filename: string; size_bytes: number; scan_status: string; step_position: number | null; sort_order: number }
+interface FilesCfg {
+  enabled: boolean;
+  steps: Array<{ position: number; delay_minutes: number; mode: string; files: FileView[] }>;
+  loose_files: FileView[];
+  files_storage: { files: number; bytes: number; available: boolean; limits: { max_per_step: number; max_mb: Record<string, number> } };
+  channels: { official: boolean; qr: boolean; ghl: boolean };
+}
+const upload = (agent: string, bytes: Buffer, mime: string, filename = 'archivo', token: string | null = T.alice) =>
+  fetch(`${base}/agents/${agent}/follow-ups/files`, { method: 'POST', headers: { 'content-type': mime, 'x-filename': encodeURIComponent(filename), ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: bytes });
+const upOk = async (agent: string, bytes: Buffer, mime: string, filename = 'archivo'): Promise<FileView> => {
+  const r = await upload(agent, bytes, mime, filename);
+  expect(r.status, await r.clone().text()).toBe(201);
+  return json<FileView>(r);
+};
+const fileStep = (files: string[], delay = 5) => ({ delay_minutes: delay, mode: 'fixed_text', fixed_text: 'Te dejo el catálogo, {{primer_nombre}}', file_ids: files });
+const storage = () => app.get(StorageGateway);
+const filesTable = async () => (await admin.query(`SELECT * FROM agent_follow_up_files ORDER BY created_at, id`)).rows as Row[];
+const filesOfConv = async (conv: string) => (await messagesOf(conv)).filter((m) => m['direction'] === 'out' && m['kind'] !== 'note' && m['sender_type'] === 'automation');
+const qrChannel = async (): Promise<string> => (await admin.query(`INSERT INTO channel_accounts(id, organization_id, provider, name) VALUES (gen_random_uuid(), $1, 'evolution', 'QR') RETURNING id`, [ORG_A])).rows[0].id as string;
+const ghlChannel = async (): Promise<string> => (await admin.query(`INSERT INTO channel_accounts(id, organization_id, provider, name) VALUES (gen_random_uuid(), $1, 'ghl', 'GHL') RETURNING id`, [ORG_A])).rows[0].id as string;
+
+describe('reglas puras de los archivos de un paso (v15)', () => {
+  it('la espera acumulada decide la ventana de 24 h de WhatsApp oficial: con 24 h justas ya está fuera', () => {
+    expect(cumulativeMinutes([5, 60, 1500])).toEqual([5, 65, 1565]);
+    expect(insideOfficialWindow(1439)).toBe(true);
+    expect(insideOfficialWindow(1440)).toBe(false);
+  });
+
+  it('el texto va de pie del primer archivo si es imagen, video o documento; si es audio, en un mensaje aparte ANTES; los demás archivos no llevan pie', () => {
+    expect(planParts('Hola', [])).toEqual([{ type: 'text', body: 'Hola' }]);
+    expect(planParts('Hola', [{ id: 'a', kind: 'image' }, { id: 'b', kind: 'document' }])).toEqual([{ type: 'file', fileId: 'a', kind: 'image', caption: 'Hola' }, { type: 'file', fileId: 'b', kind: 'document', caption: null }]);
+    expect(planParts('Hola', [{ id: 'a', kind: 'audio' }, { id: 'b', kind: 'image' }])).toEqual([{ type: 'text', body: 'Hola' }, { type: 'file', fileId: 'a', kind: 'audio', caption: null }, { type: 'file', fileId: 'b', kind: 'image', caption: null }]);
+  });
+});
+
+describe('archivos de los pasos: subir, asignar y quitar (v15)', () => {
+  it('subir deja el archivo «sin asignar» (sin la clave del almacenamiento), listo con su revisión; asignarlo al guardar lo pone en su paso y orden; quitarlo lo vence y la tarea borra el objeto', async () => {
+    const agent = await liveAgent();
+    const a = await upOk(agent, JPEG_BYTES, 'image/jpeg', 'catalogo.jpg');
+    const b = await upOk(agent, PDF_BYTES, 'application/pdf', 'precios.pdf');
+    expect(a).toMatchObject({ kind: 'image', mime_type: 'image/jpeg', filename: 'catalogo.jpg', size_bytes: JPEG_BYTES.length, step_position: null });
+    expect(['clean', 'skipped']).toContain(a.scan_status);
+    expect(JSON.stringify(a)).not.toContain('org/'); // nunca la clave del almacenamiento
+    const loose = await json<FilesCfg>(await getCfg(agent));
+    expect(loose.loose_files.map((f) => f.id).sort()).toEqual([a.id, b.id].sort());
+    expect(loose.files_storage).toMatchObject({ files: 2, bytes: JPEG_BYTES.length + PDF_BYTES.length, available: true });
+    expect(loose.channels).toEqual({ official: true, qr: false, ghl: false });
+    // asignar: el orden del paso es el de `file_ids`
+    const saved = await put(agent, { enabled: true, steps: [fileStep([b.id, a.id])] });
+    expect(saved.status, await saved.clone().text()).toBe(200);
+    const cfg = await json<FilesCfg>(saved);
+    expect(cfg.steps[0]!.files.map((f) => [f.filename, f.sort_order, f.step_position])).toEqual([['precios.pdf', 0, 1], ['catalogo.jpg', 1, 1]]);
+    expect(cfg.loose_files).toEqual([]);
+    // guardar otra vez sin uno de ellos lo quita del paso: vence y se borra del almacenamiento
+    const keyOfB = ((await filesTable()).find((r) => r['id'] === b.id)!['storage_key']) as string;
+    expect((await put(agent, { enabled: true, steps: [fileStep([a.id])] })).status).toBe(200);
+    expect((await filesTable()).find((r) => r['id'] === b.id)).toMatchObject({ state: 'expired' });
+    expect(await TenantContext.run({ organizationId: ORG_A }, () => runner().cleanupFiles(new Date()))).toBe(1);
+    expect((await filesTable()).find((r) => r['id'] === b.id)).toMatchObject({ state: 'expired', storage_key: null });
+    await expect(TenantContext.run({ organizationId: ORG_A }, () => storage().get(keyOfB))).rejects.toThrow();
+    // quitar con la X
+    const del = await call('DELETE', `/agents/${agent}/follow-ups/files/${a.id}`, T.alice);
+    expect(del.status).toBe(200);
+    expect((await json<FilesCfg>(del)).steps[0]!.files).toEqual([]);
+    expect((await call('DELETE', `/agents/${agent}/follow-ups/files/${a.id}`, T.alice)).status).toBe(404);
+  });
+
+  it('el archivo vive bajo la empresa y la secuencia, y la previsualización es una URL firmada que solo da el administrador', async () => {
+    const agent = await liveAgent();
+    const a = await upOk(agent, JPEG_BYTES, 'image/jpeg', 'foto.jpg');
+    const row = (await filesTable()).find((r) => r['id'] === a.id)!;
+    expect(String(row['storage_key'])).toMatch(new RegExp(`^org/${ORG_A}/follow-ups/[0-9a-f-]{36}/${a.id}$`));
+    const r = await call('GET', `/agents/${agent}/follow-ups/files/${a.id}/url`, T.alice);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    const u = await json<{ url: string; expires_at: string; kind: string; mime_type: string; filename: string }>(r);
+    expect(u).toMatchObject({ kind: 'image', mime_type: 'image/jpeg', filename: 'foto.jpg' });
+    expect(typeof u.url).toBe('string');
+  });
+
+  it('validaciones al subir: el tipo se decide por el CONTENIDO (un PNG que dice ser JPEG no pasa), tipos que no se envían, archivo vacío y tamaño por tipo con un mensaje claro', async () => {
+    const agent = await liveAgent();
+    expect((await upload(agent, PNG_BYTES, 'image/jpeg')).status).toBe(422); // el contenido no corresponde al tipo
+    expect((await upload(agent, Buffer.from('MZ'), 'application/x-msdownload')).status).toBe(415);
+    expect((await upload(agent, Buffer.alloc(0), 'image/jpeg')).status).toBe(400);
+    const big = Buffer.concat([MP4_BYTES, Buffer.alloc(17 * 1024 * 1024)]);
+    const r = await upload(agent, big, 'video/mp4');
+    expect(r.status).toBe(413);
+    const err = await json<{ error: { code: string; message: string } }>(r);
+    expect(err.error.code).toBe('ATTACHMENT_TOO_LARGE');
+    expect(err.error.message).toMatch(/El video pesa 17 MB; WhatsApp permite hasta 16 MB/);
+    expect((await filesTable()).length).toBe(0); // nada se guardó
+  });
+
+  it('un archivo con virus no se guarda (422) y no deja rastro', async () => {
+    const agent = await liveAgent();
+    const r = await upload(agent, Buffer.from(EICAR, 'latin1'), 'application/pdf');
+    expect([422]).toContain(r.status);
+    expect((await filesTable()).length).toBe(0);
+  });
+
+  it('en un paso: hasta 3 archivos, solo con texto fijo, cada archivo en un solo paso, de ESTE agente y sin vencer', async () => {
+    const agent = await liveAgent();
+    const other = await liveAgent({ channel: await qrChannel(), name: 'Sofía QR' });
+    const f = [await upOk(agent, JPEG_BYTES, 'image/jpeg', '1.jpg'), await upOk(agent, JPEG_BYTES, 'image/jpeg', '2.jpg'), await upOk(agent, JPEG_BYTES, 'image/jpeg', '3.jpg'), await upOk(agent, JPEG_BYTES, 'image/jpeg', '4.jpg')];
+    expect((await put(agent, { enabled: true, steps: [fileStep(f.map((x) => x.id))] })).status).toBe(400); // más de 3
+    expect((await put(agent, { enabled: true, steps: [{ delay_minutes: 5, mode: 'ai', file_ids: [f[0]!.id] }] })).status).toBe(400); // la IA no elige archivos
+    expect((await put(agent, { enabled: true, steps: [{ delay_minutes: 5, mode: 'none', start_automation_id: null, file_ids: [f[0]!.id] }] })).status).toBe(400);
+    expect((await put(agent, { enabled: true, steps: [fileStep([f[0]!.id]), fileStep([f[0]!.id])] })).status).toBe(400); // repetido
+    const foreign = await upOk(other, JPEG_BYTES, 'image/jpeg', 'otro.jpg');
+    expect((await put(agent, { enabled: true, steps: [fileStep([foreign.id])] })).status).toBe(400); // de otro agente
+    await call('DELETE', `/agents/${agent}/follow-ups/files/${f[3]!.id}`, T.alice);
+    expect((await put(agent, { enabled: true, steps: [fileStep([f[3]!.id])] })).status).toBe(400); // vencido
+    expect((await put(agent, { enabled: true, steps: [fileStep([f[0]!.id, f[1]!.id, f[2]!.id])] })).status).toBe(200);
+  });
+
+  it('ventana de 24 h de WhatsApp OFICIAL (validada en el servidor): un paso con archivos que cae pasadas 24 h de espera acumulada se rechaza; por QR no hay ventana; por GoHighLevel no hay archivos', async () => {
+    const official = await liveAgent();
+    const f = await upOk(official, JPEG_BYTES, 'image/jpeg', 'a.jpg');
+    // 5 min + 1500 min = 1505 ≥ 1440
+    const out = await put(official, { enabled: true, steps: [{ delay_minutes: 5, mode: 'ai' }, fileStep([f.id], 1500)] });
+    expect(out.status).toBe(409);
+    expect(JSON.stringify(await out.json())).toContain('FOLLOW_UP_FILES_OUTSIDE_WINDOW');
+    expect((await put(official, { enabled: true, steps: [{ delay_minutes: 5, mode: 'ai' }, fileStep([f.id], 1000)] })).status).toBe(200); // 1005 min: dentro
+    // por QR no hay ventana: el mismo paso lejano sí se acepta
+    const qr = await liveAgent({ channel: await qrChannel(), name: 'Sofía QR' });
+    const g = await upOk(qr, JPEG_BYTES, 'image/jpeg', 'b.jpg');
+    expect((await put(qr, { enabled: true, steps: [{ delay_minutes: 5, mode: 'ai' }, fileStep([g.id], 5000)] })).status).toBe(200);
+    // GoHighLevel: ni subir
+    const ghl = await liveAgent({ channel: await ghlChannel(), name: 'Sofía GHL' });
+    const r = await upload(ghl, JPEG_BYTES, 'image/jpeg', 'c.jpg');
+    expect(r.status).toBe(409);
+    expect(JSON.stringify(await r.json())).toContain('FOLLOW_UP_FILES_GHL');
+  });
+
+  it('A↔B y permisos: solo el administrador; otra empresa no ve, ni sube, ni quita, ni usa archivos ajenos (404); el asesor 403; sin sesión 401', async () => {
+    const agent = await liveAgent();
+    const a = await upOk(agent, JPEG_BYTES, 'image/jpeg', 'a.jpg');
+    const urls = [`/agents/${agent}/follow-ups/files/${a.id}/url`, `/agents/${agent}/follow-ups/files/${a.id}`];
+    expect((await call('GET', urls[0]!, T.bob)).status).toBe(404);
+    expect((await call('DELETE', urls[1]!, T.bob)).status).toBe(404);
+    expect((await upload(agent, JPEG_BYTES, 'image/jpeg', 'x.jpg', T.bob)).status).toBe(404);
+    expect((await call('GET', urls[0]!, T.carol)).status).toBe(403);
+    expect((await call('DELETE', urls[1]!, T.carol)).status).toBe(403);
+    expect((await upload(agent, JPEG_BYTES, 'image/jpeg', 'x.jpg', T.carol)).status).toBe(403);
+    expect((await call('GET', urls[0]!)).status).toBe(401);
+    expect((await upload(agent, JPEG_BYTES, 'image/jpeg', 'x.jpg', null)).status).toBe(401);
+    // un archivo de A en el agente de B no se puede usar
+    const bobAgent = ((await (await call('POST', '/agents', T.bob, { name: 'Beto IA' })).json()) as { id: string }).id;
+    expect((await put(bobAgent, { enabled: true, steps: [fileStep([a.id])] }, T.bob)).status).toBe(400);
+    expect((await filesTable()).filter((r) => r['organization_id'] === ORG_B)).toEqual([]);
+  });
+
+  it('la auditoría guarda solo nombre, tipo y tamaño (nunca el contenido)', async () => {
+    const agent = await liveAgent();
+    const a = await upOk(agent, JPEG_BYTES, 'image/jpeg', 'catalogo.jpg');
+    const rows = (await admin.query(`SELECT field, new_value FROM audit_logs WHERE entity_id = $1 AND field = 'follow_up_file_added'`, [agent])).rows as Array<{ new_value: Record<string, unknown> }>;
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.new_value).toEqual({ kind: 'image', size_bytes: JPEG_BYTES.length, name: 'catalogo.jpg' });
+    expect(JSON.stringify(rows)).not.toContain(a.id);
+  });
+
+  it('limpieza: lo subido hace más de 24 h y sin asignar vence, y los archivos de un agente borrado también; el objeto se borra del almacenamiento', async () => {
+    const agent = await liveAgent();
+    const stale = await upOk(agent, JPEG_BYTES, 'image/jpeg', 'viejo.jpg');
+    const fresh = await upOk(agent, JPEG_BYTES, 'image/jpeg', 'nuevo.jpg');
+    await admin.query(`UPDATE agent_follow_up_files SET created_at = now() - interval '25 hours' WHERE id = $1`, [stale.id]);
+    expect(await TenantContext.run({ organizationId: ORG_A }, () => runner().cleanupFiles(new Date()))).toBe(1);
+    expect((await filesTable()).map((r) => [r['filename'], r['state'], r['storage_key'] === null])).toEqual([['viejo.jpg', 'expired', true], ['nuevo.jpg', 'ready', false]]);
+    expect((await call('DELETE', `/agents/${agent}`, T.alice)).status).toBeLessThan(300);
+    expect(await TenantContext.run({ organizationId: ORG_A }, () => runner().cleanupFiles(new Date()))).toBe(1);
+    expect((await filesTable()).find((r) => r['id'] === fresh.id)).toMatchObject({ state: 'expired', storage_key: null });
+  });
+});
+
+describe('el envío de los pasos con archivos (v15)', () => {
+  const filesCfg = (files: string[], delay = 5) => ({ enabled: true, steps: [fileStep(files, delay)] });
+
+  async function armedWithFiles(kinds: Array<[Buffer, string, string]>, opts: { channel?: string } = {}): Promise<{ agent: string; conv: string; files: FileView[] }> {
+    const agent = await liveAgent(opts.channel ? { channel: opts.channel, name: 'Sofía QR' } : {});
+    const files: FileView[] = [];
+    for (const [bytes, mime, name] of kinds) files.push(await upOk(agent, bytes, mime, name));
+    expect((await put(agent, filesCfg(files.map((f) => f.id)))).status).toBe(200);
+    const c = await mkConv();
+    if (opts.channel) await admin.query(`UPDATE conversations SET channel_account_id = $2 WHERE id = $1`, [c.id, opts.channel]);
+    await inbound(c.id, '¿Tienen catálogo?');
+    await tick();
+    expect((await aiMessages(c.id)).length).toBe(1);
+    return { agent, conv: c.id, files };
+  }
+
+  it('sale en orden y uno por mensaje: el texto de pie del primer archivo (imagen), el siguiente sin pie, mensajes automáticos con su propia copia del archivo; no cuenta como respuesta humana', async () => {
+    const { agent, conv, files } = await armedWithFiles([[JPEG_BYTES, 'image/jpeg', 'catalogo.jpg'], [PDF_BYTES, 'application/pdf', 'precios.pdf']]);
+    expect(await followTick(new Date(Date.now() + 6 * MINUTE))).toBe(1);
+    const sent = await filesOfConv(conv);
+    expect(sent.map((m) => [m['kind'], m['body'], m['status'], m['sender_type']])).toEqual([['image', 'Te dejo el catálogo, Cliente', 'queued', 'automation'], ['document', null, 'queued', 'automation']]);
+    expect(sent[0]!['meta']).toMatchObject({ agent_id: agent, follow_up: 1 });
+    const atts = (await admin.query(`SELECT a.*, m.kind AS mkind FROM message_attachments a JOIN messages m ON m.id = a.message_id WHERE a.conversation_id = $1 AND a.direction = 'out' ORDER BY m.sent_at`, [conv])).rows as Row[];
+    expect(atts.map((a) => [a['mkind'], a['filename'], a['state']])).toEqual([['image', 'catalogo.jpg', 'ready'], ['document', 'precios.pdf', 'ready']]);
+    // cada envío tiene su COPIA: otra clave que la del archivo del paso (quitar el archivo después no rompe lo enviado)
+    const sources = new Set((await filesTable()).map((r) => r['storage_key']));
+    for (const a of atts) expect(sources.has(a['storage_key'])).toBe(false);
+    expect((await filesTable()).map((r) => r['id']).sort()).toEqual(files.map((f) => f.id).sort());
+    expect((await messagesOf(conv)).some((m) => m['kind'] === 'note' && String(m['body']).includes('Seguimiento 1 enviado por el agente Sofía con 2 archivos'))).toBe(true);
+    expect((await messagesOf(conv)).filter((m) => m['sender_type'] === 'human')).toEqual([]);
+    expect((await runs()).map((r) => [r['step_position'], r['status']])).toEqual([[1, 'sent']]);
+  });
+
+  it('con un audio primero, el texto sale en un mensaje aparte ANTES y luego cada archivo sin pie', async () => {
+    const { conv } = await armedWithFiles([[OGG_BYTES, 'audio/ogg', 'saludo.ogg'], [JPEG_BYTES, 'image/jpeg', 'foto.jpg']]);
+    await followTick(new Date(Date.now() + 6 * MINUTE));
+    const sent = await filesOfConv(conv);
+    expect(sent.map((m) => [m['kind'], m['body']])).toEqual([['text', 'Te dejo el catálogo, Cliente'], ['audio', null], ['image', null]]);
+  });
+
+  it('por QR el archivo sale aunque hayan pasado más de 24 h (no hay ventana)', async () => {
+    const qr = await qrChannel();
+    const { agent, conv } = await armedWithFiles([[JPEG_BYTES, 'image/jpeg', 'foto.jpg']], { channel: qr });
+    await followTick(new Date(Date.now() + 6 * MINUTE));
+    expect((await filesOfConv(conv)).map((m) => m['kind'])).toEqual(['image']);
+    expect(agent).toBeTruthy();
+  });
+
+  it('un archivo con virus al momento de enviar (se revisa de nuevo) deja el paso omitido con su motivo y una nota, y NO se envía nada ni los pasos siguientes', async () => {
+    const agent = await liveAgent();
+    const f = await upOk(agent, PDF_BYTES, 'application/pdf', 'precios.pdf');
+    expect((await put(agent, { enabled: true, steps: [fileStep([f.id]), { delay_minutes: 10, mode: 'fixed_text', fixed_text: 'Segundo paso' }] })).status).toBe(200);
+    const c = await mkConv();
+    await inbound(c.id, '¿Precios?');
+    await tick();
+    const key = ((await filesTable())[0]!['storage_key']) as string;
+    await TenantContext.run({ organizationId: ORG_A }, () => storage().put(key, Buffer.from(EICAR, 'latin1'), 'application/pdf')); // el objeto guardado quedó infectado
+    expect(await followTick(new Date(Date.now() + 6 * MINUTE))).toBe(1);
+    expect((await runs()).map((r) => [r['step_position'], r['status'], r['reason']])).toEqual([[1, 'skipped', 'attachment_infected']]); // ningún paso 2
+    expect(await filesOfConv(c.id)).toEqual([]);
+    expect((await messagesOf(c.id)).some((m) => m['kind'] === 'note' && String(m['body']).includes('no se envió: el antivirus bloqueó uno de sus archivos'))).toBe(true);
+    expect(await followTick(new Date(Date.now() + 120 * MINUTE))).toBe(0);
+  });
+
+  it('un archivo que falta en el almacenamiento omite el paso («attachment_unavailable») y termina la cadena', async () => {
+    const { conv } = await armedWithFiles([[JPEG_BYTES, 'image/jpeg', 'foto.jpg']]);
+    const key = ((await filesTable())[0]!['storage_key']) as string;
+    await TenantContext.run({ organizationId: ORG_A }, () => storage().delete(key));
+    await followTick(new Date(Date.now() + 6 * MINUTE));
+    expect((await runs()).map((r) => [r['status'], r['reason']])).toEqual([['skipped', 'attachment_unavailable']]);
+    expect(await filesOfConv(conv)).toEqual([]);
+  });
+
+  it('si el cliente responde antes de que toque, no sale nada y no queda ninguna copia suelta', async () => {
+    const { conv } = await armedWithFiles([[JPEG_BYTES, 'image/jpeg', 'foto.jpg']]);
+    await inbound(conv, 'Ya vi, gracias', { at: new Date(Date.now() + 1000) });
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() + interval '1 second' WHERE id = $1`, [conv]);
+    await followTick(new Date(Date.now() + 10 * MINUTE));
+    expect((await runs()).map((r) => [r['status'], r['reason']])).toEqual([['cancelled', 'client_replied']]);
+    expect(await filesOfConv(conv)).toEqual([]);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM message_attachments WHERE conversation_id = $1 AND direction = 'out'`, [conv])).rows[0].n).toBe(0);
+  });
+
+  it('una persona que interviene cancela el paso con archivos', async () => {
+    const { conv } = await armedWithFiles([[JPEG_BYTES, 'image/jpeg', 'foto.jpg']]);
+    await humanReply(conv, 'Hola, yo te atiendo');
+    await followTick(new Date(Date.now() + 10 * MINUTE));
+    expect((await runs()).map((r) => [r['status'], r['reason']])).toEqual([[ 'cancelled', 'human_intervened']]);
+    expect(await filesOfConv(conv)).toEqual([]);
   });
 });

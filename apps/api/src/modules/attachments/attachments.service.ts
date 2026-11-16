@@ -68,10 +68,11 @@ export class AttachmentsService {
    * Pasa el archivo por el antivirus y lo guarda. Infectado → 422 y NO se guarda; si el antivirus no responde → 503 (no se entrega nada sin revisar). Devuelve la clave del
    * almacenamiento y cómo quedó la revisión: `clean` o `skipped` (no hay antivirus configurado).
    */
-  async scanAndStore(organizationId: string, attachmentId: string, file: Pick<PreparedFile, 'bytes' | 'mime'>): Promise<{ key: string; scanStatus: 'clean' | 'skipped' }> {
+  async scanAndStore(organizationId: string, attachmentId: string, file: Pick<PreparedFile, 'bytes' | 'mime'>, folder?: string): Promise<{ key: string; scanStatus: 'clean' | 'skipped' }> {
     const scan = await this.scan(file.bytes);
     if (scan === 'infected') throw new AppError(422, 'ATTACHMENT_INFECTED', 'El antivirus detectó un virus en el archivo: no se puede usar');
-    const key = storageKey(organizationId, attachmentId);
+    // `folder`: una carpeta propia bajo la empresa (por ejemplo `follow-ups/<secuencia>`); sin ella, la de los adjuntos de conversación. Siempre `org/<empresa>/…`
+    const key = folder ? `org/${organizationId}/${folder.replace(/[^A-Za-z0-9/_-]/g, '')}/${attachmentId}` : storageKey(organizationId, attachmentId);
     try {
       await this.storage.put(key, file.bytes, file.mime);
     } catch (e) {
