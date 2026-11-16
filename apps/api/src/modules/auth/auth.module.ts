@@ -7,6 +7,8 @@ import type { AppConfig } from '../../config';
 import { APP_CONFIG } from '../../tokens';
 import { Argon2idHasher } from '../../security';
 import { AuthController } from './auth.controller';
+import { AccessResetController, PlatformAccessResetController } from './access-reset/access-reset.controller';
+import { AccessResetService } from './access-reset/access-reset.service';
 import { AccessSessionsService } from './context/access-sessions.service';
 import { ContextController, PlatformAccessSessionsController } from './context/context.controller';
 import { ContextService } from './context/context.service';
@@ -35,7 +37,7 @@ import { SignupService } from './signup/signup.service';
 
 @Module({
   imports: [AuditModule, PlatformModule, OrganizationsModule, MailModule],
-  controllers: [AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController, AgencyClientRegistrationController, ContextController, PlatformAccessSessionsController, PlatformCompanyLifecycleController],
+  controllers: [AccessResetController, PlatformAccessResetController, AuthController, SignupController, PasswordController, InvitationsController, PlatformInvitationsController, PlatformAgencyCreationController, AgencyClientRegistrationController, ContextController, PlatformAccessSessionsController, PlatformCompanyLifecycleController],
   providers: [
     AuthService,
     SignupService,
@@ -47,6 +49,7 @@ import { SignupService } from './signup/signup.service';
     CompanyPurgeStore,
     PasswordConfirmationService,
     AccessSessionsService,
+    AccessResetService,
     PermissionService,
     SignupLimiter,
     // Anti-bots (ADR-37): Turnstile. 'none' (503) o fake de desarrollo/pruebas (la config lo prohíbe en producción). El correo vive en MailModule.

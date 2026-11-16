@@ -94,6 +94,7 @@ export const PERMISSION_META: Readonly<Record<ManageableKey, PermissionMeta>> = 
   'queues.manage': cfg('setup', 'Departamentos', 'Crear departamentos, su equipo, horario y reparto.'),
   'sla.manage': cfg('setup', 'Tiempos de respuesta y horario', 'Objetivo de respuesta, horario laboral y feriados.'),
   export: cfg('setup', 'Exportar (heredado)', 'Permiso heredado sin uso.', false),
+  'users.reset_access': cfg('team', 'Restablecer accesos', 'Cerrar las sesiones de una persona del equipo y enviarle un enlace para que cree una contraseña nueva.', false),
   'users.manage': cfg('team', 'Administrar usuarios', 'Invitar, cambiar roles y permisos, desactivar y quitar personas del equipo.', false),
   'billing.manage': cfg('team', 'Plan y facturación', 'Ver y cambiar el plan y los pagos.', false),
 };
@@ -102,7 +103,7 @@ export const MANAGEABLE_KEYS = Object.keys(PERMISSION_META) as ManageableKey[];
 export const isManageable = (k: string): k is ManageableKey => Object.hasOwn(PERMISSION_META, k);
 
 /** Los que protegen al equipo: ni siquiera un administrador se los puede quitar a otro por ajuste (se cambia el rol, con la regla del último administrador). */
-export const PROTECTED_FROM_DENY: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['users.manage']);
+export const PROTECTED_FROM_DENY: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['users.manage', 'users.reset_access']);
 
 export type OverrideRole = 'client_admin' | 'advisor';
 export const isOverrideRole = (r: string): r is OverrideRole => r === 'client_admin' || r === 'advisor';

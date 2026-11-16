@@ -97,6 +97,30 @@ export interface CalendarReconnectMail {
   reconnectUrl: string | null;
 }
 
+/**
+ * ADR-71: a la persona a la que un administrador le restableció el acceso. Lleva el enlace para crear una contraseña nueva (llega SOLO a su correo) y dice quién lo pidió y, si lo hay, el motivo. El enlace es el de ADR-28 (el token existe en claro solo
+ * aquí y en el correo; no se registra).
+ */
+export interface AccessResetMail {
+  to: string;
+  /** Enlace COMPLETO `<FRONTEND_BASE_URL><RESET_LINK_PATH>#token=<token>`, armado en el servidor. */
+  resetUrl: string;
+  expiresInMinutes: number;
+  /** Quién lo pidió, ya redactado («La agencia X», «El administrador Y», «El equipo de la plataforma»). */
+  actorLabel: string;
+  organizationName: string | null;
+  reason: string | null;
+}
+
+/** ADR-71: aviso SIN enlace a los administradores del cliente cuando la agencia o la plataforma restablece el acceso de alguien de su empresa. */
+export interface AccessResetNoticeMail {
+  to: string;
+  actorLabel: string;
+  targetName: string;
+  organizationName: string;
+  reason: string;
+}
+
 export interface MailProvider {
   /** false = no hay proveedor configurado: el registro responde 503 en lugar de fingir que envió. */
   readonly available: boolean;
@@ -109,4 +133,6 @@ export interface MailProvider {
   sendCompanyPurgeNotice(mail: CompanyPurgeNoticeMail): Promise<void>;
   sendCompanyRecovered(mail: CompanyRecoveredMail): Promise<void>;
   sendCalendarReconnect(mail: CalendarReconnectMail): Promise<void>;
+  sendAccessReset(mail: AccessResetMail): Promise<void>;
+  sendAccessResetNotice(mail: AccessResetNoticeMail): Promise<void>;
 }

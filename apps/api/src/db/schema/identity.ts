@@ -28,6 +28,8 @@ export const users = identityTable(
     phone: text('phone'),
     /** Se incrementa para invalidar TODAS las sesiones del usuario (cambio de contraseña, desactivación). */
     sessionVersion: integer('session_version').notNull().default(1),
+    /** ADR-71: un administrador le restableció el acceso; su contraseña actual no sirve hasta que use el enlace del correo (el restablecimiento lo limpia). */
+    accessResetPendingAt: ts('access_reset_pending_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     deletedAt: ts('deleted_at'),
@@ -303,6 +305,40 @@ export const accessSessions = identityTable(
 );
 
 /**
+ * Restablecimientos de acceso hechos por otra persona (ADR-71): quién (agencia, Súper Admin o administrador del cliente), sobre quién y con qué motivo. SOLO INSERCIÓN (solo se completa `mail_sent`).
+ * Es el registro que lee el Súper Admin en «Accesos»; la empresa ve lo suyo en su historia de usuarios y en su auditoría. Sin enlaces ni tokens ni contraseñas. `organization_id` nulo = hecho por la ruta de plataforma
+ * sobre una cuenta que no es de una sola empresa.
+ */
+export const accessResets = identityTable(
+  'access_resets',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    actorUserId: uuid('actor_user_id').notNull().references(() => users.id),
+    /** `client_admin` | `agency` | `super_admin` (soporte o plataforma). */
+    actorRole: text('actor_role').notNull(),
+    /** La organización de la que actúa (la agencia o la plataforma), si no es el propio administrador del cliente. */
+    actorOrgId: uuid('actor_org_id').references(() => organizations.id),
+    organizationId: uuid('organization_id').references(() => organizations.id),
+    targetUserId: uuid('target_user_id').notNull().references(() => users.id),
+    /** Correo de la persona afectada, enmascarado (nunca completo). */
+    targetEmailMasked: text('target_email_masked').notNull(),
+    reason: text('reason'),
+    sessionsRevoked: integer('sessions_revoked').notNull().default(0),
+    mailSent: boolean('mail_sent').notNull().default(false),
+    ipHash: text('ip_hash'),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    check('access_resets_actor_role_valid', sql`${t.actorRole} IN ('client_admin', 'agency', 'super_admin')`),
+    check('access_resets_reason_len', sql`${t.reason} IS NULL OR length(btrim(${t.reason})) BETWEEN 10 AND 300`),
+    check('access_resets_ip_hash_hex', sql`${t.ipHash} IS NULL OR ${t.ipHash} ~ '^[0-9a-f]{64}$'`),
+    index('access_resets_created_idx').on(t.createdAt, t.id),
+    index('access_resets_org_idx').on(t.organizationId, t.createdAt),
+    index('access_resets_actor_idx').on(t.actorUserId, t.createdAt),
+  ],
+);
+
+/**
  * Sesión = un inicio de sesión (dispositivo). Los tokens son opacos (`<sessionId>.<secreto>`) y aquí solo se guarda
  * su hash SHA-256. El refresh rota en cada uso; presentar un refresh que no coincide revoca la sesión (ADR-26).
  */
@@ -414,7 +450,7 @@ export const signupAttempts = identityTable(
     count: integer('count').notNull().default(0),
     windowStartedAt: ts('window_started_at').notNull().defaultNow(),
   },
-  (t) => [check('signup_attempts_key_shape', sql`${t.key} ~ '^[svmfrxi]:[0-9a-f]{64}$'`), check('signup_attempts_count_nonneg', sql`${t.count} >= 0`)],
+  (t) => [check('signup_attempts_key_shape', sql`${t.key} ~ '^[svmfrxiato]:[0-9a-f]{64}$'`), check('signup_attempts_count_nonneg', sql`${t.count} >= 0`)],
 );
 
 /** Dominios de correo desechable rechazados en el registro. Lista global gestionada por operación (fuente de la lista: pendiente de decisión). */
@@ -442,8 +478,14 @@ export const passwordResets = identityTable(
     sentCount: integer('sent_count').notNull().default(1),
     lastSentAt: ts('last_sent_at').notNull().defaultNow(),
     createdAt: ts('created_at').notNull().defaultNow(),
+    /** ADR-71: `self` = «olvidé mi contraseña»; `admin` = lo pidió un administrador (`requested_by`). */
+    origin: text('origin').notNull().default('self'),
+    requestedBy: uuid('requested_by').references(() => users.id),
   },
-  (t) => [check('password_resets_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`)],
+  (t) => [
+    check('password_resets_token_hash_hex', sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check('password_resets_origin_valid', sql`${t.origin} IN ('self', 'admin')`),
+  ],
 );
 
 /**
@@ -695,7 +737,7 @@ export const memberHistory = identityTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
-    check('member_history_kind_valid', sql`${t.kind} IN ('invited', 'invitation_cancelled', 'role_changed', 'permissions_changed', 'queues_changed', 'deactivated', 'reactivated', 'removed', 'sessions_revoked')`),
+    check('member_history_kind_valid', sql`${t.kind} IN ('invited', 'invitation_cancelled', 'role_changed', 'permissions_changed', 'queues_changed', 'deactivated', 'reactivated', 'removed', 'sessions_revoked', 'access_reset')`),
     index('member_history_org_idx').on(t.organizationId, t.createdAt),
     index('member_history_user_idx').on(t.userId, t.createdAt),
   ],

@@ -69,6 +69,8 @@ export const PERMISSIONS = {
   'ai.credits.view': 'tenant',
   export: 'tenant',
   'users.manage': 'tenant',
+  // ADR-71: restablecer el acceso de una persona de la empresa (cierra sus sesiones, invalida su contraseña y le envía un enlace a SU correo). El administrador del cliente y, por su nivel por cliente, la agencia con nivel `admin`.
+  'users.reset_access': 'tenant',
   'billing.manage': 'tenant',
   // Consola de la agencia (M2.5, ADR-41). Solo el rol `agency` en SU organización; nunca dentro de un cliente.
   'agency.clients.read': 'tenant',
@@ -82,6 +84,8 @@ export const PERMISSIONS = {
   'platform.companies.delete': 'platform',
   'platform.companies.export': 'platform',
   'platform.access_log.read': 'platform',
+  // ADR-71: restablecer el acceso de cualquier persona (incluidas las cuentas de varias empresas, la agencia y otros Súper Admin) y ver los restablecimientos.
+  'platform.users.reset_access': 'platform',
   // M8.1 (ADR-53): precio y margen de los créditos IA, regalos de créditos y saldos de todas las empresas.
   'platform.ai.manage': 'platform',
   // v11 S3: el favicon de la plataforma. Solo el Súper Admin.

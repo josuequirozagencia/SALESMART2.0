@@ -53,7 +53,8 @@ export class AuthService {
     // Siempre se ejecuta una verificación Argon2id (también para cuentas inexistentes): tiempo similar
     const hash = found?.u.passwordHash ?? (await this.getDummyHash());
     const passwordOk = await this.hasher.verify(hash, input.password);
-    const usable = !!found && !!found.m && found.u.status === 'active' && found.u.deletedAt === null && found.u.emailVerifiedAt !== null;
+    // Un administrador le restableció el acceso (ADR-71): su contraseña actual no sirve hasta que use el enlace del correo; se responde igual que con cualquier otro fallo
+    const usable = !!found && !!found.m && found.u.status === 'active' && found.u.deletedAt === null && found.u.emailVerifiedAt !== null && found.u.accessResetPendingAt === null;
 
     if (!passwordOk || !usable) {
       await Promise.all([this.throttle.recordFailure(eKey), this.throttle.recordFailure(iKey)]);

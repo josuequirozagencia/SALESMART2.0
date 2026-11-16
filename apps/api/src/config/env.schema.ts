@@ -111,6 +111,15 @@ export const envSchema = z.object({
   RESET_EMAIL_MAX_PER_HOUR: z.coerce.number().int().min(1).max(20).default(3),
   RESET_IP_MAX_PER_HOUR: z.coerce.number().int().min(1).max(200).default(10), // solicitudes «olvidé» por IP
   RESET_ATTEMPT_IP_MAX_PER_HOUR: z.coerce.number().int().min(5).max(500).default(30), // intentos de /reset por IP
+  // ── Restablecer el acceso de otra persona (ADR-71). PROVISIONALES ──
+  ACCESS_RESET_TOKEN_TTL_MINUTES: z.coerce.number().int().min(10).max(1440).default(60), // el enlace llega a la bandeja de otra persona
+  ACCESS_RESET_ADMIN_MAX_PER_HOUR: z.coerce.number().int().min(1).max(200).default(10), // por administrador del cliente
+  ACCESS_RESET_AGENCY_MAX_PER_HOUR: z.coerce.number().int().min(1).max(200).default(5), // por persona de la agencia (más estricto)
+  ACCESS_RESET_SUPER_ADMIN_MAX_PER_HOUR: z.coerce.number().int().min(1).max(500).default(20),
+  ACCESS_RESET_TARGET_MAX_PER_HOUR: z.coerce.number().int().min(1).max(50).default(3), // por persona afectada
+  ACCESS_RESET_AGENCY_ORG_MAX_PER_DAY: z.coerce.number().int().min(1).max(500).default(10), // por agencia y empresa
+  // Política: ¿la agencia puede restablecer al dueño de la empresa? (el administrador del cliente nunca puede)
+  ACCESS_RESET_AGENCY_CAN_RESET_OWNER: z.enum(['true', 'false']).default('true'),
   // ── Invitaciones al dueño de una empresa nueva (M2.3, ADR-39). PROVISIONALES ──
   INVITE_LINK_PATH: z.string().min(1).max(100).default('/accept-invite'),
   INVITATION_TTL_DAYS: z.coerce.number().int().min(1).max(30).default(7),

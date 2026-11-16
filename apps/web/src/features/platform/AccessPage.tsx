@@ -4,6 +4,7 @@ import { durationLabel, shortDateTime } from '../../lib/format';
 import type { AccessEndReason, AccessSession } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
+import { AccessResetsPanel } from './AccessResetsPanel';
 import { NO_ACCESS_FILTERS, useAccessSessions, type AccessFilters } from './useAccessSessions';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[13px]';
@@ -42,6 +43,20 @@ function Row({ a }: { a: AccessSession }) {
  * Es el historial de entradas y salidas; lo que se hizo dentro de la cuenta queda marcado «actuando como» en la auditoría del cliente.
  */
 export function AccessPage() {
+  const [view, setView] = useState<'entries' | 'resets'>('entries');
+  return (
+    <div className="grid gap-4">
+      <div role="tablist" aria-label="Accesos" className="flex gap-1 border-b border-line">
+        {([['entries', 'Entradas a cuentas'], ['resets', 'Restablecimientos']] as const).map(([id, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)} className={`-mb-px border-b-2 px-3 py-2 text-[13.5px] font-semibold ${view === id ? 'border-accent text-accent' : 'border-transparent text-muted hover:text-fg'}`}>{label}</button>
+        ))}
+      </div>
+      {view === 'entries' ? <EntriesPanel /> : <AccessResetsPanel />}
+    </div>
+  );
+}
+
+function EntriesPanel() {
   const [text, setText] = useState('');
   const [filters, setFilters] = useState<AccessFilters>(NO_ACCESS_FILTERS);
   const q = useAccessSessions(filters);

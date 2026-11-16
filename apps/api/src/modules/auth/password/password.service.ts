@@ -58,7 +58,7 @@ export class PasswordService {
       const [prev] = await tx.select({ lastSentAt: passwordResets.lastSentAt }).from(passwordResets).where(eq(passwordResets.userId, u.id)).for('update');
       if (prev && Date.now() - prev.lastSentAt.getTime() < r.cooldownMs) return false;
       const now = new Date();
-      const values = { id, tokenHash: hashSecret(secret), expiresAt: new Date(now.getTime() + r.tokenTtlMs), consumedAt: null, lastSentAt: now };
+      const values = { id, tokenHash: hashSecret(secret), expiresAt: new Date(now.getTime() + r.tokenTtlMs), consumedAt: null, lastSentAt: now, origin: 'self', requestedBy: null };
       // Al reemplazar la fila el token anterior deja de existir (id distinto)
       await tx
         .insert(passwordResets)
@@ -95,7 +95,8 @@ export class PasswordService {
       // Consumo condicional: aunque fallara el bloqueo de fila, solo una transacción puede usar el token
       const used = await tx.update(passwordResets).set({ consumedAt: now }).where(and(eq(passwordResets.id, row.id), isNull(passwordResets.consumedAt))).returning({ id: passwordResets.id });
       if (used.length === 0) return null;
-      await tx.update(users).set({ passwordHash: newHash, sessionVersion: sql`${users.sessionVersion} + 1`, updatedAt: now }).where(eq(users.id, row.userId));
+      // `accessResetPendingAt` nulo: al elegir contraseña nueva termina el restablecimiento hecho por un administrador (ADR-71)
+      await tx.update(users).set({ passwordHash: newHash, sessionVersion: sql`${users.sessionVersion} + 1`, accessResetPendingAt: null, updatedAt: now }).where(eq(users.id, row.userId));
       await tx.update(sessions).set({ revokedAt: now, revokeReason: 'password_reset' }).where(and(eq(sessions.userId, row.userId), isNull(sessions.revokedAt)));
       return row.email;
     });

@@ -96,6 +96,16 @@ export interface AppConfig {
     readonly ipMaxPerHour: number;
     readonly attemptIpMaxPerHour: number;
   };
+  /** ADR-71. PROVISIONAL. */
+  readonly accessReset: {
+    readonly tokenTtlMs: number;
+    readonly adminMaxPerHour: number;
+    readonly agencyMaxPerHour: number;
+    readonly superAdminMaxPerHour: number;
+    readonly targetMaxPerHour: number;
+    readonly agencyOrgMaxPerDay: number;
+    readonly agencyCanResetOwner: boolean;
+  };
   readonly web: {
     /** Carpeta de la web compilada (apps/web/dist). Si está definida, la API la sirve bajo el mismo origen. */
     readonly distDir: string | undefined;
@@ -268,6 +278,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       emailMaxPerHour: e.RESET_EMAIL_MAX_PER_HOUR,
       ipMaxPerHour: e.RESET_IP_MAX_PER_HOUR,
       attemptIpMaxPerHour: e.RESET_ATTEMPT_IP_MAX_PER_HOUR,
+    },
+    accessReset: {
+      tokenTtlMs: e.ACCESS_RESET_TOKEN_TTL_MINUTES * 60_000,
+      adminMaxPerHour: e.ACCESS_RESET_ADMIN_MAX_PER_HOUR,
+      agencyMaxPerHour: e.ACCESS_RESET_AGENCY_MAX_PER_HOUR,
+      superAdminMaxPerHour: e.ACCESS_RESET_SUPER_ADMIN_MAX_PER_HOUR,
+      targetMaxPerHour: e.ACCESS_RESET_TARGET_MAX_PER_HOUR,
+      agencyOrgMaxPerDay: e.ACCESS_RESET_AGENCY_ORG_MAX_PER_DAY,
+      agencyCanResetOwner: e.ACCESS_RESET_AGENCY_CAN_RESET_OWNER === 'true',
     },
     web: { distDir: e.WEB_DIST_DIR },
     jobs: { enabled: e.JOBS_ENABLED === undefined ? e.NODE_ENV !== 'test' : e.JOBS_ENABLED === 'true', trialExpiryIntervalMs: e.JOBS_TRIAL_EXPIRY_INTERVAL_SECONDS * 1000, identityCleanupIntervalMs: e.JOBS_IDENTITY_CLEANUP_INTERVAL_SECONDS * 1000 },

@@ -1,4 +1,4 @@
-import type { CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { AccessResetMail, AccessResetNoticeMail, CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 export interface MailContent {
   subject: string;
@@ -47,6 +47,42 @@ export function passwordResetMail(m: PasswordResetMail): MailContent {
   );
   const text = `Crea una contraseña nueva — Sales Smart\n\nAbre este enlace para elegir una contraseña nueva (funciona una sola vez y vence en ${minutes} minutos):\n${m.resetUrl}\n\nSi no fuiste tú, ignora este correo: no se hará ningún cambio en tu cuenta.\n`;
   return { subject: 'Restablece tu contraseña de Sales Smart', html, text };
+}
+
+/** ADR-71: el enlace llega a quien se le restableció el acceso; dice quién lo pidió y por qué. Nada del motivo ni de los nombres se interpreta como HTML. */
+export function accessResetMail(m: AccessResetMail): MailContent {
+  if (!/^https?:\/\//i.test(m.resetUrl)) throw new Error('resetUrl debe ser http(s)');
+  const minutes = Math.max(1, Math.round(m.expiresInMinutes));
+  const url = esc(m.resetUrl);
+  const who = esc(m.actorLabel);
+  const where = m.organizationName ? ` en <b>${esc(m.organizationName)}</b>` : '';
+  const why = m.reason ? `<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:14px;">Motivo indicado: «${esc(m.reason)}».</td></tr>` : '';
+  const html = frame(
+    'Restablecieron tu acceso',
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">Restablecieron tu acceso</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:12px;">${who} restableció tu acceso${where}. Cerramos tus sesiones abiertas y tu contraseña anterior dejó de funcionar: para volver a entrar, crea una contraseña nueva. El enlace funciona una sola vez y vence en ${minutes} minutos.</td></tr>
+${why}<tr><td align="center" style="padding-bottom:14px;"><a href="${url}" style="display:inline-block;background:#6a44f2;color:#ffffff;text-decoration:none;font-weight:600;font-size:14px;border-radius:10px;padding:12px 22px;">Crear contraseña nueva</a></td></tr>
+<tr><td style="font-size:12px;line-height:1.5;color:#5f5a7a;word-break:break-all;">Si el botón no funciona, copia y pega este enlace en tu navegador:<br>${url}</td></tr>`,
+    'Si no esperabas este cambio, avisa al administrador de tu empresa.',
+  );
+  const org = m.organizationName ? ` en ${m.organizationName}` : '';
+  const reason = m.reason ? `Motivo indicado: «${m.reason}».\n\n` : '';
+  const text = `Restablecieron tu acceso — Sales Smart\n\n${m.actorLabel} restableció tu acceso${org}. Cerramos tus sesiones abiertas y tu contraseña anterior dejó de funcionar: para volver a entrar, crea una contraseña nueva.\n${reason}Abre este enlace (funciona una sola vez y vence en ${minutes} minutos):\n${m.resetUrl}\n\nSi no esperabas este cambio, avisa al administrador de tu empresa.\n`;
+  return { subject: 'Restablecieron tu acceso a Sales Smart', html, text };
+}
+
+/** ADR-71: aviso a los administradores del cliente (sin enlace). */
+export function accessResetNoticeMail(m: AccessResetNoticeMail): MailContent {
+  const html = frame(
+    'Se restableció un acceso',
+    `<tr><td style="font-size:22px;font-weight:700;padding-bottom:8px;">Se restableció un acceso</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:12px;">${esc(m.actorLabel)} restableció el acceso de <b>${esc(m.targetName)}</b> en <b>${esc(m.organizationName)}</b>.</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;padding-bottom:12px;">Motivo: «${esc(m.reason)}».</td></tr>
+<tr><td style="font-size:14px;line-height:1.5;color:#3b3558;">Se cerraron sus sesiones y recibió un enlace en su correo para crear una contraseña nueva. Puedes verlo en Equipo › Usuarios.</td></tr>`,
+    'Recibes este aviso porque administras tu empresa en Sales Smart.',
+  );
+  const text = `Se restableció un acceso — Sales Smart\n\n${m.actorLabel} restableció el acceso de ${m.targetName} en ${m.organizationName}.\nMotivo: «${m.reason}».\n\nSe cerraron sus sesiones y recibió un enlace en su correo para crear una contraseña nueva. Puedes verlo en Equipo > Usuarios.\n`;
+  return { subject: `Se restableció un acceso en ${m.organizationName.slice(0, 60)}`, html, text };
 }
 
 export function invitationMail(m: InvitationMail): MailContent {
