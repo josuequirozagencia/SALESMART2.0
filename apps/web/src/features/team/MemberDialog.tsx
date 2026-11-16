@@ -11,7 +11,8 @@ import { useQueues } from '../queues/useQueues';
 import { LeaveDialog } from './LeaveDialog';
 import { PermissionsEditor } from './PermissionsEditor';
 import { overrideCount, sameOverrides } from './permissions';
-import { usePermissionCatalog, useReactivateMember, useRevokeSessions, useSetDepartments, useSetHours, useSetPermissions, useSetRole, useTeamMember } from './useTeam';
+import { ResetAccessDialog } from './ResetAccessDialog';
+import { useCanResetAccess, useResetHistory, usePermissionCatalog, useReactivateMember, useRevokeSessions, useSetDepartments, useSetHours, useSetPermissions, useSetRole, useTeamMember } from './useTeam';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] text-fg';
 const TABS = [['general', 'General'], ['permissions', 'Permisos'], ['access', 'Acceso']] as const;
@@ -144,6 +145,9 @@ function Access({ m, people, isSelf, onClose }: { m: TeamMemberFull; people: Tea
   const revoke = useRevokeSessions(m.user_id);
   const reactivate = useReactivateMember(m.user_id);
   const [leave, setLeave] = useState<'deactivate' | 'remove'>();
+  const [resetting, setResetting] = useState(false);
+  const canReset = useCanResetAccess(m.user_id, m.status === 'active' && !isSelf);
+  const resets = useResetHistory(m.user_id);
   const [note, setNote] = useState<string>();
   const [error, setError] = useState<string>();
   const active = m.status === 'active';
@@ -157,6 +161,15 @@ function Access({ m, people, isSelf, onClose }: { m: TeamMemberFull; people: Tea
           <p className="text-[12.5px] text-muted">La saca de todos sus dispositivos ahora mismo. Podrá volver a entrar con su contraseña.</p>
           <div>
             <Button loading={revoke.isPending} onClick={() => { setNote(undefined); setError(undefined); revoke.mutate(undefined, { onSuccess: (r) => setNote(r.sessions_revoked === 0 ? 'No tenía sesiones abiertas.' : `Se cerraron ${r.sessions_revoked} ${r.sessions_revoked === 1 ? 'sesión' : 'sesiones'}.`), onError: (e) => setError(friendlyError(e)) }); }}>Cerrar todas sus sesiones</Button>
+          </div>
+        </section>
+      ) : null}
+      {active && !isSelf && canReset.data?.allowed ? (
+        <section className="grid gap-1.5 rounded-2xl border border-line p-4">
+          <b className="text-[13.5px]">Restablecer acceso</b>
+          <p className="text-[12.5px] text-muted">Cierra sus sesiones, deja de servir su contraseña actual y le envía a su correo un enlace para crear una nueva. Úsalo si perdió el acceso o si sospechas que su cuenta está comprometida.</p>
+          <div>
+            <Button variant="danger" onClick={() => setResetting(true)}>Restablecer acceso…</Button>
           </div>
         </section>
       ) : null}
@@ -182,6 +195,19 @@ function Access({ m, people, isSelf, onClose }: { m: TeamMemberFull; people: Tea
       ) : null}
       {error ? <Alert>{error}</Alert> : null}
       {note ? <Alert kind="ok">{note}</Alert> : null}
+      {resets.data && resets.data.length > 0 ? (
+        <section aria-label="Restablecimientos de acceso" className="grid gap-1.5 rounded-2xl border border-line p-4">
+          <b className="text-[13.5px]">Restablecimientos de acceso</b>
+          <ul className="grid gap-1 text-[12.5px] text-muted">
+            {resets.data.map((h) => (
+              <li key={h.at + h.by}>
+                <span className="font-semibold text-fg">{shortDateTime(h.at)}</span> · {h.by === 'agency' ? 'La agencia' : h.by === 'super_admin' ? 'La plataforma' : 'Un administrador'} restableció su acceso{h.reason ? `. Motivo: ${h.reason}` : '.'}
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+      {resetting ? <ResetAccessDialog member={m} onClose={() => setResetting(false)} /> : null}
       {leave ? (
         <LeaveDialog
           member={m}

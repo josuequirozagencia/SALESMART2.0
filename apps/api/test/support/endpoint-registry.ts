@@ -408,6 +408,11 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/users/:userId/remove', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/reactivate', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
   { route: 'POST /v1/users/:userId/sessions/revoke', kind: 'tenant', isolationTest: '../../team/team.test.ts' },
+  // ADR-71: restablecer el acceso de otra persona. Pruebas: test/auth/access-reset.test.ts
+  { route: 'GET /v1/users/:userId/reset-access', kind: 'tenant', isolationTest: '../../auth/access-reset.test.ts' },
+  { route: 'POST /v1/users/:userId/reset-access', kind: 'tenant', isolationTest: '../../auth/access-reset.test.ts' },
+  { route: 'POST /v1/platform/users/:userId/reset-access', kind: 'platform', test: '../../auth/access-reset.test.ts' },
+  { route: 'GET /v1/platform/access-resets', kind: 'platform', test: '../../auth/access-reset.test.ts' },
   // Adjuntos y audio (M5.6d, ADR-50). Pruebas: test/attachments/attachments.test.ts (A↔B, permisos, tipos/tamaños, antivirus, envío con media, RLS)
   { route: 'POST /v1/conversations/:id/attachments', kind: 'tenant', isolationTest: '../../attachments/attachments.test.ts' },
   { route: 'GET /v1/attachments/:id/url', kind: 'tenant', isolationTest: '../../attachments/attachments.test.ts' },

@@ -82,6 +82,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'LAST_ADMIN': case 'SELF_NOT_ALLOWED': case 'MEMBER_EXISTS': case 'INVITE_NOT_ALLOWED': case 'ROLE_UNCHANGED': case 'MEMBER_INACTIVE': return e.message;
     // Eliminar y recuperar empresas (ADR-59): el servidor ya redacta el motivo
     case 'PASSWORD_INVALID': return 'La contraseña no es correcta.';
+    // Restablecer el acceso de otra persona (ADR-71): el servidor ya redacta el motivo (sin revelar otras empresas)
+    case 'RESET_NOT_ALLOWED': case 'ACCESS_RESET_UNAVAILABLE': return e.message;
     case 'ALREADY_DELETED': case 'AGENCY_HAS_CLIENTS': case 'COMPANY_DELETED': case 'NOT_RECOVERABLE': case 'RECOVERY_WINDOW_CLOSED': return e.message;
     // Descargar todo (F3b)
     case 'NOT_DELETED': case 'EXPORT_NOT_READY': return e.message;

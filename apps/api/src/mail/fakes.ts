@@ -1,5 +1,5 @@
 import type { AppLogger } from '../logger';
-import type { CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
+import type { AccessResetMail, AccessResetNoticeMail, CalendarReconnectMail, CompanyDeletedMail, CompanyExportReadyMail, CompanyPurgeNoticeMail, CompanyRecoveredMail, InvitationMail, MailProvider, OwnershipChangeMail, PasswordResetMail, VerificationMail } from './ports';
 
 /** Sin proveedor: el servicio informa que no está disponible. Es el valor por defecto (y el único válido hoy en producción). */
 export class UnavailableMailProvider implements MailProvider {
@@ -31,6 +31,12 @@ export class UnavailableMailProvider implements MailProvider {
   sendCalendarReconnect(): Promise<void> {
     return Promise.reject(new Error('MailProvider no configurado'));
   }
+  sendAccessReset(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
+  sendAccessResetNotice(): Promise<void> {
+    return Promise.reject(new Error('MailProvider no configurado'));
+  }
 }
 /** SOLO PRUEBAS: guarda los correos en memoria. La configuración lo rechaza en producción. */
 export class MemoryMailProvider implements MailProvider {
@@ -44,6 +50,8 @@ export class MemoryMailProvider implements MailProvider {
   readonly companyPurgeNoticeOutbox: CompanyPurgeNoticeMail[] = [];
   readonly companyRecoveredOutbox: CompanyRecoveredMail[] = [];
   readonly calendarReconnectOutbox: CalendarReconnectMail[] = [];
+  readonly accessResetOutbox: AccessResetMail[] = [];
+  readonly accessResetNoticeOutbox: AccessResetNoticeMail[] = [];
   failNext = false;
   sendVerificationCode(mail: VerificationMail): Promise<void> {
     if (this.failNext) {
@@ -117,6 +125,25 @@ export class MemoryMailProvider implements MailProvider {
     this.calendarReconnectOutbox.push(mail);
     return Promise.resolve();
   }
+  sendAccessReset(mail: AccessResetMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.accessResetOutbox.push(mail);
+    return Promise.resolve();
+  }
+  sendAccessResetNotice(mail: AccessResetNoticeMail): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      return Promise.reject(new Error('fallo simulado del proveedor'));
+    }
+    this.accessResetNoticeOutbox.push(mail);
+    return Promise.resolve();
+  }
+  lastAccessReset(to: string): AccessResetMail | undefined {
+    return [...this.accessResetOutbox].reverse().find((m) => m.to === to);
+  }
   lastInvitation(to: string): InvitationMail | undefined {
     return [...this.inviteOutbox].reverse().find((m) => m.to === to);
   }
@@ -176,6 +203,15 @@ export class ConsoleMailProvider implements MailProvider {
   }
   sendCalendarReconnect(mail: CalendarReconnectMail): Promise<void> {
     this.log.warn({ to: mail.to, reconnectUrl: mail.reconnectUrl }, 'DEV ONLY: aviso de Google Calendar a reconectar (no se envía)');
+    return Promise.resolve();
+  }
+  sendAccessReset(mail: AccessResetMail): Promise<void> {
+    // El enlace es un secreto de un solo uso: ni siquiera el registro de desarrollo lo imprime
+    this.log.warn({ to: mail.to, actor: mail.actorLabel }, 'DEV ONLY: restablecimiento de acceso hecho por un administrador (no se envía)');
+    return Promise.resolve();
+  }
+  sendAccessResetNotice(mail: AccessResetNoticeMail): Promise<void> {
+    this.log.warn({ to: mail.to, actor: mail.actorLabel }, 'DEV ONLY: aviso de acceso restablecido a un administrador (no se envía)');
     return Promise.resolve();
   }
 }

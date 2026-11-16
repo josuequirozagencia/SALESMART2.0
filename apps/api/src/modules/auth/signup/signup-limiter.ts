@@ -5,13 +5,15 @@ import type { AppConfig } from '../../../config';
 import { Database, signupAttempts } from '../../../db';
 import { APP_CONFIG } from '../../../tokens';
 
-export type LimitKind = 's' | 'v' | 'm' | 'f' | 'r' | 'x' | 'i';
+export type LimitKind = 's' | 'v' | 'm' | 'f' | 'r' | 'x' | 'i' | 'a' | 't' | 'o';
 const HOUR_MS = 3_600_000;
+export const DAY_MS = 86_400_000;
 
 /**
  * Contadores de ventana fija (1 h) en PostgreSQL para el registro. Claves HMAC (nunca IP/correo en claro):
  *  s = registros y reenvíos por IP · v = intentos de verificación por IP · m = solicitudes por correo ·
- *  f = «olvidé mi contraseña» por IP · r = ídem por correo · x = intentos de /reset por IP · i = vista previa y aceptación de invitaciones por IP.
+ *  f = «olvidé mi contraseña» por IP · r = ídem por correo · x = intentos de /reset por IP · i = vista previa y aceptación de invitaciones por IP ·
+ *  a = restablecimientos de acceso por quien los hace · t = ídem por persona afectada · o = ídem por agencia y empresa, en ventana de un día (ADR-71).
  */
 @Injectable()
 export class SignupLimiter {
@@ -25,8 +27,8 @@ export class SignupLimiter {
   }
 
   /** Cuenta un intento (atómico). allowed=false cuando se supera `limit` dentro de la ventana. */
-  async hit(key: string, limit: number, now = new Date()): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
-    const cutoff = new Date(now.getTime() - HOUR_MS);
+  async hit(key: string, limit: number, now = new Date(), windowMs = HOUR_MS): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+    const cutoff = new Date(now.getTime() - windowMs);
     const [row] = await this.db.withIdentity((tx) =>
       tx
         .insert(signupAttempts)
@@ -42,7 +44,7 @@ export class SignupLimiter {
     );
     const count = row?.count ?? 1;
     const started = row?.windowStartedAt ?? now;
-    const retryAfterSeconds = Math.max(1, Math.ceil((started.getTime() + HOUR_MS - now.getTime()) / 1000));
+    const retryAfterSeconds = Math.max(1, Math.ceil((started.getTime() + windowMs - now.getTime()) / 1000));
     return { allowed: count <= limit, retryAfterSeconds };
   }
 }

@@ -2810,7 +2810,7 @@ Tras probar con OpenAI real, el responsable cambió la decisión 6: en vez de **
 ---
 
 ## ADR-71 — Restablecer el acceso de una persona: administrador del cliente, agencia sobre su cartera y Súper Admin (addendum v16)
-**Estado: PROPUESTO (2026-11-16). Sin código hasta que el responsable lo apruebe.**
+**Estado: APROBADO el 2026-11-16 «con las recomendaciones» (las siete preguntas abiertas quedan resueltas como se recomendó). Construido el mismo día, en una sola rebanada.**
 
 ### Contexto
 El addendum v16 pide que puedan «restablecer accesos» (a) el `client_admin` sobre su empresa, (b) la **agencia** sobre las empresas de su cartera y (c) el Súper Admin sobre cualquiera, con reglas propias para la agencia (ADR-40/41). **El documento v16 principal no existe en el proyecto** (se buscó en `ARCHIVOS MD CLAUDE`, `docs/prompts/` y el repositorio: solo está el addendum, que cita «el punto 3», «el punto 4» y «los controles de v16»). Tampoco hay hoy ningún restablecimiento hecho por un administrador (no existe `users.reset_access`): solo el olvido y el cambio de contraseña de cada persona (ADR-28) y «Cerrar sesiones» de `/v1/users` (ADR-56). Este ADR **define el comportamiento base** y lo mapea a los siete puntos del addendum; **lo que v16 pudiera decir distinto se corrige antes de construir**.
@@ -2860,3 +2860,15 @@ Migración nueva (columnas, tabla `access_resets`, tipo de historial, dos permis
 5. **Límites** (10/5/20 por hora, 3 por persona, 10 diarios por agencia y empresa): provisionales; ¿valores distintos?
 6. **Motivo para el `client_admin`:** opcional (recomendado) u obligatorio como los demás.
 7. **Aviso a los demás administradores cuando actúa un `client_admin`:** no (recomendado: ya es su empresa); ¿sí?
+
+
+### Notas de implementación (2026-11-16)
+Se aprobó con las recomendaciones de las siete preguntas: el v16 base sigue sin existir (se construyó con las suposiciones de este ADR), el `client_admin` no puede con el dueño, la contraseña vieja se invalida al iniciar, el enlace dura 60 min, los límites son 10/5/20 por hora y 3 por persona (10 por día por agencia y empresa), el motivo es opcional para el `client_admin` y no se avisa a los demás administradores cuando actúa uno. **Desviaciones y precisiones (PROPUESTAS):**
+1. **Un motivo ausente o corto es `400 VALIDATION_ERROR`, no 422** (el addendum decía 422): toda la API valida con 400 y el código de error es el de siempre. El mensaje dice qué falta.
+2. **`GET /v1/users/:userId/reset-access`** (`users.reset_access`) responde solo `{ allowed }` —sí o no, nunca por qué— para que la ficha de la persona muestre el botón solo cuando se puede; las personas de otra empresa o inexistentes dan `{ allowed: false }`. No estaba en el ADR.
+3. **La «auditoría» del cliente** es `audit_logs` (con `acting_as`) más la historia del equipo (`member_history`, tipo `access_reset`): como todavía no hay una pantalla de historia del equipo, la ficha de cada persona (Equipo › Usuarios › Acceso) muestra sus últimos restablecimientos con quién, cuándo y el motivo.
+4. **La restricción de formato de las claves del limitador (`signup_attempts_key_shape`) se amplió** a las clases `a`, `t` y `o` (en la misma migración `0142`) y `SignupLimiter.hit` admite una ventana propia (el límite por agencia y empresa es de un día).
+5. **La escritura en `audit_logs` y la de identidad son dos transacciones** (otro rol de base de datos): primero la de identidad (enlace nuevo, contraseña vieja inservible, sesiones cerradas, historia y `access_resets`), y después la auditoría de la empresa, los correos y el aviso. Si la auditoría o un correo fallan, se registra el fallo y el restablecimiento ya hecho NO se deshace; `access_resets.mail_sent` y la respuesta dicen si el correo con el enlace salió. Es el mismo criterio de «ver como» y de los avisos de venta.
+6. **Los intentos rechazados por los límites también cuentan** (se cuentan antes de comprobar la contraseña, para que no se pueda sondear sin tope).
+7. **Pruebas:** 22 de API con PostgreSQL real (`test/auth/access-reset.test.ts`: tabla de elegibilidad, los tres actores, niveles de la agencia, cartera, A↔B entre dos agencias, límites, motivo, reautenticación, correos al afectado y a los administradores, enlace de un solo uso, auditoría con `acting_as`, historia, tabla de restablecimientos y sin servicio de correo ⇒ 503) y 8 de la web (`test/access-reset.test.tsx`).
+**Sin validar:** el envío real del correo (Resend), el flujo completo en un navegador real (no hay E2E propio de este flujo) y el comportamiento con volumen real.

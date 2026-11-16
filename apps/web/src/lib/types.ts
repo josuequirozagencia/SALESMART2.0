@@ -1136,6 +1136,28 @@ export interface PermissionCatalog {
   roles: Array<{ id: TeamRole; label: string; description: string }>;
   groups: PermissionGroup[];
 }
+/** Restablecer el acceso de una persona (ADR-71). El enlace NUNCA viaja aquí: llega solo al correo de la persona. */
+export interface AccessResetResult {
+  user_id: string;
+  sessions_revoked: number;
+  email_hint: string;
+  mail_sent: boolean;
+  notified: number;
+}
+export interface AccessResetItem {
+  id: string;
+  actor: { email: string; name: string | null };
+  actor_role: 'client_admin' | 'agency' | 'super_admin';
+  actor_org: { id: string; name: string } | null;
+  organization: { id: string; name: string } | null;
+  target: { id: string; email_hint: string; name: string | null };
+  reason: string | null;
+  sessions_revoked: number;
+  mail_sent: boolean;
+  created_at: string;
+}
+export interface AccessResetList { items: AccessResetItem[]; next_cursor: string | null }
+
 export interface LeaveInput { conversations: { action: 'transfer' | 'unassign'; to_user_id?: string } }
 export interface LeaveResult {
   user_id: string;
