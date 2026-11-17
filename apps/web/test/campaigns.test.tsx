@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Me, TeamMember, TeamMemberFull } from '../src/lib/types';
@@ -9,8 +9,8 @@ import { authed, err, ME_ADMIN, ME_ADVISOR, mockApi, renderApp, resetWorld, type
 
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
-const ADMIN: CampaignAccessInfo = { plan_enabled: true, read: true, send: true, view_all: true, manage_limits: true };
-const ADVISOR: CampaignAccessInfo = { plan_enabled: true, read: true, send: true, view_all: false, manage_limits: false };
+const ADMIN: CampaignAccessInfo = { plan_enabled: true, read: true, send: true, view_all: true, manage_limits: true, manage_settings: true, cancel_others: true };
+const ADVISOR: CampaignAccessInfo = { plan_enabled: true, read: true, send: true, view_all: false, manage_limits: false, manage_settings: false, cancel_others: false };
 const OPTIONS = {
   channels: [{ id: 'c-off', name: 'Ventas', kind: 'official' }, { id: 'c-qr', name: 'Chip QR', kind: 'qr' }],
   limits: { official_daily_cap: 1000, qr_min_gap_seconds: 45, official_min_gap_seconds: 5, advisor_daily_cap: null as number | null, max_audience: 5000 },
@@ -25,8 +25,10 @@ const PEOPLE: AudienceItem[] = [
 const DRAFT: Campaign = {
   id: 'cmp1', name: 'Recordatorio de cupos', status: 'draft', status_reason: null, mode: 'text', channel: { id: 'c-qr', name: 'Chip QR', kind: 'qr' }, template_id: null, template_params: {}, body: 'Hola {{primer_nombre}}',
   audience: { source: 'all' }, include_unknown_consent: false, scheduled_at: null, gap_seconds: 60, daily_cap: 50, created_by: { id: 'u1', name: 'Ana Pérez' }, created_at: '2026-11-16T10:00:00.000Z', updated_at: '2026-11-16T10:00:00.000Z',
-  launched_at: null, finished_at: null, counts: { total: 0, by_status: {}, sent: 0, delivered: 0, read: 0, replied: 0, failed: 0, skipped: 0 }, can_edit: true,
+  launched_at: null, finished_at: null, counts: { total: 0, by_status: {}, sent: 0, delivered: 0, read: 0, replied: 0, failed: 0, skipped: 0 }, can_edit: true, can_pause: false, can_resume: false, can_cancel: false,
 };
+const RUNNING: Campaign = { ...DRAFT, id: 'cmpR', name: 'En curso hoy', status: 'running', mode: 'template', channel: { id: 'c-off', name: 'Ventas', kind: 'official' }, template_id: 't1', counts: { total: 10, by_status: {}, sent: 4, delivered: 3, read: 1, replied: 0, failed: 1, skipped: 2 }, can_edit: false, can_pause: true, can_resume: false, can_cancel: true };
+const PAUSED: Campaign = { ...RUNNING, id: 'cmpP', name: 'Pausada por límite', status: 'paused', status_reason: 'WhatsApp limitó los envíos de este número. La campaña quedó pausada: reanúdala más tarde.', can_pause: false, can_resume: true };
 const previewFor = (over: Partial<CampaignPreview> = {}): CampaignPreview => ({
   campaign_id: null,
   audience: { in_scope: 4, out_of_scope: 0, eligible: 2, skipped: { revoked: 1, excluded: 0, no_phone: 0, no_consent: 1, duplicate: 0 }, sample: [{ id: 'k1', name: 'Ana Lema' }] },
@@ -37,8 +39,8 @@ const previewFor = (over: Partial<CampaignPreview> = {}): CampaignPreview => ({
   ...over,
 });
 
-interface World { access: CampaignAccessInfo; items: Campaign[]; previews: Call[]; creates: Call[]; options: typeof OPTIONS; created: Campaign | null }
-const world = (over: Partial<World> = {}): World => ({ access: ADMIN, items: [DRAFT], previews: [], creates: [], options: OPTIONS, created: null, ...over });
+interface World { access: CampaignAccessInfo; items: Campaign[]; previews: Call[]; creates: Call[]; actions: Call[]; options: typeof OPTIONS; created: Campaign | null; cap: number }
+const world = (over: Partial<World> = {}): World => ({ access: ADMIN, items: [DRAFT], previews: [], creates: [], actions: [], options: OPTIONS, created: null, cap: 1000, ...over });
 
 function server(w: World, me: Me = ME_ADMIN, extra: Record<string, Handler> = {}): Record<string, Handler> {
   return {
@@ -58,9 +60,17 @@ function server(w: World, me: Me = ME_ADMIN, extra: Record<string, Handler> = {}
     'POST /campaigns/audience': () => ({ body: { items: PEOPLE, total: PEOPLE.length, next_cursor: null } }),
     'POST /campaigns': (c) => {
       w.creates.push(c);
-      w.created = { ...DRAFT, id: 'cmp2', name: (c.body as { name: string }).name };
+      const sent = c.body as { name: string; channel_id: string; scheduled_at?: string | null };
+      w.created = { ...DRAFT, id: 'cmp2', name: sent.name, scheduled_at: sent.scheduled_at ?? null, ...(sent.channel_id === 'c-off' ? { mode: 'template' as const, channel: { id: 'c-off', name: 'Ventas', kind: 'official' as const }, template_id: 't1', body: null } : {}) };
       return { status: 201, body: w.created };
     },
+    'PATCH /campaigns/cmp2': (c) => { w.actions.push(c); return { body: { ...w.created, ...(c.body as object) } }; },
+    'POST /campaigns/cmp2/launch': (c) => { w.actions.push(c); return { status: 201, body: { ...w.created, status: 'running', can_edit: false, can_pause: true, can_cancel: true } }; },
+    'POST /campaigns/cmpR/pause': (c) => { w.actions.push(c); return { body: { ...RUNNING, status: 'paused', can_pause: false, can_resume: true } }; },
+    'POST /campaigns/cmpP/resume': (c) => { w.actions.push(c); return { body: { ...PAUSED, status: 'running', status_reason: null } }; },
+    'POST /campaigns/cmpR/cancel': (c) => { w.actions.push(c); return { body: { ...RUNNING, status: 'cancelled', can_pause: false, can_cancel: false } }; },
+    'GET /campaigns/settings': () => ({ body: { official_daily_cap: w.cap, default_cap: 1000 } }),
+    'PUT /campaigns/settings': (c) => { w.actions.push(c); w.cap = (c.body as { official_daily_cap: number }).official_daily_cap; return { body: { official_daily_cap: w.cap, default_cap: 1000 } }; },
     ...extra,
   };
 }
@@ -202,15 +212,134 @@ describe('guardar el borrador', () => {
     expect(within(form).getByLabelText(/1 · Nombre/)).toHaveValue('Demasiado');
   });
 
-  it('el botón de enviar aún no existe (llega en la próxima versión) y los resultados de un borrador están en cero con su explicación', async () => {
+  it('por QR el envío todavía no existe (llega en la próxima versión): el botón está desactivado y se explica; guardar el borrador sigue funcionando; los resultados de un borrador están en cero', async () => {
     mockApi(server(world()));
     renderApp('/campaigns');
     const form = await screen.findByRole('form', { name: 'Nueva campaña' });
-    expect(within(form).getByRole('button', { name: 'Enviar campaña (próximamente)' })).toBeDisabled();
+    await userEvent.selectOptions(await within(form).findByRole('combobox', { name: 'Conexión' }), 'c-qr');
+    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Solo borrador');
+    expect(await within(form).findByText(/El envío por WhatsApp QR llega en la próxima versión/)).toBeInTheDocument();
+    expect(within(form).getByRole('button', { name: 'Enviar campaña' })).toBeDisabled();
+    expect(within(form).getByRole('button', { name: 'Guardar borrador' })).toBeEnabled();
     await userEvent.click(await screen.findByRole('button', { name: 'Resultados de Recordatorio de cupos' }));
     const dlg = within(await screen.findByRole('dialog', { name: 'Recordatorio de cupos' }));
     expect(dlg.getByText('Destinatarios')).toBeInTheDocument();
     expect(dlg.getByText(/es un borrador/)).toBeInTheDocument();
+  });
+
+  it('por WhatsApp oficial: «Enviar campaña» guarda el borrador, pide la confirmación con lo que va a pasar y lanza con Idempotency-Key; la tabla muestra la campaña en curso', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/campaigns');
+    const form = await screen.findByRole('form', { name: 'Nueva campaña' });
+    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Seguimiento');
+    expect(within(form).getByRole('button', { name: 'Enviar campaña' })).toBeDisabled(); // falta la plantilla
+    await userEvent.selectOptions(await within(form).findByRole('combobox', { name: 'Plantilla' }), 't1');
+    await userEvent.type(within(form).getByLabelText(/Variable \{\{2\}\}/), 'viernes');
+    await userEvent.click(await within(form).findByRole('button', { name: 'Enviar campaña' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Enviar campaña' }));
+    expect(await dlg.findByText(/se enviará a/)).toHaveTextContent('2 destinatarios por Ventas con la plantilla cupos_octubre');
+    expect(dlg.getByText(/Un mensaje cada 60 segundos, hasta 100 por día/)).toBeInTheDocument();
+    expect(dlg.getByText(/Las plantillas de marketing tienen costo en Meta/)).toBeInTheDocument();
+    expect(dlg.getByText(/Quien pidió la baja o no dio su consentimiento no recibe nada/)).toBeInTheDocument();
+    expect(w.creates).toHaveLength(1);
+    await userEvent.click(dlg.getByRole('button', { name: 'Confirmar y enviar' }));
+    expect(await screen.findByText(/Campaña «Seguimiento» en curso/)).toBeInTheDocument();
+    const launch = w.actions.find((c) => c.path === '/campaigns/cmp2/launch')!;
+    expect(launch.method).toBe('POST');
+    expect(launch.headers['idempotency-key']).toMatch(/^web-/);
+  });
+
+  it('volver de la confirmación no pierde el borrador: «Enviar» de nuevo cambia el mismo borrador (no crea otro)', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/campaigns');
+    const form = await screen.findByRole('form', { name: 'Nueva campaña' });
+    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Seguimiento');
+    await userEvent.selectOptions(await within(form).findByRole('combobox', { name: 'Plantilla' }), 't1');
+    await userEvent.type(within(form).getByLabelText(/Variable \{\{2\}\}/), 'viernes');
+    await userEvent.click(within(form).getByRole('button', { name: 'Enviar campaña' }));
+    await userEvent.click(within(await screen.findByRole('dialog', { name: 'Enviar campaña' })).getByRole('button', { name: 'Volver' }));
+    await userEvent.click(within(form).getByRole('button', { name: 'Enviar campaña' }));
+    await screen.findByRole('dialog', { name: 'Enviar campaña' });
+    expect(w.creates).toHaveLength(1);
+    expect(w.actions.filter((c) => c.method === 'PATCH')).toHaveLength(1);
+  });
+
+  it('programar: el botón cambia a «Programar campaña» y la confirmación dice cuándo saldrá', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/campaigns');
+    const form = await screen.findByRole('form', { name: 'Nueva campaña' });
+    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Programada');
+    await userEvent.selectOptions(await within(form).findByRole('combobox', { name: 'Plantilla' }), 't1');
+    await userEvent.type(within(form).getByLabelText(/Variable \{\{2\}\}/), 'viernes');
+    await userEvent.click(within(form).getByRole('button', { name: 'Programar' }));
+    const future = new Date(Date.now() + 2 * 86_400_000);
+    const pad = (x: number): string => String(x).padStart(2, '0');
+    fireEvent.change(within(form).getByLabelText('Día y hora de envío'), { target: { value: `${future.getFullYear()}-${pad(future.getMonth() + 1)}-${pad(future.getDate())}T10:30` } });
+    await userEvent.click(await within(form).findByRole('button', { name: 'Programar campaña' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Programar campaña' }));
+    expect(await dlg.findByText(/Saldrá el/)).toBeInTheDocument();
+    expect((w.creates[0]!.body as { scheduled_at: string }).scheduled_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe('pausar, reanudar y cancelar desde la tabla', () => {
+  it('una campaña en curso se pausa; la pausada muestra su motivo y se reanuda; cancelar pide confirmación y no se deshace', async () => {
+    const w = world({ items: [RUNNING, PAUSED] });
+    mockApi(server(w));
+    renderApp('/campaigns');
+    const table = await screen.findByRole('table');
+    expect(await within(table).findByText('En curso')).toBeInTheDocument();
+    expect(within(table).getByText(/WhatsApp limitó los envíos de este número/)).toBeInTheDocument();
+    await userEvent.click(within(table).getByRole('button', { name: 'Pausar En curso hoy' }));
+    await waitFor(() => expect(w.actions.some((c) => c.path === '/campaigns/cmpR/pause')).toBe(true));
+    expect(await screen.findByText(/Campaña «En curso hoy» pausada/)).toBeInTheDocument();
+    await userEvent.click(within(table).getByRole('button', { name: 'Reanudar Pausada por límite' }));
+    await waitFor(() => expect(w.actions.some((c) => c.path === '/campaigns/cmpP/resume')).toBe(true));
+    await userEvent.click(within(table).getByRole('button', { name: 'Cancelar En curso hoy' }));
+    const ask = within(await screen.findByRole('dialog', { name: '¿Cancelar la campaña?' }));
+    expect(ask.getByText(/No se puede deshacer/)).toBeInTheDocument();
+    expect(w.actions.some((c) => c.path === '/campaigns/cmpR/cancel')).toBe(false); // todavía no
+    await userEvent.click(ask.getByRole('button', { name: 'Sí, cancelar' }));
+    await waitFor(() => expect(w.actions.some((c) => c.path === '/campaigns/cmpR/cancel')).toBe(true));
+    expect(await screen.findByText(/Campaña «En curso hoy» cancelada/)).toBeInTheDocument();
+  });
+
+  it('un asesor sin permiso de las ajenas no ve los botones de una campaña que no puede tocar; los números se muestran acumulados', async () => {
+    mockApi(server(world({ access: ADVISOR, items: [{ ...RUNNING, can_pause: false, can_cancel: false }] }), ME_ADVISOR));
+    renderApp('/campaigns');
+    const table = await screen.findByRole('table');
+    await within(table).findByText('En curso hoy');
+    expect(within(table).queryByRole('button', { name: /Pausar|Cancelar/ })).not.toBeInTheDocument();
+    const row = within(await within(table).findByRole('row', { name: /En curso hoy/ }));
+    expect(row.getAllByText('10')[0]).toBeInTheDocument(); // destinatarios
+    expect(row.getByText('4')).toBeInTheDocument(); // enviados
+  });
+});
+
+describe('tope diario de la empresa', () => {
+  it('quien administra las conexiones lo ve y lo cambia', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/campaigns');
+    const card = await screen.findByRole('region', { name: 'Tope diario de la empresa' });
+    const input = within(card).getByLabelText('Mensajes por día');
+    await waitFor(() => expect(input).toHaveValue(1000));
+    await userEvent.clear(input);
+    await userEvent.type(input, '300');
+    await userEvent.click(within(card).getByRole('button', { name: 'Guardar tope' }));
+    expect(await within(card).findByText('Tope guardado.')).toBeInTheDocument();
+    expect(w.actions.find((c) => c.method === 'PUT')!.body).toEqual({ official_daily_cap: 300 });
+  });
+
+  it('el asesor no ve la tarjeta del tope de la empresa', async () => {
+    mockApi(server(world({ access: ADVISOR }), ME_ADVISOR));
+    renderApp('/campaigns');
+    await screen.findByRole('heading', { level: 1, name: 'Mis campañas masivas' });
+    await screen.findByRole('region', { name: 'Reglas de protección' });
+    expect(screen.queryByRole('region', { name: 'Tope diario de la empresa' })).not.toBeInTheDocument();
   });
 });
 

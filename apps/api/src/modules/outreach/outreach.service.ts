@@ -23,9 +23,11 @@ export interface TemplateOutreach {
   /** Responsable del lead: si la conversación nace aquí queda «pendiente» para esa persona; sin él, «sin asignar». */
   readonly ownerId: string | null;
   readonly now: Date;
+  /** Quién lo manda: una regla del sistema (por omisión) o una campaña masiva. Las dos dejan el mensaje en cola y NO cuentan como respuesta humana. */
+  readonly senderType?: 'automation' | 'campaign';
 }
 
-export type OutreachOutcome = { sent: true; conversationId: string } | { sent: false; reason: 'revoked' | 'channel_unavailable' | 'template_unavailable' };
+export type OutreachOutcome = { sent: true; conversationId: string; messageId: string } | { sent: false; reason: 'revoked' | 'channel_unavailable' | 'template_unavailable' };
 
 /**
  * Mensajes automáticos que nacen de una regla del sistema (formularios, M9.2; automatizaciones, M9.3), no de una persona: quedan en cola como `sender_type = automation` y los envía la misma tarea de
@@ -77,9 +79,9 @@ export class OutreachService {
       if (i.ownerId) await writeAudit(tx, { entityType: 'conversation', entityId: conv.id, field: 'owner_id', oldValue: null, newValue: i.ownerId, source: 'api' });
     }
     const template = { id: row.id, name: row.name, language: row.language, category: row.category, buttons: prepared.rendered.buttons, send: prepared.send };
-    const m = await this.queue(tx, conv.id, i.channelId, 'template', renderedText(prepared.rendered), { template }, i.now);
+    const m = await this.queue(tx, conv.id, i.channelId, 'template', renderedText(prepared.rendered), { template }, i.now, i.senderType ?? 'automation');
     this.realtime.touchHere(conv.id, { ...(conv.created ? { created: true } : {}), message: { id: m, kind: 'created' } });
-    return { sent: true, conversationId: conv.id };
+    return { sent: true, conversationId: conv.id, messageId: m };
   }
 
   /**
@@ -113,10 +115,10 @@ export class OutreachService {
   }
 
   /** El mensaje de salida automático, en cola; no cambia el estado ni el responsable de la conversación. */
-  private async queue(tx: TenantTx, conversationId: string, channelId: string, kind: 'text' | 'template', body: string, meta: Record<string, unknown>, now: Date): Promise<string> {
+  private async queue(tx: TenantTx, conversationId: string, channelId: string, kind: 'text' | 'template', body: string, meta: Record<string, unknown>, now: Date, senderType: 'automation' | 'campaign' = 'automation'): Promise<string> {
     const [m] = await tx
       .insert(messages)
-      .values({ conversationId, channelAccountId: channelId, direction: 'out', senderType: 'automation', kind, body, meta, status: 'queued', sentAt: now, attempts: 0, nextAttemptAt: now })
+      .values({ conversationId, channelAccountId: channelId, direction: 'out', senderType, kind, body, meta, status: 'queued', sentAt: now, attempts: 0, nextAttemptAt: now })
       .returning({ id: messages.id });
     await tx
       .update(conversations)

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, inArray, isNull, lt, or, type SQL } from 'drizzle-orm';
-import { campaignAdvisorLimits, campaignRecipients, campaigns, channelAccounts, contactLists, Database, qrAccounts, RECIPIENT_STATUSES, type TenantTx } from '../../db';
+import { campaignAdvisorLimits, campaignRecipients, campaignSettings, campaigns, channelAccounts, contactLists, Database, qrAccounts, RECIPIENT_STATUSES, type TenantTx } from '../../db';
 import { ConflictError, ForbiddenError, NotFoundError, ValidationError, type ErrorDetail } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
@@ -11,7 +11,7 @@ import { dailyLimit } from '../qr';
 import { customKeysIn, resolveQuickReply, unknownVariables, variablesIn, type ResolveContext } from '../quick-replies';
 import { renderedText, TemplatesService } from '../templates';
 import { classify, effectiveDailyCap, estimate } from './audience';
-import { MAX_AUDIENCE, MAX_DRAFTS_PER_USER, MIN_GAP_OFFICIAL_S, OFFICIAL_DAILY_CAP, MIN_GAP_QR_S, type AdvisorLimitDto, type AudienceDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type AudienceListDto, type UpdateCampaignDto } from './campaigns.dto';
+import { MAX_AUDIENCE, MAX_DRAFTS_PER_USER, MIN_GAP_OFFICIAL_S, OFFICIAL_DAILY_CAP, type SettingsDto, MIN_GAP_QR_S, type AdvisorLimitDto, type AudienceDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type AudienceListDto, type UpdateCampaignDto } from './campaigns.dto';
 
 type Row = typeof campaigns.$inferSelect;
 
@@ -22,6 +22,8 @@ export interface CampaignAccess {
   readonly viewAll: boolean;
   /** `contacts.view_all`: el alcance de contactos para armar la audiencia (sin él, solo los suyos; ADR-43). */
   readonly contactsViewAll: boolean;
+  /** `campaigns.cancel`: puede pausar, reanudar o cancelar las campañas de otras personas. */
+  readonly cancelOthers: boolean;
 }
 
 export type ChannelKind = 'official' | 'qr';
@@ -61,6 +63,10 @@ export interface CampaignView {
   counts: CampaignCounts;
   /** ¿Se puede editar? (solo un borrador, y solo quien lo creó). */
   can_edit: boolean;
+  /** ¿Puede esta persona pausar, reanudar o cancelar? (quien la creó, o quien tiene `campaigns.cancel`; según el estado). */
+  can_pause: boolean;
+  can_resume: boolean;
+  can_cancel: boolean;
 }
 
 export interface CampaignList {
@@ -107,6 +113,8 @@ export interface AdvisorLimitView {
 }
 
 const AUDIT = 'campaign';
+/** Las opciones de la empresa son una sola fila: la auditoría las identifica con este id fijo. */
+const ORG_SETTINGS_ID = '00000000-0000-4000-8000-000000000072';
 /** Variables que una campaña puede usar: solo las del contacto (ADR-72). `{{telefono}}`, `{{mi_nombre}}` y `{{empresa}}` de las respuestas rápidas no tienen sentido en un envío masivo. */
 const CAMPAIGN_BUILT_IN = new Set(['primer_nombre', 'nombre']);
 
@@ -185,7 +193,7 @@ export class CampaignsService {
         return kind && (a.viewAll || kind === 'official' || r.createdBy === a.userId) ? [{ id: r.id, name: r.name, kind }] : [];
       });
       const advisor = a.viewAll ? null : await this.advisorCap(tx, a.userId);
-      return { channels, limits: { official_daily_cap: OFFICIAL_DAILY_CAP, qr_min_gap_seconds: MIN_GAP_QR_S, official_min_gap_seconds: MIN_GAP_OFFICIAL_S, advisor_daily_cap: advisor, max_audience: MAX_AUDIENCE } };
+      return { channels, limits: { official_daily_cap: await this.officialCap(tx), qr_min_gap_seconds: MIN_GAP_QR_S, official_min_gap_seconds: MIN_GAP_OFFICIAL_S, advisor_daily_cap: advisor, max_audience: MAX_AUDIENCE } };
     });
   }
 
@@ -341,8 +349,8 @@ export class CampaignsService {
   }
 
   /** Qué puede hacer la persona con campañas (para la pantalla y el menú): permisos verificados y si el plan las incluye. */
-  async accessInfo(flags: { read: boolean; send: boolean; viewAll: boolean; manageLimits: boolean }): Promise<{ plan_enabled: boolean; read: boolean; send: boolean; view_all: boolean; manage_limits: boolean }> {
-    return { plan_enabled: await this.directory.featureEnabled('campaigns'), read: flags.read, send: flags.send, view_all: flags.viewAll, manage_limits: flags.manageLimits };
+  async accessInfo(flags: { read: boolean; send: boolean; viewAll: boolean; manageLimits: boolean; manageSettings: boolean; cancelOthers: boolean }): Promise<{ plan_enabled: boolean; read: boolean; send: boolean; view_all: boolean; manage_limits: boolean; manage_settings: boolean; cancel_others: boolean }> {
+    return { plan_enabled: await this.directory.featureEnabled('campaigns'), read: flags.read, send: flags.send, view_all: flags.viewAll, manage_limits: flags.manageLimits, manage_settings: flags.manageSettings, cancel_others: flags.cancelOthers };
   }
 
   /** El tipo de la conexión si está activa y la persona puede usarla para campañas (oficial: cualquiera; QR: la que creó, o cualquiera si ve todo); null si no. */
@@ -366,7 +374,7 @@ export class CampaignsService {
       const qrLimit = kind === 'qr' ? await this.qrWarmupLimit(tx, c.channelId) : 0;
       const advisorCap = a.viewAll ? null : await this.advisorCap(tx, a.userId);
       const minGap = kind === 'qr' ? MIN_GAP_QR_S : MIN_GAP_OFFICIAL_S;
-      const { cap, channelCap } = effectiveDailyCap({ mode, campaignCap: c.dailyCap > 0 ? c.dailyCap : 10000, advisorCap, qrWarmupLimit: qrLimit });
+      const { cap, channelCap } = effectiveDailyCap({ mode, campaignCap: c.dailyCap > 0 ? c.dailyCap : 10000, advisorCap, qrWarmupLimit: qrLimit, officialCap: await this.officialCap(tx) });
       limits = { channel_kind: kind, daily_cap: cap, channel_cap: channelCap, advisor_cap: advisorCap, min_gap_seconds: minGap };
       est = estimate(out.eligible.length, cap, Math.max(c.gapSeconds, minGap));
     }
@@ -423,6 +431,110 @@ export class CampaignsService {
       await writeAudit(tx, { entityType: 'campaign_advisor_limit', entityId: userId, field: 'daily_cap', oldValue: before?.cap ?? null, newValue: input.daily_cap, source: 'manual' });
       return { user_id: row!.userId, daily_cap: row!.dailyCap, updated_at: row!.updatedAt.toISOString() };
     });
+  }
+
+  // ── tope de la empresa ───────────────────────────────────────────────────
+
+  /** El tope diario de la empresa por WhatsApp oficial: el que fijó el administrador o, sin él, el provisional. */
+  private async officialCap(tx: TenantTx): Promise<number> {
+    const [s] = await tx.select({ cap: campaignSettings.officialDailyCap }).from(campaignSettings).limit(1);
+    return s?.cap ?? OFFICIAL_DAILY_CAP;
+  }
+
+  async settings(): Promise<{ official_daily_cap: number; default_cap: number }> {
+    await this.assertPlan();
+    return { official_daily_cap: await this.db.withTenant((tx) => this.officialCap(tx)), default_cap: OFFICIAL_DAILY_CAP };
+  }
+
+  /** Fija el tope diario de la empresa por WhatsApp oficial (quien administra las conexiones). Que no supere el nivel de mensajería de Meta del número lo dice Meta al enviar (la campaña se pausa sola), no se valida aquí. */
+  async setSettings(input: SettingsDto): Promise<{ official_daily_cap: number; default_cap: number }> {
+    await this.assertPlan();
+    const by = TenantContext.current().userId ?? null;
+    await this.db.withTenant(async (tx) => {
+      const [before] = await tx.select({ cap: campaignSettings.officialDailyCap }).from(campaignSettings).limit(1);
+      await tx.insert(campaignSettings).values({ officialDailyCap: input.official_daily_cap, updatedBy: by }).onConflictDoUpdate({ target: [campaignSettings.organizationId], set: { officialDailyCap: input.official_daily_cap, updatedBy: by, updatedAt: new Date() } });
+      await writeAudit(tx, { entityType: 'campaign_settings', entityId: ORG_SETTINGS_ID, field: 'official_daily_cap', oldValue: before?.cap ?? null, newValue: input.official_daily_cap, source: 'manual' });
+    });
+    return { official_daily_cap: input.official_daily_cap, default_cap: OFFICIAL_DAILY_CAP };
+  }
+
+  // ── lanzar, pausar, reanudar y cancelar ──────────────────────────────────
+
+  /**
+   * Lanza una campaña: CONGELA la audiencia (cada contacto queda como destinatario con su teléfono, o como omitido con su motivo) y la deja «en curso» o «programada». Solo quien la creó, con el alcance de
+   * contactos de esa persona. Es idempotente: repetirlo (doble clic, reintento de red) devuelve la campaña tal como quedó, sin congelar de nuevo. En 17.3 solo por WhatsApp oficial.
+   */
+  async launch(a: CampaignAccess, id: string): Promise<{ campaign: CampaignView; created: boolean }> {
+    await this.assertPlan();
+    const out = await this.db.withTenant(async (tx) => {
+      const [row] = await tx.select().from(campaigns).where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt), eq(campaigns.createdBy, a.userId))).for('update').limit(1);
+      if (!row) throw new NotFoundError();
+      if (row.launchedAt) return { campaign: (await this.viewMany(tx, a, [row], false)).items[0]!, created: false };
+      if (row.status !== 'draft') throw new ConflictError('CAMPAIGN_STATE', 'Solo se puede lanzar un borrador');
+      const c = fromRow(row);
+      await this.validate(tx, a, c);
+      const [ch] = await tx.select({ provider: channelAccounts.provider }).from(channelAccounts).where(eq(channelAccounts.id, c.channelId)).limit(1);
+      if (ch?.provider !== 'meta_cloud') throw new ConflictError('CHANNEL_NOT_SUPPORTED_YET', 'El envío por WhatsApp QR llega en la próxima versión: por ahora las campañas se envían por WhatsApp oficial');
+      const aud = await this.contacts.audienceIn(tx, { viewAll: a.contactsViewAll }, this.source(c.audience), MAX_AUDIENCE);
+      const classified = classify(aud.contacts, { excluded: new Set(c.audience.excluded_contact_ids ?? []), includeUnknownConsent: c.includeUnknownConsent });
+      if (classified.eligible.length === 0) throw new ConflictError('NO_RECIPIENTS', 'No hay a quién enviarle: revisa la base elegida, los destinatarios desmarcados y el consentimiento');
+      const rows = classified.states.map((s) => ({ campaignId: id, contactId: s.id, phone: s.phone, ...(s.state === 'eligible' ? { status: 'pending' } : { status: 'skipped', skipReason: s.state }) }));
+      for (let i = 0; i < rows.length; i += 500) await tx.insert(campaignRecipients).values(rows.slice(i, i + 500)).onConflictDoNothing();
+      const now = new Date();
+      const [updated] = await tx.update(campaigns).set({ status: c.scheduledAt ? 'scheduled' : 'running', launchedAt: now, nextSendAt: c.scheduledAt ?? now, statusReason: null, updatedAt: now }).where(eq(campaigns.id, id)).returning();
+      await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'launched', oldValue: 'draft', newValue: { status: updated!.status, recipients: classified.eligible.length, skipped: classified.counts, scheduled: c.scheduledAt !== null }, source: 'manual' });
+      return { campaign: (await this.viewMany(tx, a, [updated!], false)).items[0]!, created: true };
+    });
+    await this.named([out.campaign]);
+    return out;
+  }
+
+  /** Pausa una campaña en curso o programada. Lo que ya salió queda; lo pendiente espera. Quien la creó o quien tiene `campaigns.cancel`. */
+  pause(a: CampaignAccess, id: string): Promise<CampaignView> {
+    return this.transition(a, id, 'pause');
+  }
+
+  /** Reanuda una campaña pausada (a mano o por un problema de la conexión que ya se arregló). */
+  resume(a: CampaignAccess, id: string): Promise<CampaignView> {
+    return this.transition(a, id, 'resume');
+  }
+
+  /** Cancela: lo ya enviado queda; lo pendiente pasa a «omitido» (cancelada) y no sale. No se puede deshacer. */
+  cancel(a: CampaignAccess, id: string): Promise<CampaignView> {
+    return this.transition(a, id, 'cancel');
+  }
+
+  private async transition(a: CampaignAccess, id: string, action: 'pause' | 'resume' | 'cancel'): Promise<CampaignView> {
+    await this.assertPlan();
+    const v = await this.db.withTenant(async (tx) => {
+      const [row] = await tx.select().from(campaigns).where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt), a.viewAll ? undefined : eq(campaigns.createdBy, a.userId))).for('update').limit(1);
+      if (!row) throw new NotFoundError();
+      if (row.createdBy !== a.userId && !a.cancelOthers) throw new ForbiddenError('CAMPAIGN_NOT_YOURS', 'Solo quien creó la campaña o un administrador puede pausarla, reanudarla o cancelarla');
+      const now = new Date();
+      const from = row.status;
+      let patch: Partial<typeof campaigns.$inferInsert>;
+      if (action === 'pause') {
+        if (from !== 'running' && from !== 'scheduled') throw new ConflictError('CAMPAIGN_STATE', 'Solo se puede pausar una campaña en curso o programada');
+        patch = { status: 'paused', statusReason: 'Pausada a mano', updatedAt: now };
+      } else if (action === 'resume') {
+        if (from !== 'paused') throw new ConflictError('CAMPAIGN_STATE', 'Solo se puede reanudar una campaña pausada');
+        const later = row.scheduledAt !== null && row.scheduledAt.getTime() > now.getTime();
+        patch = { status: later ? 'scheduled' : 'running', statusReason: null, nextSendAt: later ? row.scheduledAt : now, updatedAt: now };
+      } else {
+        if (from !== 'running' && from !== 'scheduled' && from !== 'paused') throw new ConflictError('CAMPAIGN_STATE', 'Solo se puede cancelar una campaña programada, en curso o pausada');
+        patch = { status: 'cancelled', statusReason: null, finishedAt: now, nextSendAt: null, updatedAt: now };
+      }
+      const [updated] = await tx.update(campaigns).set(patch).where(eq(campaigns.id, id)).returning();
+      let cancelled = 0;
+      if (action === 'cancel') {
+        const done = await tx.update(campaignRecipients).set({ status: 'skipped', skipReason: 'cancelled', updatedAt: now }).where(and(eq(campaignRecipients.campaignId, id), eq(campaignRecipients.status, 'pending'))).returning({ id: campaignRecipients.id });
+        cancelled = done.length;
+      }
+      await writeAudit(tx, { entityType: AUDIT, entityId: id, field: action === 'pause' ? 'paused' : action === 'resume' ? 'resumed' : 'cancelled', oldValue: from, newValue: { status: updated!.status, by: 'person', ...(action === 'cancel' ? { pending_cancelled: cancelled } : {}) }, source: 'manual' });
+      return (await this.viewMany(tx, a, [updated!], false)).items[0]!;
+    });
+    await this.named([v]);
+    return v;
   }
 
   // ── validación ───────────────────────────────────────────────────────────
@@ -507,7 +619,7 @@ export class CampaignsService {
       const minGap = kind === 'qr' ? MIN_GAP_QR_S : MIN_GAP_OFFICIAL_S;
       if (c.gapSeconds < minGap) errors.push({ path: 'gap_seconds', code: 'gap_too_short', message: `La pausa mínima entre mensajes es de ${minGap} segundos en esta conexión` });
       const advisorCap = a.viewAll ? null : await this.advisorCap(tx, a.userId);
-      const { cap, channelCap } = effectiveDailyCap({ mode: kind === 'qr' ? 'text' : 'template', campaignCap: c.dailyCap, advisorCap, qrWarmupLimit: kind === 'qr' ? await this.qrWarmupLimit(tx, c.channelId) : 0 });
+      const { cap, channelCap } = effectiveDailyCap({ mode: kind === 'qr' ? 'text' : 'template', campaignCap: c.dailyCap, advisorCap, qrWarmupLimit: kind === 'qr' ? await this.qrWarmupLimit(tx, c.channelId) : 0, officialCap: await this.officialCap(tx) });
       if (c.dailyCap > cap) errors.push({ path: 'daily_cap', code: 'cap_exceeded', message: `El máximo por día es ${cap}${advisorCap !== null && advisorCap <= channelCap ? ' (el tope que fijó tu administrador)' : ''}` });
     }
     const active = new Set((await this.custom.labels(tx, 'contact')).map((f) => f.key));
@@ -650,6 +762,9 @@ export class CampaignsService {
         finished_at: r.finishedAt?.toISOString() ?? null,
         counts: { total, by_status: by, sent: by.sent + delivered, delivered, read, replied, failed: by.failed, skipped: by.skipped },
         can_edit: r.status === 'draft' && r.createdBy === a.userId,
+        can_pause: (r.createdBy === a.userId || a.cancelOthers) && (r.status === 'running' || r.status === 'scheduled'),
+        can_resume: (r.createdBy === a.userId || a.cancelOthers) && r.status === 'paused',
+        can_cancel: (r.createdBy === a.userId || a.cancelOthers) && (r.status === 'running' || r.status === 'scheduled' || r.status === 'paused'),
       };
     });
     const last = rows.at(-1);

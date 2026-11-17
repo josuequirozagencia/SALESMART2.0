@@ -45,6 +45,8 @@ export const campaigns = tenantTable(
     createdBy: uuid('created_by').notNull().references(() => users.id),
     idempotencyKey: text('idempotency_key').notNull(),
     /** Cuándo se lanzó (se congeló la audiencia) y cuándo terminó. */
+    /** Cuándo puede salir el próximo mensaje de la campaña (la pausa entre mensajes, o la espera de un tope diario alcanzado). */
+    nextSendAt: ts('next_send_at'),
     launchedAt: ts('launched_at'),
     finishedAt: ts('finished_at'),
     /** Por qué quedó pausada o falló (texto fijo del sistema, sin datos de clientes). */
@@ -111,7 +113,8 @@ export const campaignRecipients = tenantTable(
     uniqueIndex('campaign_recipients_contact_uq').on(t['organizationId']!, t['campaignId']!, t['contactId']!),
     index('campaign_recipients_pending_idx').on(t['organizationId']!, t['campaignId']!, t['id']!).where(sql`${t['status']!} = 'pending'`),
     index('campaign_recipients_status_idx').on(t['organizationId']!, t['campaignId']!, t['status']!),
-    index('campaign_recipients_message_idx').on(t['organizationId']!, t['messageId']!).where(sql`${t['messageId']!} IS NOT NULL`),
+    uniqueIndex('campaign_recipients_message_uq').on(t['organizationId']!, t['messageId']!).where(sql`${t['messageId']!} IS NOT NULL`),
+    index('campaign_recipients_queued_idx').on(t['organizationId']!, t['queuedAt']!).where(sql`${t['queuedAt']!} IS NOT NULL`),
   ],
 );
 
@@ -129,3 +132,18 @@ export const campaignAdvisorLimits = tenantTable(
     check('campaign_advisor_limits_cap_valid', sql`${t['dailyCap']!} BETWEEN 1 AND 10000`),
   ],
 );
+
+/** Tope diario de mensajes de campaña por WhatsApp oficial de la empresa (una sola fila por empresa). Sin fila rige el provisional de 1 000 (ADR-72 #5). */
+export const campaignSettings = tenantTable(
+  'campaign_settings',
+  {
+    officialDailyCap: integer('official_daily_cap').notNull(),
+    updatedBy: uuid('updated_by').references(() => users.id),
+    updatedAt: ts('updated_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'campaign_settings_pk', columns: [t['organizationId']!] }),
+    check('campaign_settings_cap_valid', sql`${t['officialDailyCap']!} BETWEEN 1 AND 100000`),
+  ],
+);
+

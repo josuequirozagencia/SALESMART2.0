@@ -90,5 +90,9 @@ export const audienceListSchema = z
   .strict();
 export type AudienceListDto = z.infer<typeof audienceListSchema>;
 
+/** Tope diario de la empresa por WhatsApp oficial (ADR-72 #5). */
+export const settingsSchema = z.object({ official_daily_cap: z.number().int().min(1).max(100000) }).strict();
+export type SettingsDto = z.infer<typeof settingsSchema>;
+
 export const advisorLimitSchema = z.object({ daily_cap: z.number().int().min(1).max(10000) }).strict();
 export type AdvisorLimitDto = z.infer<typeof advisorLimitSchema>;

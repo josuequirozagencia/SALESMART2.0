@@ -1009,6 +1009,13 @@
       "when": 1795900000000,
       "tag": "0143_v17_campanas",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "7",
+      "when": 1796000000000,
+      "tag": "0144_v17_envio_oficial",
+      "breakpoints": true
     }
   ]
 }
