@@ -1,0 +1,2 @@
+ALTER TABLE "campaign_recipients" ADD COLUMN "opted_out_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "campaign_recipients_contact_idx" ON "campaign_recipients" USING btree ("organization_id","contact_id") WHERE "campaign_recipients"."message_id" IS NOT NULL;

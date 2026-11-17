@@ -8,7 +8,7 @@ import type { TenantTx } from '../../db';
  */
 export type DomainEvent =
   | { type: 'contact_created'; contactId: string; key: string; source: string }
-  | { type: 'message_received'; contactId: string; key: string; channelId: string; conversationId: string; kind: string }
+  | { type: 'message_received'; contactId: string; key: string; channelId: string; conversationId: string; kind: string; messageId?: string }
   | { type: 'opportunity_created'; contactId: string; key: string; opportunityId: string; pipelineId: string; stageId: string }
   | { type: 'stage_changed'; contactId: string; key: string; opportunityId: string; pipelineId: string; fromStageId: string | null; toStageId: string; status: 'open' | 'won' | 'lost' }
   | { type: 'field_changed'; contactId: string; key: string; field: string; oldValue: string | null; newValue: string | null }

@@ -1,5 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { api, apiDownload, type Download } from '../../lib/api';
 import { newKey, useIdempotencyKey } from '../../lib/idempotency';
 
 export { useIdempotencyKey, newKey };
@@ -224,4 +224,80 @@ export function useCampaignSettings(enabled: boolean) {
 export function useSetCampaignSettings() {
   const done = useDone();
   return useMutation({ mutationFn: (official_daily_cap: number) => api<{ official_daily_cap: number; default_cap: number }>('/campaigns/settings', { method: 'PUT', body: { official_daily_cap } }), onSettled: done });
+}
+
+// ── resultados, CSV y resumen (17.5) ─────────────────────────────────────────
+
+export type RecipientStatus = 'pending' | 'queued' | 'sent' | 'delivered' | 'read' | 'replied' | 'failed' | 'skipped';
+export type SkipReason = 'revoked' | 'no_consent' | 'no_phone' | 'duplicate' | 'out_of_scope' | 'excluded' | 'missing_variable' | 'cancelled';
+
+export interface CampaignRecipient {
+  id: string;
+  contact: { id: string; name: string };
+  phone: string | null;
+  status: RecipientStatus;
+  skip_reason: SkipReason | null;
+  error: string | null;
+  queued_at: string | null;
+  sent_at: string | null;
+  delivered_at: string | null;
+  read_at: string | null;
+  replied_at: string | null;
+  failed_at: string | null;
+  opted_out_at: string | null;
+}
+
+export interface CampaignResultsSummary {
+  recipients: number;
+  sent: number;
+  delivered: number;
+  read: number;
+  replied: number;
+  failed: number;
+  skipped: number;
+  waiting: number;
+  skipped_by_reason: Partial<Record<SkipReason, number>>;
+  opted_out: number;
+  /** De 0 a 1; null mientras no haya enviados. */
+  delivery_rate: number | null;
+  reply_rate: number | null;
+}
+
+export interface CampaignResults { campaign: Campaign; summary: CampaignResultsSummary; items: CampaignRecipient[]; next_cursor: string | null }
+
+/** El informe de una campaña ya lanzada: totales y tasas (de la primera página) y los destinatarios con su estado, por páginas y, si se quiere, de un solo estado. Se refresca solo mientras la campaña sigue en marcha. */
+export function useCampaignResults(id: string, status: RecipientStatus | null, enabled: boolean, live: boolean) {
+  return useInfiniteQuery({
+    queryKey: ['campaigns', 'results', id, status],
+    enabled,
+    retry: false,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api<CampaignResults>(`/campaigns/${id}/results?limit=50${status ? `&status=${status}` : ''}${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
+    getNextPageParam: (last) => last.next_cursor ?? undefined,
+    refetchInterval: live ? 5000 : false,
+  });
+}
+
+/** El CSV de los destinatarios de una campaña (el servidor deja la descarga en la auditoría). */
+export const exportCampaign = (id: string): Promise<Download> => apiDownload(`/campaigns/${id}/export`, { method: 'POST', fallbackName: 'campana.csv' });
+
+export interface CampaignsSummary {
+  period: { from: string; to: string };
+  campaigns: number;
+  recipients: number;
+  sent: number;
+  delivered: number;
+  read: number;
+  replied: number;
+  failed: number;
+  skipped: number;
+  opted_out: number;
+  delivery_rate: number | null;
+  reply_rate: number | null;
+  scope: 'own' | 'all';
+}
+
+/** Las campañas lanzadas en el periodo y lo que dieron (la tarjeta de Analítica). Solo se pide si la persona tiene campañas y su plan las incluye. */
+export function useCampaignsSummary(p: { from: string; to: string }, enabled: boolean) {
+  return useQuery({ queryKey: ['campaigns', 'summary', p], enabled, retry: false, staleTime: 30_000, queryFn: () => api<CampaignsSummary>(`/campaigns/summary?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`) });
 }

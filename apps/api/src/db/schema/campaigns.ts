@@ -99,6 +99,8 @@ export const campaignRecipients = tenantTable(
     readAt: ts('read_at'),
     repliedAt: ts('replied_at'),
     failedAt: ts('failed_at'),
+    /** El contacto respondió pidiendo la baja («BAJA», «STOP»…) a un mensaje de la campaña (17.5): pasó a `revoked`. */
+    optedOutAt: ts('opted_out_at'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -114,6 +116,8 @@ export const campaignRecipients = tenantTable(
     index('campaign_recipients_pending_idx').on(t['organizationId']!, t['campaignId']!, t['id']!).where(sql`${t['status']!} = 'pending'`),
     index('campaign_recipients_status_idx').on(t['organizationId']!, t['campaignId']!, t['status']!),
     uniqueIndex('campaign_recipients_message_uq').on(t['organizationId']!, t['messageId']!).where(sql`${t['messageId']!} IS NOT NULL`),
+    /** Para anotar la respuesta de un contacto a sus mensajes de campaña sin recorrer la campaña entera (17.5). */
+    index('campaign_recipients_contact_idx').on(t['organizationId']!, t['contactId']!).where(sql`${t['messageId']!} IS NOT NULL`),
     index('campaign_recipients_queued_idx').on(t['organizationId']!, t['queuedAt']!).where(sql`${t['queuedAt']!} IS NOT NULL`),
   ],
 );

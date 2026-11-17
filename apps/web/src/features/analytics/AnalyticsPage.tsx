@@ -5,6 +5,7 @@ import { money, shortDate, shortDateTime } from '../../lib/format';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { exportReport, PERIODS, useAdvisorExport, useExportsLog, usePeriod, useRefreshExports, useReport, useSetAdvisorExport, type Report, type ReportColumn, type ReportName, type WinningMode } from './useAnalytics';
 import { PAGE_TITLE } from '../../ui/PageHeader';
+import { CampaignsSummaryCard } from '../campaigns/CampaignsSummaryCard';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
 type TabName = ReportName | 'downloads';
@@ -168,6 +169,7 @@ export function AnalyticsPage() {
       </div>
       {tab === 'downloads' ? <Downloads /> : (
         <>
+          <CampaignsSummaryCard period={period} />
           {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando el reporte" /></div> : null}
           {q.isError ? <Alert>{friendlyError(q.error, 'No se pudo cargar el reporte')}</Alert> : null}
           {error ? <Alert>{error}</Alert> : null}

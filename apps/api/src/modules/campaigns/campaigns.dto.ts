@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CAMPAIGN_STATUSES } from '../../db';
+import { CAMPAIGN_STATUSES, RECIPIENT_STATUSES } from '../../db';
 import { contactFiltersSchema } from '../contacts';
 
 /** Pausa mínima entre mensajes (s): 45 por QR (ADR-72 #4) y 5 por WhatsApp oficial (el prototipo). */
@@ -100,3 +100,19 @@ export type SettingsDto = z.infer<typeof settingsSchema>;
 
 export const advisorLimitSchema = z.object({ daily_cap: z.number().int().min(1).max(10000) }).strict();
 export type AdvisorLimitDto = z.infer<typeof advisorLimitSchema>;
+
+/** El informe de una campaña (17.5): los destinatarios con su estado, por páginas y, si se quiere, de un solo estado. */
+export const resultsQuerySchema = z
+  .object({
+    status: z.enum(RECIPIENT_STATUSES).optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    cursor: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+export type ResultsQuery = z.infer<typeof resultsQuerySchema>;
+
+/** Periodo de la tarjeta de Analítica: por omisión los últimos 30 días hasta ahora (como el resto de los reportes). `to` es exclusivo. */
+export const MAX_SUMMARY_DAYS = 366;
+const instant = z.iso.datetime({ offset: true });
+export const summaryQuerySchema = z.object({ from: instant.optional(), to: instant.optional() }).strict();
+export type SummaryQuery = z.infer<typeof summaryQuerySchema>;

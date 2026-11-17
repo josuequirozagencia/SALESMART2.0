@@ -18,19 +18,24 @@
 //   PATCH /v1/campaigns/:id
 //   POST /v1/campaigns/:id/duplicate
 //   GET /v1/campaigns/:id/preview
+//   GET /v1/campaigns/summary
+//   GET /v1/campaigns/:id/results
+//   POST /v1/campaigns/:id/export
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
+import { sql } from 'drizzle-orm';
 import { Client } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
-import { DbModule } from '../../src/db';
+import { Database, DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
-import { CampaignSenderService, CampaignsModule } from '../../src/modules/campaigns';
+import { CampaignResponsesService, CampaignSenderService, CampaignsModule } from '../../src/modules/campaigns';
 import { ChannelsModule, FAKE_WHATSAPP_TOKEN } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
+import { ConversationsModule, ConversationsService, type NormalizedMessage } from '../../src/modules/conversations';
 import { OrganizationsModule } from '../../src/modules/organizations';
 import { TemplatesModule } from '../../src/modules/templates';
 import { Argon2idHasher } from '../../src/security';
@@ -38,7 +43,7 @@ import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, ChannelsModule, TemplatesModule, CampaignsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, ConversationsModule, ChannelsModule, TemplatesModule, CampaignsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
 class TestAppModule {}
 
 const info = requireDb();
@@ -970,5 +975,244 @@ describe('envío por WhatsApp QR (17.4)', () => {
     await tick(1000, ORG_B);
     expect((await messagesOf(b.id)).map((m) => m.contact)).toEqual(['De B']);
     expect((await admin.query(`SELECT count(*)::int AS n FROM messages m JOIN conversations v ON v.id = m.conversation_id WHERE v.organization_id = $1 AND m.sender_type = 'campaign'`, [ORG_A])).rows[0].n).toBe(1);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+describe('resultados, CSV y baja por palabra clave (17.5)', () => {
+  const sender = (): CampaignSenderService => app.get(CampaignSenderService);
+  const tick = (offsetMs = 1000, org = ORG_A): Promise<number> => TenantContext.run({ organizationId: org }, () => sender().runDue(new Date(Date.now() + offsetMs)));
+  const launchQr = (token: string, id: string) => call('POST', `/campaigns/${id}/launch`, token, { accept_qr_risk: true }, { 'idempotency-key': key() });
+  const recipients = async (id: string) => (await admin.query(`SELECT r.status, r.skip_reason, r.message_id, r.conversation_id, r.replied_at, r.opted_out_at, r.contact_id, c.name FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id WHERE r.campaign_id = $1 ORDER BY c.name`, [id])).rows as Array<{ status: string; skip_reason: string | null; message_id: string | null; conversation_id: string | null; replied_at: Date | null; opted_out_at: Date | null; contact_id: string; name: string }>;
+  const byName = (rows: Awaited<ReturnType<typeof recipients>>, name: string) => rows.find((r) => r.name === name)!;
+  /** Envía todo lo que la campaña tiene pendiente (las pasadas de la tarea) y deja los mensajes como «enviados» hace una hora. */
+  async function sendAll(id: string, rounds = 8): Promise<void> {
+    for (let i = 1; i <= rounds; i += 1) {
+      await tick(i * 50_000);
+      await admin.query(`UPDATE messages SET status = 'sent', sent_at = now() - interval '1 hour' WHERE status = 'queued' AND sender_type = 'campaign'`);
+    }
+    await tick((rounds + 1) * 50_000); // la última pasada pone al día los estados
+    expect((await admin.query(`SELECT count(*)::int AS n FROM campaign_recipients WHERE campaign_id = $1 AND status = 'pending'`, [id])).rows[0].n).toBe(0);
+  }
+  /** Un mensaje REAL del cliente por el chip QR (el mismo camino que usa el webhook): corre el reparto de siempre y avisa a los oyentes. */
+  let seq = 0;
+  async function inbound(contactId: string, channel: string, text: string | null, over: Partial<NormalizedMessage> = {}): Promise<void> {
+    const phone = (await admin.query(`SELECT e164 FROM contact_phones WHERE contact_id = $1`, [contactId])).rows[0].e164 as string;
+    seq += 1;
+    const m: NormalizedMessage = { externalId: `ext-in-${Date.now()}-${seq}`, from: phone, fromRaw: phone.slice(1), profileName: null, kind: 'text', text, media: null, extra: {}, sentAt: new Date(), ...over };
+    await TenantContext.run({ organizationId: ORG_A }, () => app.get(Database).withTenant((tx) => app.get(ConversationsService).ingestInbound(tx, channel, m, { now: new Date(), timeZone: 'America/Guayaquil', assignable: new Set([IDS.alice]) })));
+  }
+  const results = (token: string, id: string, qs = '') => call('GET', `/campaigns/${id}/results${qs}`, token);
+  const people = async (names: string[], over: Parameters<typeof mkContact>[0] = {}) => {
+    const ids: string[] = [];
+    for (const n of names) ids.push(await mkContact({ owner: IDS.alice, name: n, ...over }));
+    return ids;
+  };
+
+  interface Results {
+    campaign: Camp;
+    summary: { recipients: number; sent: number; delivered: number; read: number; replied: number; failed: number; skipped: number; waiting: number; skipped_by_reason: Record<string, number>; opted_out: number; delivery_rate: number | null; reply_rate: number | null };
+    items: Array<{ id: string; contact: { id: string; name: string }; phone: string | null; status: string; skip_reason: string | null; error: string | null; sent_at: string | null; replied_at: string | null; opted_out_at: string | null }>;
+    next_cursor: string | null;
+  }
+
+  it('responder dentro de las 72 h marca «respondió» (la primera vez, en cada campaña); fuera de la ventana, por otra conexión o a un mensaje que no salió, no cuenta', async () => {
+    const [ana, beto, cata] = await people(['Ana', 'Beto', 'Cata']);
+    const c = await mk(T.alice, textBody({ gap_seconds: 45, daily_cap: 50 }));
+    await ok(await launchQr(T.alice, c.id), 201);
+    await sendAll(c.id);
+    const rows0 = await recipients(c.id);
+    expect(rows0.map((r) => r.status)).toEqual(['sent', 'sent', 'sent']);
+    // Beto: su mensaje salió hace 80 h (fuera de la ventana)
+    await admin.query(`UPDATE messages SET sent_at = now() - interval '80 hours' WHERE id = $1`, [byName(rows0, 'Beto').message_id]);
+    await inbound(ana!, qrAdmin, 'Sí, me interesa');
+    await inbound(beto!, qrAdmin, 'Hola, ahora sí');
+    // Cata responde por OTRA conexión (el chip de Carolina): no es respuesta a esta campaña
+    await inbound(cata!, qrCarol, 'Hola desde otro número');
+    let rows = await recipients(c.id);
+    expect(byName(rows, 'Ana')).toMatchObject({ status: 'replied' });
+    expect(byName(rows, 'Ana').replied_at).not.toBeNull();
+    expect(byName(rows, 'Beto').status).toBe('sent');
+    expect(byName(rows, 'Cata').status).toBe('sent');
+    // una segunda respuesta no cambia la fecha de la primera
+    const first = byName(rows, 'Ana').replied_at!.getTime();
+    await inbound(ana!, qrAdmin, 'Otra pregunta');
+    rows = await recipients(c.id);
+    expect(byName(rows, 'Ana').replied_at!.getTime()).toBe(first);
+    // el estado de entrega que llega tarde no baja a quien ya respondió
+    await tick(600_000);
+    expect(byName(await recipients(c.id), 'Ana').status).toBe('replied');
+    const v = await ok<Camp>(await call('GET', `/campaigns/${c.id}`, T.alice));
+    expect(v.counts).toMatchObject({ total: 3, sent: 3, delivered: 1, read: 1, replied: 1 }); // acumulados
+  });
+
+  it('«BAJA», «STOP»… (el mensaje entero) tras una campaña: el contacto queda «No contactar», lo pendiente en cualquier campaña se descarta y hay una nota interna; una frase parecida no revoca', async () => {
+    const [ana, beto, cata, dani] = await people(['Ana', 'Beto', 'Cata', 'Dani']);
+    const c = await mk(T.alice, textBody({ gap_seconds: 45, daily_cap: 50 }));
+    await ok(await launchQr(T.alice, c.id), 201);
+    await sendAll(c.id);
+    // Ana está además en OTRA campaña que aún no sale (pendiente): ya no le llegará
+    const other = await mk(T.alice, textBody({ name: 'Otra campaña', audience: { source: 'all', excluded_contact_ids: [beto, cata, dani] } }));
+    await ok(await launchQr(T.alice, other.id), 201);
+    await inbound(ana!, qrAdmin, '¡BAJA!');
+    await inbound(beto!, qrAdmin, 'quiero dar de baja mi plan'); // no es una baja de mensajes
+    await inbound(cata!, qrAdmin, 'Cancelar mi cita por favor'); // tampoco
+    await inbound(dani!, qrAdmin, 'No más', { kind: 'image' }); // una imagen no es una petición escrita
+    const consent = async (id: string) => (await admin.query(`SELECT consent FROM contacts WHERE id = $1`, [id])).rows[0].consent as string;
+    expect(await consent(ana!)).toBe('revoked');
+    for (const id of [beto, cata, dani]) expect(await consent(id!)).toBe('granted');
+    const rows = await recipients(c.id);
+    expect(byName(rows, 'Ana')).toMatchObject({ status: 'replied' });
+    expect(byName(rows, 'Ana').opted_out_at).not.toBeNull();
+    expect(byName(rows, 'Beto').opted_out_at).toBeNull();
+    expect(byName(await recipients(other.id), 'Ana')).toMatchObject({ status: 'skipped', skip_reason: 'revoked' });
+    // la nota interna queda en la conversación (una sola) y la auditoría registra el cambio de consentimiento con su origen
+    const notes = (await admin.query(`SELECT body, status, sender_type, kind FROM messages WHERE conversation_id = $1 AND kind = 'note'`, [byName(rows, 'Ana').conversation_id])).rows as Array<{ body: string; status: string; sender_type: string }>;
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toMatchObject({ status: 'internal', sender_type: 'system' });
+    expect(notes[0]!.body).toContain('pidió la baja');
+    const log = (await admin.query(`SELECT old_value, new_value, source FROM audit_logs WHERE entity_type = 'contact' AND entity_id = $1 AND field = 'consent'`, [ana])).rows as Array<{ old_value: string; new_value: string; source: string }>;
+    expect(log).toEqual([{ old_value: 'granted', new_value: 'revoked', source: 'automation' }]);
+    expect((await audit(c.id)).some((a) => a.field === 'opt_out')).toBe(true);
+    // volver a pedirla no repite la nota ni cambia nada
+    await inbound(ana!, qrAdmin, 'STOP');
+    expect((await admin.query(`SELECT count(*)::int AS n FROM messages WHERE conversation_id = $1 AND kind = 'note'`, [byName(rows, 'Ana').conversation_id])).rows[0].n).toBe(1);
+    // una campaña nueva a toda la base ya no incluye a Ana
+    const next = await mk(T.alice, textBody({ name: 'Después' }));
+    const p = await preview(T.alice, next.id);
+    expect(p.audience.skipped.revoked).toBe(1);
+  });
+
+  it('una baja fuera de las 72 h, o de alguien que nunca recibió una campaña, no revoca; un fallo al anotar nunca impide guardar el mensaje del cliente', async () => {
+    const [ana, zeta] = await people(['Ana', 'Zeta']);
+    const c = await mk(T.alice, textBody({ gap_seconds: 45, daily_cap: 50, audience: { source: 'all', excluded_contact_ids: [zeta] } }));
+    await ok(await launchQr(T.alice, c.id), 201);
+    await sendAll(c.id);
+    await admin.query(`UPDATE messages SET sent_at = now() - interval '100 hours' WHERE sender_type = 'campaign'`);
+    await inbound(ana!, qrAdmin, 'BAJA'); // la campaña le llegó hace más de 72 h: es solo un mensaje más
+    await inbound(zeta!, qrAdmin, 'BAJA'); // nunca recibió una campaña
+    expect((await admin.query(`SELECT count(*)::int AS n FROM contacts WHERE consent = 'revoked'`)).rows[0].n).toBe(0);
+    expect(byName(await recipients(c.id), 'Ana').status).toBe('sent');
+    // un fallo del oyente (aquí, un contacto con un identificador roto) se traga y el mensaje del cliente se guarda igual
+    const svc = app.get(CampaignResponsesService);
+    const conv = byName(await recipients(c.id), 'Ana').conversation_id!;
+    const after = await TenantContext.run({ organizationId: ORG_A }, () =>
+      app.get(Database).withTenant(async (tx) => {
+        await svc.onEvent(tx, { type: 'message_received', contactId: 'no-es-un-uuid', key: 'k', channelId: qrAdmin, conversationId: conv, kind: 'text', messageId: 'tampoco' });
+        return (await tx.execute(sql`SELECT 1 AS ok`)).rows[0];
+      }),
+    );
+    expect(after).toEqual({ ok: 1 }); // la transacción sigue sana
+  });
+
+  it('el informe: totales acumulados, tasas, omitidos por motivo y cada destinatario con su estado, por páginas y por estado; el asesor ve solo lo suyo; otra empresa no existe', async () => {
+    const [ana] = await people(['Ana', 'Beto', 'Cata', 'Dani']);
+    await mkContact({ owner: IDS.alice, name: 'Eli', consent: 'revoked' });
+    await mkContact({ owner: IDS.alice, name: 'Fer', phone: null });
+    const c = await mk(T.alice, textBody({ gap_seconds: 45, daily_cap: 50 }));
+    await ok(await launchQr(T.alice, c.id), 201);
+    await sendAll(c.id);
+    const rows = await recipients(c.id);
+    await admin.query(`UPDATE messages SET status = 'read', delivered_at = now(), read_at = now() WHERE id = $1`, [byName(rows, 'Ana').message_id]);
+    await admin.query(`UPDATE messages SET status = 'delivered', delivered_at = now() WHERE id = $1`, [byName(rows, 'Beto').message_id]);
+    await admin.query(`UPDATE messages SET status = 'failed', error = 'WhatsApp no pudo entregar el mensaje a este número', meta = meta || '{"error_code":"recipient_invalid"}'::jsonb WHERE id = $1`, [byName(rows, 'Cata').message_id]);
+    await tick(900_000);
+    await inbound(ana!, qrAdmin, 'Me interesa');
+    const r = await ok<Results>(await results(T.alice, c.id));
+    expect(r.campaign).toMatchObject({ id: c.id, name: 'Recordatorio de cupos' });
+    expect(r.summary).toEqual({ recipients: 6, sent: 3, delivered: 2, read: 1, replied: 1, failed: 1, skipped: 2, waiting: 0, skipped_by_reason: { revoked: 1, no_phone: 1 }, opted_out: 0, delivery_rate: 0.667, reply_rate: 0.333 });
+    expect(r.items.map((i) => [i.contact.name, i.status])).toEqual(expect.arrayContaining([['Ana', 'replied'], ['Beto', 'delivered'], ['Cata', 'failed'], ['Dani', 'sent'], ['Eli', 'skipped'], ['Fer', 'skipped']]));
+    expect(r.items.find((i) => i.contact.name === 'Eli')).toMatchObject({ skip_reason: 'revoked', sent_at: null });
+    expect(r.items.find((i) => i.contact.name === 'Cata')!.error).toBe('WhatsApp no pudo entregar el mensaje a este número');
+    // por estado y por páginas (sin repetir ni saltar)
+    const failed = await ok<Results>(await results(T.alice, c.id, '?status=failed'));
+    expect(failed.items.map((i) => i.contact.name)).toEqual(['Cata']);
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 4; i += 1) {
+      const page: Results = await ok<Results>(await results(T.alice, c.id, `?limit=4${cursor ? `&cursor=${cursor}` : ''}`));
+      seen.push(...page.items.map((x) => x.contact.name));
+      cursor = page.next_cursor;
+      if (!cursor) break;
+    }
+    expect(seen.sort()).toEqual(['Ana', 'Beto', 'Cata', 'Dani', 'Eli', 'Fer']);
+    expect((await results(T.alice, c.id, '?status=nada')).status).toBe(400);
+    expect((await results(T.alice, c.id, '?cursor=@@@')).status).toBe(400);
+    // quién ve qué: Carolina (con campañas) NO ve la del administrador; la suya sí
+    expect((await results(T.carol, c.id)).status).toBe(404);
+    const mine = await mk(T.carol, textBody({ name: 'De Carolina', channel_id: qrCarol }));
+    expect((await results(T.carol, mine.id)).status).toBe(200);
+    expect((await results(T.alice, mine.id)).status).toBe(200); // el administrador ve todas
+    // otra empresa, sin permiso y sin sesión
+    expect((await results(T.bob, c.id)).status).toBe(404);
+    expect((await results(T.eve, c.id)).status).toBe(403);
+    expect((await results(T.root, c.id)).status).toBe(403);
+    expect((await call('GET', `/campaigns/${c.id}/results`)).status).toBe(401);
+    expect((await results(T.alice, NOBODY)).status).toBe(404);
+  });
+
+  it('CSV: BOM, encabezados en español, una fila por destinatario, celdas con fórmulas neutralizadas y estados en español; queda auditado sin nombres ni teléfonos; solo de campañas que ves', async () => {
+    const [ana] = await people(['=SUMA(A1)', 'Beto']);
+    await mkContact({ owner: IDS.alice, name: 'Eli', consent: 'revoked' });
+    const c = await mk(T.alice, textBody({ name: 'Campaña de Noviembre', gap_seconds: 45, daily_cap: 50 }));
+    await ok(await launchQr(T.alice, c.id), 201);
+    await sendAll(c.id);
+    await inbound(ana!, qrAdmin, 'Hola');
+    const r = await call('POST', `/campaigns/${c.id}/export`, T.alice);
+    expect(r.status).toBe(200);
+    expect(r.headers.get('content-type')).toContain('text/csv');
+    expect(r.headers.get('content-disposition')).toMatch(/^attachment; filename="campana-campana-de-noviembre-\d{4}-\d{2}-\d{2}\.csv"$/);
+    expect(r.headers.get('x-export-count')).toBe('3');
+    // `fetch().text()` quita el BOM al decodificar: se leen los bytes crudos para comprobarlo
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes).replace(/^\uFEFF/, '');
+    expect(text.startsWith('Contacto,Teléfono,Estado,Motivo de omisión,En cola,Enviado,Entregado,Leído,Respondió,Falló,Error,Pidió la baja\r\n')).toBe(true);
+    const lines = text.trim().split('\r\n');
+    expect(lines).toHaveLength(4);
+    expect(lines.find((l) => l.includes('SUMA'))!.startsWith("'=SUMA(A1),")).toBe(true); // la fórmula no se ejecuta al abrir el archivo
+    expect(lines.find((l) => l.includes('SUMA'))).toContain('Respondió');
+    expect(lines.find((l) => l.startsWith('Beto'))).toContain('Enviado');
+    expect(lines.find((l) => l.startsWith('Eli'))).toContain('Omitido,No contactar');
+    // auditoría: quién descargó y cuántas filas; nunca nombres ni teléfonos
+    const log = (await audit(c.id)).find((a) => a.field === 'exported')!;
+    expect(log.new_value).toMatchObject({ count: 3, by: IDS.alice });
+    expect(JSON.stringify(log.new_value)).not.toMatch(/Beto|\+593/);
+    // Carolina no puede bajar la de otra persona; otra empresa, sin permiso y sin sesión tampoco
+    expect((await call('POST', `/campaigns/${c.id}/export`, T.carol)).status).toBe(404);
+    expect((await call('POST', `/campaigns/${c.id}/export`, T.bob)).status).toBe(404);
+    expect((await call('POST', `/campaigns/${c.id}/export`, T.eve)).status).toBe(403);
+    expect((await call('POST', `/campaigns/${c.id}/export`, T.root)).status).toBe(403);
+    expect((await call('POST', `/campaigns/${c.id}/export`)).status).toBe(401);
+    const mine = await mk(T.carol, textBody({ name: 'De Carolina', channel_id: qrCarol }));
+    expect((await call('POST', `/campaigns/${mine.id}/export`, T.carol)).status).toBe(200);
+  });
+
+  it('resumen del periodo para Analítica: campañas lanzadas en el periodo con lo que dieron; el asesor solo las suyas, el administrador todas; una empresa no suma a otra; el plan se exige', async () => {
+    const [ana] = await people(['Ana', 'Beto']);
+    const c = await mk(T.alice, textBody({ gap_seconds: 45, daily_cap: 50 }));
+    await ok(await launchQr(T.alice, c.id), 201);
+    await sendAll(c.id);
+    await inbound(ana!, qrAdmin, 'BAJA');
+    await mk(T.alice, textBody({ name: 'Borrador sin lanzar' })); // un borrador no cuenta
+    const s = await ok<{ campaigns: number; recipients: number; sent: number; delivered: number; replied: number; failed: number; skipped: number; opted_out: number; delivery_rate: number | null; reply_rate: number | null; scope: string }>(await call('GET', '/campaigns/summary', T.alice));
+    expect(s).toMatchObject({ campaigns: 1, recipients: 2, sent: 2, replied: 1, opted_out: 1, scope: 'all', reply_rate: 0.5 });
+    // el asesor ve su alcance: lo suyo (nada); otra empresa, nada
+    expect(await ok(await call('GET', '/campaigns/summary', T.carol))).toMatchObject({ campaigns: 0, recipients: 0, scope: 'own', delivery_rate: null, reply_rate: null });
+    expect(await ok(await call('GET', '/campaigns/summary', T.bob))).toMatchObject({ campaigns: 0, recipients: 0 });
+    // un periodo anterior a su lanzamiento no la incluye; uno inválido es 400
+    const past = await ok<{ campaigns: number }>(await call('GET', '/campaigns/summary?from=2020-01-01T00:00:00Z&to=2020-02-01T00:00:00Z', T.alice));
+    expect(past.campaigns).toBe(0);
+    expect((await call('GET', '/campaigns/summary?from=2026-02-01T00:00:00Z&to=2026-01-01T00:00:00Z', T.alice)).status).toBe(400);
+    expect((await call('GET', '/campaigns/summary?from=2019-01-01T00:00:00Z&to=2026-01-01T00:00:00Z', T.alice)).status).toBe(400);
+    expect((await call('GET', '/campaigns/summary', T.eve)).status).toBe(403);
+    expect((await call('GET', '/campaigns/summary', T.root)).status).toBe(403);
+    expect((await call('GET', '/campaigns/summary')).status).toBe(401);
+    const off = (await admin.query(`INSERT INTO plans(id, name, features) VALUES (gen_random_uuid(), 'Básico', '{"campaigns": false}') RETURNING id`)).rows[0].id as string;
+    await admin.query(`UPDATE organizations SET plan_id = $1 WHERE id = $2`, [off, ORG_A]);
+    const blocked = await call('GET', '/campaigns/summary', T.alice);
+    expect(blocked.status).toBe(403);
+    expect(await code(blocked)).toBe('PLAN_FEATURE_DISABLED');
+    expect((await results(T.alice, c.id)).status).toBe(403);
   });
 });

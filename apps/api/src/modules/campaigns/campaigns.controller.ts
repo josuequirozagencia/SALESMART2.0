@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Headers, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { z } from 'zod';
 import { ValidationError } from '../../errors';
@@ -6,7 +6,8 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { TenantContext } from '../../tenant';
-import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, launchSchema, listCampaignsQuerySchema, previewSchema, settingsSchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type LaunchDto, type ListCampaignsQuery, type PreviewDto, type SettingsDto, type UpdateCampaignDto } from './campaigns.dto';
+import { CampaignResultsService } from './campaign-results.service';
+import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, launchSchema, listCampaignsQuerySchema, previewSchema, resultsQuerySchema, settingsSchema, summaryQuerySchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type LaunchDto, type ListCampaignsQuery, type PreviewDto, type ResultsQuery, type SettingsDto, type SummaryQuery, type UpdateCampaignDto } from './campaigns.dto';
 import { CampaignsService, type CampaignAccess } from './campaigns.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -31,7 +32,10 @@ function keyOf(raw: string | undefined): string {
  */
 @Controller('campaigns')
 export class CampaignsController {
-  constructor(@Inject(CampaignsService) private readonly campaigns: CampaignsService) {}
+  constructor(
+    @Inject(CampaignsService) private readonly campaigns: CampaignsService,
+    @Inject(CampaignResultsService) private readonly results: CampaignResultsService,
+  ) {}
 
   /** Qué puede hacer la persona con campañas y si su plan las incluye: la pantalla y el menú se arman con esto (no devuelve datos de la empresa). */
   @RequirePermission('inbox.read')
@@ -39,6 +43,13 @@ export class CampaignsController {
   access(@Req() req: AuthedRequest) {
     const has = (k: 'campaigns.read' | 'campaigns.send' | 'campaigns.view_all' | 'campaigns.cancel' | 'users.manage' | 'channels.manage'): boolean => req.principal?.permissions?.has(k) === true;
     return this.campaigns.accessInfo({ read: has('campaigns.read'), send: has('campaigns.send'), viewAll: has('campaigns.view_all'), manageLimits: has('users.manage'), manageSettings: has('channels.manage'), cancelOthers: has('campaigns.cancel') });
+  }
+
+  /** El resumen del periodo para la tarjeta de Analítica (las campañas lanzadas en el periodo y lo que dieron). Solo las propias, o todas con `campaigns.view_all`. */
+  @RequirePermission('campaigns.read')
+  @Get('summary')
+  summary(@Req() req: AuthedRequest, @Query(new ZodValidationPipe(summaryQuerySchema)) q: SummaryQuery) {
+    return this.results.summary(accessOf(req), q);
   }
 
   @RequirePermission('campaigns.send')
@@ -113,6 +124,26 @@ export class CampaignsController {
   @Get(':id')
   get(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
     return this.campaigns.get(accessOf(req), id);
+  }
+
+  /** El informe de la campaña: totales, tasas y los destinatarios con su estado, por páginas (17.5). */
+  @RequirePermission('campaigns.read')
+  @Get(':id/results')
+  resultsOf(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Query(new ZodValidationPipe(resultsQuerySchema)) q: ResultsQuery) {
+    return this.results.results(accessOf(req), id, q);
+  }
+
+  /** El CSV de los destinatarios (BOM UTF-8, anti-fórmulas). POST porque deja rastro en la auditoría: quién descargó y cuántas filas. */
+  @RequirePermission('campaigns.read')
+  @Post(':id/export')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  async exportCsv(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Res({ passthrough: true }) res: Response): Promise<string> {
+    const r = await this.results.exportCsv(accessOf(req), id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${r.filename}"`);
+    res.setHeader('X-Export-Count', String(r.count));
+    return r.csv;
   }
 
   @RequirePermission('campaigns.send')
