@@ -771,9 +771,9 @@ describe('ponerse al día con Evolution (v19 B3)', () => {
 });
 
 describe('ventana de la pasada automática (v19 B3)', () => {
-  it('sin pasada previa mira 48 h; con una previa, desde ella menos 15 min, y nunca más atrás de 48 h', () => {
+  it('sin pasada previa mira 7 días; con una previa, desde ella menos 15 min, y nunca más atrás de 48 h', () => {
     const now = new Date('2026-11-17T12:00:00Z');
-    expect(autoWindowStart(null, now).toISOString()).toBe('2026-11-15T12:00:00.000Z');
+    expect(autoWindowStart(null, now).toISOString()).toBe('2026-11-10T12:00:00.000Z');
     expect(autoWindowStart(new Date('2026-11-17T11:50:00Z'), now).toISOString()).toBe('2026-11-17T11:35:00.000Z');
     expect(autoWindowStart(new Date('2026-11-10T00:00:00Z'), now).toISOString()).toBe('2026-11-15T12:00:00.000Z');
   });

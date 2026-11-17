@@ -12,6 +12,8 @@ import { QR_SESSION, QrSessionError, type QrSessionProvider } from './qr-session
 export const CATCH_UP_MAX_RECORDS = 1_000;
 /** Horas que cubre cada pasada automática y margen que se solapa con la anterior (los avisos pueden llegar fuera de orden). */
 export const CATCH_UP_AUTO_HOURS = 48;
+/** La PRIMERA pasada de una conexión mira tan atrás como el máximo manual: lo que ya estaba perdido cuando se encendió esta función también se recupera. */
+export const CATCH_UP_FIRST_HOURS = 168;
 export const CATCH_UP_OVERLAP_MS = 15 * 60_000;
 export const CATCH_UP_MAX_HOURS = 168;
 const CHUNK = 200;
@@ -28,10 +30,10 @@ export interface CatchUpResult {
   hours: number;
 }
 
-/** Desde cuándo mirar en una pasada automática: lo último que se cubrió (con margen) y nunca más atrás de 48 h. Pura: se prueba sin base. */
+/** Desde cuándo mirar en una pasada automática: la primera mira 7 días; las demás, lo último que se cubrió (con margen) y nunca más atrás de 48 h. Pura: se prueba sin base. */
 export function autoWindowStart(lastCatchUpAt: Date | null, now: Date): Date {
-  const floor = now.getTime() - CATCH_UP_AUTO_HOURS * 3_600_000;
-  return new Date(lastCatchUpAt ? Math.max(lastCatchUpAt.getTime() - CATCH_UP_OVERLAP_MS, floor) : floor);
+  if (!lastCatchUpAt) return new Date(now.getTime() - CATCH_UP_FIRST_HOURS * 3_600_000);
+  return new Date(Math.max(lastCatchUpAt.getTime() - CATCH_UP_OVERLAP_MS, now.getTime() - CATCH_UP_AUTO_HOURS * 3_600_000));
 }
 
 /**
