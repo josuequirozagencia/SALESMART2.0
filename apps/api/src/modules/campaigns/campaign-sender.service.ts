@@ -1,13 +1,15 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, count, eq, gte, isNull, lte, sql, type SQL } from 'drizzle-orm';
-import { campaignAdvisorLimits, campaignRecipients, campaignSettings, campaigns, channelAccounts, contacts, Database, whatsappAccounts, type TenantTx } from '../../db';
+import { campaignAdvisorLimits, campaignRecipients, campaignSettings, campaigns, channelAccounts, contacts, Database, qrAccounts, whatsappAccounts, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import { CustomValuesService, type CustomValues } from '../custom-fields';
 import { OutreachService } from '../outreach';
+import { dailyLimit } from '../qr';
 import { customKeysIn, resolveQuickReply, type ResolveContext } from '../quick-replies';
 import { TemplatesService } from '../templates';
-import { OFFICIAL_DAILY_CAP } from './campaigns.dto';
+import { qrChannelCap } from './audience';
+import { MIN_GAP_QR_S, OFFICIAL_DAILY_CAP } from './campaigns.dto';
 
 type Campaign = typeof campaigns.$inferSelect;
 
@@ -27,7 +29,14 @@ export const PAUSING_ERRORS: Readonly<Record<string, string>> = {
   channel_off: 'La conexión de WhatsApp está desactivada. Actívala y reanuda la campaña.',
   credentials: 'No se pueden leer las credenciales de la conexión: el administrador debe volver a pegar el token. La campaña quedó pausada.',
   template_unavailable: 'La plantilla ya no está disponible en Meta. Sincroniza las plantillas y crea la campaña de nuevo. La campaña quedó pausada.',
+  // Por WhatsApp QR (v17 · 17.4)
+  qr_session_down: 'La sesión de WhatsApp por QR se cayó: vuelve a escanear el QR en Configuración › Conexiones y reanuda la campaña.',
+  qr_limit: 'El número por QR llegó a su límite diario (se está calentando): la campaña quedó pausada, reanúdala mañana.',
+  qr_not_configured: 'WhatsApp por QR no está configurado en la plataforma. La campaña quedó pausada.',
+  not_found: 'La sesión de WhatsApp por QR ya no existe: vuelve a crear la conexión. La campaña quedó pausada.',
+  not_configured: 'El servidor de WhatsApp por QR rechazó la clave de la plataforma: avisa al administrador de la plataforma. La campaña quedó pausada.',
 };
+const QR_SESSION_DOWN = 'La sesión de WhatsApp por QR no está conectada: vuelve a escanear el QR en Configuración › Conexiones y reanuda la campaña.';
 const CONNECTION_DOWN = 'La conexión de WhatsApp no está disponible o está desactivada. Actívala y reanuda la campaña.';
 const TEMPLATE_GONE = 'La plantilla ya no está aprobada o disponible. Sincroniza las plantillas y crea la campaña de nuevo.';
 
@@ -121,22 +130,38 @@ export class CampaignSenderService {
   /** Saca el siguiente mensaje de UNA campaña (o la pausa, la termina o la deja esperar). Devuelve cuántas cosas hizo. */
   private async step(tx: TenantTx, id: string, now: Date): Promise<number> {
     const [c] = await tx.select().from(campaigns).where(and(eq(campaigns.id, id), eq(campaigns.status, 'running'), isNull(campaigns.deletedAt))).for('update', { skipLocked: true }).limit(1);
-    if (!c || !c.templateId) return 0; // otra instancia la tiene, o ya no está en curso
+    if (!c) return 0; // otra instancia la tiene, o ya no está en curso
+    const isText = c.mode === 'text';
+    if (isText ? !c.body : !c.templateId) return 0;
     if (c.nextSendAt && c.nextSendAt.getTime() > now.getTime()) return 0;
 
-    // La conexión y la plantilla, una vez por pasada: si no están, se pausa con el motivo (no se descartan destinatarios por un problema que no es suyo)
-    const [ch] = await tx
-      .select({ id: channelAccounts.id })
-      .from(channelAccounts)
-      .innerJoin(whatsappAccounts, and(eq(whatsappAccounts.organizationId, channelAccounts.organizationId), eq(whatsappAccounts.channelAccountId, channelAccounts.id)))
-      .where(and(eq(channelAccounts.id, c.channelAccountId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(whatsappAccounts.active, true)))
-      .limit(1);
-    if (!ch) return this.pauseNow(tx, c, CONNECTION_DOWN, now);
-    try {
-      await this.templates.getSendable(tx, c.channelAccountId, c.templateId);
-    } catch (e) {
-      if (e instanceof NotFoundError || e instanceof ConflictError) return this.pauseNow(tx, c, TEMPLATE_GONE, now);
-      throw e;
+    // La conexión (y la plantilla, por WhatsApp oficial), una vez por pasada: si no están, se pausa con el motivo (no se descartan destinatarios por un problema que no es suyo)
+    let qrFirstConnectedAt: Date | null = null;
+    if (isText) {
+      const [q] = await tx
+        .select({ state: qrAccounts.state, first: qrAccounts.firstConnectedAt })
+        .from(channelAccounts)
+        .innerJoin(qrAccounts, and(eq(qrAccounts.organizationId, channelAccounts.organizationId), eq(qrAccounts.channelAccountId, channelAccounts.id)))
+        .where(and(eq(channelAccounts.id, c.channelAccountId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(channelAccounts.provider, 'evolution')))
+        .limit(1);
+      if (!q) return this.pauseNow(tx, c, CONNECTION_DOWN, now);
+      // Sesión caída: la campaña espera con aviso; el mensaje NUNCA se reenvía por otra vía ni gasta intentos
+      if (q.state !== 'open') return this.pauseNow(tx, c, QR_SESSION_DOWN, now);
+      qrFirstConnectedAt = q.first;
+    } else {
+      const [ch] = await tx
+        .select({ id: channelAccounts.id })
+        .from(channelAccounts)
+        .innerJoin(whatsappAccounts, and(eq(whatsappAccounts.organizationId, channelAccounts.organizationId), eq(whatsappAccounts.channelAccountId, channelAccounts.id)))
+        .where(and(eq(channelAccounts.id, c.channelAccountId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(whatsappAccounts.active, true)))
+        .limit(1);
+      if (!ch) return this.pauseNow(tx, c, CONNECTION_DOWN, now);
+      try {
+        await this.templates.getSendable(tx, c.channelAccountId, c.templateId!);
+      } catch (e) {
+        if (e instanceof NotFoundError || e instanceof ConflictError) return this.pauseNow(tx, c, TEMPLATE_GONE, now);
+        throw e;
+      }
     }
 
     // Mensajes en camino y topes diarios (campaña, asesor y empresa); si se alcanzó alguno, espera
@@ -151,7 +176,8 @@ export class CampaignSenderService {
     const capped =
       (await sent24(eq(campaigns.id, c.id))) >= c.dailyCap ||
       (advisor !== undefined && (await sent24(eq(campaigns.createdBy, c.createdBy))) >= advisor.cap) ||
-      (await sent24(eq(campaigns.channelAccountId, c.channelAccountId))) >= (await this.officialCap(tx));
+      // El tope de la conexión: por WhatsApp oficial, el de la empresa; por QR, el 70 % del cupo del calentamiento de HOY (el resto queda para las conversaciones normales, que comparten el cupo)
+      (await sent24(eq(campaigns.channelAccountId, c.channelAccountId))) >= (isText ? qrChannelCap(dailyLimit(qrFirstConnectedAt, now)) : await this.officialCap(tx));
     if (capped) {
       await tx.update(campaigns).set({ nextSendAt: new Date(now.getTime() + CAP_RECHECK_MS), updatedAt: now }).where(eq(campaigns.id, c.id));
       return 0;
@@ -169,7 +195,9 @@ export class CampaignSenderService {
       const outcome = await this.sendOne(tx, c, r, now);
       touched += 1;
       if (outcome === 'queued') {
-        await tx.update(campaigns).set({ nextSendAt: new Date(now.getTime() + c.gapSeconds * 1000), updatedAt: now }).where(eq(campaigns.id, c.id));
+        // Por QR la pausa nunca baja de la mínima (45 s), aunque la campaña pidiera menos
+        const gap = isText ? Math.max(c.gapSeconds, MIN_GAP_QR_S) : c.gapSeconds;
+        await tx.update(campaigns).set({ nextSendAt: new Date(now.getTime() + gap * 1000), updatedAt: now }).where(eq(campaigns.id, c.id));
         return touched;
       }
       if (outcome === 'paused') return touched;
@@ -194,19 +222,29 @@ export class CampaignSenderService {
     if (contact.consent === 'revoked') return skip('revoked'); // la baja manda sobre todo lo demás: jamás se le escribe
     if (!r.phone) return skip('no_phone');
 
-    // Las variables de la plantilla con los datos de ESTE contacto; sin el dato, no se manda la llave cruda: se descarta con su motivo
-    const texts = Object.values(c.templateParams);
+    // Las variables (de la plantilla o del texto) con los datos de ESTE contacto; sin el dato, no se manda la llave cruda: se descarta con su motivo
+    const isText = c.mode === 'text';
+    const texts = isText ? [c.body ?? ''] : Object.values(c.templateParams);
     const wanted = new Set(texts.flatMap((t) => customKeysIn(t)));
     const values: CustomValues = wanted.size === 0 ? {} : ((await this.custom.valuesFor(tx, 'contact', [contact.id])).get(contact.id) ?? {});
     const ctx: ResolveContext = { contactName: contact.name, contactPhone: r.phone, agentName: '', orgName: '', custom: Object.fromEntries(Object.entries(values).filter(([k]) => wanted.has(k))) };
-    const params: Record<string, string> = {};
-    for (const [key, text] of Object.entries(c.templateParams)) {
-      const out = resolveQuickReply(text, ctx);
-      if (out.missing.length > 0) return skip('missing_variable', `Falta el dato ${out.missing.map((m) => `{{${m}}}`).join(', ')}`.slice(0, 200));
-      params[key] = out.text.trim();
-    }
+    const missingData = (missing: string[]): string => `Falta el dato ${missing.map((m) => `{{${m}}}`).join(', ')}`.slice(0, 200);
+    const owner = contact.ownerId ?? c.createdBy;
 
-    const sent = await this.outreach.sendTemplate(tx, { contactId: contact.id, phone: r.phone, channelId: c.channelAccountId, templateId: c.templateId!, params, queueId: null, ownerId: contact.ownerId ?? c.createdBy, now, senderType: 'campaign' });
+    let sent: { sent: true; conversationId: string; messageId: string } | { sent: false; reason: string };
+    if (isText) {
+      const out = resolveQuickReply(c.body ?? '', ctx);
+      if (out.missing.length > 0) return skip('missing_variable', missingData(out.missing));
+      sent = await this.outreach.openAndSendText(tx, { contactId: contact.id, phone: r.phone, channelId: c.channelAccountId, text: out.text.trim(), queueId: null, ownerId: owner, now });
+    } else {
+      const params: Record<string, string> = {};
+      for (const [key, text] of Object.entries(c.templateParams)) {
+        const out = resolveQuickReply(text, ctx);
+        if (out.missing.length > 0) return skip('missing_variable', missingData(out.missing));
+        params[key] = out.text.trim();
+      }
+      sent = await this.outreach.sendTemplate(tx, { contactId: contact.id, phone: r.phone, channelId: c.channelAccountId, templateId: c.templateId!, params, queueId: null, ownerId: owner, now, senderType: 'campaign' });
+    }
     if (sent.sent) {
       await tx.update(campaignRecipients).set({ status: 'queued', messageId: sent.messageId, conversationId: sent.conversationId, queuedAt: now, updatedAt: now }).where(eq(campaignRecipients.id, r.id));
       return 'queued';

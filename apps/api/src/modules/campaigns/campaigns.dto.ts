@@ -90,6 +90,10 @@ export const audienceListSchema = z
   .strict();
 export type AudienceListDto = z.infer<typeof audienceListSchema>;
 
+/** Lanzar una campaña: por WhatsApp QR hay que aceptar el aviso de riesgo (queda en la auditoría). El cuerpo es opcional. */
+export const launchSchema = z.preprocess((v) => v ?? {}, z.object({ accept_qr_risk: z.boolean().optional() }).strict());
+export type LaunchDto = z.infer<typeof launchSchema>;
+
 /** Tope diario de la empresa por WhatsApp oficial (ADR-72 #5). */
 export const settingsSchema = z.object({ official_daily_cap: z.number().int().min(1).max(100000) }).strict();
 export type SettingsDto = z.infer<typeof settingsSchema>;

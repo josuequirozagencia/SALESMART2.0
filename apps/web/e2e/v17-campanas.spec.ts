@@ -80,9 +80,7 @@ test.describe('escritorio 1440 × 900', () => {
     const msg = form.getByRole('textbox', { name: 'Mensaje' });
     await msg.fill('Hola {{primer_nombre}}, tenemos cupos para esta semana.');
     await expect(form.getByText('Hola Ana, tenemos cupos para esta semana.')).toBeVisible();
-    // por QR el envío llega en la próxima versión (17.4): el botón está desactivado y se explica
-    await expect(form.getByRole('button', { name: 'Enviar campaña' })).toBeDisabled();
-    await expect(form.getByText(/El envío por WhatsApp QR llega en la próxima versión/)).toBeVisible();
+    await expect(form.getByRole('button', { name: 'Enviar campaña' })).toBeEnabled();
 
     await form.getByRole('button', { name: 'Guardar borrador' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Campaña «Cupos de octubre» guardada como borrador' })).toBeVisible();
@@ -104,6 +102,31 @@ test.describe('escritorio 1440 × 900', () => {
     // duplicar abre la copia para editarla
     await page.getByRole('button', { name: 'Duplicar Cupos de octubre (v2)' }).click();
     await expect(page.getByRole('form', { name: 'Editar campaña' }).getByLabel(/1 · Nombre/)).toHaveValue('Cupos de octubre (v2) (copia)');
+  });
+});
+
+test.describe('envío por QR 1440 × 900', () => {
+  test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' });
+
+  test('el aviso de riesgo es obligatorio y, con la sesión sin conectar, el envío se explica sin perder el borrador', async ({ page, request }) => {
+    const email = await fixture(request);
+    await uiLogin(page, email);
+    await page.goto('/campaigns');
+    const form = page.getByRole('form', { name: 'Nueva campaña' });
+    await form.getByLabel(/1 · Nombre/).fill('Envío por QR');
+    await form.getByRole('textbox', { name: 'Mensaje' }).fill('Hola {{primer_nombre}}, tenemos cupos esta semana.');
+    await form.getByRole('button', { name: 'Enviar campaña' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Enviar campaña' });
+    await expect(dlg.getByText(/Conexión no oficial/)).toBeVisible();
+    const confirm = dlg.getByRole('button', { name: 'Confirmar y enviar' });
+    await expect(confirm).toBeDisabled(); // sin aceptar el aviso no se puede
+    await dlg.getByRole('checkbox', { name: /Entiendo el riesgo/ }).check();
+    await confirm.click();
+    // el chip de la prueba no tiene la sesión conectada: se explica y la campaña sigue como borrador
+    await expect(dlg.getByRole('alert')).toContainText('La sesión de WhatsApp por QR no está conectada');
+    await dlg.getByRole('button', { name: 'Volver' }).click();
+    await expect(page.getByRole('table').getByText('Envío por QR')).toBeVisible();
+    await expect(page.getByRole('table').getByText('Borrador').first()).toBeVisible();
   });
 });
 

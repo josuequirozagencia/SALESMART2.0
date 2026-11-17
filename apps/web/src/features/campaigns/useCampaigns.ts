@@ -207,7 +207,8 @@ export function useSetAdvisorLimit(userId: string) {
 /** Lanza la campaña (congela la audiencia y empieza a enviar, o queda programada). Idempotente: con la misma llave devuelve la campaña como quedó. */
 export function useLaunchCampaign() {
   const done = useDone();
-  return useMutation({ mutationFn: ({ id, key }: { id: string; key: string }) => api<Campaign>(`/campaigns/${id}/launch`, { method: 'POST', headers: idem(key) }), onSettled: done });
+  // Por WhatsApp QR el servidor exige que se haya aceptado el aviso de riesgo (queda en la auditoría)
+  return useMutation({ mutationFn: ({ id, key, acceptQrRisk }: { id: string; key: string; acceptQrRisk?: boolean }) => api<Campaign>(`/campaigns/${id}/launch`, { method: 'POST', headers: idem(key), ...(acceptQrRisk ? { body: { accept_qr_risk: true } } : {}) }), onSettled: done });
 }
 
 export type CampaignAction = 'pause' | 'resume' | 'cancel';
