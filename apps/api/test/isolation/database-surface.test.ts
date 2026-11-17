@@ -102,9 +102,9 @@ describe('Database — la transacción no puede filtrarse', () => {
 });
 
 describe('superficie pública', () => {
-  it('Database solo expone withTenant, withPlatform, withIdentity, ping y close', () => {
+  it('Database solo expone withTenant, withPlatform, withIdentity, afterCommit (avisos tras confirmar), ping y close', () => {
     const publicMethods = Object.getOwnPropertyNames(Database.prototype).filter((n) => n !== 'constructor' && n !== 'run').sort();
-    expect(publicMethods).toEqual(['close', 'ping', 'withIdentity', 'withPlatform', 'withTenant']);
+    expect(publicMethods).toEqual(['afterCommit', 'close', 'ping', 'withIdentity', 'withPlatform', 'withTenant']);
     for (const forbidden of ['pool', 'pools', 'client', 'drizzle', 'db', 'query', 'execute', 'connect']) {
       expect(forbidden in Database.prototype).toBe(false);
     }

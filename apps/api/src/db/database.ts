@@ -9,6 +9,15 @@ import { DatabaseContextMismatchError } from './errors';
 import { guardClient, type GuardState } from './guarded-client';
 import type { DrizzleTx, IdentityTx, PlatformTx, TenantTx } from './types';
 
+/** Ejecuta un aviso posterior al COMMIT: un fallo se registra y nunca propaga (lo que se anota con `afterCommit` es un aviso, no parte del dato). */
+function runHook(fn: () => void, log: AppLogger | undefined): void {
+  try {
+    fn();
+  } catch (err) {
+    log?.error({ err }, 'falló un aviso posterior a confirmar la transacción');
+  }
+}
+
 export interface DatabasePools {
   app: Pool;
   platform: Pool;
@@ -62,15 +71,7 @@ export class Database {
   afterCommit(fn: () => void): void {
     const store = this.active.getStore();
     if (store) store.afterCommit.push(fn);
-    else this.runHook(fn);
-  }
-
-  private runHook(fn: () => void): void {
-    try {
-      fn();
-    } catch (err) {
-      this.log?.error({ err }, 'falló un aviso posterior a confirmar la transacción');
-    }
+    else runHook(fn, this.log);
   }
 
   async withTenant<T>(fn: (tx: TenantTx) => Promise<T>): Promise<T> {
@@ -132,7 +133,7 @@ export class Database {
         }
       });
       // La transacción ya se confirmó: ahora sí salen los avisos que quedaron en espera
-      for (const hook of hooks) this.runHook(hook);
+      for (const hook of hooks) runHook(hook, this.log);
       return result;
     } catch (err) {
       // Asegura que no quede transacción abierta/abortada en la conexión que vuelve al pool.
