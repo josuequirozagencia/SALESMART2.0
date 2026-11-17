@@ -1030,6 +1030,13 @@
       "when": 1796200000000,
       "tag": "0146_v17_variantes_ia",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1796300000000,
+      "tag": "0147_v19_salud_conexion",
+      "breakpoints": true
     }
   ]
 }

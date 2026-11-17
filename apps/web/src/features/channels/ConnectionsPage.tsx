@@ -12,6 +12,7 @@ import { useMetaSettings } from '../meta/useMeta';
 import { useQueues } from '../queues/useQueues';
 import { ChannelDialog } from './ChannelDialog';
 import { ConnectionCard, type ConnectionStatus } from './ConnectionCard';
+import { ConnectionHealth } from './ConnectionHealth';
 import { QrSection } from './QrSection';
 import { TemplatesDialog } from './TemplatesDialog';
 import { useQrChannels } from './useQrChannels';
@@ -177,6 +178,8 @@ export function ConnectionsPage() {
               </ul>
             )}
           </section>
+
+          <ConnectionHealth />
 
           {showQr ? <div id="whatsapp-qr"><QrSection /></div> : null}
         </>

@@ -64,6 +64,9 @@ export interface EvolutionConnection {
   readonly profileName: string | null;
 }
 
+/** Por qué se ignoró un aviso (v19 B1): se cuenta por conexión y hora para «Salud de la conexión». */
+export type IgnoredReason = 'group' | 'status' | 'from_me' | 'no_phone' | 'malformed' | 'receipt' | 'unsupported';
+
 export interface ParsedEvolution {
   /** Nombre de la instancia de Evolution (identifica la conexión; hace de «número» del evento normalizado). */
   readonly instance: string | null;
@@ -77,9 +80,11 @@ export interface ParsedEvolution {
   readonly inlineMedia: ReadonlyMap<string, string>;
   /** Mensajes o estados descartados (grupos, propios del chip, sin teléfono, tipo que no usamos, formato roto). */
   readonly ignored: number;
+  /** El motivo, cuando el aviso se ignoró (o era un evento que no usamos); null si se procesó. */
+  readonly ignoredReason: IgnoredReason | null;
 }
 
-const EMPTY: Omit<ParsedEvolution, 'instance'> = { events: [], connection: null, qr: null, inlineMedia: new Map(), ignored: 0 };
+const EMPTY: Omit<ParsedEvolution, 'instance'> = { events: [], connection: null, qr: null, inlineMedia: new Map(), ignored: 0, ignoredReason: null };
 
 /** «593999999999@s.whatsapp.net» (o con sufijo de dispositivo `:12`) → teléfono E.164; cualquier otro identificador (`@lid`, `@g.us`…) → null. */
 export function phoneFromJid(jid: unknown): string | null {
@@ -170,24 +175,25 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
   const message = isObj(data['message']) ? data['message'] : null;
   const id = key ? str(key['id']) : null;
   const remote = key ? str(key['remoteJid']) : null;
-  if (!key || !message || !id || !remote) return { ...EMPTY, ignored: 1 };
+  if (!key || !message || !id || !remote) return { ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   // Los grupos y los estados de WhatsApp no son una conversación con un cliente
-  if (remote.endsWith('@g.us') || remote === 'status@broadcast') return { ...EMPTY, ignored: 1 };
+  if (remote === 'status@broadcast') return { ...EMPTY, ignored: 1, ignoredReason: 'status' };
+  if (remote.endsWith('@g.us')) return { ...EMPTY, ignored: 1, ignoredReason: 'group' };
   const fromMe = key['fromMe'] === true;
   const content = contentOf(id, message);
   if (content === 'reaction') {
     // La reacción que pone el teléfono a un mensaje no se trae (v9, fuera de alcance)
-    if (fromMe) return { ...EMPTY, ignored: 1 };
+    if (fromMe) return { ...EMPTY, ignored: 1, ignoredReason: 'from_me' };
     const r = message['reactionMessage'] as Record<string, unknown>;
     const target = isObj(r['key']) ? str(r['key']['id']) : null;
     const emoji = typeof r['text'] === 'string' ? stripNul(r['text']).trim() : '';
-    if (!target || emoji.length > 32 || /\p{Cc}/u.test(emoji)) return { ...EMPTY, ignored: 1 };
+    if (!target || emoji.length > 32 || /\p{Cc}/u.test(emoji)) return { ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
     const reaction: NormalizedReaction = { targetExternalId: target, emoji: emoji === '' ? null : emoji, at: toDate(data['messageTimestamp'], now) };
     return { ...EMPTY, events: [{ event: { phoneNumberId: instance, messages: [], statuses: [], reactions: [reaction] }, raw: redactEvolutionPayload(data) }] };
   }
   // El teléfono sale del identificador de teléfono; si solo hay un `@lid`, se usa la variante `remoteJidAlt` que Evolution da en los chats 1:1
   const from = phoneFromJid(remote) ?? phoneFromJid(key['remoteJidAlt']);
-  if (!from) return { ...EMPTY, ignored: 1 };
+  if (!from) return { ...EMPTY, ignored: 1, ignoredReason: 'no_phone' };
   const quotedId = quotedIdOf(message);
   const msg: NormalizedMessage = {
     externalId: id,
@@ -211,11 +217,11 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
 function update(instance: string, data: Record<string, unknown>, now: Date): Omit<ParsedEvolution, 'instance'> {
   const id = str(data['keyId']) ?? (isObj(data['key']) ? str(data['key']['id']) : null);
   const status = str(data['status']);
-  if (!id || !status) return { ...EMPTY, ignored: 1 };
+  if (!id || !status) return { ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   // Solo importan los estados de lo que NOSOTROS enviamos; el «leído» de los mensajes del cliente (fromMe: false) no es un estado de entrega
-  if (data['fromMe'] !== true) return { ...EMPTY, ignored: 1 };
+  if (data['fromMe'] !== true) return { ...EMPTY, ignored: 1, ignoredReason: 'receipt' };
   const state = STATUS_MAP[status.toUpperCase()];
-  if (!state) return { ...EMPTY, ignored: status.toUpperCase() === 'PENDING' ? 0 : 1 };
+  if (!state) return status.toUpperCase() === 'PENDING' ? { ...EMPTY } : { ...EMPTY, ignored: 1, ignoredReason: 'unsupported' };
   const s: NormalizedStatus = { externalId: id, state, at: now, error: state === 'failed' ? { code: 'unknown', title: 'El envío falló en WhatsApp' } : null };
   return { ...EMPTY, events: [{ event: { phoneNumberId: instance, messages: [], statuses: [s], reactions: [] }, raw: redactEvolutionPayload(data) }] };
 }
@@ -233,11 +239,11 @@ function connectionOf(data: Record<string, unknown>): EvolutionConnection | null
  * (`send.message`, grupos, contactos, chats…) se ignoran sin error; nunca lanza por un contenido mal formado.
  */
 export function parseEvolutionWebhook(body: unknown, now = new Date()): ParsedEvolution {
-  if (!isObj(body)) return { instance: null, ...EMPTY, ignored: 1 };
+  if (!isObj(body)) return { instance: null, ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   const instance = str(body['instance']);
   const event = str(body['event'])?.toLowerCase().replaceAll('_', '.') ?? null;
   const data = isObj(body['data']) ? body['data'] : null;
-  if (!instance || !event || !data) return { instance, ...EMPTY, ignored: 1 };
+  if (!instance || !event || !data) return { instance, ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   switch (event) {
     case 'messages.upsert':
       return { instance, ...upsert(instance, data, now) };
@@ -250,7 +256,7 @@ export function parseEvolutionWebhook(body: unknown, now = new Date()): ParsedEv
       return { instance, ...EMPTY, qr: { updated: isObj(data['qrcode']), limitReached: limit } };
     }
     default:
-      return { instance, ...EMPTY }; // send.message, groups.*, contacts.*, chats.*…: no los usamos
+      return { instance, ...EMPTY, ignoredReason: 'unsupported' }; // send.message, groups.*, contacts.*, chats.*…: no los usamos (se cuentan aparte, no son «ignorados» con error)
   }
 }
 

@@ -34,8 +34,9 @@ import { PushModule } from './modules/push';
 import { RealtimeModule } from './modules/realtime';
 import { SlaModule } from './modules/sla';
 import { CampaignsModule } from './modules/campaigns';
+import { ConnectionHealthModule } from './modules/connection-health';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, BrandingModule, FollowUpsModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SampleDataModule, SlaModule, ChannelsModule, TemplatesModule, QuickRepliesModule, CampaignsModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, NotificationsModule, PushModule, PhotosModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), CalendarModule.register(), AiModule, CompanyExportModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, BrandingModule, FollowUpsModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SampleDataModule, SlaModule, ChannelsModule, ConnectionHealthModule, TemplatesModule, QuickRepliesModule, CampaignsModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, NotificationsModule, PushModule, PhotosModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), CalendarModule.register(), AiModule, CompanyExportModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

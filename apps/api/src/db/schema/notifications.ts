@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
+import { channelAccounts } from './channels';
 import { conversations, messages } from './conversations';
 import { tasks } from './crm';
 import { tenantTable } from './helpers';
@@ -48,15 +49,23 @@ export const notifications = tenantTable(
     taskId: uuid('task_id'),
     /** Avisos de una venta nueva (v13 S4.2). */
     saleId: uuid('sale_id'),
+    /** Alertas de salud de una conexión (v19 B1): cuál conexión y por qué (`lag`, `silent`, `failed`, `backlog`). */
+    channelAccountId: uuid('channel_account_id'),
+    alertReason: text('alert_reason'),
     createdAt: ts('created_at').notNull().defaultNow(),
     readAt: ts('read_at'),
   },
   (t) => [
     foreignKey({ name: 'notifications_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
     foreignKey({ name: 'notifications_message_fk', columns: [t['organizationId']!, t['messageId']!], foreignColumns: [messages.organizationId, messages.id] }),
+    foreignKey({ name: 'notifications_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
     foreignKey({ name: 'notifications_sale_fk', columns: [t['organizationId']!, t['saleId']!], foreignColumns: [sales.organizationId, sales.id] }),
     foreignKey({ name: 'notifications_task_fk', columns: [t['organizationId']!, t['taskId']!], foreignColumns: [tasks.organizationId, tasks.id] }),
-    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect', 'sale_created')`),
+    check('notifications_type_valid', sql`${t['type']!} IN ('mention', 'task_assigned', 'task_due', 'calendar_reconnect', 'sale_created', 'connection_health')`),
+    // Una alerta de conexión lleva su conexión y su motivo, y nada más; ningún otro tipo lleva conexión ni motivo
+    check('notifications_connection_shape', sql`(${t['type']!} = 'connection_health' AND ${t['channelAccountId']!} IS NOT NULL AND ${t['alertReason']!} IN ('lag', 'silent', 'failed', 'backlog') AND ${t['conversationId']!} IS NULL AND ${t['messageId']!} IS NULL AND ${t['taskId']!} IS NULL AND ${t['saleId']!} IS NULL AND ${t['actorId']!} IS NULL) OR (${t['type']!} <> 'connection_health' AND ${t['channelAccountId']!} IS NULL AND ${t['alertReason']!} IS NULL)`),
+    // Una sola alerta SIN LEER por persona, conexión y motivo (si el problema sigue no se acumulan)
+    uniqueIndex('notifications_connection_uq').on(t['organizationId']!, t['userId']!, t['channelAccountId']!, t['alertReason']!).where(sql`${t['type']!} = 'connection_health' AND ${t['readAt']!} IS NULL`),
     // Un aviso de venta nueva lleva su venta y quien la registró; ninguna conversación, nota ni tarea
     check('notifications_sale_shape', sql`${t['type']!} <> 'sale_created' OR (${t['saleId']!} IS NOT NULL AND ${t['actorId']!} IS NOT NULL AND ${t['conversationId']!} IS NULL AND ${t['messageId']!} IS NULL AND ${t['taskId']!} IS NULL)`),
     // Un solo aviso por persona y venta (repetir el registro no duplica)

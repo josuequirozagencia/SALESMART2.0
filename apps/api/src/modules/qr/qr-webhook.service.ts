@@ -55,7 +55,11 @@ export class QrWebhookService {
     if (parsed.connection) {
       await this.db.withTenant((tx) => this.connections.applyState(tx, channelAccountId, parsed.connection!, now));
     } else {
-      await this.db.withTenant((tx) => tx.update(qrAccounts).set({ lastEventAt: now }).where(eq(qrAccounts.channelAccountId, channelAccountId)));
+      await this.db.withTenant(async (tx) => {
+        await tx.update(qrAccounts).set({ lastEventAt: now }).where(eq(qrAccounts.channelAccountId, channelAccountId));
+        // v19 B1: lo que se ignora se cuenta por motivo (solo un contador; para «Salud de la conexión»)
+        if (parsed.ignoredReason) await this.events.countIgnored(tx, channelAccountId, parsed.ignoredReason, now);
+      });
     }
     if (parsed.events.length === 0) return false;
     const event = String((body as Record<string, unknown>)['event']);
