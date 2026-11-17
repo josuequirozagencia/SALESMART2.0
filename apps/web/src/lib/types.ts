@@ -910,7 +910,7 @@ export interface MentionOption {
 /** Un aviso del centro de avisos: menciones en notas (F1, ADR-57) y avisos de tareas (F2, ADR-58). */
 export interface AppNotification {
   id: string;
-  type: 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created';
+  type: 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created' | 'connection_health';
   created_at: string;
   read_at: string | null;
   /** Null en un aviso de vencimiento o de una tarea que creó el sistema. */
@@ -923,6 +923,8 @@ export interface AppNotification {
   task: { id: string; title: string; due_at: string | null; status: 'open' | 'done'; contact_id: string | null } | null;
   /** Solo en los avisos de una venta nueva (v13 S4.2). Opcional: los avisos de antes no lo traen. */
   sale?: { id: string; product: string; amount: string; currency: string; seller: { id: string; name: string } | null; contact: { id: string; name: string } } | null;
+  /** Solo en las alertas de una conexión (v19 B1). Opcional: los avisos de antes no lo traen. */
+  connection?: { id: string; name: string; reason: 'lag' | 'silent' | 'failed' | 'backlog' } | null;
 }
 export interface NotificationPage {
   items: AppNotification[];

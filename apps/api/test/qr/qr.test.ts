@@ -286,6 +286,22 @@ describe('webhook de Evolution', () => {
     expect((await admin.query(`SELECT count(*)::int AS n FROM messages`)).rows[0].n).toBe(0);
   });
 
+  it('lo que se ignora se CUENTA por motivo y hora (solo un contador: nada del contenido), por conexión y empresa (v19 B1)', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, { ...upsert(inst, 'G-0000000000000003', { conversation: 'grupo' }), data: { key: { remoteJid: '120363424375113025@g.us', fromMe: false, id: 'G-0000000000000003' }, message: { conversation: 'x' } } });
+    await post(v.id, { ...upsert(inst, 'G-0000000000000004', { conversation: 'grupo' }), data: { key: { remoteJid: '120363424375113026@g.us', fromMe: false, id: 'G-0000000000000004' }, message: { conversation: 'x' } } });
+    await post(v.id, evt(inst, 'messages.update', { keyId: 'ACK-0000000000000001', status: 'READ', fromMe: false }));
+    await post(v.id, evt(inst, 'chats.update', { id: 'x' }));
+    await post(v.id, upsert('ss-otra-instancia-0000', 'O-0000000000000009', { conversation: 'ajeno' })); // otra instancia: no es de esta conexión, no cuenta
+    const rows = (await admin.query(`SELECT reason, sum(n)::int AS n FROM webhook_ignored WHERE channel_account_id = $1 GROUP BY reason ORDER BY reason`, [v.id])).rows as Array<{ reason: string; n: number }>;
+    expect(rows).toEqual([{ reason: 'group', n: 2 }, { reason: 'receipt', n: 1 }, { reason: 'unsupported', n: 1 }]);
+    // nunca el contenido
+    expect(JSON.stringify((await admin.query(`SELECT * FROM webhook_ignored`)).rows)).not.toMatch(/grupo|ajeno|x@/);
+    // la empresa B no ve nada de esto (RLS)
+    expect((await admin.query(`SELECT count(*)::int AS n FROM webhook_ignored WHERE organization_id = $1`, [ORG_B])).rows[0].n).toBe(0);
+  });
+
   it('un archivo que llega en base64 NO se guarda en el aviso: va al almacenamiento y el adjunto queda listo (con su revisión) y sin rastro temporal', async () => {
     const v = await mk(T.alice);
     const inst = await instanceOf(v.id);

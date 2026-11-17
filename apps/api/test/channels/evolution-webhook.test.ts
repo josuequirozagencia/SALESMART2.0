@@ -228,3 +228,27 @@ describe('mensajes escritos desde el teléfono (fromMe, v9)', () => {
     expect(parseEvolutionWebhook(mine('PH-UNS-000000000001', { pollCreationMessage: { name: '¿?' } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'unsupported', text: null, origin: 'device' });
   });
 });
+
+describe('motivo de lo ignorado (v19 B1)', () => {
+  const key = (over: Record<string, unknown> = {}) => ({ remoteJid: '593984000001@s.whatsapp.net', fromMe: false, id: 'IGN-0000000000000001', ...over });
+  const body = (event: string, data: unknown) => ({ instance: 'ss-instancia-0001', event, data });
+  const R = (b: unknown) => parseEvolutionWebhook(b, NOW).ignoredReason;
+
+  it('cada descarte dice por qué: grupo, estado de WhatsApp, reacción del teléfono, sin teléfono, formato roto, acuse de lectura y evento que no usamos', () => {
+    expect(R(body('messages.upsert', { key: key({ remoteJid: '120363424375113025@g.us' }), message: { conversation: 'x' } }))).toBe('group');
+    expect(R(body('messages.upsert', { key: key({ remoteJid: 'status@broadcast' }), message: { conversation: 'x' } }))).toBe('status');
+    expect(R(body('messages.upsert', { key: key({ fromMe: true }), message: { reactionMessage: { key: { id: 'A' }, text: '👍' } } }))).toBe('from_me');
+    expect(R(body('messages.upsert', { key: key({ remoteJid: '1234567@lid' }), message: { conversation: 'x' } }))).toBe('no_phone');
+    expect(R(body('messages.upsert', { key: key(), message: null }))).toBe('malformed');
+    expect(R(body('messages.update', { keyId: 'X', status: 'READ', fromMe: false }))).toBe('receipt');
+    expect(R(body('messages.update', { keyId: 'X', status: 'ALGO_NUEVO', fromMe: true }))).toBe('unsupported');
+    expect(R(body('chats.update', { id: 'x' }))).toBe('unsupported');
+    expect(R('no es un objeto')).toBe('malformed');
+  });
+
+  it('lo que sí se procesa no trae motivo; «PENDING» (nuestro propio envío) tampoco cuenta como ignorado', () => {
+    expect(R(body('messages.upsert', { key: key(), message: { conversation: 'Hola' }, messageTimestamp: 1_700_000_000 }))).toBeNull();
+    expect(R(body('messages.update', { keyId: 'X', status: 'PENDING', fromMe: true }))).toBeNull();
+    expect(R(body('connection.update', { state: 'open' }))).toBeNull();
+  });
+});

@@ -49,6 +49,30 @@ export const webhookEvents = tenantTable(
   ],
 );
 
+export const IGNORED_REASONS = ['group', 'status', 'from_me', 'no_phone', 'malformed', 'receipt', 'unsupported'] as const;
+
+/**
+ * Avisos de WhatsApp por QR que se IGNORARON, contados por conexión, hora y motivo (v19 B1; para «Salud de la conexión»): `group` (chats de grupo), `status` (estados de WhatsApp), `from_me` (reacciones puestas desde el
+ * teléfono), `no_phone` (sin teléfono resoluble), `malformed` (aviso sin lo mínimo), `receipt` (acuses de lectura del cliente: no son un estado de entrega) y `unsupported` (eventos que no usamos). Solo CONTADORES: nunca guarda
+ * el contenido de un aviso. TABLA DE NEGOCIO (RLS forzada); sin DELETE (la purga de una empresa la borra con ella).
+ */
+export const webhookIgnored = tenantTable(
+  'webhook_ignored',
+  {
+    channelAccountId: uuid('channel_account_id').notNull(),
+    /** La hora (truncada, en UTC) a la que pertenece el conteo. */
+    hour: ts('hour').notNull(),
+    reason: text('reason').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ name: 'webhook_ignored_pk', columns: [t['organizationId']!, t['channelAccountId']!, t['hour']!, t['reason']!] }),
+    foreignKey({ name: 'webhook_ignored_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
+    check('webhook_ignored_reason_valid', sql`${t['reason']!} IN ('group', 'status', 'from_me', 'no_phone', 'malformed', 'receipt', 'unsupported')`),
+    check('webhook_ignored_n_valid', sql`${t['n']!} >= 0`),
+  ],
+);
+
 /**
  * Conversación de UN contacto por UN canal. Solo puede haber una ABIERTA (cualquier estado menos `closed`) por contacto y canal: índice único parcial.
  * Estados (ADR-50 #5): `unassigned` sin asesor · `pending` asignada y sin aceptar · `working` · `waiting` esperando al cliente · `closed`.

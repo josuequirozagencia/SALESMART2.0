@@ -8,6 +8,14 @@ import { Alert, Button, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications, useUnreadNotifications } from './useNotifications';
 
+/** Lo que dice cada alerta de salud de una conexión (v19 B1); el detalle y el botón de reintentar están en Configuración › Conexiones. */
+const CONNECTION_TEXT = {
+  lag: 'los mensajes llegan con mucho retraso desde WhatsApp.',
+  silent: 'lleva horas sin recibir ningún aviso en horario laboral; puede haberse cortado.',
+  failed: 'hay avisos que no se pudieron procesar; puedes reintentarlos.',
+  backlog: 'los avisos se están procesando con retraso.',
+} as const;
+
 /** Qué dice un aviso: una mención en una nota, «te asignaron una tarea» o «tu tarea vence / venció» (F1 y F2, ADR-57 y ADR-58). */
 function textOf(n: AppNotification): string {
   // v13 S4.2: «Nueva venta: {vendedor} · {monto} · {contacto}»
@@ -16,6 +24,7 @@ function textOf(n: AppNotification): string {
     if (!s) return 'Nueva venta registrada';
     return `Nueva venta: ${s.seller?.name ?? 'Sin vendedor'} · ${new Intl.NumberFormat('es-EC', { style: 'currency', currency: s.currency }).format(Number(s.amount))} · ${s.contact.name}`;
   }
+  if (n.type === 'connection_health') return `Conexión «${n.connection?.name ?? 'de WhatsApp'}»: ${CONNECTION_TEXT[n.connection?.reason ?? 'failed']}`;
   if (n.type === 'calendar_reconnect') return 'Google Calendar necesita que lo vuelvas a conectar. Las citas nuevas esperan hasta entonces para salir hacia Google.';
   if (n.type === 'task_assigned') return n.actor ? `${n.actor.name} te asignó la tarea «${n.task?.title ?? 'sin título'}»` : `Se te asignó la tarea «${n.task?.title ?? 'sin título'}»`;
   if (n.type === 'task_due') {
@@ -27,7 +36,7 @@ function textOf(n: AppNotification): string {
 }
 
 /** A dónde lleva un aviso: la conversación de una mención o la tarea (se abre en «Tareas»). */
-const hrefOf = (n: AppNotification): string => (n.type === 'mention' ? `/inbox/${n.conversation?.id ?? ''}` : n.type === 'calendar_reconnect' ? '/settings/calendar' : n.type === 'sale_created' ? '/sales' : `/tasks?task=${n.task?.id ?? ''}`);
+const hrefOf = (n: AppNotification): string => (n.type === 'mention' ? `/inbox/${n.conversation?.id ?? ''}` : n.type === 'calendar_reconnect' ? '/settings/calendar' : n.type === 'connection_health' ? '/settings/connections' : n.type === 'sale_created' ? '/sales' : `/tasks?task=${n.task?.id ?? ''}`);
 
 function Item({ n, canMark, onOpen }: { n: AppNotification; canMark: boolean; onOpen: () => void }) {
   const mark = useMarkNotificationRead();
