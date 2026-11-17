@@ -24,7 +24,7 @@ import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule, OutboundDispatcher } from '../../src/modules/inbox';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { PlatformCredentialsReader } from '../../src/modules/platform';
-import { QrCatchUpJob, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart, withKnownPhones } from '../../src/modules/qr';
+import { QrCatchUpJob, QrCatchUpService, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart, withKnownPhones } from '../../src/modules/qr';
 import { DomainEventBus } from '../../src/modules/events';
 import { QueuesModule } from '../../src/modules/queues';
 import { Argon2idHasher } from '../../src/security';
@@ -743,6 +743,7 @@ describe('ponerse al día con Evolution (v19 B3)', () => {
     const v = await mk(T.alice);
     const inst = await instanceOf(v.id);
     await open(v.id);
+    app.get(QrCatchUpService).maxRecords = 1000;
     give(inst, Array.from({ length: 1005 }, (_x, i) => rec(`BIG-${String(i).padStart(12, '0')}`, 40 - i / 100, `m${i}`, { who: `59399${String(1000 + (i % 7)).padStart(7, '0')}` })));
     const r = await json<Result>(await catchUp(T.alice, v.id, 48));
     expect(r.truncated).toBe(true);
