@@ -62,6 +62,11 @@ export const PERMISSIONS = {
   'analytics.manage': 'tenant',
   // M7.5 (ADR-52): inscribir un contacto en un flujo (Workflow) de GoHighLevel. El asesor solo sobre los contactos que ve.
   'ghl.enroll': 'tenant',
+  // v17 (ADR-72): campañas masivas. `campaigns.read` ve las PROPIAS (con `campaigns.view_all`, todas); `campaigns.send` crea y lanza a SUS contactos; `campaigns.cancel` pausa o cancela las de otras personas. El asesor no tiene ninguno por defecto: el administrador se los concede por persona.
+  'campaigns.read': 'tenant',
+  'campaigns.send': 'tenant',
+  'campaigns.view_all': 'tenant',
+  'campaigns.cancel': 'tenant',
   // F1 (ADR-57): ver los avisos PROPIOS (menciones; entra en el techo de solo lectura) y marcarlos como leídos (escritura).
   'notifications.read': 'tenant',
   'notifications.write': 'tenant',
@@ -134,7 +139,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
  * y cualquier acceso de agencia o de soporte a una empresa con la prueba vencida (ADR-41). Todo permiso que no está aquí es de escritura.
  * PROVISIONAL: cada módulo nuevo añade aquí sus permisos de lectura.
  */
-export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'ai.credits.view', 'notifications.read']);
+export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'ai.credits.view', 'notifications.read', 'campaigns.read', 'campaigns.view_all']);
 
 export type AccessLevel = 'read' | 'advisor' | 'admin';
 export const isAccessLevel = (v: unknown): v is AccessLevel => v === 'read' || v === 'advisor' || v === 'admin';

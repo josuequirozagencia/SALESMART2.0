@@ -1002,6 +1002,13 @@
       "when": 1795800000000,
       "tag": "0142_adr71_restablecer_acceso",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "7",
+      "when": 1795900000000,
+      "tag": "0143_v17_campanas",
+      "breakpoints": true
     }
   ]
 }

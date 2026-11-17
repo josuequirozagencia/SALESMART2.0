@@ -21,9 +21,9 @@ Fecha: 2026-10-03 · Estado: **aprobado (2026-10-03)**; los valores marcados PRO
 |---|---|
 | **MVP** | Fundaciones (auth, organizaciones, RLS, auditoría, observabilidad) · Contactos y listas · Oportunidades y pipelines · Inbox omnicanal con WhatsApp oficial · Etiquetas del sistema · Citas y recordatorios · Ventas con abono · Dashboard · Meta CAPI (Lead/Schedule/Purchase) · GHL (Private Token) · SLA · Registro con prueba de 7 días · Plataforma Súper Admin · Móvil · **«Mis ventas» del asesor (el asesor crea ventas, no las modifica) [PROPUESTA v9]** · Inbox: botón Enviar, panel de contacto oculto por defecto |
 | **V1** | WhatsApp QR (Evolution) · Agentes IA + Knowledge Base/RAG · Créditos IA · Formularios embebibles · Telefonía + WebRTC (Twilio) · Automatizaciones · Comisiones · Planes y cobro · Clonado de configuración · API pública · Consentimiento · **Gestor de grupos de WhatsApp (solo QR, con permisos por asesor) [PROPUESTA v9]** · **Comisión propia del asesor, plan en solo lectura [PROPUESTA v9]** |
-| **V2** | IA de voz (tras PoC) · Llamadas masivas · Campañas masivas · Cumpleaños · Marca blanca · Migración desde ChatIA · Exportar XLSX/PDF |
+| **V2** | IA de voz (tras PoC) · Llamadas masivas · Cumpleaños · Marca blanca · Migración desde ChatIA · Exportar XLSX/PDF |
 
-**Nota v9:** las **campañas masivas** (incluidas las del asesor con plantilla/texto libre según la conexión) permanecen en **V2**; adelantarlas exige decidir cobro, límites y consentimiento (§15 #17).
+**Nota v9 / v17:** las **campañas masivas** (incluidas las del asesor con plantilla/texto libre según la conexión) **se adelantaron a la versión vigente** por pedido del responsable (2026-11-16): decididas en **ADR-72** (cobro: ninguno por ahora; límites, consentimiento y «no contactar» resueltos; §15 #17). Plan: `docs/M_CAMPANAS_PLAN.md`.
 
 **Fuera de alcance (descartado):** chat interno, anuncios, ayuda, Typebot/Dialogflow, marcador predictivo, OAuth de GHL Marketplace, login social (Google) en primera versión.
 
@@ -252,7 +252,7 @@ Cada regla enlaza su ADR; los criterios de aceptación completos están en la se
 - **Ventas del asesor (ADR-32 + enmienda 1):** el asesor crea ventas (`sales.create`) y **registra abonos** de las suyas (`sales.register_payment`: fila append-only; abono > saldo se rechaza; saldo y «cobrada» los calcula el servidor; queda en `audit_logs`). No modifica valor, producto, comisión ni plan; la corrección se pide con `sale_change_requests`. Ninguna API de edición de venta acepta al rol `advisor`. No existe «pago de comisión» visible por ahora.
 - **Alta manual de contacto:** «+ Contacto» con campos estándar y personalizados; teléfono único por empresa (E.164); origen `manual` en auditoría; el asesor solo crea contactos asignados a sí mismo. El administrador gestiona los campos extra (tipo, opciones, obligatorio, visible en el formulario) con `custom_fields.manage`.
 - **Acceso a contactos del asesor:** «Mis contactos» (propios) + «Compartidos»; extiende ADR-14 (hoy definido para conversaciones) a contactos; se aplica en servidor y RLS.
-- **Campañas (V2):** el tipo de conexión decide el modo: oficial ⇒ plantilla aprobada; QR ⇒ texto libre con límites bajos. Límite efectivo = mínimo(tope del asesor, tope de la conexión). Se respeta «no contactar».
+- **Campañas (ADR-72):** el tipo de conexión decide el modo: oficial ⇒ plantilla aprobada; QR ⇒ texto libre con límites bajos. Límite efectivo = mínimo(tope del asesor, tope de la conexión). Se respeta «no contactar».
 - **Grupos (V1, solo QR):** sin proveedor QR no hay módulo de grupos; el envío programado y recurrente corre en el worker (idempotente); `@todos` y adjuntos según capacidad del proveedor.
 - **Interfaz:** el botón Enviar y Enter envían (Shift+Enter = salto de línea); el panel de datos del contacto inicia oculto. La interfaz solo oculta; el servidor decide.
 
@@ -392,7 +392,7 @@ Tras el PoC Retell vs. Vapi.
 | 14 | Archivos del repo actual sin leer (ver Fase 27 §5.2) | Pueden aportar reglas finas | Ninguno |
 | 15 | ¿La API oficial de Meta permite alguna gestión de grupos? (sin verificar) | ABIERTO | Gestor de grupos |
 | 16 | Grupos: ¿asignación por asesor o de toda la organización? (hoy: toda la organización) | ABIERTO | Gestor de grupos |
-| 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | ABIERTO (V2) | Campañas masivas |
+| 17 | Campañas del asesor: cobro, límites, calentamiento de números QR, consentimiento y «no contactar»; costo de plantillas de marketing | **DECIDIDO (ADR-72, 2026-11-16):** sin cobro por ahora y aviso de costo; QR mínimo 45 s con cupo compartido (la campaña usa como máximo el 70 %); `unknown` excluido salvo que el administrador lo incluya; baja por palabra clave. Sigue abierta la normativa local (#12) | Campañas masivas |
 | 18 | Regla de acceso a contactos del asesor (extiende ADR-14) | APROBADO (ADR-32, 2026-10-09) | Contactos/M3 |
 | 19 | Spike de WhatsApp QR (Evolution) sobre Railway con chip de prueba | APROBADO (ADR-31); en curso | EvolutionProvider/M9 |
 | 21 | Un plan asignado saca a la empresa de la prueba; el cobro es manual hasta la pasarela (ADR-38, APROBADO 2026-10-12) | **CONFIRMADO** | Billing |
