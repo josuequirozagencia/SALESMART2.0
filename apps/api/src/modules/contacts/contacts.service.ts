@@ -393,6 +393,19 @@ export class ContactsService {
   }
 
   /**
+   * El contacto pidió no recibir más mensajes (p. ej. respondió «BAJA» a una campaña, v17 · 17.5): pasa a «revocado». Dentro de la transacción del que llama; audita con su origen. Devuelve true si
+   * cambió (si ya estaba revocado no hace nada). Solo ESTE camino automático revoca; volver a concederlo lo decide una persona desde la ficha.
+   */
+  async revokeConsent(tx: TenantTx, id: string, audit: AuditSource): Promise<boolean> {
+    const row = await this.repo.lockById(tx, id);
+    if (!row || row.consent === 'revoked') return false;
+    const now = new Date();
+    await tx.update(contacts).set({ consent: 'revoked', consentUpdatedAt: now, updatedAt: now }).where(eq(contacts.id, id));
+    await writeAudit(tx, { entityType: 'contact', entityId: id, field: 'consent', oldValue: row.consent, newValue: 'revoked', source: audit });
+    return true;
+  }
+
+  /**
    * Registra un clic de Click-to-WhatsApp (ADR-45): el PRIMER toque nunca se sobrescribe; el último sí (salvo un clic más antiguo que el último registrado);
    * el mismo `ctwa_cl_id` que ya es el último no cambia nada. Devuelve qué se tocó.
    */

@@ -47,6 +47,31 @@ async function fixture(request: APIRequestContext): Promise<string> {
   return email;
 }
 
+/** Una campaña ya terminada, con destinatarios en distintos estados (lo que dejaría el envío real), para ver el informe sin enviar nada de verdad. */
+async function seedFinishedCampaign(email: string): Promise<void> {
+  await withDb(async (db) => {
+    const me = (await db.query(`SELECT m.organization_id AS org, u.id AS uid FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [email])).rows[0] as { org: string; uid: string };
+    const ch = (await db.query(`SELECT id FROM channel_accounts WHERE organization_id = $1 AND provider = 'evolution' LIMIT 1`, [me.org])).rows[0].id as string;
+    const camp = (await db.query(
+      `INSERT INTO campaigns(id, organization_id, name, channel_account_id, mode, body, audience, status, gap_seconds, daily_cap, created_by, idempotency_key, launched_at, finished_at)
+       VALUES (gen_random_uuid(), $1, 'Cupos de noviembre', $2, 'text', 'Hola {{primer_nombre}}', '{"source":"all"}', 'completed', 60, 50, $3, $4, now() - interval '2 hours', now() - interval '1 hour') RETURNING id`,
+      [me.org, ch, me.uid, `e2e-175-${Date.now()}`],
+    )).rows[0].id as string;
+    const rows: Array<[string, string, string, string | null, string | null]> = [
+      ['Ana Lema', 'replied', '+593988210001', null, 'now() - interval \'30 minutes\''],
+      ['Beto Vera', 'delivered', '+593988210002', null, null],
+      ['Pidió Baja', 'skipped', '+593988210003', 'revoked', null],
+    ];
+    for (const [name, status, phone, reason, replied] of rows) {
+      const c = (await db.query(`SELECT id FROM contacts WHERE organization_id = $1 AND name = $2`, [me.org, name])).rows[0].id as string;
+      await db.query(
+        `INSERT INTO campaign_recipients(id, organization_id, campaign_id, contact_id, phone, status, skip_reason, sent_at, replied_at) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, ${status === 'skipped' ? 'NULL' : "now() - interval '90 minutes'"}, ${replied ?? 'NULL'})`,
+        [me.org, camp, c, phone, status, reason],
+      );
+    }
+  });
+}
+
 async function uiLogin(page: Page, email: string): Promise<void> {
   await login(page, email);
   await expect(page.getByRole('heading', { name: /Hola, / })).toBeVisible();
@@ -161,3 +186,56 @@ for (const size of [{ width: 412, height: 915 }, { width: 360, height: 800 }] as
     });
   });
 }
+
+test.describe('resultados y Analítica 1440 × 900', () => {
+  test.use({ viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce', acceptDownloads: true });
+
+  test('el informe de una campaña terminada muestra totales, tasas y cada destinatario; el CSV se descarga con BOM; la tarjeta de Analítica la cuenta', async ({ page, request }) => {
+    const email = await fixture(request);
+    await seedFinishedCampaign(email);
+    await uiLogin(page, email);
+    await page.goto('/campaigns');
+    await page.getByRole('button', { name: 'Resultados de Cupos de noviembre' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Cupos de noviembre' });
+    await expect(dlg.getByRole('list', { name: 'Tasas y omitidos' }).getByText('Entrega 100 %')).toBeVisible();
+    await expect(dlg.getByRole('list', { name: 'Tasas y omitidos' }).getByText('Respuesta 50 %')).toBeVisible();
+    const table = dlg.getByRole('table');
+    await expect(table.getByText('Ana Lema')).toBeVisible();
+    await expect(table.locator('tr', { hasText: 'Ana Lema' }).getByText('Respondió')).toBeVisible();
+    await expect(table.locator('tr', { hasText: 'Beto Vera' }).getByText('Entregado')).toBeVisible();
+    await expect(table.locator('tr', { hasText: 'Pidió Baja' }).getByText('No contactar')).toBeVisible();
+    // el CSV: nombre del servidor y BOM al principio
+    const [download] = await Promise.all([page.waitForEvent('download'), dlg.getByRole('button', { name: 'Descargar CSV' }).click()]);
+    expect(download.suggestedFilename()).toMatch(/^campana-cupos-de-noviembre-\d{4}-\d{2}-\d{2}\.csv$/);
+    const path = await download.path();
+    const { readFileSync } = await import('node:fs');
+    const bytes = readFileSync(path);
+    expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    expect(bytes.toString('utf8')).toContain('Ana Lema');
+    await dlg.getByRole('button', { name: 'Cerrar' }).first().click();
+    // Analítica: la campaña lanzada en el periodo cuenta en la tarjeta
+    await page.goto('/analytics');
+    const card = page.getByRole('region', { name: 'Campañas del periodo' });
+    await expect(card).toBeVisible();
+    await expect(card.getByText('Campañas', { exact: true }).locator('xpath=following-sibling::b')).toHaveText('1');
+    await expect(card.getByText('Respuesta 50 %')).toBeVisible();
+  });
+});
+
+test.describe('resultados 360 × 800', () => {
+  test.use({ viewport: { width: 360, height: 800 }, reducedMotion: 'reduce' });
+
+  test('el informe cabe en la pantalla sin desbordar', async ({ page, request }) => {
+    const email = await fixture(request);
+    await seedFinishedCampaign(email);
+    await uiLogin(page, email);
+    await page.goto('/campaigns');
+    await page.getByRole('button', { name: 'Resultados de Cupos de noviembre' }).click();
+    const dlg = page.getByRole('dialog', { name: 'Cupos de noviembre' });
+    await expect(dlg.getByText('Ana Lema')).toBeVisible();
+    const box = (await dlg.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(360 + 0.5);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+});

@@ -8,6 +8,7 @@ import { Pill } from '../../ui/Pill';
 import { useDocumentTitle } from '../../lib/platformBrand';
 import { friendlyError } from '../../lib/errors';
 import { CampaignForm } from './CampaignForm';
+import { ResultsDialog } from './CampaignResults';
 import { baseLabel, campaignError, channelLabel, STATUS_KIND, STATUS_LABEL, whenLabel } from './labels';
 import { newKey, useCampaignAccess, useCampaignAction, useCampaignOptions, useCampaignSettings, useCampaigns, useDuplicateCampaign, useLivePreview, useSetCampaignSettings, type Campaign, type CampaignAccessInfo, type CampaignOptions } from './useCampaigns';
 
@@ -58,24 +59,6 @@ function Scope({ options }: { options: CampaignOptions }) {
       <div className="h-1.5 overflow-hidden rounded-full bg-surface2" aria-hidden="true"><i className="block h-full bg-accent" style={{ width: `${total > 0 ? Math.round((inScope / total) * 100) : 0}%` }} /></div>
       <p className="text-[12px] text-muted">{n(inScope)} de {n(total)} contactos de la empresa · tope diario de envíos: {cap ?? '—'}</p>
     </section>
-  );
-}
-
-/** Resultados de una campaña (prototipo: «Resultados»): los totales al día. El detalle por destinatario llega en 17.5. */
-function ResultsDialog({ c, onClose }: { c: Campaign; onClose: () => void }) {
-  const k = c.counts;
-  const cells: Array<[string, number]> = [['Destinatarios', k.total], ['Enviados', k.sent], ['Entregados', k.delivered], ['Leídos', k.read], ['Respondieron', k.replied], ['Fallidos', k.failed]];
-  return (
-    <Modal title={c.name} onClose={onClose} wide>
-      <p className="text-[13px] text-muted">{channelLabel(c)} · creada por {c.created_by.name || 'una persona del equipo'}</p>
-      <dl className="grid grid-cols-2 gap-2 min-[420px]:grid-cols-3">
-        {cells.map(([label, v]) => (
-          <div key={label} className="rounded-xl border border-line p-3"><dt className="text-[11.5px] font-semibold uppercase tracking-wide text-muted">{label}</dt><dd className="text-[22px] font-bold">{n(v)}</dd></div>
-        ))}
-      </dl>
-      {c.status === 'draft' ? <Alert kind="info">Esta campaña es un borrador: todavía no se envió, por eso los resultados están en cero.</Alert> : <p className="text-[12px] text-muted">Los números se actualizan con los estados que reporta WhatsApp (enviado, entregado, leído). El detalle por destinatario llega en la próxima versión.</p>}
-      <div className="flex justify-end"><Button onClick={onClose}>Cerrar</Button></div>
-    </Modal>
   );
 }
 

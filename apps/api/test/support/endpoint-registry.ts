@@ -387,6 +387,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/campaigns/:id', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'POST /v1/campaigns/:id/duplicate', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'GET /v1/campaigns/:id/preview', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'GET /v1/campaigns/summary', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'GET /v1/campaigns/:id/results', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'POST /v1/campaigns/:id/export', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   // Mensajes programados (M5.6c, ADR-50). Pruebas: test/scheduled/scheduled.test.ts (A↔B, permisos, ventana de 24 h, límites, cancelar, envío a su hora, cancelación automática, concurrencia)
   { route: 'GET /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Vista global (M5.10). Pruebas: test/scheduled/scheduled-global.test.ts (A↔B, alcance por persona, pestañas, cursor, filtro «mías», contactos borrados)

@@ -30,7 +30,7 @@
 | 17.2 | Pantalla «Campañas masivas» (una sola pantalla con cinco secciones, como el prototipo), vista previa, avisos de riesgo y de costo, tope por asesor en Equipo › Usuarios | construida 2026-11-16 |
 | 17.3 | Envío por WhatsApp oficial: lanzar (congela la audiencia), tarea `campaign-sender`, pausar/reanudar/cancelar, programar, tope diario por empresa | construida 2026-11-17 |
 | 17.4 | Envío por QR: «abrir y enviar texto», 45 s mínimo, cupo compartido con reserva, sesión caída ⇒ pausa | construida 2026-11-17 |
-| 17.5 | Resultados por campaña y destinatario, CSV, baja por palabra clave, tarjeta en Analítica | pendiente |
+| 17.5 | Resultados por campaña y destinatario, CSV, baja por palabra clave, tarjeta en Analítica | construida 2026-11-17 |
 
 ## 4. Sin validar (declararlo en cada PR)
 Plantillas de marketing contra Meta real, envío masivo real por Evolution (riesgo de bloqueo), volumen alto en la tarea, consentimiento `unknown` según la normativa local y el 70 % de reserva del cupo del QR.
