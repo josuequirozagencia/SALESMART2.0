@@ -297,6 +297,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/qr-channels', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'GET /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'POST /v1/qr-channels/:id/qr', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'POST /v1/qr-channels/:id/catch-up', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'POST /v1/qr-channels/:id/disconnect', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'PATCH /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'DELETE /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },

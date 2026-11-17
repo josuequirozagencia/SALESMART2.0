@@ -6,6 +6,7 @@
 //   POST /v1/qr-channels/:id/disconnect
 //   PATCH /v1/qr-channels/:id
 //   DELETE /v1/qr-channels/:id
+//   POST /v1/qr-channels/:id/catch-up
 //   POST /v1/integrations/qr/webhook/:routeId
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
@@ -23,7 +24,8 @@ import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule, OutboundDispatcher } from '../../src/modules/inbox';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { PlatformCredentialsReader } from '../../src/modules/platform';
-import { QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError } from '../../src/modules/qr';
+import { QrCatchUpJob, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart } from '../../src/modules/qr';
+import { DomainEventBus } from '../../src/modules/events';
 import { QueuesModule } from '../../src/modules/queues';
 import { Argon2idHasher } from '../../src/security';
 import { TenantContext } from '../../src/tenant';
@@ -644,5 +646,135 @@ describe('mensajes escritos desde el teléfono (v9)', () => {
     expect(await countOf('messages', `organization_id = '${ORG_A}'`)).toBe(1);
     expect(await countOf('messages', `organization_id = '${ORG_B}'`)).toBe(1);
     expect((await admin.query(`SELECT body FROM messages WHERE organization_id = $1`, [ORG_A])).rows[0].body).toBe('de A');
+  });
+});
+
+describe('ponerse al día con Evolution (v19 B3)', () => {
+  const rec = (id: string, ageH: number, body: string, over: { who?: string; fromMe?: boolean; message?: Record<string, unknown> } = {}): Record<string, unknown> => {
+    const who = over.who ?? '593990000002';
+    return { key: { remoteJid: `${who}@s.whatsapp.net`, remoteJidAlt: `${who}@s.whatsapp.net`, fromMe: over.fromMe ?? false, id, participant: '' }, pushName: 'Cliente Prueba', status: 'DELIVERY_ACK', message: over.message ?? { conversation: body }, messageType: 'conversation', messageTimestamp: Math.floor(Date.now() / 1000 - ageH * 3600), instanceId: 'i-1', source: 'android' };
+  };
+  const give = (instance: string, records: Array<Record<string, unknown>>): void => void fake().stored.set(instance, records);
+  const catchUp = async (token: string, id: string, hours?: number) => call('POST', `/qr-channels/${id}/catch-up`, token, hours === undefined ? {} : { hours });
+  interface Result { found: number; recovered: number; existing: number; truncated: boolean; hours: number }
+
+  it('lo que Evolution tiene y la plataforma no, entra a la bandeja por el mismo camino (contacto, conversación, mensaje con su hora real); repetir no duplica; es histórico', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    give(inst, [rec('REC-0000000000001', 60, 'Hola, ¿precio?'), rec('REC-0000000000002', 59, 'Quedo atento'), rec('REC-0000000000003', 3, 'Buenas')]);
+    const r = await catchUp(T.alice, v.id, 96);
+    expect(r.status).toBe(200);
+    expect(await json<Result>(r)).toMatchObject({ found: 3, recovered: 3, existing: 0, truncated: false, hours: 96 });
+    await runEvents();
+    await runEvents();
+    expect(await countOf('messages')).toBe(3);
+    const rows = (await admin.query(`SELECT body, direction, meta, sent_at FROM messages ORDER BY sent_at`)).rows as Array<{ body: string; direction: string; meta: Record<string, unknown>; sent_at: Date }>;
+    expect(rows.map((x) => x.body)).toEqual(['Hola, ¿precio?', 'Quedo atento', 'Buenas']);
+    expect(rows.every((x) => x.direction === 'in' && x.meta['recovered'] === true)).toBe(true);
+    expect(Date.now() - rows[0]!.sent_at.getTime()).toBeGreaterThan(59 * HOUR); // conserva la hora REAL de WhatsApp, no la de hoy
+    const conv = await convOf(v.id);
+    expect(conv?.['unread_count']).toBe(3);
+    expect(await countOf('contacts')).toBe(1);
+    // repetir la pasada: ya existen, no se pone nada en cola ni se duplica
+    expect(await json<Result>(await catchUp(T.alice, v.id, 96))).toMatchObject({ found: 3, recovered: 0, existing: 3 });
+    await runEvents();
+    expect(await countOf('messages')).toBe(3);
+    const q = await qrRow(v.id);
+    expect(q['last_catch_up_found']).toBe(3);
+    expect(q['last_catch_up_recovered']).toBe(0);
+    expect(q['last_catch_up_error']).toBeNull();
+    // la lista de conexiones muestra el resultado, sin teléfonos ni textos
+    const list = await json<{ items: Array<{ id: string; catch_up: { found: number; recovered: number; truncated: boolean; error: string | null } | null }> }>(await call('GET', '/qr-channels', T.alice));
+    expect(list.items.find((i) => i.id === v.id)?.catch_up).toMatchObject({ found: 3, recovered: 0, truncated: false, error: null });
+  });
+
+  it('lo que ya recibió el webhook no se vuelve a traer; un mensaje escrito desde el teléfono entra como de salida; los grupos no', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    await post(v.id, upsert(inst, 'LIVE-000000000001', { conversation: 'ya llegó por el webhook' }));
+    await runEvents();
+    const group = rec('GRP-0000000000001', 18, 'grupo');
+    (group['key'] as Record<string, unknown>)['remoteJid'] = '120363424375113025@g.us';
+    give(inst, [rec('LIVE-000000000001', 0.1, 'ya llegó por el webhook'), rec('OLD-0000000000001', 20, 'se perdió'), rec('PH-00000000000001', 19, 'respuesta desde el teléfono', { fromMe: true }), group]);
+    expect(await json<Result>(await catchUp(T.alice, v.id, 48))).toMatchObject({ found: 3, recovered: 2, existing: 1 });
+    await runEvents();
+    expect(await countOf('messages')).toBe(3);
+    const phone = (await admin.query(`SELECT direction, sender_type, meta FROM messages WHERE external_id = 'PH-00000000000001'`)).rows[0] as { direction: string; sender_type: string; meta: Record<string, unknown> };
+    expect(phone).toMatchObject({ direction: 'out', sender_type: 'human' });
+    expect(phone.meta['origin']).toBe('device');
+  });
+
+  it('un mensaje recuperado de días atrás no dispara reglas ni cronómetros ni saludos; el hecho se emite marcado como histórico', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    const seen: Array<{ type: string; historical: boolean }> = [];
+    const off = app.get(DomainEventBus).subscribe((_tx, e) => {
+      seen.push({ type: e.type, historical: e.type === 'message_received' && e.historical === true });
+      return Promise.resolve();
+    });
+    give(inst, [rec('HIS-0000000000001', 30, 'mensaje viejo')]);
+    await catchUp(T.alice, v.id, 48);
+    await runEvents();
+    off();
+    expect(seen.filter((e) => e.type === 'message_received')).toEqual([{ type: 'message_received', historical: true }]);
+    expect(await countOf('messages', `sender_type = 'automation'`)).toBe(0);
+  });
+
+  it('hours se valida (1 a 168); una asesora no puede; otra empresa no la ve (404); una instancia que ya no existe da 409', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    expect((await catchUp(T.alice, v.id, 0)).status).toBe(400);
+    expect((await catchUp(T.alice, v.id, 169)).status).toBe(400);
+    expect((await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 24, otro: 1 })).status).toBe(400);
+    expect((await catchUp(T.carol, v.id, 24)).status).toBe(403);
+    expect((await catchUp(T.bob, v.id, 24)).status).toBe(404);
+    expect((await call('POST', `/qr-channels/${v.id}/catch-up`, undefined, { hours: 24 })).status).toBe(401);
+    expect((await catchUp(T.alice, v.id)).status).toBe(200); // sin hours: 48 por omisión
+    fake().instances.delete(inst);
+    const gone = await catchUp(T.alice, v.id, 24);
+    expect(gone.status).toBe(409);
+    expect((await json<{ error: { code: string } }>(gone)).error.code).toBe('QR_INSTANCE_MISSING');
+  });
+
+  it('si hay más mensajes que el tope de lectura se dice (truncated) y los recientes sí entran', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    give(inst, Array.from({ length: 1005 }, (_x, i) => rec(`BIG-${String(i).padStart(12, '0')}`, 40 - i / 100, `m${i}`, { who: `59399${String(1000 + (i % 7)).padStart(7, '0')}` })));
+    const r = await json<Result>(await catchUp(T.alice, v.id, 48));
+    expect(r.truncated).toBe(true);
+    expect(r.found).toBe(1000);
+    expect((await qrRow(v.id))['last_catch_up_truncated']).toBe(true);
+  });
+
+  it('la tarea automática: solo sesiones abiertas, y un fallo de Evolution deja constancia sin tumbar la tarea', async () => {
+    const open1 = await mk(T.alice, 'Abierta');
+    const closed = await mk(T.alice, 'Caída');
+    await open(open1.id);
+    const i1 = await instanceOf(open1.id);
+    give(i1, [rec('JOB-0000000000001', 10, 'desde la tarea')]);
+    const job = app.get(QrCatchUpJob);
+    const now = new Date();
+    expect(await job.run(now)).toBe(1);
+    await runEvents();
+    expect(await countOf('messages')).toBe(1);
+    expect((await qrRow(closed.id))['last_catch_up_at']).toBeNull();
+    expect(((await qrRow(open1.id))['last_catch_up_at'] as Date).getTime()).toBe(now.getTime());
+    // Evolution ya no tiene la instancia: la tarea no lanza y anota el motivo
+    fake().instances.delete(i1);
+    expect(await job.run(new Date(now.getTime() + 10 * 60_000))).toBe(0);
+    expect((await qrRow(open1.id))['last_catch_up_error']).toMatch(/No se pudo leer de Evolution/);
+  });
+});
+
+describe('ventana de la pasada automática (v19 B3)', () => {
+  it('sin pasada previa mira 7 días; con una previa, desde ella menos 15 min, y nunca más atrás de 48 h', () => {
+    const now = new Date('2026-11-17T12:00:00Z');
+    expect(autoWindowStart(null, now).toISOString()).toBe('2026-11-10T12:00:00.000Z');
+    expect(autoWindowStart(new Date('2026-11-17T11:50:00Z'), now).toISOString()).toBe('2026-11-17T11:35:00.000Z');
+    expect(autoWindowStart(new Date('2026-11-10T00:00:00Z'), now).toISOString()).toBe('2026-11-15T12:00:00.000Z');
   });
 });

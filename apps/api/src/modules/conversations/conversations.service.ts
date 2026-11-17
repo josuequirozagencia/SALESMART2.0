@@ -69,7 +69,7 @@ export class ConversationsService {
    * actualiza la conversación (último mensaje, no leídos; si esperaba al cliente, vuelve a «trabajando») y, si sigue «sin asignar», la reparte según la cola de su
    * conexión (M5.3). `assign` trae lo de identidad que el reparto necesita (zona horaria y quién puede recibir trabajo): se resuelve antes de abrir la transacción.
    */
-  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext, opts?: IngestOptions): Promise<IngestResult> {
+  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext, opts?: IngestOptions, historical = false): Promise<IngestResult> {
     const [seen] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId))).limit(1);
     if (seen) return { duplicate: true, conversationId: null, contactCreated: false, conversationCreated: false };
 
@@ -95,7 +95,7 @@ export class ConversationsService {
         kind: m.kind,
         body: m.text,
         media: m.media ? { id: m.media.id, mime_type: m.media.mimeType, filename: m.media.filename } : null,
-        meta: { wa_id: m.fromRaw, ...m.extra },
+        meta: { wa_id: m.fromRaw, ...m.extra, ...(historical ? { recovered: true } : {}) },
         replyToMessageId: await this.quotedId(tx, channelAccountId, m.replyToExternalId),
         status: 'received',
         sentAt: m.sentAt,
@@ -106,8 +106,9 @@ export class ConversationsService {
     // Dos entregas del mismo mensaje a la vez: gana una y la otra no toca la conversación
     if (inserted.length === 0) return { duplicate: true, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
 
-    this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: inserted[0]!.id, kind: 'created' }, inbound: true });
-    await this.events?.emit(tx, { type: 'message_received', contactId: contact.id, key: `message_received:${inserted[0]!.id}`, channelId: channelAccountId, conversationId: conv.id, kind: m.kind, messageId: inserted[0]!.id });
+    // Un mensaje recuperado de días atrás (v19 B3, «ponerse al día») no avisa al celular de nadie (push) ni dispara automatizaciones; la pantalla sí se actualiza y las bajas de campañas sí cuentan
+    this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: inserted[0]!.id, kind: 'created' }, inbound: !historical });
+    await this.events?.emit(tx, { type: 'message_received', contactId: contact.id, key: `message_received:${inserted[0]!.id}`, channelId: channelAccountId, conversationId: conv.id, kind: m.kind, messageId: inserted[0]!.id, ...(historical ? { historical: true as const } : {}) });
 
     // Adjunto entrante (M5.6d): el mensaje queda, y aparte el archivo en `message_attachments` para que la tarea `attachments` lo descargue y lo revise (no bloquea la ingesta)
     await this.queueMediaDownload(tx, conv.id, inserted[0]!.id, m);
@@ -128,6 +129,8 @@ export class ConversationsService {
     // Una conversación sin dueño (nueva, o que antes no tenía a quién) se reparte ahora; si ya tiene dueño no se toca
     const a = await this.assignment.assignConversation(tx, conv.id, assign);
     // Si ya tenía dueño, el cliente espera una respuesta POSTERIOR (el cronómetro corre desde su mensaje, no desde que lo procesamos); si acaba de asignarse, ya corre el de primera respuesta
+    // Lo recuperado de días atrás (v19 B3) no arranca cronómetros ni saludos: reasignaría en masa por mensajes viejos
+    if (historical) return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
     if (!a.assigned && a.ownerId) await this.sla.startFollowup(tx, { id: conv.id, ownerId: a.ownerId, queueId: a.queueId }, { now: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, timeZone: assign.timeZone });
     // Saludo o aviso de fuera de horario de la cola (M5.5c): salen al cliente como mensaje automático, que no es una respuesta humana
     await this.autoMessages.afterInbound(tx, { conversationId: conv.id, channelAccountId, queueId: a.queueId, created: conv.created, receivedAt: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, inboundAt: m.sentAt, now: assign.now, timeZone: assign.timeZone });

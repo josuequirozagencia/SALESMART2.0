@@ -57,6 +57,13 @@ export interface QrSendMedia {
   readonly caption: string | null;
 }
 
+/** Lo que Evolution guarda de los mensajes recientes de una sesión (v19 B3): cada registro tiene la misma forma que el `data` de un aviso `messages.upsert`. */
+export interface QrRecentMessages {
+  readonly records: ReadonlyArray<Record<string, unknown>>;
+  /** Había más mensajes dentro del periodo que el tope pedido: quien llama debe decirlo (la recuperación no es completa). */
+  readonly truncated: boolean;
+}
+
 export interface QrSessionProvider {
   readonly name: 'evolution' | 'fake';
   /** Crea la instancia y le dice a qué dirección avisar. `webhookUrl` ya lleva el token: es un secreto. Lanza `QrSessionError`. */
@@ -71,6 +78,11 @@ export interface QrSessionProvider {
   deleteInstance(credentials: QrCredentials, instance: string): Promise<void>;
   /** La dirección de la foto de perfil de un número (dígitos, sin «+»), o null si no tiene foto o su privacidad no la deja ver. Falla igual que el resto (sesión caída, clave…). */
   fetchProfilePicture(credentials: QrCredentials, instance: string, phone: string): Promise<string | null>;
+  /**
+   * Los mensajes (entrantes y escritos desde el teléfono) que Evolution guardó desde `sinceMs` (v19 B3, «ponerse al día»): sirve para recuperar lo que un aviso perdido dejó sin llegar. Solo lectura.
+   * A lo sumo `maxRecords` registros, los más recientes primero; `truncated` avisa si quedaron más. Falla igual que el resto (sesión caída, clave…).
+   */
+  listRecentMessages(credentials: QrCredentials, instance: string, input: { sinceMs: number; maxRecords: number }): Promise<QrRecentMessages>;
   sendText(credentials: QrCredentials, instance: string, input: { to: string; text: string; replyTo?: QrQuoted | undefined }): Promise<SentMessage>;
   sendMedia(credentials: QrCredentials, instance: string, input: QrSendMedia): Promise<SentMessage>;
 }

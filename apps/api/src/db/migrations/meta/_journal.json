@@ -1037,6 +1037,13 @@
       "when": 1796300000000,
       "tag": "0147_v19_salud_conexion",
       "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1796400000000,
+      "tag": "0148_v19_ponerse_al_dia",
+      "breakpoints": true
     }
   ]
 }

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { EvolutionConnectionState } from '../channels';
 import type { SentMessage } from '../channels';
-import { QrSessionError, type QrCodeResult, type QrCredentials, type QrQuoted, type QrSendMedia, type QrSessionProvider, type QrErrorCode } from './qr-session.port';
+import { QrSessionError, type QrCodeResult, type QrCredentials, type QrQuoted, type QrRecentMessages, type QrSendMedia, type QrSessionProvider, type QrErrorCode } from './qr-session.port';
 
 /** Clave que acepta el fake: cualquier otra se rechaza como `not_configured` (igual que Evolution con una clave equivocada). */
 export const FAKE_QR_KEY = 'fake-qr-key';
@@ -31,12 +31,15 @@ export class FakeQrSession implements QrSessionProvider {
   readonly sent: FakeQrSent[] = [];
   /** Fotos de perfil por teléfono (dígitos): lo que «WhatsApp» devolvería. */
   readonly pictures = new Map<string, string>();
+  /** Lo que «Evolution» tiene guardado por instancia (forma de un `messages.upsert`): para probar «ponerse al día» (v19 B3). */
+  readonly stored = new Map<string, Array<Record<string, unknown>>>();
   private failures: QrSessionError[] = [];
 
   reset(): void {
     this.instances.clear();
     this.sent.length = 0;
     this.pictures.clear();
+    this.stored.clear();
     this.failures = [];
   }
 
@@ -114,6 +117,17 @@ export class FakeQrSession implements QrSessionProvider {
       this.check(c);
       this.instances.delete(instance);
       return Promise.resolve();
+    } catch (e) {
+      return Promise.reject(e);
+    }
+  }
+
+  listRecentMessages(c: QrCredentials, instance: string, input: { sinceMs: number; maxRecords: number }): Promise<QrRecentMessages> {
+    try {
+      this.check(c);
+      this.get(instance);
+      const all = (this.stored.get(instance) ?? []).filter((r) => Number(r['messageTimestamp']) * 1000 >= input.sinceMs).sort((a, b) => Number(b['messageTimestamp']) - Number(a['messageTimestamp']));
+      return Promise.resolve({ records: all.slice(0, input.maxRecords), truncated: all.length > input.maxRecords });
     } catch (e) {
       return Promise.reject(e);
     }
