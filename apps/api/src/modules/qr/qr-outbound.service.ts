@@ -153,13 +153,14 @@ export class QrOutboundService {
             sql`NOT EXISTS (SELECT 1 FROM messages o WHERE o.organization_id = ${messages.organizationId} AND o.conversation_id = ${messages.conversationId} AND o.direction = 'out' AND o.status = 'queued' AND (o.sent_at, o.id) < (${messages.sentAt}, ${messages.id}) AND o.kind <> 'note')`,
           ),
         )
-        .returning({ id: messages.id, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, sentAt: messages.sentAt, replyToMessageId: messages.replyToMessageId });
+        .returning({ id: messages.id, senderType: messages.senderType, conversationId: messages.conversationId, channelAccountId: messages.channelAccountId, body: messages.body, attempts: messages.attempts, kind: messages.kind, sentAt: messages.sentAt, replyToMessageId: messages.replyToMessageId });
       const m = rows[0];
       if (!m) return { kind: 'skipped' as const };
 
       const [ctx] = await tx
         .select({
           peerId: conversations.peerId,
+          inWindow: sql<boolean>`coalesce(${conversations.lastInboundAt} > ${new Date(now.getTime() - 24 * 60 * 60_000).toISOString()}::timestamptz, false)`,
           contactId: conversations.contactId,
           status: channelAccounts.status,
           deletedAt: channelAccounts.deletedAt,
@@ -215,8 +216,10 @@ export class QrOutboundService {
       const [stat] = await tx
         .select({ n: sql<number>`count(*)::int`, last: sql<Date | null>`max(${messages.sentAt})` })
         .from(messages)
-        .where(and(eq(messages.channelAccountId, m.channelAccountId), eq(messages.direction, 'out'), inArray(messages.status, ['sent', 'delivered', 'read']), gt(messages.sentAt, since), sql`${messages.id} <> ${m.id}`));
-      const gate = sendGate({ sentLast24h: stat?.n ?? 0, lastSentAt: stat?.last ? new Date(stat.last) : null, firstConnectedAt: ctx.firstConnectedAt, now });
+        .where(and(eq(messages.channelAccountId, m.channelAccountId), eq(messages.direction, 'out'), inArray(messages.status, ['sent', 'delivered', 'read']), gt(messages.sentAt, since), sql`${messages.id} <> ${m.id}`, sql`coalesce(${messages.meta}->>'origin', '') <> 'device'`));
+      // Lo escrito desde el TELÉFONO no se cuenta (no pasó por la plataforma ni es envío automático). Una respuesta a un cliente que escribió en las últimas 24 h no se frena con el límite del día (la campaña no cuenta como respuesta)
+      const replyInWindow = m.senderType !== 'campaign' && ctx.inWindow;
+      const gate = sendGate({ sentLast24h: stat?.n ?? 0, lastSentAt: stat?.last ? new Date(stat.last) : null, firstConnectedAt: ctx.firstConnectedAt, now, replyInWindow });
       if (!gate.ok) return waitLocal(gate.reason === 'daily' ? 'rate_limited' : 'rate_limited', Math.max(gate.retryAt.getTime() - now.getTime(), 1_000));
       return { kind: 'plan' as const, plan: { messageId: m.id, attempts: m.attempts, instance: ctx.instance, to, text: m.body ?? '', sentAt: m.sentAt, attachment, replyTo } };
     });

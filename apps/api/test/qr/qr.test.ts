@@ -429,6 +429,8 @@ describe('envío por la sesión', () => {
 
   it('calentamiento: el límite del día (20 el primer día) y la pausa mínima entre mensajes hacen esperar al siguiente, sin gastar intentos', async () => {
     const { v, conv } = await ready();
+    // un envío «en frío»: el cliente no escribió en las últimas 24 h (contestar a quien escribió primero no se frena con el límite del día)
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '3 days' WHERE id = $1`, [conv]);
     for (let i = 0; i < 20; i++) await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'previo', 'sent', now() - interval '2 hours', $4)`, [ORG_A, conv, v.id, `PREV${i}`]);
     const id = await queueOut(conv, v.id, 'El número 21');
     expect(await dispatch(id)).toEqual({ outcome: 'retry', code: 'rate_limited' });
@@ -443,6 +445,40 @@ describe('envío por la sesión', () => {
     const gap = await dispatch(next, new Date());
     expect(gap).toEqual({ outcome: 'retry', code: 'rate_limited' });
     expect(await dispatch(next, new Date(Date.now() + 10_000))).toEqual({ outcome: 'sent' });
+  });
+
+  it('respuestas al cliente que escribió en las últimas 24 h NO se frenan con el límite del día (solo con la pausa mínima); la campaña y el contacto en frío sí, y lo escrito desde el TELÉFONO no cuenta (v19)', async () => {
+    const { v, conv } = await ready();
+    const prev = (i: number, origin: string | null) =>
+      admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id, meta) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'previo', 'sent', now() - interval '2 hours', $4, $5::jsonb)`, [ORG_A, conv, v.id, `GATE${i}-${origin ?? 'p'}`, origin ? JSON.stringify({ origin }) : '{}']);
+    // 20 envíos de la PLATAFORMA en las últimas 24 h = el límite del primer día
+    for (let i = 0; i < 20; i++) await prev(i, null);
+    // 1) con el cliente escribiendo hace poco, la respuesta sale aunque ya se llegó al límite
+    const reply = await queueOut(conv, v.id, 'respuesta al cliente');
+    expect(await dispatch(reply)).toEqual({ outcome: 'sent' });
+    // 2) pero la pausa mínima sigue: otra enseguida espera unos segundos
+    const next = await queueOut(conv, v.id, 'otra enseguida');
+    expect(await dispatch(next, new Date())).toEqual({ outcome: 'retry', code: 'rate_limited' });
+    expect(await dispatch(next, new Date(Date.now() + 10_000))).toEqual({ outcome: 'sent' });
+    // 3) una campaña NO es respuesta: sigue frenada por el límite
+    const camp = await queueOut(conv, v.id, 'campaña');
+    await admin.query(`UPDATE messages SET sender_type = 'campaign' WHERE id = $1`, [camp]);
+    expect(await dispatch(camp, new Date(Date.now() + 20_000))).toEqual({ outcome: 'retry', code: 'rate_limited' });
+    await admin.query(`UPDATE messages SET status = 'failed', next_attempt_at = NULL WHERE id = $1`, [camp]); // fuera de la cola (un mensaje no sale antes que otro anterior suyo en cola)
+    // 4) si el cliente no escribe desde hace más de 24 h es un envío en frío: también frenado
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '3 days' WHERE id = $1`, [conv]);
+    const cold = await queueOut(conv, v.id, 'en frío');
+    expect(await dispatch(cold, new Date(Date.now() + 30_000))).toEqual({ outcome: 'retry', code: 'rate_limited' });
+  });
+
+  it('lo escrito desde el teléfono no cuenta para el límite del día ni para la pausa mínima: 200 mensajes del teléfono no frenan un envío en frío (v19)', async () => {
+    const { v, conv } = await ready();
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '3 days' WHERE id = $1`, [conv]);
+    for (let i = 0; i < 200; i++) {
+      await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id, meta) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'del teléfono', 'sent', now() - interval '1 second', $4, '{"origin":"device"}'::jsonb)`, [ORG_A, conv, v.id, `DEV${i}`]);
+    }
+    const id = await queueOut(conv, v.id, 'enviado por la plataforma');
+    expect(await dispatch(id)).toEqual({ outcome: 'sent' });
   });
 
   it('no se pueden enviar plantillas ni stickers por QR (falla con su motivo); un error del servidor se reintenta y un número inválido falla', async () => {
