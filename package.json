@@ -36,6 +36,11 @@
     "typescript-eslint": "8.71.0"
   },
   "pnpm": {
+    "auditConfig": {
+      "ignoreGhsas": [
+        "GHSA-fc5q-39xc-vjpf"
+      ]
+    },
     "overrides": {
       "esbuild": ">=0.25.0",
       "body-parser": ">=2.4.0",
