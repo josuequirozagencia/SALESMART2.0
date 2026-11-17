@@ -234,6 +234,11 @@ export class TemplatesService {
     return row;
   }
 
+  /** Los ids de las variables que pide la plantilla (`body:1`, `button:0:1`…), para comprobar de antemano lo que una campaña promete llenar. */
+  variableIds(row: Row): string[] {
+    return variablesOf(fromRow(row)).map((v) => v.id);
+  }
+
   /** Valida los valores contra la plantilla y arma el texto y los datos de envío; 400 con el campo que falla. */
   prepare(row: Row, params: Readonly<Record<string, string>>): Prepared {
     const t = fromRow(row);

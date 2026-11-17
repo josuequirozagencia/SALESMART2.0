@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, eq } from 'drizzle-orm';
-import { Database, organizations, trialConfig } from '../../db';
+import { Database, organizations, plans, trialConfig } from '../../db';
+import { normalizeFeatures, type PlanFeatureKey } from './plan-features';
 import { operatingOrg } from './operating';
 import { TenantContext } from '../../tenant';
 import { OrgMembersService } from './org-members.service';
@@ -40,6 +41,19 @@ export class OrgDirectoryService {
     const value: OrgDirectory = { timeZone: row?.timezone || FALLBACK_ZONE, assignable: new Set(people.map((p) => p.id)) };
     this.cache.set(org, { at: now, value });
     return value;
+  }
+
+  /**
+   * ¿El plan de la empresa del contexto enciende esta función? (v17, ADR-72 #10: la primera función de plan que el servidor EXIGE). Una empresa sin plan asignado está en su prueba gratis y la
+   * prueba da acceso a todo. Se lee ANTES de abrir la transacción de negocio (es identidad).
+   */
+  async featureEnabled(key: PlanFeatureKey): Promise<boolean> {
+    const org = TenantContext.current().organizationId;
+    const [row] = await this.db.withIdentity((tx) =>
+      tx.select({ planId: organizations.planId, features: plans.features }).from(organizations).leftJoin(plans, eq(plans.id, organizations.planId)).where(eq(organizations.id, org)).limit(1),
+    );
+    if (!row?.planId) return true;
+    return normalizeFeatures(row.features)[key];
   }
 
   /** El nombre de la empresa del contexto, para las variables de las respuestas rápidas (`{{empresa}}`). Se lee ANTES de la transacción de negocio. */

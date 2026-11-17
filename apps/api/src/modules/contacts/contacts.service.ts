@@ -89,6 +89,15 @@ export interface ContactList {
 }
 
 /** Lo que el controlador sabe del que pregunta (de sus permisos verificados). El id de la persona sale de TenantContext. */
+/** Un contacto de la audiencia de una campaña: solo lo que hace falta para decidir si se le escribe. */
+export interface AudienceContact {
+  id: string;
+  name: string;
+  consent: 'unknown' | 'granted' | 'revoked';
+  /** Teléfono principal (E.164); null si no tiene. */
+  phone: string | null;
+}
+
 export interface ContactScope {
   readonly viewAll: boolean;
 }
@@ -460,6 +469,38 @@ export class ContactsService {
       if (!p.next) return out;
       cursor = p.next;
     }
+  }
+
+  /**
+   * Los contactos de la AUDIENCIA de una campaña (v17, ADR-72), dentro de la transacción del que llama: una lista guardada (fija o dinámica) o filtros sueltos, siempre con el ALCANCE de
+   * la persona (sin `contacts.view_all`, solo los suyos). Devuelve solo lo que la campaña necesita (id, nombre, consentimiento y teléfono principal), más cuántos contactos de la
+   * empresa cumplen lo mismo SIN el alcance (`company`, para decir «el resto no está disponible para ti» como en el prototipo). Más de `max` es un 400: hay que filtrar.
+   */
+  async audienceIn(tx: TenantTx, scope: ContactScope, src: { list?: string | undefined; filters?: ContactFilters | undefined }, max: number): Promise<{ contacts: AudienceContact[]; visible: number; company: number }> {
+    const sc = this.scope(scope);
+    const base = (limit: number, viewAll: boolean): [Scope, ListContactsQuery] => [
+      { userId: sc.userId, viewAll },
+      { ...(src.filters ?? {}), ...(src.list ? { list: src.list } : {}), sort: 'created_at', order: 'asc', limit },
+    ];
+    const out: AudienceContact[] = [];
+    let visible = 0;
+    let cursor: string | undefined;
+    for (;;) {
+      const [s, q] = base(100, scope.viewAll);
+      const p = await this.pageFor(tx, s, cursor ? { ...q, cursor } : q);
+      if (p.total !== null) visible = p.total;
+      const phones = await this.repo.phonesOf(tx, p.rows.map((r) => r.id));
+      for (const r of p.rows) out.push({ id: r.id, name: r.name, consent: r.consent as AudienceContact['consent'], phone: phones.get(r.id)?.[0]?.e164 ?? null });
+      if (out.length > max) throw new AppError(400, 'AUDIENCE_TOO_LARGE', `La audiencia supera los ${max} contactos: elige una lista más chica o aplica filtros`);
+      if (!p.next) break;
+      cursor = p.next;
+    }
+    let company = visible;
+    if (!scope.viewAll) {
+      const [s, q] = base(1, true);
+      company = (await this.pageFor(tx, s, q)).total ?? visible;
+    }
+    return { contacts: out, visible, company };
   }
 
   /** Convierte lo leído en vistas de contacto (resuelve responsables en identidad; llamar FUERA de la transacción del tenant). */
