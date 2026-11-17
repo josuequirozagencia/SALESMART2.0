@@ -427,7 +427,7 @@ describe('vista previa de la audiencia', () => {
     await ok(await call('PUT', `/campaigns/advisor-limits/${IDS.carol}`, T.alice, { daily_cap: 2 }));
     p = await preview(T.carol, qr.id);
     expect(p.limits).toMatchObject({ daily_cap: 2, advisor_cap: 2 });
-    expect(p.estimate.days).toBe(3);
+    expect(p.estimate!.days).toBe(3);
     expect(p.warnings).toContain('spans_days');
     // y ya no puede crear ni editar campañas por encima de su tope
     const over = await create(T.carol, textBody({ channel_id: qrCarol, daily_cap: 3 }));
