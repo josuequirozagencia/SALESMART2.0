@@ -9,8 +9,9 @@ import type { AgentStatus, ChatMessage, MentionOption, ChatMessagePage, Conversa
  */
 export const LIST_POLL_MS = 10_000;
 export const THREAD_POLL_MS = 5_000;
-export const LIVE_LIST_POLL_MS = 60_000;
-export const LIVE_THREAD_POLL_MS = 30_000;
+// Con el tiempo real «en vivo» solo quedan como respaldo, pero un respaldo de 30–60 s hacía que un aviso perdido se notara medio minuto después (v19 B2): ahora 15 s y 10 s
+export const LIVE_LIST_POLL_MS = 15_000;
+export const LIVE_THREAD_POLL_MS = 10_000;
 
 /** Intervalos de consulta según haya o no conexión en vivo. */
 function usePolling(): { list: number; thread: number } {

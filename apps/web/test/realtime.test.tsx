@@ -1,6 +1,10 @@
 import { screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient } from '@tanstack/react-query';
+import { LIVE_LIST_POLL_MS, LIVE_THREAD_POLL_MS } from '../src/features/inbox/useInbox';
+import { MISSING_RETRY_MS, threadHasMessage } from '../src/features/inbox/useInboxRealtime';
 import { getRealtimeStatus, startRealtime } from '../src/lib/realtime';
+import { getRealtimeStats, recordRealtimeEvent, resetRealtimeStats } from '../src/lib/realtimeStats';
 import type { ChatMessage, Conversation, ConversationList } from '../src/lib/types';
 import { sockets, lastSocket } from './fake-socket';
 import { authed, ME_ADVISOR, mockApi, renderApp, resetWorld, type Handler } from './helpers';
@@ -158,4 +162,64 @@ describe('Tiempo real · conexión', () => {
     expect(seen).toEqual(['c7']);
     stop();
   });
+});
+
+const MSG = (id: string): ChatMessage => ({ id, direction: 'in', sender_type: 'contact', author: null, kind: 'text', text: 'Hola', media: null, extra: null, reaction: null, status: 'received', error: null, sent_at: NOW, delivered_at: null, read_at: null, is_note: false, template: null, attachment: null });
+
+describe('Tiempo real · medición y respaldo (v19 B2)', () => {
+  it('las consultas de respaldo con el tiempo real en vivo son de 15 s (lista) y 10 s (hilo): un aviso perdido no tarda medio minuto', () => {
+    expect(LIVE_LIST_POLL_MS).toBe(15_000);
+    expect(LIVE_THREAD_POLL_MS).toBe(10_000);
+  });
+
+  it('cuenta los avisos y mide cuánto tardó cada uno desde que el servidor lo emitió (mediana y máximo); un aviso mal formado no cuenta', () => {
+    resetRealtimeStats();
+    const stop = startRealtime({ onChange: () => {}, onResync: () => {} });
+    const s = lastSocket();
+    s.fire('connect');
+    s.fire('conversation.updated', { data: {} }); // sin conversación: no cuenta
+    expect(getRealtimeStats().events).toBe(0);
+    const ago = (ms: number): string => new Date(Date.now() - ms).toISOString();
+    s.fire('message.created', { at: ago(400), data: { conversation_id: 'c1', message_id: 'm1' } });
+    s.fire('message.created', { at: ago(1_000), data: { conversation_id: 'c1', message_id: 'm2' } });
+    s.fire('message.created', { at: ago(9_000), data: { conversation_id: 'c1', message_id: 'm3' } });
+    const st = getRealtimeStats();
+    expect(st.events).toBe(3);
+    expect(st.lastEventAt).not.toBeNull();
+    expect(st.lagMedianMs!).toBeGreaterThanOrEqual(1_000);
+    expect(st.lagMedianMs!).toBeLessThan(1_500);
+    expect(st.lagMaxMs!).toBeGreaterThanOrEqual(9_000);
+    stop();
+    // un aviso sin hora legible cuenta pero no mide
+    resetRealtimeStats();
+    recordRealtimeEvent('no es una fecha');
+    expect(getRealtimeStats()).toMatchObject({ events: 1, lagMedianMs: null, lagMaxMs: null });
+  });
+
+  it('threadHasMessage: sin el hilo en memoria no hay nada que reintentar; con el hilo, depende de si ya trae el mensaje', () => {
+    const qc = new QueryClient();
+    expect(threadHasMessage(qc, 'c1', 'm9')).toBe(true);
+    qc.setQueryData(['messages', 'c1'], { pages: [{ items: [MSG('m1')], next_cursor: null }], pageParams: [undefined] });
+    expect(threadHasMessage(qc, 'c1', 'm1')).toBe(true);
+    expect(threadHasMessage(qc, 'c1', 'm9')).toBe(false);
+  });
+
+  it('si el aviso anunciaba un mensaje que el hilo aún no trae (la transacción se confirmó un instante después), el hilo se vuelve a pedir solo; cuando ya está, no se repite', async () => {
+    let arrived = false;
+    const api = mockApi({ ...server(), 'GET /conversations/c1/messages': () => ({ body: { items: arrived ? [MSG('m9')] : ([] as ChatMessage[]), next_cursor: null } }) });
+    resetRealtimeStats();
+    renderApp('/inbox/c1');
+    await screen.findByText('Ana Torres');
+    await live();
+    await waitFor(() => expect(api.count('GET /conversations/c1/messages')).toBeGreaterThan(0));
+    const before = api.count('GET /conversations/c1/messages');
+    lastSocket().fire('message.created', { organization_id: 'o1', request_id: 'r', at: NOW, data: { conversation_id: 'c1', message_id: 'm9' } });
+    await waitFor(() => expect(api.count('GET /conversations/c1/messages')).toBe(before + 1)); // la respuesta al aviso: aún sin el mensaje
+    arrived = true; // en el servidor ya se confirmó
+    await waitFor(() => expect(api.count('GET /conversations/c1/messages')).toBe(before + 2), { timeout: MISSING_RETRY_MS[0] + 2_000 }); // el reintento
+    expect(getRealtimeStats().missingRetries).toBe(1);
+    await new Promise((r) => setTimeout(r, MISSING_RETRY_MS[1] + 600));
+    expect(api.count('GET /conversations/c1/messages')).toBe(before + 2); // ya estaba: no hay más reintentos
+    expect(getRealtimeStats().missingGaveUp).toBe(0);
+  }, 20_000);
 });

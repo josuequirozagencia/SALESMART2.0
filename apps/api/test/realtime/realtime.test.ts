@@ -8,7 +8,7 @@ import { Client } from 'pg';
 import { io as connectIo, type Socket } from 'socket.io-client';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
-import { DbModule } from '../../src/db';
+import { Database, DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { ChannelsModule, FAKE_WHATSAPP_TOKEN } from '../../src/modules/channels';
@@ -18,6 +18,7 @@ import { OrganizationsModule } from '../../src/modules/organizations';
 import { QueuesModule } from '../../src/modules/queues';
 import { clientIp, MAX_SOCKETS_PER_USER, REALTIME_PATH, RealtimeService, type RealtimeEnvelope } from '../../src/modules/realtime';
 import { Argon2idHasher } from '../../src/security';
+import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
@@ -286,5 +287,64 @@ describe('desde la API', () => {
     rt.touchHere(conv);
     await sleep(700);
     expect(got).toEqual([]);
+  });
+});
+
+describe('el aviso sale DESPUÉS de confirmar la transacción (v19 B2)', () => {
+  const inTx = <T,>(fn: () => Promise<T>): Promise<T> => TenantContext.run({ organizationId: ORG_A }, () => app.get(Database).withTenant(fn));
+  const MSG = '0190aaaa-7a3b-7c4d-8e5f-000000000001';
+
+  it('una transacción más larga que la espera de antes NO avisa mientras sigue abierta; avisa apenas se confirma', async () => {
+    const conv = await mkConv(IDS.carol);
+    const s = await connect(T.alice);
+    const got = listen(s, EVENTS);
+    await inTx(async () => {
+      rt.touchHere(conv, { message: { id: MSG, kind: 'created' } });
+      await sleep(600); // más que los 250 ms de antes: el aviso viejo habría salido con la transacción todavía abierta
+      expect(got).toEqual([]);
+    });
+    await sleep(500);
+    expect(got.some((g) => g.event === 'message.created' && g.body.data.message_id === MSG && g.body.data.conversation_id === conv)).toBe(true);
+  });
+
+  it('si la transacción se revierte, no sale ningún aviso', async () => {
+    const conv = await mkConv(IDS.carol);
+    const s = await connect(T.alice);
+    const got = listen(s, EVENTS);
+    await expect(inTx(async () => {
+      rt.touchHere(conv, { message: { id: MSG, kind: 'created' } });
+      throw new Error('falla a propósito');
+    })).rejects.toThrow('falla a propósito');
+    await sleep(700);
+    expect(got).toEqual([]);
+  });
+
+  it('una llamada anidada comparte la transacción externa: sale al confirmar la externa; y fuera de una transacción sale enseguida', async () => {
+    const conv = await mkConv(IDS.carol);
+    const s = await connect(T.alice);
+    const got = listen(s, EVENTS);
+    await inTx(async () => {
+      await app.get(Database).withTenant(async () => { rt.touchHere(conv, { message: { id: MSG, kind: 'updated' } }); });
+      await sleep(500);
+      expect(got).toEqual([]);
+    });
+    await sleep(500);
+    expect(got.some((g) => g.event === 'message.updated')).toBe(true);
+    got.length = 0;
+    await TenantContext.run({ organizationId: ORG_A }, async () => { rt.touchHere(conv, { message: { id: MSG, kind: 'created' } }); });
+    await sleep(500);
+    expect(got.some((g) => g.event === 'message.created')).toBe(true);
+  });
+
+  it('un fallo al avisar no tumba ni revierte la transacción ya confirmada', async () => {
+    const db = app.get(Database);
+    const out = await TenantContext.run({ organizationId: ORG_A }, async () => {
+      const r = await db.withTenant(async () => {
+        db.afterCommit(() => { throw new Error('el aviso falló'); });
+        return 'confirmada';
+      });
+      return r;
+    });
+    expect(out).toBe('confirmada');
   });
 });
