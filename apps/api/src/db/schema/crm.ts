@@ -89,6 +89,28 @@ export const contactPhones = tenantTable(
 );
 
 /**
+ * Identidades de un contacto fuera de su teléfono (ADR-73, v19): hoy solo `wa_lid`, el código interno `…@lid` con el que WhatsApp identifica a un contacto cuando NO entrega su teléfono. Sirve para reconocer al
+ * mismo contacto en el siguiente mensaje y para saber a qué contacto aplicar el teléfono cuando por fin llega. Único por empresa (el mismo código en otra empresa es otro contacto). Sin DELETE para `app_rw`.
+ */
+export const contactIdentities = tenantTable(
+  'contact_identities',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    contactId: uuid('contact_id').notNull(),
+    kind: text('kind').notNull(),
+    value: text('value').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'contact_identities_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('contact_identities_kind_valid', sql`${t['kind']!} IN ('wa_lid')`),
+    check('contact_identities_lid_shape', sql`${t['kind']!} <> 'wa_lid' OR ${t['value']!} ~ '^[0-9]{5,30}@lid$'`),
+    uniqueIndex('contact_identities_org_kind_value_uq').on(t['organizationId']!, t['kind']!, t['value']!),
+    index('contact_identities_contact_idx').on(t['organizationId']!, t['contactId']!),
+  ],
+);
+
+/**
  * Etiquetas (M3.3, ADR-45). Las del SISTEMA (`lead`, `appointment`, `sale`) las crea el servicio al primer uso en cada empresa, no se borran ni se renombran
  * y solo las pone el sistema. Las personalizadas llegan en M3.4. `app_rw` no tiene DELETE (borrado lógico).
  */

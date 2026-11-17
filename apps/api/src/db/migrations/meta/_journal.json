@@ -1044,6 +1044,13 @@
       "when": 1796400000000,
       "tag": "0148_v19_ponerse_al_dia",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1796500000000,
+      "tag": "0149_v19_contactos_lid",
+      "breakpoints": true
     }
   ]
 }

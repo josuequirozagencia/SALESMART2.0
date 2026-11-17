@@ -80,13 +80,16 @@ describe('mensajes entrantes (messages.upsert)', () => {
     expect(parseEvolutionWebhook(upsert('REA-0000000000000003', { reactionMessage: { text: '👍' } }), NOW).ignored).toBe(1);
   });
 
-  it('el identificador con sufijo de dispositivo o solo @lid: se usa remoteJidAlt; sin teléfono resoluble se descarta', () => {
+  it('el identificador con sufijo de dispositivo o solo @lid: se usa remoteJidAlt; sin teléfono resoluble el mensaje entra con su código @lid (ADR-73)', () => {
     const dev = parseEvolutionWebhook(upsert('DEV-0000000000000001', { conversation: 'hola' }, {}, { remoteJid: `${CLIENT}:50@s.whatsapp.net` }), NOW);
     expect(dev.events[0]!.event.messages[0]!.from).toBe(`+${CLIENT}`);
     const lid = parseEvolutionWebhook(upsert('LID-0000000000000001', { conversation: 'hola' }, {}, { remoteJid: '257720267587711@lid' }), NOW);
     expect(lid.events[0]!.event.messages[0]!.from).toBe(`+${CLIENT}`); // por remoteJidAlt
     const lost = parseEvolutionWebhook(upsert('LID-0000000000000002', { conversation: 'hola' }, {}, { remoteJid: '257720267587711@lid', remoteJidAlt: '257720267587711@lid' }), NOW);
-    expect(lost).toMatchObject({ events: [], ignored: 1 });
+    expect(lost.ignored).toBe(0);
+    expect(lost.events[0]!.event.messages[0]).toMatchObject({ from: null, lid: '257720267587711@lid' });
+    // con teléfono Y código, el mensaje lleva los dos (el contacto se reconoce por el teléfono y se guarda el par)
+    expect(lid.events[0]!.event.messages[0]).toMatchObject({ from: `+${CLIENT}`, lid: '257720267587711@lid' });
   });
 
   it('grupos y estados de WhatsApp se ignoran (y se cuentan), también los que escribe el teléfono', () => {
@@ -215,7 +218,7 @@ describe('mensajes escritos desde el teléfono (fromMe, v9)', () => {
     const lid = parseEvolutionWebhook(mine('PH-LID-00000000001', { conversation: 'ok' }, {}), NOW);
     expect(lid.events[0]!.event.messages[0]).toMatchObject({ from: `+${CLIENT}`, origin: 'device' });
     const onlyLid = parseEvolutionWebhook(upsert('PH-LID-00000000002', { conversation: 'ok' }, {}, { fromMe: true, remoteJid: '154640482095149@lid', remoteJidAlt: undefined }), NOW);
-    expect(onlyLid).toMatchObject({ events: [], ignored: 1 });
+    expect(onlyLid.events[0]!.event.messages[0]).toMatchObject({ from: null, lid: '154640482095149@lid', origin: 'device' });
   });
 
   it('la reacción que pone el teléfono se sigue ignorando; la del cliente se sigue leyendo', () => {
@@ -238,7 +241,7 @@ describe('motivo de lo ignorado (v19 B1)', () => {
     expect(R(body('messages.upsert', { key: key({ remoteJid: '120363424375113025@g.us' }), message: { conversation: 'x' } }))).toBe('group');
     expect(R(body('messages.upsert', { key: key({ remoteJid: 'status@broadcast' }), message: { conversation: 'x' } }))).toBe('status');
     expect(R(body('messages.upsert', { key: key({ fromMe: true }), message: { reactionMessage: { key: { id: 'A' }, text: '👍' } } }))).toBe('from_me');
-    expect(R(body('messages.upsert', { key: key({ remoteJid: '1234567@lid' }), message: { conversation: 'x' } }))).toBe('no_phone');
+    expect(R(body('messages.upsert', { key: key({ remoteJid: 'abc@s.whatsapp.net' }), message: { conversation: 'x' } }))).toBe('no_phone');
     expect(R(body('messages.upsert', { key: key(), message: null }))).toBe('malformed');
     expect(R(body('messages.update', { keyId: 'X', status: 'READ', fromMe: false }))).toBe('receipt');
     expect(R(body('messages.update', { keyId: 'X', status: 'ALGO_NUEVO', fromMe: true }))).toBe('unsupported');

@@ -348,6 +348,53 @@ export class ContactsService {
   }
 
   /**
+   * Quién es la persona que escribió por WhatsApp (ADR-73, v19). Por WhatsApp oficial siempre hay teléfono. Por QR, WhatsApp a veces identifica al contacto solo con su código `…@lid`:
+   *  - teléfono y código: el contacto del teléfono (o el que ya tenía ese código) y se guarda el par; si el código era de un contacto sin teléfono, aprende el teléfono; si el teléfono ya era de OTRO contacto
+   *    NO se fusionan solos (queda constancia en la auditoría para que una persona decida);
+   *  - solo teléfono: como siempre;
+   *  - solo código: el contacto que ya tenía ese código o, si no hay, uno nuevo SIN teléfono con el nombre del perfil de WhatsApp.
+   * Dentro de la transacción del que llama; serializado por teléfono y por código.
+   */
+  async resolveWhatsapp(tx: TenantTx, input: { phone: string | null; lid: string | null; name?: string | null; audit?: AuditSource }): Promise<{ id: string; created: boolean }> {
+    const { phone, lid } = input;
+    const audit = input.audit ?? 'meta';
+    if (!lid) {
+      if (!phone) throw new ValidationError([{ path: 'phone', code: 'required', message: 'Falta el teléfono del contacto' }]);
+      return this.findOrCreateByPhone(tx, phone, 'whatsapp', input.name, audit);
+    }
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`contact_lid:${lid}`}::text || ':' || app_org()::text), 0))`);
+    const known = await this.repo.idByIdentity(tx, 'wa_lid', lid);
+    if (!phone) {
+      if (known) return { id: known, created: false };
+      const profile = (input.name ?? '').replace(/\p{Cc}/gu, ' ').trim().slice(0, 200).trim();
+      const finalName = profile === '' ? 'Contacto sin teléfono' : profile;
+      const [c] = await tx.insert(contacts).values({ name: finalName, source: 'whatsapp', channel: channelOf('whatsapp'), consent: 'unknown', createdBy: null }).returning();
+      await this.repo.addIdentity(tx, c!.id, 'wa_lid', lid);
+      await writeAudit(tx, { entityType: 'contact', entityId: c!.id, newValue: { name: finalName, source: 'whatsapp', consent: 'unknown', phones: [], identity: 'wa_lid' }, source: audit });
+      await this.events?.emit(tx, { type: 'contact_created', contactId: c!.id, key: `contact_created:${c!.id}`, source: 'whatsapp' });
+      return { id: c!.id, created: true };
+    }
+    // Con teléfono y código
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended((${`contact_phone:${phone}`}::text || ':' || app_org()::text), 0))`);
+    const byPhone = await this.repo.idByPhone(tx, phone);
+    if (known && !byPhone) {
+      // El contacto que se reconocía por su código aprende el teléfono (si ya tenía otro, no se toca)
+      if (!(await this.repo.hasPhone(tx, known))) {
+        await tx.insert(contactPhones).values({ contactId: known, e164: phone, isPrimary: true });
+        await writeAudit(tx, { entityType: 'contact', entityId: known, field: 'phones', newValue: [phone], source: audit });
+      }
+      return { id: known, created: false };
+    }
+    if (known && byPhone && known !== byPhone) {
+      await writeAudit(tx, { entityType: 'contact', entityId: byPhone, field: 'wa_lid_conflict', newValue: { other_contact_id: known }, source: audit });
+      return { id: byPhone, created: false };
+    }
+    const c = byPhone ? { id: byPhone, created: false } : await this.findOrCreateByPhone(tx, phone, 'whatsapp', input.name, audit);
+    if (!known) await this.repo.addIdentity(tx, c.id, 'wa_lid', lid);
+    return c;
+  }
+
+  /**
    * Fija el canal de un contacto RECIÉN creado por un anuncio (M3.3 §11). Solo se llama cuando quien invoca acaba de crear el contacto: un clic posterior nunca cambia el canal.
    */
   async setChannelOnCreate(tx: TenantTx, id: string, channel: ContactChannel): Promise<void> {

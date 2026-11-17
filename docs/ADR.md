@@ -3015,7 +3015,7 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 **Sin validar contra Evolution real** salvo la lectura de `findMessages` hecha a mano el 2026-11-17: el efecto de la tarea con varias empresas y volumen, `media` de mensajes recuperados, y la recuperación en una sesión con miles de mensajes.
 
 
-## ADR-73 — Contactos de WhatsApp por QR identificados por su código `@lid` cuando WhatsApp no entrega el teléfono (v19) — PROPUESTO
+## ADR-73 — Contactos de WhatsApp por QR identificados por su código `@lid` cuando WhatsApp no entrega el teléfono (v19) — APROBADO (2026-11-17)
 **Fecha:** 2026-11-17. **Origen:** diagnóstico v19 (`docs/V19_DIAGNOSTICO_MENSAJES_TARDIOS.md`) y la recuperación de mensajes de Jakilu (B3).
 
 **Contexto (medido el 2026-11-17 contra Evolution v2.3.7 real, 4 días de Jakilu):**
@@ -3036,3 +3036,11 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 **Impacto:** migración (tabla + permisos de RLS), `evolution-webhook.ts` (el lector devuelve `lid` y `phone|null`), `ConversationsService`/`ContactsService` (buscar por identidad antes que por teléfono; crear sin teléfono), `QrOutboundService` (jid completo), `QrCatchUpService` (aprende el mapa de los registros y reprocesa los sin teléfono), campañas/exportaciones (excluir), pantalla de contacto («Sin teléfono»). Pruebas: A↔B de la identidad, mensaje sin teléfono que crea contacto y conversación, aprendizaje del teléfono, no fusionar automáticamente, salida al jid, y recuperación de los avisos descartados.
 
 **Sin validar:** envío real a un `@lid`; que el mismo `@lid` se repita entre conexiones (la unicidad es por empresa); volumen de contactos sin teléfono en otras empresas (mirar el contador `no_phone` de la salud de las conexiones durante unos días antes de generalizar).
+
+**Aprobado por el responsable el 2026-11-17 «según tu recomendación»** (dos entregas). **Entrega 1 construida el 2026-11-17** (migración `0149`, `when` del diario fijado a mano en `1796500000000`):
+- Tabla `contact_identities` (negocio, RLS forzada, sin DELETE; único `(empresa, kind, value)`; `kind = 'wa_lid'` con el formato validado en la base). `NormalizedMessage.from` pasa a poder ser `null` y trae `lid`; `parseEvolutionWebhook` ya no descarta el mensaje sin teléfono si trae el código (`no_phone` solo cuando no hay ninguno de los dos).
+- `ContactsService.resolveWhatsapp` (único punto): teléfono y código → el contacto del teléfono y se guarda el par; el contacto que solo tenía el código **aprende el teléfono** si aún no tenía ninguno; si el teléfono ya era de otro contacto no se fusionan y queda `audit_logs` con `field = 'wa_lid_conflict'` (**precisión: auditoría, no nota interna**); solo código → el contacto con ese código o uno nuevo sin teléfono («Contacto sin teléfono» si el perfil no trae nombre), con etiqueta Lead y evento `contact_created` como cualquier contacto nuevo.
+- «Ponerse al día» (B3) copia el teléfono a los registros del mismo `@lid` que no lo traen (`withKnownPhones`), así que lo recuperado se reconoce por teléfono cuando hay otro registro que lo tenga.
+- **Salida (corrección de un fallo latente):** `QrOutboundService` ya no convierte un `…@lid` en dígitos (eran los de OTRO número). Con un `@lid` usa el teléfono principal del contacto; si no lo hay, el mensaje falla con `lid_no_phone` y su motivo en español. **El envío al jid `@lid` es la entrega 2** y no está habilitado.
+- Web: la ficha dice «Sin teléfono» en vez de «—».
+**Sin validar:** el efecto en Jakilu con mensajes reales (se comprueba tras aplicar `0149` y reprocesar con «Recuperar mensajes»); el comportamiento de los contactos sin teléfono en campañas, exportaciones y GoHighLevel (campañas ya los salta como «sin teléfono»; exportación y GoHighLevel no se probaron con ellos).

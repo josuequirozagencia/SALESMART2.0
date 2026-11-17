@@ -4,7 +4,7 @@ import { channelAccounts, Database, messages, qrAccounts } from '../../db';
 import { NotFoundError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { errorLabel, parseEvolutionWebhook, WebhookEventsService } from '../channels';
+import { errorLabel, lidFromJid, parseEvolutionWebhook, phoneFromJid, WebhookEventsService } from '../channels';
 import { QrConnectionsService } from './qr-connections.service';
 import { QR_SESSION, QrSessionError, type QrSessionProvider } from './qr-session.port';
 
@@ -34,6 +34,28 @@ export interface CatchUpResult {
 export function autoWindowStart(lastCatchUpAt: Date | null, now: Date): Date {
   if (!lastCatchUpAt) return new Date(now.getTime() - CATCH_UP_FIRST_HOURS * 3_600_000);
   return new Date(Math.max(lastCatchUpAt.getTime() - CATCH_UP_OVERLAP_MS, now.getTime() - CATCH_UP_AUTO_HOURS * 3_600_000));
+}
+
+/**
+ * Evolution solo trae el teléfono (`key.remoteJidAlt`) en algunos mensajes de un mismo contacto `@lid` (ADR-73). Si OTRO registro del mismo `@lid` lo trae, se le pone a los que no: así el contacto se reconoce
+ * por su teléfono y no se duplica. Devuelve copias; no toca los registros originales. Pura: se prueba sin base.
+ */
+export function withKnownPhones(records: ReadonlyArray<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+  const phoneOf = new Map<string, string>();
+  for (const r of records) {
+    const k = r['key'];
+    if (!isObj(k)) continue;
+    const lid = lidFromJid(k['remoteJid']);
+    if (lid && phoneFromJid(k['remoteJidAlt']) !== null) phoneOf.set(lid, String(k['remoteJidAlt']));
+  }
+  return records.map((r) => {
+    const k = r['key'];
+    if (!isObj(k)) return r;
+    const lid = lidFromJid(k['remoteJid']);
+    const phone = lid ? phoneOf.get(lid) : undefined;
+    return lid && phone && phoneFromJid(k['remoteJidAlt']) === null ? { ...r, key: { ...k, remoteJidAlt: phone } } : r;
+  });
 }
 
 /**
@@ -88,9 +110,10 @@ export class QrCatchUpService {
       throw e;
     }
 
-    // Solo los mensajes de chats 1:1 con teléfono (los grupos, los estados y lo demás los descarta el mismo lector del webhook)
+    const records = withKnownPhones(recent.records);
+    // Solo los mensajes de chats 1:1 (los grupos, los estados y lo demás los descarta el mismo lector del webhook)
     const candidates: Array<{ raw: Record<string, unknown>; externalId: string; at: number }> = [];
-    for (const rec of recent.records) {
+    for (const rec of records) {
       const parsed = parseEvolutionWebhook({ instance: row.instance, event: 'messages.upsert', data: rec }, now);
       for (const e of parsed.events) {
         const m = e.event.messages[0];
