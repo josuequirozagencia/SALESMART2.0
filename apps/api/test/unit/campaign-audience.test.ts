@@ -1,6 +1,6 @@
 // v17 · 17.1 — la regla de quién recibe una campaña (ADR-72) es una función PURA: aquí se demuestra sin base de datos. Un contacto `revoked` jamás entra.
 import { describe, expect, it } from 'vitest';
-import { classify, effectiveDailyCap, estimate } from '../../src/modules/campaigns/audience';
+import { classify, effectiveDailyCap, estimate, qrChannelCap } from '../../src/modules/campaigns/audience';
 import type { AudienceContact } from '../../src/modules/contacts';
 
 const c = (id: string, consent: AudienceContact['consent'], phone: string | null = `+5939880${id.padStart(4, '0')}`): AudienceContact => ({ id, name: `Contacto ${id}`, consent, phone });
@@ -62,5 +62,11 @@ describe('estimate', () => {
     expect(estimate(250, 100, 60)).toEqual({ days: 3, first_day_minutes: 100 });
     expect(estimate(10, 100, 45)).toEqual({ days: 1, first_day_minutes: 8 });
     expect(estimate(1, 100, 5).first_day_minutes).toBe(1);
+  });
+});
+
+describe('qrChannelCap', () => {
+  it('el 70 % del cupo del calentamiento de hoy para las campañas; nunca menos de 1', () => {
+    expect([qrChannelCap(20), qrChannelCap(50), qrChannelCap(100), qrChannelCap(250), qrChannelCap(1)]).toEqual([14, 35, 70, 175, 1]);
   });
 });

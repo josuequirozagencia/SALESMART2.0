@@ -295,10 +295,9 @@ export function CampaignForm({ access, options, editing, onSaved, onLaunched, on
       {error ? <Alert>{error}</Alert> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="submit" loading={busy} disabled={!ready}>{editing || draftId ? 'Guardar cambios' : 'Guardar borrador'}</Button>
-        <Button variant="primary" loading={busy} disabled={!ready || !access.send || kind !== 'official' || eligible === 0} onClick={() => void send()} title={kind === 'qr' ? 'El envío por WhatsApp QR llega en la próxima versión' : undefined}>{when === 'later' ? 'Programar campaña' : 'Enviar campaña'}</Button>
+        <Button variant="primary" loading={busy} disabled={!ready || !access.send || eligible === 0} onClick={() => void send()}>{when === 'later' ? 'Programar campaña' : 'Enviar campaña'}</Button>
         <Button onClick={onCancel}>Cancelar</Button>
       </div>
-      {kind === 'qr' ? <p className="text-[12px] text-muted">El envío por WhatsApp QR llega en la próxima versión: por ahora puedes guardar el borrador. Las campañas se envían por WhatsApp oficial.</p> : null}
       {confirm ? (
         <LaunchDialog
           campaign={confirm}

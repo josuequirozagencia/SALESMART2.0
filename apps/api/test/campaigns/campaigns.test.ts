@@ -592,11 +592,11 @@ describe('envío por WhatsApp oficial (17.3)', () => {
     // ya no se edita
     expect((await call('PATCH', `/campaigns/${c.id}`, T.alice, { name: 'tarde' })).status).toBe(409);
     expect((await admin.query(`SELECT field FROM audit_logs WHERE entity_type = 'campaign' AND entity_id = $1 ORDER BY at, id`, [c.id])).rows.map((r) => r.field)).toEqual([null, 'launched']);
-    // por QR todavía no se envía (17.4); sin destinatarios no se lanza
+    // por QR hace falta aceptar el aviso de riesgo (17.4); sin destinatarios no se lanza
     const qr = await mk(T.alice, textBody());
     const r = await launch(T.alice, qr.id);
     expect(r.status).toBe(409);
-    expect(await code(r)).toBe('CHANNEL_NOT_SUPPORTED_YET');
+    expect(await code(r)).toBe('QR_RISK_NOT_ACCEPTED');
     const empty = await mk(T.carol, tplBody({ name: 'Vacía' }));
     const r2 = await launch(T.carol, empty.id);
     expect(r2.status).toBe(409);
@@ -841,5 +841,134 @@ describe('envío por WhatsApp oficial (17.3)', () => {
     expect(mb).toHaveLength(1);
     expect(mb[0]!.contact).toBe('De B');
     expect((await admin.query(`SELECT count(*)::int AS n FROM messages m JOIN conversations v ON v.id = m.conversation_id WHERE v.organization_id = $1 AND m.sender_type = 'campaign'`, [ORG_B])).rows[0].n).toBe(1);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+describe('envío por WhatsApp QR (17.4)', () => {
+  const sender = (): CampaignSenderService => app.get(CampaignSenderService);
+  const tick = (offsetMs = 1000, org = ORG_A): Promise<number> => TenantContext.run({ organizationId: org }, () => sender().runDue(new Date(Date.now() + offsetMs)));
+  const launchQr = (token: string, id: string, body?: unknown) => call('POST', `/campaigns/${id}/launch`, token, body, { 'idempotency-key': key() });
+  const act = (token: string, id: string, what: 'pause' | 'resume' | 'cancel') => call('POST', `/campaigns/${id}/${what}`, token);
+  const recipients = async (id: string) => (await admin.query(`SELECT r.status, r.skip_reason, r.error, r.message_id, c.name FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id WHERE r.campaign_id = $1 ORDER BY c.name`, [id])).rows as Array<{ status: string; skip_reason: string | null; error: string | null; message_id: string | null; name: string }>;
+  const dbCamp = async (id: string) => (await admin.query(`SELECT status, status_reason, next_send_at FROM campaigns WHERE id = $1`, [id])).rows[0] as { status: string; status_reason: string | null; next_send_at: Date | null };
+  const messagesOf = async (id: string) => (await admin.query(`SELECT m.id, m.sender_type, m.kind, m.direction, m.status, m.body, c.name AS contact FROM messages m JOIN conversations v ON v.id = m.conversation_id JOIN contacts c ON c.id = v.contact_id WHERE m.id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1) ORDER BY m.sent_at, m.id`, [id])).rows as Array<{ id: string; sender_type: string; kind: string; direction: string; status: string; body: string; contact: string }>;
+  const markSent = (): Promise<unknown> => admin.query(`UPDATE messages SET status = 'sent' WHERE status = 'queued' AND sender_type = 'campaign'`);
+  const people = async (names: string[], over: Parameters<typeof mkContact>[0] = {}) => { for (const n of names) await mkContact({ owner: IDS.alice, name: n, ...over }); };
+
+  it('lanzar por QR exige aceptar el aviso de riesgo y una sesión conectada; queda registrado en la auditoría', async () => {
+    await people(['Ana', 'Beto']);
+    const c = await mk(T.alice, textBody({ gap_seconds: 45 }));
+    const noRisk = await launchQr(T.alice, c.id);
+    expect(noRisk.status).toBe(409);
+    expect(await code(noRisk)).toBe('QR_RISK_NOT_ACCEPTED');
+    expect((await launchQr(T.alice, c.id, { accept_qr_risk: false })).status).toBe(409);
+    expect((await launchQr(T.alice, c.id, { otra: true })).status).toBe(400); // cuerpo estricto
+    await admin.query(`UPDATE qr_accounts SET state = 'closed' WHERE channel_account_id = $1`, [qrAdmin]);
+    const down = await launchQr(T.alice, c.id, { accept_qr_risk: true });
+    expect(down.status).toBe(409);
+    expect(await code(down)).toBe('QR_SESSION_DOWN');
+    await admin.query(`UPDATE qr_accounts SET state = 'open' WHERE channel_account_id = $1`, [qrAdmin]);
+    const ok1 = await ok<Camp>(await launchQr(T.alice, c.id, { accept_qr_risk: true }), 201);
+    expect(ok1).toMatchObject({ status: 'running', mode: 'text', counts: { total: 2 } });
+    const log = (await admin.query(`SELECT field, new_value FROM audit_logs WHERE entity_type = 'campaign' AND entity_id = $1 AND field = 'launched'`, [c.id])).rows[0] as { new_value: Record<string, unknown> };
+    expect(log.new_value).toMatchObject({ status: 'running', recipients: 2, qr_risk_accepted: true });
+    expect(JSON.stringify(log.new_value)).not.toContain('Hola'); // nunca el texto
+    // una campaña oficial no necesita el aviso (lo sigue aceptando sin cuerpo)
+    const off = await mk(T.alice, tplBody({ name: 'Oficial' }));
+    expect((await launchQr(T.alice, off.id)).status).toBe(201);
+  });
+
+  it('el texto sale de a UNO con la pausa mínima de 45 s, personalizado por contacto, abriendo su conversación con su responsable, sin plantilla, sin reparto, sin Lead; la baja posterior y el dato que falta se descartan', async () => {
+    const f = await ok<{ key: string }>(await call('POST', '/custom-fields', T.alice, { name: 'Ciudad', type: 'text' }), 201);
+    const ana = await mkContact({ owner: IDS.carol, name: 'Ana Lema' });
+    const beto = await mkContact({ owner: null, name: 'Beto Vera' });
+    const sinCiudad = await mkContact({ owner: IDS.alice, name: 'Sin Ciudad' });
+    const baja = await mkContact({ owner: IDS.alice, name: 'Pidió Baja' });
+    for (const id of [ana, beto, baja]) await ok(await call('PATCH', `/contacts/${id}`, T.alice, { custom_fields: { [f.key]: 'Quito' } }));
+    const c = await mk(T.alice, textBody({ gap_seconds: 45, daily_cap: 50, body: 'Hola {{primer_nombre}} de {{contact.ciudad}}, ¿te reservo un cupo?' }));
+    await ok(await launchQr(T.alice, c.id, { accept_qr_risk: true }), 201);
+    await admin.query(`UPDATE contacts SET consent = 'revoked' WHERE id = $1`, [baja]); // pide la baja DESPUÉS de lanzar
+    expect(await tick(1000)).toBeGreaterThan(0);
+    expect((await messagesOf(c.id)).length).toBe(1);
+    expect(await tick(20_000)).toBe(0); // la pausa de 45 s no pasó
+    expect((await dbCamp(c.id)).next_send_at!.getTime()).toBeGreaterThan(Date.now() + 40_000);
+    await markSent();
+    for (let i = 2; i <= 6; i += 1) {
+      await tick(i * 50_000);
+      await markSent();
+    }
+    const rows = await recipients(c.id);
+    expect(rows.find((r) => r.name === 'Pidió Baja')).toMatchObject({ status: 'skipped', skip_reason: 'revoked', message_id: null });
+    expect(rows.find((r) => r.name === 'Sin Ciudad')).toMatchObject({ status: 'skipped', skip_reason: 'missing_variable', message_id: null });
+    expect(sinCiudad).toBeTruthy();
+    expect((await dbCamp(c.id)).status).toBe('completed');
+    const msgs = await messagesOf(c.id);
+    expect(msgs).toHaveLength(2);
+    expect(msgs.every((m) => m.kind === 'text' && m.direction === 'out' && m.sender_type === 'campaign')).toBe(true);
+    expect(msgs.map((m) => m.body).sort()).toEqual(['Hola Ana de Quito, ¿te reservo un cupo?', 'Hola Beto de Quito, ¿te reservo un cupo?']);
+    // conversaciones: nuevas y «pendientes» para su responsable (Ana: Carolina; Beto sin responsable: quien creó la campaña); sin Lead, sin reparto, sin cronómetros
+    const convs = (await admin.query(`SELECT c.name, v.status, v.owner_id, a.provider FROM conversations v JOIN contacts c ON c.id = v.contact_id JOIN channel_accounts a ON a.id = v.channel_account_id ORDER BY c.name`)).rows as Array<{ name: string; status: string; owner_id: string; provider: string }>;
+    expect(convs).toEqual([{ name: 'Ana Lema', status: 'pending', owner_id: IDS.carol, provider: 'evolution' }, { name: 'Beto Vera', status: 'pending', owner_id: IDS.alice, provider: 'evolution' }]);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM contact_tags`)).rows[0].n).toBe(0);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM response_timers`)).rows[0].n).toBe(0);
+  });
+
+  it('si la sesión se cae, la campaña se PAUSA con aviso y no se envía por otro canal; al volver a conectar y reanudar sigue; un mensaje que falló por la sesión también la pausa', async () => {
+    await people(['Ana', 'Beto', 'Cata', 'Dani']);
+    const c = await mk(T.alice, textBody({ gap_seconds: 45 }));
+    await ok(await launchQr(T.alice, c.id, { accept_qr_risk: true }), 201);
+    await tick(1000);
+    await markSent();
+    await admin.query(`UPDATE qr_accounts SET state = 'closed' WHERE channel_account_id = $1`, [qrAdmin]);
+    await tick(50_000);
+    expect(await dbCamp(c.id)).toMatchObject({ status: 'paused', status_reason: expect.stringContaining('sesión') });
+    expect((await messagesOf(c.id)).length).toBe(1); // nada salió con la sesión caída
+    expect((await admin.query(`SELECT count(*)::int AS n FROM messages m JOIN channel_accounts a ON a.id = m.channel_account_id WHERE a.provider <> 'evolution' AND m.sender_type = 'campaign'`)).rows[0].n).toBe(0); // y nunca por otra vía
+    await admin.query(`UPDATE qr_accounts SET state = 'open' WHERE channel_account_id = $1`, [qrAdmin]);
+    expect(await ok<Camp>(await act(T.alice, c.id, 'resume'))).toMatchObject({ status: 'running' });
+    await tick(100_000);
+    expect((await messagesOf(c.id)).length).toBe(2);
+    // el despachador da por fallido un mensaje tras 24 h de sesión caída: esa causa también pausa la campaña
+    const last = (await messagesOf(c.id)).at(-1)!;
+    await admin.query(`UPDATE messages SET status = 'failed', error = 'La sesión de WhatsApp por QR estuvo caída más de 24 horas', meta = meta || '{"error_code":"qr_session_down"}'::jsonb WHERE id = $1`, [last.id]);
+    await tick(110_000);
+    expect(await dbCamp(c.id)).toMatchObject({ status: 'paused', status_reason: expect.stringContaining('se cayó') });
+  });
+
+  it('una campaña por QR nunca usa más del 70 % del cupo del calentamiento del día (el resto queda para las conversaciones): entre dos campañas en el mismo chip, 14 de 20', async () => {
+    await admin.query(`UPDATE qr_accounts SET first_connected_at = now() WHERE channel_account_id = $1`, [qrAdmin]); // chip recién conectado: 20 al día → 14 para campañas
+    for (let i = 1; i <= 12; i += 1) await mkContact({ owner: IDS.alice, name: `Contacto ${String(i).padStart(2, '0')}` });
+    const a = await mk(T.alice, textBody({ name: 'Primera', gap_seconds: 45, daily_cap: 10 }));
+    const b = await mk(T.alice, textBody({ name: 'Segunda', gap_seconds: 45, daily_cap: 10 }));
+    expect((await create(T.alice, textBody({ name: 'Pasada de tope', daily_cap: 15 }))).status).toBe(400); // ni siquiera se puede pedir más de 14
+    await ok(await launchQr(T.alice, a.id, { accept_qr_risk: true }), 201);
+    await ok(await launchQr(T.alice, b.id, { accept_qr_risk: true }), 201);
+    for (let i = 1; i <= 40; i += 1) {
+      await tick(i * 50_000);
+      await markSent();
+    }
+    const na = (await messagesOf(a.id)).length;
+    const nb = (await messagesOf(b.id)).length;
+    expect(na + nb).toBe(14); // el 70 % de 20
+    expect(Math.max(na, nb)).toBeLessThanOrEqual(10); // y cada una, su propio tope
+    expect(sender()).toBeTruthy();
+  });
+
+  it('A↔B y asesor: la campaña de B por su chip no toca a A; el asesor solo lanza por el chip que él creó', async () => {
+    await mkContact({ owner: IDS.carol, name: 'De Carolina' });
+    await mkContact({ org: ORG_B, owner: IDS.bob, name: 'De B' });
+    const qrB = await qrChannel(ORG_B, 'Chip de B', IDS.bob);
+    const own = await mk(T.carol, textBody({ channel_id: qrCarol, gap_seconds: 45 }));
+    const b = await mk(T.bob, textBody({ channel_id: qrB, gap_seconds: 45 }));
+    expect((await launchQr(T.carol, own.id, { accept_qr_risk: true })).status).toBe(201);
+    expect((await launchQr(T.bob, own.id, { accept_qr_risk: true })).status).toBe(404); // de otra empresa
+    expect((await launchQr(T.bob, b.id, { accept_qr_risk: true })).status).toBe(201);
+    await tick(1000, ORG_A);
+    expect((await messagesOf(own.id)).map((m) => m.contact)).toEqual(['De Carolina']);
+    expect(await messagesOf(b.id)).toHaveLength(0); // B todavía no tuvo su pasada
+    await tick(1000, ORG_B);
+    expect((await messagesOf(b.id)).map((m) => m.contact)).toEqual(['De B']);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM messages m JOIN conversations v ON v.id = m.conversation_id WHERE v.organization_id = $1 AND m.sender_type = 'campaign'`, [ORG_A])).rows[0].n).toBe(1);
   });
 });

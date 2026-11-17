@@ -27,6 +27,19 @@ export interface TemplateOutreach {
   readonly senderType?: 'automation' | 'campaign';
 }
 
+/** Un texto libre de una campaña por WhatsApp QR: abre (o reutiliza) la conversación del contacto en esa conexión y deja el mensaje en cola. */
+export interface TextOutreach {
+  readonly contactId: string;
+  /** Teléfono en E.164. */
+  readonly phone: string;
+  readonly channelId: string;
+  readonly text: string;
+  readonly queueId: string | null;
+  /** Responsable del lead: si la conversación nace aquí queda «pendiente» para esa persona; sin él, «sin asignar». */
+  readonly ownerId: string | null;
+  readonly now: Date;
+}
+
 export type OutreachOutcome = { sent: true; conversationId: string; messageId: string } | { sent: false; reason: 'revoked' | 'channel_unavailable' | 'template_unavailable' };
 
 /**
@@ -69,19 +82,44 @@ export class OutreachService {
     const plan = await this.checkTemplate(tx, i);
     if (!plan.ok) return { sent: false, reason: plan.reason };
     const { ch, row, prepared } = plan;
-    const conv = await this.conversationsSvc.openFor(tx, i.contactId, i.channelId, i.phone.replace(/\D/g, ''), 'api');
-    if (conv.created) {
-      // La conversación nace asignada al responsable del lead (pendiente de aceptar); sin responsable, sin asignar. No hay mensaje del cliente: ni cronómetro de respuesta
-      await tx
-        .update(conversations)
-        .set({ queueId: i.queueId ?? ch.queueId, ...(i.ownerId ? { ownerId: i.ownerId, assignedAt: i.now, assignmentSource: 'distribution', status: 'pending' } : {}), updatedAt: i.now })
-        .where(eq(conversations.id, conv.id));
-      if (i.ownerId) await writeAudit(tx, { entityType: 'conversation', entityId: conv.id, field: 'owner_id', oldValue: null, newValue: i.ownerId, source: 'api' });
-    }
+    const conv = await this.openAndAssign(tx, i, ch.queueId);
     const template = { id: row.id, name: row.name, language: row.language, category: row.category, buttons: prepared.rendered.buttons, send: prepared.send };
     const m = await this.queue(tx, conv.id, i.channelId, 'template', renderedText(prepared.rendered), { template }, i.now, i.senderType ?? 'automation');
     this.realtime.touchHere(conv.id, { ...(conv.created ? { created: true } : {}), message: { id: m, kind: 'created' } });
     return { sent: true, conversationId: conv.id, messageId: m };
+  }
+
+  /**
+   * Para las CAMPAÑAS por WhatsApp QR (v17 · 17.4): abre —o reutiliza— la conversación abierta del contacto en esa conexión y deja un TEXTO LIBRE en cola (sin plantilla ni ventana de 24 h, que el QR
+   * no tiene). `sendText` NO sirve para esto a propósito: nunca abre conversaciones, y las automatizaciones dependen de eso. La conversación nueva nace asignada al responsable del lead
+   * (pendiente de aceptar) o, sin él, a quien pasó el que llama; NO consume el reparto, no pone «Lead» y no arranca cronómetros. Nunca a quien pidió la baja.
+   */
+  async openAndSendText(tx: TenantTx, i: TextOutreach): Promise<{ sent: true; conversationId: string; messageId: string } | { sent: false; reason: 'revoked' | 'channel_unavailable' }> {
+    const [c] = await tx.select({ consent: contacts.consent }).from(contacts).where(and(eq(contacts.id, i.contactId), isNull(contacts.deletedAt))).limit(1);
+    if (!c || c.consent === 'revoked') return { sent: false, reason: 'revoked' };
+    const [ch] = await tx
+      .select({ id: channelAccounts.id, queueId: channelAccounts.queueId })
+      .from(channelAccounts)
+      .where(and(eq(channelAccounts.id, i.channelId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(channelAccounts.provider, 'evolution')))
+      .limit(1);
+    if (!ch) return { sent: false, reason: 'channel_unavailable' };
+    const conv = await this.openAndAssign(tx, i, ch.queueId);
+    const m = await this.queue(tx, conv.id, i.channelId, 'text', i.text, {}, i.now, 'campaign');
+    this.realtime.touchHere(conv.id, { ...(conv.created ? { created: true } : {}), message: { id: m, kind: 'created' } });
+    return { sent: true, conversationId: conv.id, messageId: m };
+  }
+
+  /** Abre o reutiliza la conversación del contacto y, si es nueva, la deja asignada a su responsable (pendiente de aceptar) o sin asignar. No hay mensaje del cliente: ni cronómetro de respuesta. */
+  private async openAndAssign(tx: TenantTx, i: Pick<TemplateOutreach, 'contactId' | 'phone' | 'channelId' | 'queueId' | 'ownerId' | 'now'>, channelQueueId: string | null): Promise<{ id: string; created: boolean }> {
+    const conv = await this.conversationsSvc.openFor(tx, i.contactId, i.channelId, i.phone.replace(/\D/g, ''), 'api');
+    if (conv.created) {
+      await tx
+        .update(conversations)
+        .set({ queueId: i.queueId ?? channelQueueId, ...(i.ownerId ? { ownerId: i.ownerId, assignedAt: i.now, assignmentSource: 'distribution', status: 'pending' } : {}), updatedAt: i.now })
+        .where(eq(conversations.id, conv.id));
+      if (i.ownerId) await writeAudit(tx, { entityType: 'conversation', entityId: conv.id, field: 'owner_id', oldValue: null, newValue: i.ownerId, source: 'api' });
+    }
+    return conv;
   }
 
   /**

@@ -11,7 +11,7 @@ import { dailyLimit } from '../qr';
 import { customKeysIn, resolveQuickReply, unknownVariables, variablesIn, type ResolveContext } from '../quick-replies';
 import { renderedText, TemplatesService } from '../templates';
 import { classify, effectiveDailyCap, estimate } from './audience';
-import { MAX_AUDIENCE, MAX_DRAFTS_PER_USER, MIN_GAP_OFFICIAL_S, OFFICIAL_DAILY_CAP, type SettingsDto, MIN_GAP_QR_S, type AdvisorLimitDto, type AudienceDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type AudienceListDto, type UpdateCampaignDto } from './campaigns.dto';
+import { MAX_AUDIENCE, MAX_DRAFTS_PER_USER, MIN_GAP_OFFICIAL_S, OFFICIAL_DAILY_CAP, type LaunchDto, type SettingsDto, MIN_GAP_QR_S, type AdvisorLimitDto, type AudienceDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type AudienceListDto, type UpdateCampaignDto } from './campaigns.dto';
 
 type Row = typeof campaigns.$inferSelect;
 
@@ -462,9 +462,9 @@ export class CampaignsService {
 
   /**
    * Lanza una campaña: CONGELA la audiencia (cada contacto queda como destinatario con su teléfono, o como omitido con su motivo) y la deja «en curso» o «programada». Solo quien la creó, con el alcance de
-   * contactos de esa persona. Es idempotente: repetirlo (doble clic, reintento de red) devuelve la campaña tal como quedó, sin congelar de nuevo. En 17.3 solo por WhatsApp oficial.
+   * contactos de esa persona. Es idempotente: repetirlo (doble clic, reintento de red) devuelve la campaña tal como quedó, sin congelar de nuevo. Por WhatsApp QR exige aceptar el aviso de riesgo y una sesión conectada.
    */
-  async launch(a: CampaignAccess, id: string): Promise<{ campaign: CampaignView; created: boolean }> {
+  async launch(a: CampaignAccess, id: string, input: LaunchDto = {}): Promise<{ campaign: CampaignView; created: boolean }> {
     await this.assertPlan();
     const out = await this.db.withTenant(async (tx) => {
       const [row] = await tx.select().from(campaigns).where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt), eq(campaigns.createdBy, a.userId))).for('update').limit(1);
@@ -474,7 +474,13 @@ export class CampaignsService {
       const c = fromRow(row);
       await this.validate(tx, a, c);
       const [ch] = await tx.select({ provider: channelAccounts.provider }).from(channelAccounts).where(eq(channelAccounts.id, c.channelId)).limit(1);
-      if (ch?.provider !== 'meta_cloud') throw new ConflictError('CHANNEL_NOT_SUPPORTED_YET', 'El envío por WhatsApp QR llega en la próxima versión: por ahora las campañas se envían por WhatsApp oficial');
+      const byQr = ch?.provider === 'evolution';
+      if (byQr) {
+        // Por WhatsApp QR (no oficial): el aviso de riesgo es obligatorio y la sesión tiene que estar conectada
+        if (input.accept_qr_risk !== true) throw new ConflictError('QR_RISK_NOT_ACCEPTED', 'Antes de enviar por WhatsApp QR hay que aceptar el aviso de riesgo: el número puede bloquearse si envías muchos mensajes seguidos');
+        const [q] = await tx.select({ state: qrAccounts.state }).from(qrAccounts).where(eq(qrAccounts.channelAccountId, c.channelId)).limit(1);
+        if (q?.state !== 'open') throw new ConflictError('QR_SESSION_DOWN', 'La sesión de WhatsApp por QR no está conectada: vuelve a escanear el QR en Configuración › Conexiones y lanza la campaña de nuevo');
+      }
       const aud = await this.contacts.audienceIn(tx, { viewAll: a.contactsViewAll }, this.source(c.audience), MAX_AUDIENCE);
       const classified = classify(aud.contacts, { excluded: new Set(c.audience.excluded_contact_ids ?? []), includeUnknownConsent: c.includeUnknownConsent });
       if (classified.eligible.length === 0) throw new ConflictError('NO_RECIPIENTS', 'No hay a quién enviarle: revisa la base elegida, los destinatarios desmarcados y el consentimiento');
@@ -482,7 +488,7 @@ export class CampaignsService {
       for (let i = 0; i < rows.length; i += 500) await tx.insert(campaignRecipients).values(rows.slice(i, i + 500)).onConflictDoNothing();
       const now = new Date();
       const [updated] = await tx.update(campaigns).set({ status: c.scheduledAt ? 'scheduled' : 'running', launchedAt: now, nextSendAt: c.scheduledAt ?? now, statusReason: null, updatedAt: now }).where(eq(campaigns.id, id)).returning();
-      await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'launched', oldValue: 'draft', newValue: { status: updated!.status, recipients: classified.eligible.length, skipped: classified.counts, scheduled: c.scheduledAt !== null }, source: 'manual' });
+      await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'launched', oldValue: 'draft', newValue: { status: updated!.status, recipients: classified.eligible.length, skipped: classified.counts, scheduled: c.scheduledAt !== null, ...(byQr ? { qr_risk_accepted: true } : {}) }, source: 'manual' });
       return { campaign: (await this.viewMany(tx, a, [updated!], false)).items[0]!, created: true };
     });
     await this.named([out.campaign]);

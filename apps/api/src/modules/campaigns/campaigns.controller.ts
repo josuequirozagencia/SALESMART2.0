@@ -6,7 +6,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { TenantContext } from '../../tenant';
-import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, listCampaignsQuerySchema, previewSchema, settingsSchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type SettingsDto, type UpdateCampaignDto } from './campaigns.dto';
+import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, launchSchema, listCampaignsQuerySchema, previewSchema, settingsSchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type LaunchDto, type ListCampaignsQuery, type PreviewDto, type SettingsDto, type UpdateCampaignDto } from './campaigns.dto';
 import { CampaignsService, type CampaignAccess } from './campaigns.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -135,9 +135,9 @@ export class CampaignsController {
    */
   @RequirePermission('campaigns.send')
   @Post(':id/launch')
-  async launch(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response, @Param('id', idParam) id: string, @Headers('idempotency-key') key: string | undefined) {
+  async launch(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response, @Param('id', idParam) id: string, @Headers('idempotency-key') key: string | undefined, @Body(new ZodValidationPipe(launchSchema)) b: LaunchDto) {
     keyOf(key);
-    const r = await this.campaigns.launch(accessOf(req), id);
+    const r = await this.campaigns.launch(accessOf(req), id, b);
     res.status(r.created ? 201 : 200);
     return r.campaign;
   }

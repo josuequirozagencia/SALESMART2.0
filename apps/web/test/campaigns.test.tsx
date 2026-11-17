@@ -212,15 +212,47 @@ describe('guardar el borrador', () => {
     expect(within(form).getByLabelText(/1 · Nombre/)).toHaveValue('Demasiado');
   });
 
-  it('por QR el envío todavía no existe (llega en la próxima versión): el botón está desactivado y se explica; guardar el borrador sigue funcionando; los resultados de un borrador están en cero', async () => {
-    mockApi(server(world()));
+  it('por QR: el aviso de riesgo es obligatorio para enviar (la confirmación queda desactivada hasta aceptarlo) y se manda al servidor; guardar el borrador no lo pide; los resultados de un borrador están en cero', async () => {
+    const w = world();
+    mockApi(server(w));
     renderApp('/campaigns');
     const form = await screen.findByRole('form', { name: 'Nueva campaña' });
     await userEvent.selectOptions(await within(form).findByRole('combobox', { name: 'Conexión' }), 'c-qr');
-    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Solo borrador');
-    expect(await within(form).findByText(/El envío por WhatsApp QR llega en la próxima versión/)).toBeInTheDocument();
-    expect(within(form).getByRole('button', { name: 'Enviar campaña' })).toBeDisabled();
+    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Cupos por QR');
     expect(within(form).getByRole('button', { name: 'Guardar borrador' })).toBeEnabled();
+    await userEvent.click(await within(form).findByRole('button', { name: 'Enviar campaña' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Enviar campaña' }));
+    expect(await dlg.findByText(/con el mensaje que escribiste/)).toBeInTheDocument();
+    expect(dlg.getByText(/Conexión no oficial/)).toBeInTheDocument();
+    expect(dlg.getByText(/el 70 % del cupo diario del número/)).toBeInTheDocument();
+    const confirm = dlg.getByRole('button', { name: 'Confirmar y enviar' });
+    expect(confirm).toBeDisabled(); // sin aceptar el aviso no se puede
+    await userEvent.click(dlg.getByRole('checkbox', { name: /Entiendo el riesgo/ }));
+    expect(confirm).toBeEnabled();
+    await userEvent.click(confirm);
+    expect(await screen.findByText(/Campaña «Cupos por QR» en curso/)).toBeInTheDocument();
+    expect(w.actions.find((c) => c.path === '/campaigns/cmp2/launch')!.body).toEqual({ accept_qr_risk: true });
+  });
+
+  it('si el servidor dice que la sesión del QR está caída, se muestra con su causa y se puede volver sin perder el borrador', async () => {
+    const w = world();
+    mockApi(server(w, ME_ADMIN, { 'POST /campaigns/cmp2/launch': (c) => { w.actions.push(c); return err(409, 'QR_SESSION_DOWN', 'La sesión de WhatsApp por QR no está conectada: vuelve a escanear el QR en Configuración › Conexiones y lanza la campaña de nuevo'); } }));
+    renderApp('/campaigns');
+    const form = await screen.findByRole('form', { name: 'Nueva campaña' });
+    await userEvent.selectOptions(await within(form).findByRole('combobox', { name: 'Conexión' }), 'c-qr');
+    await userEvent.type(within(form).getByLabelText(/1 · Nombre/), 'Sin sesión');
+    await userEvent.click(await within(form).findByRole('button', { name: 'Enviar campaña' }));
+    const dlg = within(await screen.findByRole('dialog', { name: 'Enviar campaña' }));
+    await userEvent.click(dlg.getByRole('checkbox', { name: /Entiendo el riesgo/ }));
+    await userEvent.click(dlg.getByRole('button', { name: 'Confirmar y enviar' }));
+    expect(await dlg.findByRole('alert')).toHaveTextContent('La sesión de WhatsApp por QR no está conectada');
+    await userEvent.click(dlg.getByRole('button', { name: 'Volver' }));
+    expect(screen.queryByRole('dialog', { name: 'Enviar campaña' })).not.toBeInTheDocument();
+  });
+
+  it('los resultados de un borrador están en cero y se explica', async () => {
+    mockApi(server(world()));
+    renderApp('/campaigns');
     await userEvent.click(await screen.findByRole('button', { name: 'Resultados de Recordatorio de cupos' }));
     const dlg = within(await screen.findByRole('dialog', { name: 'Recordatorio de cupos' }));
     expect(dlg.getByText('Destinatarios')).toBeInTheDocument();
