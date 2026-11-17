@@ -126,8 +126,15 @@ export class FakeQrSession implements QrSessionProvider {
     try {
       this.check(c);
       this.get(instance);
-      const all = (this.stored.get(instance) ?? []).filter((r) => Number(r['messageTimestamp']) * 1000 >= input.sinceMs).sort((a, b) => Number(b['messageTimestamp']) - Number(a['messageTimestamp']));
-      return Promise.resolve({ records: all.slice(0, input.maxRecords), truncated: all.length > input.maxRecords });
+      // Igual que Evolution: sin grupos ni estados, más nuevos primero y el tope vale por cada sentido (entrante / escrito desde el teléfono)
+      const jidOf = (r: Record<string, unknown>): string => String((r['key'] as { remoteJid?: unknown } | undefined)?.remoteJid ?? '');
+      const fromMeOf = (r: Record<string, unknown>): boolean => (r['key'] as { fromMe?: unknown } | undefined)?.fromMe === true;
+      const all = (this.stored.get(instance) ?? [])
+        .filter((r) => Number(r['messageTimestamp']) * 1000 >= input.sinceMs && !jidOf(r).endsWith('@g.us') && jidOf(r) !== 'status@broadcast')
+        .sort((a, b) => Number(b['messageTimestamp']) - Number(a['messageTimestamp']));
+      const inb = all.filter((r) => !fromMeOf(r));
+      const outb = all.filter((r) => fromMeOf(r));
+      return Promise.resolve({ records: [...inb.slice(0, input.maxRecords), ...outb.slice(0, input.maxRecords)], truncated: inb.length > input.maxRecords || outb.length > input.maxRecords });
     } catch (e) {
       return Promise.reject(e);
     }
