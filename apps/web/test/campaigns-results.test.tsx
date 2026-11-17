@@ -11,7 +11,7 @@ beforeEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); resetWorld(); })
 const ADMIN: CampaignAccessInfo = { plan_enabled: true, read: true, send: true, view_all: true, manage_limits: true, manage_settings: true, cancel_others: true };
 const OPTIONS = { channels: [{ id: 'c-qr', name: 'Chip QR', kind: 'qr' }], limits: { official_daily_cap: 1000, qr_min_gap_seconds: 45, official_min_gap_seconds: 5, advisor_daily_cap: null, max_audience: 5000 } };
 const base: Campaign = {
-  id: 'cmpR', name: 'Cupos de noviembre', status: 'running', status_reason: null, mode: 'text', channel: { id: 'c-qr', name: 'Chip QR', kind: 'qr' }, template_id: null, template_params: {}, body: 'Hola {{primer_nombre}}',
+  id: 'cmpR', name: 'Cupos de noviembre', status: 'running', status_reason: null, mode: 'text', channel: { id: 'c-qr', name: 'Chip QR', kind: 'qr' }, template_id: null, template_params: {}, body: 'Hola {{primer_nombre}}', body_variants: [],
   audience: { source: 'all' }, include_unknown_consent: false, scheduled_at: null, gap_seconds: 60, daily_cap: 50, created_by: { id: 'u1', name: 'Ana Pérez' }, created_at: '2026-11-16T10:00:00.000Z', updated_at: '2026-11-16T10:00:00.000Z',
   launched_at: '2026-11-16T10:05:00.000Z', finished_at: null, counts: { total: 6, by_status: {}, sent: 3, delivered: 2, read: 1, replied: 1, failed: 1, skipped: 2 }, can_edit: false, can_pause: true, can_resume: false, can_cancel: true,
 };
@@ -19,7 +19,7 @@ const DONE: Campaign = { ...base, id: 'cmpD', name: 'Ya terminó', status: 'comp
 const DRAFT: Campaign = { ...base, id: 'cmpB', name: 'Sin lanzar', status: 'draft', launched_at: null, counts: { total: 0, by_status: {}, sent: 0, delivered: 0, read: 0, replied: 0, failed: 0, skipped: 0 }, can_edit: true, can_pause: false, can_cancel: false };
 
 const rec = ({ name, ...over }: Partial<CampaignRecipient> & { id: string; name: string; status: CampaignRecipient['status'] }): CampaignRecipient => ({
-  contact: { id: `c-${over.id}`, name }, phone: `+5939880000${over.id}`, skip_reason: null, error: null, queued_at: null, sent_at: '2026-11-16T10:06:00.000Z', delivered_at: null, read_at: null, replied_at: null, failed_at: null, opted_out_at: null, ...over,
+  contact: { id: `c-${over.id}`, name }, phone: `+5939880000${over.id}`, variant: null, skip_reason: null, error: null, queued_at: null, sent_at: '2026-11-16T10:06:00.000Z', delivered_at: null, read_at: null, replied_at: null, failed_at: null, opted_out_at: null, ...over,
 });
 const ALL: CampaignRecipient[] = [
   rec({ id: '01', name: 'Ana Lema', status: 'replied', replied_at: '2026-11-16T11:00:00.000Z' }),

@@ -50,6 +50,8 @@ export interface CampaignView {
   template_id: string | null;
   template_params: Record<string, string>;
   body: string | null;
+  /** Otras versiones del texto (solo por QR). */
+  body_variants: string[];
   audience: Record<string, unknown>;
   include_unknown_consent: boolean;
   scheduled_at: string | null;
@@ -117,6 +119,8 @@ const AUDIT = 'campaign';
 const ORG_SETTINGS_ID = '00000000-0000-4000-8000-000000000072';
 /** Variables que una campaña puede usar: solo las del contacto (ADR-72). `{{telefono}}`, `{{mi_nombre}}` y `{{empresa}}` de las respuestas rápidas no tienen sentido en un envío masivo. */
 const CAMPAIGN_BUILT_IN = new Set(['primer_nombre', 'nombre']);
+/** Para comparar textos sin mayúsculas, acentos ni signos (dos versiones que solo difieren en eso son la misma). */
+const foldText = (s: string): string => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, ' ').replace(/\s+/g, ' ').trim();
 
 const kindOf = (provider: string): ChannelKind | null => (provider === 'meta_cloud' ? 'official' : provider === 'evolution' ? 'qr' : null);
 const encodeCursor = (id: string): string => Buffer.from(id).toString('base64url');
@@ -135,6 +139,7 @@ interface Composed {
   templateId: string | null;
   templateParams: Record<string, string>;
   body: string | null;
+  bodyVariants: string[];
   audience: AudienceDto;
   includeUnknownConsent: boolean;
   scheduledAt: Date | null;
@@ -149,6 +154,7 @@ const fromRow = (r: Row): Composed => ({
   templateId: r.templateId,
   templateParams: r.templateParams,
   body: r.body,
+  bodyVariants: r.bodyVariants,
   audience: r.audience as unknown as AudienceDto,
   includeUnknownConsent: r.includeUnknownConsent,
   scheduledAt: r.scheduledAt,
@@ -309,6 +315,7 @@ export class CampaignsService {
           templateId: input.template_id ?? null,
           templateParams: input.template_params ?? {},
           body: input.body ?? null,
+          bodyVariants: [],
           gapSeconds: input.gap_seconds ?? 0,
           dailyCap: input.daily_cap ?? 0,
           name: '',
@@ -553,6 +560,7 @@ export class CampaignsService {
       templateId: i.template_id ?? null,
       templateParams: i.template_params ?? {},
       body: i.body ?? null,
+      bodyVariants: i.body_variants ?? [],
       audience: i.audience,
       includeUnknownConsent: i.include_unknown_consent ?? false,
       scheduledAt: i.scheduled_at ? new Date(i.scheduled_at) : null,
@@ -569,6 +577,7 @@ export class CampaignsService {
       templateId: i.template_id !== undefined ? i.template_id : base.templateId,
       templateParams: i.template_params ?? base.templateParams,
       body: i.body !== undefined ? i.body : base.body,
+      bodyVariants: i.body_variants ?? base.bodyVariants,
       audience: i.audience ?? base.audience,
       includeUnknownConsent: i.include_unknown_consent ?? base.includeUnknownConsent,
       scheduledAt: i.scheduled_at !== undefined ? (i.scheduled_at ? new Date(i.scheduled_at) : null) : base.scheduledAt,
@@ -585,6 +594,7 @@ export class CampaignsService {
       templateId: c.mode === 'template' ? c.templateId : null,
       templateParams: c.mode === 'template' ? c.templateParams : {},
       body: c.mode === 'text' ? c.body : null,
+      bodyVariants: c.mode === 'text' ? c.bodyVariants : [],
       audience: c.audience as unknown as Record<string, unknown>,
       includeUnknownConsent: c.includeUnknownConsent,
       scheduledAt: c.scheduledAt,
@@ -607,7 +617,8 @@ export class CampaignsService {
       gap_seconds: c.gapSeconds,
       daily_cap: c.dailyCap,
       scheduled: c.scheduledAt !== null,
-      variables: [...new Set([...variablesIn(c.body ?? ''), ...Object.values(c.templateParams).flatMap((v) => variablesIn(v))])],
+      variants: c.bodyVariants.length,
+      variables: [...new Set([...variablesIn(c.body ?? ''), ...c.bodyVariants.flatMap((v) => variablesIn(v)), ...Object.values(c.templateParams).flatMap((v) => variablesIn(v))])],
     };
   }
 
@@ -639,9 +650,16 @@ export class CampaignsService {
     if (c.mode === 'text') {
       if (!c.body) errors.push({ path: 'body', code: 'required', message: 'Escribe el mensaje' });
       else checkText('body', c.body);
+      const seen = new Set<string>([foldText(c.body ?? '')]);
+      c.bodyVariants.forEach((v, i) => {
+        checkText(`body_variants.${i}`, v);
+        if (seen.has(foldText(v))) errors.push({ path: `body_variants.${i}`, code: 'duplicate_variant', message: 'Esta versión es igual a otra: cada versión debe ser distinta' });
+        seen.add(foldText(v));
+      });
       if (c.templateId) errors.push({ path: 'template_id', code: 'not_allowed', message: 'El texto libre no lleva plantilla' });
     } else {
       if (c.body) errors.push({ path: 'body', code: 'not_allowed', message: 'Las plantillas no llevan texto libre' });
+      if (c.bodyVariants.length > 0) errors.push({ path: 'body_variants', code: 'not_allowed', message: 'Las versiones del mensaje solo se usan en el texto libre por WhatsApp QR' });
       if (!c.templateId) errors.push({ path: 'template_id', code: 'required', message: 'Elige una plantilla aprobada' });
       else if (ch && kind === 'official') {
         const row = await this.templates.getSendable(tx, c.channelId, c.templateId); // 404 si no es de esa conexión, 409 si ya no se puede enviar
@@ -756,6 +774,7 @@ export class CampaignsService {
         template_id: r.templateId,
         template_params: r.templateParams,
         body: r.body,
+        body_variants: r.bodyVariants,
         audience: r.audience,
         include_unknown_consent: r.includeUnknownConsent,
         scheduled_at: r.scheduledAt?.toISOString() ?? null,

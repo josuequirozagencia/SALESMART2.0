@@ -6,6 +6,7 @@ import { Pill } from '../../ui/Pill';
 import { campaignError, KIND_HINT, KIND_TITLE } from './labels';
 import { LaunchDialog } from './LaunchDialog';
 import { RecipientsPicker } from './RecipientsPicker';
+import { VariantsEditor } from './VariantsEditor';
 import { useCampaignTemplates, useCreateCampaign, useIdempotencyKey, useLivePreview, useUpdateCampaign, type Campaign, type CampaignAccessInfo, type CampaignAudience, type CampaignInput, type CampaignOptions, type PreviewInput } from './useCampaigns';
 
 const selectCls = 'w-full rounded-[11px] border border-line-strong bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
@@ -47,6 +48,7 @@ export function CampaignForm({ access, options, editing, onSaved, onLaunched, on
   const [templateId, setTemplateId] = useState(editing?.template_id ?? '');
   const [params, setParams] = useState<Record<string, string>>(editing?.template_params ?? {});
   const [body, setBody] = useState(editing?.body ?? 'Hola {{primer_nombre}}, ');
+  const [variants, setVariants] = useState<string[]>(editing?.body_variants ?? []);
   const [when, setWhen] = useState<'now' | 'later'>(editing?.scheduled_at ? 'later' : 'now');
   const [at, setAt] = useState(editing?.scheduled_at ? toLocalInput(editing.scheduled_at) : '');
   const [gap, setGap] = useState(editing?.gap_seconds ?? 60);
@@ -132,7 +134,7 @@ export function CampaignForm({ access, options, editing, onSaved, onLaunched, on
       name: name.trim(),
       channel_id: channelId,
       mode: kind === 'qr' ? 'text' : 'template',
-      ...(kind === 'qr' ? { body: body.trim() } : { template_id: templateId, template_params: Object.fromEntries(Object.entries(params).map(([k, v]) => [k, v.trim()])) }),
+      ...(kind === 'qr' ? { body: body.trim(), body_variants: variants.map((v) => v.trim()).filter((v) => v !== '') } : { template_id: templateId, template_params: Object.fromEntries(Object.entries(params).map(([k, v]) => [k, v.trim()])) }),
       audience,
       ...(access.view_all ? { include_unknown_consent: includeUnknown } : {}),
       scheduled_at: scheduled,
@@ -225,6 +227,7 @@ export function CampaignForm({ access, options, editing, onSaved, onLaunched, on
             <>
               <div className="rounded-xl bg-warn-soft px-3 py-2.5 text-[13px] text-warn"><b>Conexión no oficial.</b> Puede bloquearse si envías muchos mensajes seguidos. Escribe un texto natural y no repitas el mismo mensaje a cientos de personas.</div>
               <textarea className={areaCls} rows={4} maxLength={1000} aria-label="Mensaje" value={body} onFocus={() => setFocus('body')} onChange={(e) => setBody(e.target.value)} placeholder="Escribe el mensaje. Usa {{primer_nombre}} para personalizarlo" />
+              <VariantsEditor text={body} variants={variants} onChange={setVariants} />
             </>
           ) : (
             <>

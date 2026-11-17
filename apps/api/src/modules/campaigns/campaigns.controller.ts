@@ -7,7 +7,8 @@ import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { TenantContext } from '../../tenant';
 import { CampaignResultsService } from './campaign-results.service';
-import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, launchSchema, listCampaignsQuerySchema, previewSchema, resultsQuerySchema, settingsSchema, summaryQuerySchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type LaunchDto, type ListCampaignsQuery, type PreviewDto, type ResultsQuery, type SettingsDto, type SummaryQuery, type UpdateCampaignDto } from './campaigns.dto';
+import { CampaignVariantsService } from './campaign-variants.service';
+import { advisorLimitSchema, audienceListSchema, createCampaignSchema, generateVariantsSchema, type GenerateVariantsDto, idempotencyKeySchema, launchSchema, listCampaignsQuerySchema, previewSchema, resultsQuerySchema, settingsSchema, summaryQuerySchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type LaunchDto, type ListCampaignsQuery, type PreviewDto, type ResultsQuery, type SettingsDto, type SummaryQuery, type UpdateCampaignDto } from './campaigns.dto';
 import { CampaignsService, type CampaignAccess } from './campaigns.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -35,6 +36,7 @@ export class CampaignsController {
   constructor(
     @Inject(CampaignsService) private readonly campaigns: CampaignsService,
     @Inject(CampaignResultsService) private readonly results: CampaignResultsService,
+    @Inject(CampaignVariantsService) private readonly variants: CampaignVariantsService,
   ) {}
 
   /** Qué puede hacer la persona con campañas y si su plan las incluye: la pantalla y el menú se arman con esto (no devuelve datos de la empresa). */
@@ -84,6 +86,15 @@ export class CampaignsController {
   @HttpCode(200)
   previewLive(@Req() req: AuthedRequest, @Body(new ZodValidationPipe(previewSchema)) b: PreviewDto) {
     return this.campaigns.previewDraft(accessOf(req), b);
+  }
+
+  /** Versiones del mensaje escritas con IA (solo por WhatsApp QR): cuesta créditos de la empresa y no guarda nada; la persona las revisa y las guarda con la campaña. */
+  @RequirePermission('campaigns.send')
+  @Post('variants')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  generateVariants(@Body(new ZodValidationPipe(generateVariantsSchema)) b: GenerateVariantsDto) {
+    return this.variants.generate(b);
   }
 
   /** Una página de la lista de destinatarios con su estado, para marcar o desmarcar a mano. */

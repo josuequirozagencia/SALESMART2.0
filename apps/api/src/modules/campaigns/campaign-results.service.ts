@@ -29,6 +29,8 @@ export interface RecipientView {
   replied_at: string | null;
   failed_at: string | null;
   opted_out_at: string | null;
+  /** Qué versión del texto recibió: 1 = el mensaje principal, 2... = una variante; null si la campaña no tiene versiones o no se envió. */
+  variant: number | null;
 }
 
 export interface ResultsSummary {
@@ -149,8 +151,8 @@ export class CampaignResultsService {
     });
     const when = (d: Date | null): string => (d ? fmt(d, tz) : '');
     const csv = csvFile([
-      ['Contacto', 'Teléfono', 'Estado', 'Motivo de omisión', 'En cola', 'Enviado', 'Entregado', 'Leído', 'Respondió', 'Falló', 'Error', 'Pidió la baja'],
-      ...rows.map(({ r, name }) => [name, r.phone ?? '', STATUS_LABEL[r.status] ?? r.status, r.skipReason ? (SKIP_LABEL[r.skipReason] ?? r.skipReason) : '', when(r.queuedAt), when(r.sentAt), when(r.deliveredAt), when(r.readAt), when(r.repliedAt), when(r.failedAt), r.error ?? '', r.optedOutAt ? 'Sí' : '']),
+      ['Contacto', 'Teléfono', 'Estado', 'Motivo de omisión', 'En cola', 'Enviado', 'Entregado', 'Leído', 'Respondió', 'Falló', 'Error', 'Pidió la baja', 'Versión'],
+      ...rows.map(({ r, name }) => [name, r.phone ?? '', STATUS_LABEL[r.status] ?? r.status, r.skipReason ? (SKIP_LABEL[r.skipReason] ?? r.skipReason) : '', when(r.queuedAt), when(r.sentAt), when(r.deliveredAt), when(r.readAt), when(r.repliedAt), when(r.failedAt), r.error ?? '', r.optedOutAt ? 'Sí' : '', r.variantIndex === null ? '' : r.variantIndex + 1]),
     ]);
     const slug = campaign.name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'campana';
     return { filename: `campana-${slug}-${new Date().toISOString().slice(0, 10)}.csv`, csv, count: rows.length };
@@ -226,6 +228,7 @@ function view(r: typeof campaignRecipients.$inferSelect, name: string): Recipien
     replied_at: iso(r.repliedAt),
     failed_at: iso(r.failedAt),
     opted_out_at: iso(r.optedOutAt),
+    variant: r.variantIndex === null ? null : r.variantIndex + 1,
   };
 }
 

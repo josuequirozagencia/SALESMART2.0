@@ -44,6 +44,8 @@ const fields = {
   template_id: z.uuid().nullable().optional(),
   template_params: paramsSchema.optional(),
   body: z.string().trim().min(1).max(1000).nullable().optional(),
+  /** Otras versiones del mismo texto (solo por QR; hasta 10): cada destinatario recibe una distinta. */
+  body_variants: z.array(z.string().trim().min(1).max(1000)).max(10).optional(),
   audience: audienceSchema,
   include_unknown_consent: z.boolean().optional(),
   scheduled_at: z.iso.datetime({ offset: true }).nullable().optional(),
@@ -116,3 +118,7 @@ export const MAX_SUMMARY_DAYS = 366;
 const instant = z.iso.datetime({ offset: true });
 export const summaryQuerySchema = z.object({ from: instant.optional(), to: instant.optional() }).strict();
 export type SummaryQuery = z.infer<typeof summaryQuerySchema>;
+
+/** Pedir versiones del mensaje a la IA (solo por QR): el texto original y cuántas versiones. No guarda nada. */
+export const generateVariantsSchema = z.object({ text: z.string().trim().min(1).max(1000), count: z.number().int().min(1).max(10).default(5) }).strict();
+export type GenerateVariantsDto = z.infer<typeof generateVariantsSchema>;

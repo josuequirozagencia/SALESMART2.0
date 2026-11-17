@@ -6,3 +6,5 @@ export { classify, effectiveDailyCap, estimate, type AudienceSkip, type Classifi
 export { CampaignResultsService, type ResultsView, type RecipientView, type ResultsSummary, type CampaignsSummaryView } from './campaign-results.service';
 export { CampaignResponsesService, REPLY_WINDOW_HOURS, OPT_OUT_NOTE } from './campaign-responses.service';
 export { isOptOutText, normalizeOptOut } from './campaign-optout';
+export { CampaignVariantsService, type VariantsView } from './campaign-variants.service';
+export { acceptVariants, parseVariants, pickVariant, variantProblem, MAX_VARIANTS, MAX_VARIANT_RUNS_PER_DAY, type VariantProblem } from './variants';
