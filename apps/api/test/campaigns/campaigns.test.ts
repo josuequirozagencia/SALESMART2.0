@@ -21,6 +21,7 @@
 //   GET /v1/campaigns/summary
 //   GET /v1/campaigns/:id/results
 //   POST /v1/campaigns/:id/export
+//   POST /v1/campaigns/variants
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
