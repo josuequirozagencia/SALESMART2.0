@@ -159,12 +159,16 @@ describe.each(harnesses)('puerto de sesión por QR: %s', (_name, make) => {
     h.openSession(i);
     const now = Math.floor(Date.now() / 1000);
     const rec = (id: string, ageH: number, fromMe: boolean): Record<string, unknown> => ({ key: { id, fromMe, remoteJid: '593990000030@s.whatsapp.net' }, message: { conversation: 'x' }, messageTimestamp: now - ageH * 3600 });
-    h.giveMessages(i, [rec('A', 1, false), rec('B', 5, false), rec('C', 30, false), rec('D', 2, true), rec('E', 90, false)]);
+    const grp = rec('G', 1, false);
+    (grp['key'] as { remoteJid: string }).remoteJid = '120363424375113025@g.us';
+    const est = rec('S', 1, false);
+    (est['key'] as { remoteJid: string }).remoteJid = 'status@broadcast';
+    h.giveMessages(i, [rec('A', 1, false), rec('B', 5, false), rec('C', 30, false), rec('D', 2, true), rec('E', 90, false), grp, est]);
     const r = await h.provider.listRecentMessages(h.creds, i, { sinceMs: Date.now() - 48 * 3_600_000, maxRecords: 100 });
     expect(r.truncated).toBe(false);
     expect(r.records.map((x) => (x['key'] as { id: string }).id).sort()).toEqual(['A', 'B', 'C', 'D']);
     const cut = await h.provider.listRecentMessages(h.creds, i, { sinceMs: Date.now() - 48 * 3_600_000, maxRecords: 2 });
-    expect(cut.records).toHaveLength(2);
+    expect(cut.records).toHaveLength(3); // 2 entrantes (el tope vale por sentido) + 1 escrito desde el teléfono; los grupos y estados no cuentan
     expect(cut.truncated).toBe(true);
     expect(await h.provider.listRecentMessages(h.creds, i, { sinceMs: Date.now(), maxRecords: 10 })).toMatchObject({ records: [], truncated: false });
     await expect(h.provider.listRecentMessages(h.badCreds, i, { sinceMs: 0, maxRecords: 1 })).rejects.toMatchObject({ code: 'not_configured' });
