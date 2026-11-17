@@ -37,6 +37,8 @@ export interface QrChannelView {
   last_error: string | null;
   /** Calentamiento: día en que va y cuántos mensajes puede enviar hoy. */
   warmup: { day: number; daily_limit: number };
+  /** La última «puesta al día» (v19 B3), o null si nunca corrió. Solo cifras y el motivo del fallo: nada de clientes. */
+  catch_up: { at: string; found: number; recovered: number; truncated: boolean; error: string | null } | null;
   created_at: string;
 }
 
@@ -75,7 +77,7 @@ export class QrConnectionsService {
     return baseUrl && apiKey ? { baseUrl, apiKey } : null;
   }
 
-  private async mustCredentials(): Promise<QrCredentials> {
+  async mustCredentials(): Promise<QrCredentials> {
     if (this.cfg.channels.qrProvider === 'none') throw new ServiceUnavailableError('QR_DISABLED', 'WhatsApp por QR está apagado en este entorno');
     const c = await this.credentials();
     if (!c) throw new ServiceUnavailableError('QR_NOT_CONFIGURED', 'WhatsApp por QR no está configurado: el administrador de la plataforma debe guardar la URL y la clave de Evolution en Proveedores');
@@ -89,7 +91,7 @@ export class QrConnectionsService {
   }
 
   /** Un error del proveedor, traducido a uno nuestro (con un texto que la persona entiende; nunca la clave ni la dirección del servidor). */
-  private translate(e: unknown): unknown {
+  translate(e: unknown): unknown {
     if (!(e instanceof QrSessionError)) return e;
     if (e.code === 'not_configured') return new ServiceUnavailableError('QR_NOT_CONFIGURED', 'El servidor de WhatsApp por QR rechazó la clave de la plataforma: el administrador de la plataforma debe revisarla en Proveedores');
     if (e.code === 'not_found') return new ConflictError('QR_INSTANCE_MISSING', 'La sesión de WhatsApp por QR ya no existe en el servidor: vuelve a crear la conexión');
@@ -305,6 +307,7 @@ export class QrConnectionsService {
       down_since: iso(r.q.downSince),
       last_error: r.q.lastError,
       warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: dailyLimit(r.q.firstConnectedAt, now) },
+      catch_up: r.q.lastCatchUpAt ? { at: r.q.lastCatchUpAt.toISOString(), found: r.q.lastCatchUpFound ?? 0, recovered: r.q.lastCatchUpRecovered ?? 0, truncated: r.q.lastCatchUpTruncated ?? false, error: r.q.lastCatchUpError } : null,
       created_at: r.a.createdAt.toISOString(),
     };
   }

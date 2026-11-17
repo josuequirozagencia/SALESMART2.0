@@ -20,7 +20,16 @@ export interface QrChannel {
   last_error: string | null;
   /** Calentamiento del número: día en que va y cuántos mensajes puede enviar hoy. */
   warmup: { day: number; daily_limit: number };
+  /** La última «puesta al día» con Evolution (v19 B3), o null si nunca corrió. */
+  catch_up: { at: string; found: number; recovered: number; truncated: boolean; error: string | null } | null;
   created_at: string;
+}
+export interface CatchUpResult {
+  found: number;
+  recovered: number;
+  existing: number;
+  truncated: boolean;
+  hours: number;
 }
 export interface QrList {
   items: QrChannel[];
@@ -54,6 +63,7 @@ export function useQrMutations() {
     code: useMutation({ mutationFn: (id: string) => api<QrCode>(`/qr-channels/${id}/qr`, { method: 'POST' }), onSettled: done }),
     disconnect: useMutation({ mutationFn: (id: string) => api<QrChannel>(`/qr-channels/${id}/disconnect`, { method: 'POST' }), onSettled: done }),
     update: useMutation({ mutationFn: ({ id, patch }: { id: string; patch: { name?: string; queue_id?: string | null } }) => api<QrChannel>(`/qr-channels/${id}`, { method: 'PATCH', body: patch }), onSettled: done }),
+    catchUp: useMutation({ mutationFn: ({ id, hours }: { id: string; hours: number }) => api<CatchUpResult>(`/qr-channels/${id}/catch-up`, { method: 'POST', body: { hours } }), onSettled: done }),
     remove: useMutation({ mutationFn: (id: string) => api<{ id: string; deleted: true }>(`/qr-channels/${id}`, { method: 'DELETE' }), onSettled: done }),
   };
 }

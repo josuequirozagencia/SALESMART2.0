@@ -148,7 +148,7 @@ export class ConnectionHealthService {
                count(*) FILTER (WHERE m.created_at > ${sinceRecent}::timestamptz)::int AS recent_n,
                percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM (m.created_at - m.sent_at))) FILTER (WHERE m.created_at > ${sinceRecent}::timestamptz) AS recent_p50
           FROM messages m
-         WHERE m.direction = 'in' AND m.kind <> 'note' AND m.sent_at IS NOT NULL AND m.created_at > ${since24}::timestamptz
+         WHERE m.direction = 'in' AND m.kind <> 'note' AND m.sent_at IS NOT NULL AND m.meta->>'recovered' IS NULL AND m.created_at > ${since24}::timestamptz
          GROUP BY m.channel_account_id`)
     ).rows;
     const events = (

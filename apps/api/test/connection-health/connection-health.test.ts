@@ -181,6 +181,19 @@ describe('el panel de salud', () => {
     expect(byName(h, 'GoHighLevel')).toMatchObject({ kind: 'ghl', session: null, level: 'ok', reasons: [], inbound_24h: { count: 0, lag_median_s: null } });
   });
 
+  it('los mensajes recuperados con «ponerse al día» (meta.recovered) no cuentan como retraso: entraron hoy pero son de días atrás', async () => {
+    const before = byName(await list(T.alice), 'Chip principal');
+    const conv = (await admin.query(`SELECT id FROM conversations WHERE channel_account_id = $1 LIMIT 1`, [ch['Chip principal']])).rows[0].id as string;
+    await admin.query(
+      `INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, external_id, direction, sender_type, kind, body, status, sent_at, created_at, meta) VALUES (gen_random_uuid(), $1, $2, $3, 'rec-lag-1', 'in', 'contact', 'text', 'viejo', 'received', now() - interval '90 hours', now() - interval '1 minute', '{"recovered": true}'::jsonb)`,
+      [ORG_A, conv, ch['Chip principal']],
+    );
+    const after = byName(await list(T.alice), 'Chip principal');
+    expect(after.inbound_24h).toEqual(before.inbound_24h);
+    expect(after.recent_lag_median_s).toBe(before.recent_lag_median_s);
+    await admin.query(`DELETE FROM messages WHERE external_id = 'rec-lag-1'`);
+  });
+
   it('solo quien administra las conexiones; cada empresa ve SOLO las suyas; sin sesión 401', async () => {
     expect((await call('GET', '/connection-health')).status).toBe(401);
     expect((await call('GET', '/connection-health', T.carol)).status).toBe(403); // asesora

@@ -131,6 +131,34 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
+const CATCH_UP_HOURS: ReadonlyArray<{ hours: number; label: string }> = [
+  { hours: 24, label: 'Últimas 24 horas' },
+  { hours: 48, label: 'Últimos 2 días' },
+  { hours: 96, label: 'Últimos 4 días' },
+  { hours: 168, label: 'Últimos 7 días' },
+];
+
+/** «Recuperar mensajes» (v19 B3): lee lo que Evolution guardó y la plataforma no tiene. No duplica nada; los archivos no se recuperan. */
+function CatchUpPanel({ c, onClose, onError }: { c: QrChannel; onClose: () => void; onError: (m: string | undefined) => void }) {
+  const m = useQrMutations();
+  const [hours, setHours] = useState(96);
+  const r = m.catchUp.data;
+  return (
+    <div role="group" aria-label={`Recuperar mensajes de ${c.name}`} className="grid gap-2 rounded-xl border border-line bg-surface2 p-3">
+      <label className="grid gap-1 text-[13px] font-semibold">
+        Periodo a revisar
+        <select className={selectCls} value={hours} onChange={(e) => setHours(Number(e.target.value))}>{CATCH_UP_HOURS.map((o) => <option key={o.hours} value={o.hours}>{o.label}</option>)}</select>
+      </label>
+      <p className="text-[12.5px] text-muted">Revisa lo que WhatsApp entregó a Evolution y trae a la bandeja los mensajes que no llegaron. No duplica los que ya están ni avisa al celular de nadie. Los archivos y notas de voz de esos mensajes no se recuperan.</p>
+      {r ? <Alert kind="info">{r.recovered > 0 ? `Se recuperaron ${r.recovered} ${r.recovered === 1 ? 'mensaje' : 'mensajes'} (${r.existing} ya estaban). Aparecen en la bandeja en unos segundos.` : `No faltaba ningún mensaje (${r.found} revisados).`}{r.truncated ? ' Había más mensajes de los que se pueden revisar de una vez: prueba con un periodo más corto.' : ''}</Alert> : null}
+      <div className="flex flex-wrap gap-2">
+        <Button variant="primary" className={SMALL} loading={m.catchUp.isPending} onClick={() => { onError(undefined); m.catchUp.mutate({ id: c.id, hours }, { onError: (e) => onError(friendlyError(e, 'No pudimos revisar los mensajes de Evolution.')) }); }}>Recuperar mensajes</Button>
+        <Button className={SMALL} onClick={onClose}>Cerrar</Button>
+      </div>
+    </div>
+  );
+}
+
 /** Lo que de verdad hace el cambio de departamento de una conexión (v7, ADR-65): afecta a las conversaciones NUEVAS; las que ya existen siguen en el departamento que tenían. */
 export const MOVE_NOTICE = 'Las conversaciones nuevas de este número irán al departamento elegido. Las conversaciones que ya existen siguen en el departamento que tenían.';
 
@@ -139,6 +167,7 @@ function QrCard({ c, queueName, queues, onPair, onError }: { c: QrChannel; queue
   const [confirm, setConfirm] = useState<'disconnect' | 'remove' | null>(null);
   // «Cambiar departamento»: selector y Guardar (usa el PATCH de siempre; funciona también con la sesión caída)
   const [moving, setMoving] = useState(false);
+  const [catching, setCatching] = useState(false);
   const [target, setTarget] = useState(c.queue_id ?? '');
   const pill = QR_STATE[c.state];
   const down = c.state === 'logged_out' || c.state === 'closed';
@@ -157,7 +186,9 @@ function QrCard({ c, queueName, queues, onPair, onError }: { c: QrChannel; queue
         <div className="flex gap-1.5"><dt className="text-muted">Departamento</dt><dd>{queueName ?? 'sin departamento'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Calentamiento</dt><dd>Día {c.warmup.day}: hasta {c.warmup.daily_limit} mensajes al día</dd></div>
+        {c.catch_up ? <div className="flex gap-1.5"><dt className="text-muted">Última revisión de mensajes</dt><dd>{shortDateTime(c.catch_up.at)}{c.catch_up.error ? ' · con error' : c.catch_up.recovered > 0 ? ` · recuperó ${c.catch_up.recovered}` : ' · al día'}</dd></div> : null}
       </dl>
+      {catching ? <CatchUpPanel c={c} onClose={() => setCatching(false)} onError={onError} /> : null}
       {moving ? (
         <div className="grid gap-2 rounded-xl border border-line bg-surface2 p-3">
           <label className="grid gap-1 text-[13px] font-semibold">
@@ -183,6 +214,7 @@ function QrCard({ c, queueName, queues, onPair, onError }: { c: QrChannel; queue
       ) : (
         <div className="flex flex-wrap gap-2">
           <Button className={SMALL} variant={down || c.state === 'created' ? 'primary' : 'secondary'} aria-label={`${c.state === 'open' ? 'Ver' : 'Vincular'} ${c.name}`} onClick={onPair}>{c.state === 'open' ? 'Ver estado' : 'Vincular con QR'}</Button>
+          {c.state !== 'created' ? <Button className={SMALL} aria-label={`Recuperar mensajes de ${c.name}`} onClick={() => setCatching(true)}>Recuperar mensajes</Button> : null}
           <Button className={SMALL} aria-label={`Cambiar departamento de ${c.name}`} onClick={() => { setTarget(c.queue_id ?? ''); setMoving(true); }}>Cambiar departamento</Button>
           {c.state === 'open' ? <Button className={SMALL} aria-label={`Cerrar sesión de ${c.name}`} onClick={() => setConfirm('disconnect')}>Cerrar sesión</Button> : null}
           <Button className={SMALL} aria-label={`Borrar ${c.name}`} onClick={() => setConfirm('remove')}>Borrar</Button>

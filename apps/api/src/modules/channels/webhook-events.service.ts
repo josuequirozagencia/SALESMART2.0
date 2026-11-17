@@ -120,10 +120,11 @@ export class WebhookEventsService {
               const r = await this.conversations.ingestDeviceMessage(tx, ev.channelAccountId, m, { now, timeZone: assign.timeZone, mayWait: now.getTime() - ev.receivedAt.getTime() < STATUS_WAIT_MS });
               if (r === 'wait') unknownTargets += 1;
             } else {
-              const r = await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
+              // v19 B3: un aviso recuperado con «ponerse al día» (marca `__catchup`) lleva mensajes viejos: se guardan, pero sin avisos al celular, reglas ni cronómetros
+              const r = await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign, undefined, (ev.payload)['__catchup'] === 1);
               // B4: un mensaje que el proveedor fechó hace más de un minuto es de una cola que se atrasó aguas arriba (WhatsApp o Evolution): solo se registra el retraso, nunca el teléfono ni el texto
               const lag = Math.round((now.getTime() - m.sentAt.getTime()) / 1000);
-              if (!r.duplicate && lag > LATE_LOG_SECONDS) this.log.warn({ event_id: ev.id, channel_id: ev.channelAccountId, lag_s: lag }, 'mensaje entrante recibido con retraso respecto a su hora en el proveedor');
+              if (!r.duplicate && lag > LATE_LOG_SECONDS && (ev.payload)['__catchup'] !== 1) this.log.warn({ event_id: ev.id, channel_id: ev.channelAccountId, lag_s: lag }, 'mensaje entrante recibido con retraso respecto a su hora en el proveedor');
             }
           }
           for (const s of event.statuses) if ((await this.conversations.applyStatus(tx, ev.channelAccountId, s)) === 'unknown') unknownTargets += 1;
