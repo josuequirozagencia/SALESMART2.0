@@ -73,12 +73,12 @@ export class ConversationsService {
     const [seen] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId))).limit(1);
     if (seen) return { duplicate: true, conversationId: null, contactCreated: false, conversationCreated: false };
 
-    const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
+    const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.resolveWhatsapp(tx, { phone: m.from, lid: m.lid ?? null, name: m.profileName });
     // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
     if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
     // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial) y el Lead hacia Meta; un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
     const clid = m.referral?.ctwaClid ?? null;
-    if (clid) {
+    if (clid && m.from) {
       await this.attribution.recordIn(tx, { phone: m.from, ctwa_cl_id: clid, source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() }, m.sentAt, contact);
     } else if (contact.created) {
       await this.touches.record(tx, contact.id, { kind: 'message_in', at: m.sentAt, source: 'whatsapp', originRef: m.externalId });
@@ -182,7 +182,7 @@ export class ConversationsService {
         .limit(1);
       if (inFlight) return 'wait';
     }
-    const contact = await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', null);
+    const contact = await this.contacts.resolveWhatsapp(tx, { phone: m.from, lid: m.lid ?? null, name: null, audit: 'meta' });
     const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw, 'meta');
     const inserted = await tx
       .insert(messages)

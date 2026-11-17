@@ -86,6 +86,13 @@ export interface ParsedEvolution {
 
 const EMPTY: Omit<ParsedEvolution, 'instance'> = { events: [], connection: null, qr: null, inlineMedia: new Map(), ignored: 0, ignoredReason: null };
 
+/** «123456789012345@lid» → el código `@lid` de WhatsApp (ADR-73); cualquier otro identificador → null. De 5 a 30 dígitos; el sufijo de dispositivo (`:12`) se quita. */
+export function lidFromJid(jid: unknown): string | null {
+  const s = str(jid);
+  const m = s ? /^(\d{5,30})(?::\d+)?@lid$/.exec(s) : null;
+  return m ? `${m[1]}@lid` : null;
+}
+
 /** «593999999999@s.whatsapp.net» (o con sufijo de dispositivo `:12`) → teléfono E.164; cualquier otro identificador (`@lid`, `@g.us`…) → null. */
 export function phoneFromJid(jid: unknown): string | null {
   const s = str(jid);
@@ -193,11 +200,14 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
   }
   // El teléfono sale del identificador de teléfono; si solo hay un `@lid`, se usa la variante `remoteJidAlt` que Evolution da en los chats 1:1
   const from = phoneFromJid(remote) ?? phoneFromJid(key['remoteJidAlt']);
-  if (!from) return { ...EMPTY, ignored: 1, ignoredReason: 'no_phone' };
+  // Sin teléfono pero con el código `@lid` (ADR-73): el contacto se reconoce por ese código; sin ninguno de los dos no hay a quién atribuir el mensaje
+  const lid = lidFromJid(remote) ?? lidFromJid(key['remoteJidAlt']);
+  if (!from && !lid) return { ...EMPTY, ignored: 1, ignoredReason: 'no_phone' };
   const quotedId = quotedIdOf(message);
   const msg: NormalizedMessage = {
     externalId: id,
     from,
+    ...(lid ? { lid } : {}),
     fromRaw: remote,
     // En un mensaje del teléfono el `pushName` es el de la persona dueña de la línea, no el del cliente
     profileName: fromMe ? null : str(data['pushName']),

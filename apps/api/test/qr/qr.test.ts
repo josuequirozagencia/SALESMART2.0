@@ -24,7 +24,7 @@ import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule, OutboundDispatcher } from '../../src/modules/inbox';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { PlatformCredentialsReader } from '../../src/modules/platform';
-import { QrCatchUpJob, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart } from '../../src/modules/qr';
+import { QrCatchUpJob, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart, withKnownPhones } from '../../src/modules/qr';
 import { DomainEventBus } from '../../src/modules/events';
 import { QueuesModule } from '../../src/modules/queues';
 import { Argon2idHasher } from '../../src/security';
@@ -776,5 +776,168 @@ describe('ventana de la pasada automática (v19 B3)', () => {
     expect(autoWindowStart(null, now).toISOString()).toBe('2026-11-10T12:00:00.000Z');
     expect(autoWindowStart(new Date('2026-11-17T11:50:00Z'), now).toISOString()).toBe('2026-11-17T11:35:00.000Z');
     expect(autoWindowStart(new Date('2026-11-10T00:00:00Z'), now).toISOString()).toBe('2026-11-15T12:00:00.000Z');
+  });
+});
+
+describe('contactos por su código @lid cuando WhatsApp no entrega el teléfono (ADR-73)', () => {
+  const LID = '257720267587711@lid';
+  const lidMsg = (instance: string, id: string, text: string, over: { lid?: string; alt?: string; name?: string } = {}) =>
+    evt(instance, 'messages.upsert', { key: { remoteJid: over.lid ?? LID, ...(over.alt ? { remoteJidAlt: over.alt } : {}), fromMe: false, id, participant: '' }, pushName: over.name ?? 'Cliente Lid', status: 'DELIVERY_ACK', message: { conversation: text }, messageType: 'conversation', messageTimestamp: Math.floor(Date.now() / 1000), instanceId: 'i-1', source: 'ios' });
+  const contactsOf = async (org = ORG_A) => (await admin.query(`SELECT c.id, c.name, c.source, (SELECT count(*)::int FROM contact_phones p WHERE p.contact_id = c.id AND p.deleted_at IS NULL) AS phones FROM contacts c WHERE c.organization_id = $1 AND c.deleted_at IS NULL ORDER BY c.created_at`, [org])).rows as Array<{ id: string; name: string; source: string; phones: number }>;
+  const idsOf = async (org = ORG_A) => (await admin.query(`SELECT contact_id, kind, value FROM contact_identities WHERE organization_id = $1`, [org])).rows as Array<{ contact_id: string; kind: string; value: string }>;
+  const setup = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    return { v, inst: await instanceOf(v.id) };
+  };
+
+  it('un mensaje solo con @lid crea un contacto SIN teléfono con el nombre de su perfil, su identidad y su conversación; el siguiente mensaje del mismo código es el mismo contacto', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID1-0000000000001', 'Hola, ¿precio?'));
+    await runEvents();
+    const [c] = await contactsOf();
+    expect(c).toMatchObject({ name: 'Cliente Lid', source: 'whatsapp', phones: 0 });
+    expect(await idsOf()).toEqual([{ contact_id: c!.id, kind: 'wa_lid', value: LID }]);
+    expect((await convOf(v.id))?.['peer_id']).toBe(LID);
+    expect(await countOf('messages')).toBe(1);
+    expect(await countOf('contact_tags', `contact_id = '${c!.id}'`)).toBe(1); // la etiqueta Lead del que escribe por primera vez
+    await post(v.id, lidMsg(inst, 'LID1-0000000000002', 'Sigo aquí'));
+    await runEvents();
+    expect(await contactsOf()).toHaveLength(1);
+    expect(await countOf('messages')).toBe(2);
+    expect(await countOf('conversations')).toBe(1);
+  });
+
+  it('sin nombre de perfil se llama «Contacto sin teléfono»', async () => {
+    const { v, inst } = await setup();
+    const body = lidMsg(inst, 'LID2-0000000000001', 'hola');
+    (body.data as Record<string, unknown>)['pushName'] = '';
+    await post(v.id, body);
+    await runEvents();
+    expect((await contactsOf())[0]!.name).toBe('Contacto sin teléfono');
+  });
+
+  it('cuando después llega el teléfono (remoteJidAlt) el MISMO contacto lo aprende: no se duplica y el teléfono queda como principal', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID3-0000000000001', 'primero sin teléfono'));
+    await runEvents();
+    await post(v.id, lidMsg(inst, 'LID3-0000000000002', 'ahora con teléfono', { alt: '593991230001@s.whatsapp.net' }));
+    await runEvents();
+    const cs = await contactsOf();
+    expect(cs).toHaveLength(1);
+    expect(cs[0]!.phones).toBe(1);
+    expect((await admin.query(`SELECT e164, is_primary FROM contact_phones WHERE contact_id = $1`, [cs[0]!.id])).rows[0]).toEqual({ e164: '+593991230001', is_primary: true });
+    expect(await countOf('conversations')).toBe(1);
+  });
+
+  it('con teléfono y código desde el primer mensaje se guarda el par; un mensaje posterior solo con el código es la misma persona', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID4-0000000000001', 'con teléfono', { alt: '593991230002@s.whatsapp.net' }));
+    await runEvents();
+    const [c] = await contactsOf();
+    expect(c!.phones).toBe(1);
+    expect(await idsOf()).toEqual([{ contact_id: c!.id, kind: 'wa_lid', value: LID }]);
+    await post(v.id, lidMsg(inst, 'LID4-0000000000002', 'esta vez sin teléfono'));
+    await runEvents();
+    expect(await contactsOf()).toHaveLength(1);
+    expect(await countOf('messages')).toBe(2);
+  });
+
+  it('si el teléfono que llega ya era de OTRO contacto NO se fusionan: queda constancia en la auditoría y cada contacto sigue como estaba', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID5-0000000000001', 'sin teléfono')); // contacto A, solo con código
+    await post(v.id, upsert(inst, 'PH5-0000000000001', { conversation: 'desde su teléfono' }, '593991230003')); // contacto B, con teléfono
+    await runEvents();
+    expect(await contactsOf()).toHaveLength(2);
+    await post(v.id, lidMsg(inst, 'LID5-0000000000002', 'ahora trae el teléfono de B', { alt: '593991230003@s.whatsapp.net' }));
+    await runEvents();
+    const cs = await contactsOf();
+    expect(cs).toHaveLength(2); // sin fusión automática
+    expect(cs.map((c) => c.phones).sort()).toEqual([0, 1]);
+    const conflict = (await admin.query(`SELECT entity_id, new_value FROM audit_logs WHERE organization_id = $1 AND field = 'wa_lid_conflict'`, [ORG_A])).rows as Array<{ entity_id: string; new_value: { other_contact_id: string } }>;
+    expect(conflict).toHaveLength(1);
+    const withPhone = cs.find((c) => c.phones === 1)!;
+    expect(conflict[0]!.entity_id).toBe(withPhone.id);
+    expect(conflict[0]!.new_value.other_contact_id).toBe(cs.find((c) => c.phones === 0)!.id);
+  });
+
+  it('responder a un contacto sin teléfono falla con su motivo (lid_no_phone) y NO manda nada a los dígitos del código; con el teléfono ya conocido sale al teléfono', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID6-0000000000001', 'hola'));
+    await runEvents();
+    const conv = (await convOf(v.id))!['id'] as string;
+    const id = await queueOut(conv, v.id, 'te respondo');
+    expect(await dispatch(id)).toMatchObject({ outcome: 'failed' });
+    expect(fake().sent).toHaveLength(0);
+    expect((await msg(id))['meta']).toMatchObject({ error_code: 'lid_no_phone' });
+    expect(String((await msg(id))['error'])).toMatch(/no nos entregó el teléfono/);
+    // llega el teléfono: ahora se responde a ESE teléfono, no a los dígitos del código
+    await post(v.id, lidMsg(inst, 'LID6-0000000000002', 'ahora sí', { alt: '593991230004@s.whatsapp.net' }));
+    await runEvents();
+    const id2 = await queueOut(conv, v.id, 'ya te veo');
+    expect(await dispatch(id2)).toEqual({ outcome: 'sent' });
+    expect(fake().sent).toHaveLength(1);
+    expect(fake().sent[0]!.to).toBe('593991230004');
+  });
+
+  it('un contacto con teléfono cuya conversación quedó con el código como destino también recibe al teléfono (antes habría ido a los dígitos del código)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID7-0000000000001', 'hola', { alt: '593991230005@s.whatsapp.net' }));
+    await runEvents();
+    expect((await convOf(v.id))?.['peer_id']).toBe(LID);
+    const id = await queueOut((await convOf(v.id))!['id'] as string, v.id, 'respuesta');
+    expect(await dispatch(id)).toEqual({ outcome: 'sent' });
+    expect(fake().sent[0]!.to).toBe('593991230005');
+  });
+
+  it('aislamiento A↔B: el mismo código en otra empresa es otro contacto y su identidad no se ve desde la primera', async () => {
+    const a = await mk(T.alice);
+    const b = await mk(T.bob, 'Chip de Luna');
+    await open(a.id);
+    const instA = await instanceOf(a.id);
+    const instB = await instanceOf(b.id);
+    fake().setState(instB, 'open');
+    await post(a.id, lidMsg(instA, 'ISO-0000000000001', 'en A'));
+    await post(b.id, lidMsg(instB, 'ISO-0000000000001', 'en B', { name: 'Otra persona' }));
+    await runEvents(ORG_A);
+    await runEvents(ORG_B);
+    expect((await contactsOf(ORG_A)).map((c) => c.name)).toEqual(['Cliente Lid']);
+    expect((await contactsOf(ORG_B)).map((c) => c.name)).toEqual(['Otra persona']);
+    expect(await idsOf(ORG_A)).toHaveLength(1);
+    expect(await idsOf(ORG_B)).toHaveLength(1);
+    expect((await idsOf(ORG_A))[0]!.contact_id).not.toBe((await idsOf(ORG_B))[0]!.contact_id);
+  });
+
+  it('«ponerse al día»: un @lid con teléfono en OTRO registro del mismo código se resuelve por ese teléfono; sin ninguno entra como contacto sin teléfono', async () => {
+    const { v, inst } = await setup();
+    const now = Math.floor(Date.now() / 1000);
+    const rec = (id: string, lid: string, ageH: number, alt?: string): Record<string, unknown> => ({ key: { remoteJid: lid, ...(alt ? { remoteJidAlt: alt } : {}), fromMe: false, id }, pushName: 'Desde historial', message: { conversation: `m-${id}` }, messageType: 'conversation', messageTimestamp: now - ageH * 3600 });
+    const A = '111111111111@lid';
+    const B = '222222222222@lid';
+    fake().stored.set(inst, [rec('H-A-00000000001', A, 30), rec('H-A-00000000002', A, 20, '593991230006@s.whatsapp.net'), rec('H-B-00000000001', B, 10)]);
+    const r = await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 48 });
+    expect(r.status).toBe(200);
+    expect(await json<{ found: number; recovered: number }>(r)).toMatchObject({ found: 3, recovered: 3 });
+    await runEvents();
+    const cs = await contactsOf();
+    expect(cs).toHaveLength(2);
+    expect(cs.map((c) => c.phones).sort()).toEqual([0, 1]); // A: con teléfono (por el registro hermano); B: sin teléfono
+    expect(await countOf('messages')).toBe(3);
+    expect((await idsOf()).map((i) => i.value).sort()).toEqual([A, B]);
+  });
+});
+
+describe('teléfonos que Evolution entrega en algunos registros (withKnownPhones, ADR-73)', () => {
+  const R = (lid: string, id: string, alt?: string): Record<string, unknown> => ({ key: { remoteJid: lid, ...(alt ? { remoteJidAlt: alt } : {}), fromMe: false, id } });
+  it('copia el teléfono a los registros del mismo código que no lo traen, sin tocar los originales ni los de otros códigos', () => {
+    const a = R('100000@lid', 'a');
+    const b = R('100000@lid', 'b', '593990000009@s.whatsapp.net');
+    const c = R('200000@lid', 'c');
+    const d = { key: { remoteJid: '593990000010@s.whatsapp.net', id: 'd' } };
+    const out = withKnownPhones([a, b, c, d]);
+    expect((out[0]!['key'] as Record<string, unknown>)['remoteJidAlt']).toBe('593990000009@s.whatsapp.net');
+    expect((out[2]!['key'] as Record<string, unknown>)['remoteJidAlt']).toBeUndefined();
+    expect(out[3]).toBe(d);
+    expect((a['key'] as Record<string, unknown>)['remoteJidAlt']).toBeUndefined(); // el original no cambió
   });
 });

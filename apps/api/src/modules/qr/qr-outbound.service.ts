@@ -21,6 +21,7 @@ const backoff = (attempts: number): number => Math.min(15_000 * 2 ** Math.max(at
 const ERROR_TEXT: Readonly<Record<string, string>> = {
   channel_off: 'La conexión de WhatsApp por QR está desactivada o borrada. Actívala y vuelve a intentar',
   no_recipient: 'El contacto no tiene un teléfono al cual escribir',
+  lid_no_phone: 'WhatsApp no nos entregó el teléfono de este contacto, así que por ahora solo podemos recibir sus mensajes. Podrás responderle cuando aparezca su teléfono o cuando se habilite el envío a estos contactos',
   qr_unsupported: 'Por WhatsApp por QR no se pueden enviar plantillas ni stickers',
   attachment_data: 'Faltan los datos del archivo: súbelo de nuevo e inténtalo',
   storage_unavailable: 'No pudimos leer el archivo del almacenamiento: inténtalo de nuevo en unos minutos',
@@ -184,11 +185,15 @@ export class QrOutboundService {
 
       if (!ctx || ctx.deletedAt !== null || ctx.status !== 'active' || !ctx.instance) return failLocal('channel_off');
       if (m.kind === 'template' || m.kind === 'sticker') return failLocal('qr_unsupported');
-      let to = String(ctx.peerId ?? '').replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
+      // ADR-73: un `…@lid` NO es un teléfono (sus dígitos son otro número): nunca se manda a esos dígitos. Se usa el teléfono del contacto si ya se conoce; si no, el mensaje falla con su motivo
+      const peer = String(ctx.peerId ?? '');
+      const isLid = /@lid$/.test(peer);
+      let to = isLid ? '' : peer.replace(/@.*$/, '').replace(/:\d+$/, '').replace(/\D/g, '');
       if (to === '') {
         const [p] = await tx.select({ e164: contactPhones.e164 }).from(contactPhones).where(and(eq(contactPhones.contactId, ctx.contactId), isNull(contactPhones.deletedAt), eq(contactPhones.isPrimary, true))).limit(1);
         to = p ? p.e164.replace(/^\+/, '') : '';
       }
+      if (to === '' && isLid) return failLocal('lid_no_phone');
       const isMedia = m.kind === 'image' || m.kind === 'video' || m.kind === 'audio' || m.kind === 'document';
       if (to === '' || (!isMedia && m.body === null)) return failLocal('no_recipient');
       let attachment: Plan['attachment'] = null;

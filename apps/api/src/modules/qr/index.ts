@@ -1,7 +1,7 @@
 export { QrModule } from './qr.module';
 export { QrHeartbeatJob } from './qr-heartbeat.job';
 export { QrCatchUpJob } from './qr-catch-up.job';
-export { QrCatchUpService, autoWindowStart, CATCH_UP_MAX_HOURS, type CatchUpResult } from './qr-catch-up.service';
+export { QrCatchUpService, autoWindowStart, withKnownPhones, CATCH_UP_MAX_HOURS, type CatchUpResult } from './qr-catch-up.service';
 export { ContactPhotosJob, CONTACT_PHOTOS_BATCH, CONTACT_PHOTOS_RECHECK_MS } from './contact-photos.job';
 export { PHOTO_DOWNLOADER, MAX_CONTACT_PHOTO_BYTES, type PhotoDownloader } from './photo-downloader';
 export { QrOutboundService, type QrDispatch } from './qr-outbound.service';

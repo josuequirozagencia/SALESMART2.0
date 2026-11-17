@@ -199,7 +199,7 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
         <>
           <Block id="data" title="Datos" st={st}>
             <dl className="grid gap-1.5 text-[13px]">
-              <div><dt className="text-[12px] text-muted">Teléfonos</dt><dd>{contact.phones.length > 0 ? contact.phones.map((p) => p.e164 + (p.primary && contact.phones.length > 1 ? ' (principal)' : '')).join(' · ') : '—'}</dd></div>
+              <div><dt className="text-[12px] text-muted">Teléfonos</dt><dd>{contact.phones.length > 0 ? contact.phones.map((p) => p.e164 + (p.primary && contact.phones.length > 1 ? ' (principal)' : '')).join(' · ') : 'Sin teléfono'}</dd></div>
               {contact.email ? <div><dt className="text-[12px] text-muted">Correo</dt><dd className="break-all">{contact.email}</dd></div> : null}
               <div><dt className="text-[12px] text-muted">Responsable</dt><dd>{contact.owner ? personName(contact.owner.name) : 'Sin responsable'}</dd></div>
               <div><dt className="text-[12px] text-muted">Consentimiento</dt><dd>{CONSENT[contact.consent]}</dd></div>
