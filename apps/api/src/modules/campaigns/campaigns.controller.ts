@@ -6,7 +6,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { TenantContext } from '../../tenant';
-import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, listCampaignsQuerySchema, previewSchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type UpdateCampaignDto } from './campaigns.dto';
+import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, listCampaignsQuerySchema, previewSchema, settingsSchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type SettingsDto, type UpdateCampaignDto } from './campaigns.dto';
 import { CampaignsService, type CampaignAccess } from './campaigns.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -15,6 +15,7 @@ const accessOf = (req: AuthedRequest): CampaignAccess => ({
   userId: TenantContext.current().userId ?? '',
   viewAll: req.principal?.permissions?.has('campaigns.view_all') === true,
   contactsViewAll: req.principal?.permissions?.has('contacts.view_all') === true,
+  cancelOthers: req.principal?.permissions?.has('campaigns.cancel') === true,
 });
 
 /** La llave de idempotencia es obligatoria al crear: sin ella, un doble clic o un reintento de red crearía dos campañas. */
@@ -36,14 +37,27 @@ export class CampaignsController {
   @RequirePermission('inbox.read')
   @Get('access')
   access(@Req() req: AuthedRequest) {
-    const has = (k: 'campaigns.read' | 'campaigns.send' | 'campaigns.view_all' | 'users.manage'): boolean => req.principal?.permissions?.has(k) === true;
-    return this.campaigns.accessInfo({ read: has('campaigns.read'), send: has('campaigns.send'), viewAll: has('campaigns.view_all'), manageLimits: has('users.manage') });
+    const has = (k: 'campaigns.read' | 'campaigns.send' | 'campaigns.view_all' | 'campaigns.cancel' | 'users.manage' | 'channels.manage'): boolean => req.principal?.permissions?.has(k) === true;
+    return this.campaigns.accessInfo({ read: has('campaigns.read'), send: has('campaigns.send'), viewAll: has('campaigns.view_all'), manageLimits: has('users.manage'), manageSettings: has('channels.manage'), cancelOthers: has('campaigns.cancel') });
   }
 
   @RequirePermission('campaigns.send')
   @Get('options')
   options(@Req() req: AuthedRequest) {
     return this.campaigns.options(accessOf(req));
+  }
+
+  /** El tope diario de la empresa por WhatsApp oficial (lo administra quien administra las conexiones). */
+  @RequirePermission('channels.manage')
+  @Get('settings')
+  settings() {
+    return this.campaigns.settings();
+  }
+
+  @RequirePermission('channels.manage')
+  @Put('settings')
+  setSettings(@Body(new ZodValidationPipe(settingsSchema)) b: SettingsDto) {
+    return this.campaigns.setSettings(b);
   }
 
   /** Las plantillas enviables de una conexión oficial que la persona puede usar (para elegir la del mensaje). */
@@ -114,6 +128,39 @@ export class CampaignsController {
     const r = await this.campaigns.duplicate(accessOf(req), id, keyOf(key));
     res.status(r.created ? 201 : 200);
     return r.campaign;
+  }
+
+  /**
+   * Lanza la campaña: congela la audiencia y la deja en curso (o programada). Idempotente: repetirlo devuelve la campaña como quedó (`Idempotency-Key` obligatoria, como en todo lo que envía o mueve dinero).
+   */
+  @RequirePermission('campaigns.send')
+  @Post(':id/launch')
+  async launch(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response, @Param('id', idParam) id: string, @Headers('idempotency-key') key: string | undefined) {
+    keyOf(key);
+    const r = await this.campaigns.launch(accessOf(req), id);
+    res.status(r.created ? 201 : 200);
+    return r.campaign;
+  }
+
+  @RequirePermission('campaigns.send')
+  @Post(':id/pause')
+  @HttpCode(200)
+  pause(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.campaigns.pause(accessOf(req), id);
+  }
+
+  @RequirePermission('campaigns.send')
+  @Post(':id/resume')
+  @HttpCode(200)
+  resume(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.campaigns.resume(accessOf(req), id);
+  }
+
+  @RequirePermission('campaigns.send')
+  @Post(':id/cancel')
+  @HttpCode(200)
+  cancel(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.campaigns.cancel(accessOf(req), id);
   }
 
   /** Vista previa de la audiencia y del mensaje: cuántos recibirían, a quiénes se omite y por qué, y el mensaje con un contacto real. No envía ni guarda nada. */

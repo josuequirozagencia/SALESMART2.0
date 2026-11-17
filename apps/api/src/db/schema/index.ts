@@ -32,4 +32,4 @@ export { agentFollowUps, agentFollowUpSteps, agentFollowUpRuns, agentFollowUpFil
 export { calendarConnections, appointmentCalendarEvents } from './calendar';
 export { forms, formFields, formSubmissions } from './forms';
 export { automations, automationRuns, automationRunSteps, automationSettings } from './automations';
-export { campaigns, campaignRecipients, campaignAdvisorLimits, CAMPAIGN_STATUSES, RECIPIENT_STATUSES, SKIP_REASONS } from './campaigns';
+export { campaigns, campaignRecipients, campaignAdvisorLimits, campaignSettings, CAMPAIGN_STATUSES, RECIPIENT_STATUSES, SKIP_REASONS } from './campaigns';

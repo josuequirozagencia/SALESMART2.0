@@ -1,5 +1,11 @@
 // v17 · 17.1 — Campañas masivas: modelo, permisos y audiencia, SIN enviar (ADR-72). Rutas cubiertas (el registro de endpoints exige que este archivo escriba cada una tal cual):
 //   GET /v1/campaigns/access
+//   GET /v1/campaigns/settings
+//   PUT /v1/campaigns/settings
+//   POST /v1/campaigns/:id/launch
+//   POST /v1/campaigns/:id/pause
+//   POST /v1/campaigns/:id/resume
+//   POST /v1/campaigns/:id/cancel
 //   GET /v1/campaigns/options
 //   GET /v1/campaigns/channels/:channelId/templates
 //   POST /v1/campaigns/preview
@@ -22,12 +28,13 @@ import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
-import { CampaignsModule } from '../../src/modules/campaigns';
+import { CampaignSenderService, CampaignsModule } from '../../src/modules/campaigns';
 import { ChannelsModule, FAKE_WHATSAPP_TOKEN } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
 import { OrganizationsModule } from '../../src/modules/organizations';
 import { TemplatesModule } from '../../src/modules/templates';
 import { Argon2idHasher } from '../../src/security';
+import { TenantContext } from '../../src/tenant';
 import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
@@ -71,7 +78,7 @@ async function start(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE campaign_recipients, campaign_advisor_limits, campaigns, message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, queue_distribution_state, queue_members, qr_accounts, whatsapp_accounts, channel_accounts, queues, channel_routes, contact_tags, contact_phones, contacts, custom_field_values, custom_field_definitions, tags, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, plans, users CASCADE');
+  await admin.query('TRUNCATE campaign_recipients, campaign_advisor_limits, campaign_settings, campaigns, message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, queue_distribution_state, queue_members, qr_accounts, whatsapp_accounts, channel_accounts, queues, channel_routes, contact_tags, contact_phones, contacts, custom_field_values, custom_field_definitions, tags, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, plans, users CASCADE');
   const orgs: Array<[string, string, string]> = [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']];
   for (const [id, kind, name] of orgs) await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'America/Guayaquil')`, [id, kind, name]);
   const users: Array<[string, string, string | null]> = [[IDS.alice, 'alice@a.test', 'Alicia Torres'], [IDS.carol, 'carol@a.test', 'Carolina Vera'], [IDS.eve, 'eve@a.test', 'Eva Mora'], [IDS.bob, 'bob@b.test', 'Beto Luna'], [IDS.root, 'root@plat.test', null]];
@@ -128,6 +135,7 @@ interface Camp {
   id: string; name: string; status: string; mode: 'template' | 'text'; channel: { id: string; name: string; kind: string } | null; template_id: string | null; template_params: Record<string, string>; body: string | null;
   audience: Record<string, unknown>; include_unknown_consent: boolean; scheduled_at: string | null; gap_seconds: number; daily_cap: number; created_by: { id: string; name: string }; can_edit: boolean;
   counts: { total: number; sent: number; delivered: number; read: number; replied: number; failed: number; skipped: number };
+  status_reason: string | null; can_pause: boolean; can_resume: boolean; can_cancel: boolean;
 }
 interface Preview {
   campaign_id: string;
@@ -469,9 +477,9 @@ describe('tope diario por asesor', () => {
 // ═════════════════════════════════════════════════════════════════════════════
 describe('rutas de apoyo de la pantalla (17.2)', () => {
   it('acceso: cada persona ve lo que puede hacer y si su plan lo incluye, sin datos de la empresa; la plataforma 403', async () => {
-    expect(await ok(await call('GET', '/campaigns/access', T.alice))).toEqual({ plan_enabled: true, read: true, send: true, view_all: true, manage_limits: true });
-    expect(await ok(await call('GET', '/campaigns/access', T.carol))).toEqual({ plan_enabled: true, read: true, send: true, view_all: false, manage_limits: false });
-    expect(await ok(await call('GET', '/campaigns/access', T.eve))).toEqual({ plan_enabled: true, read: false, send: false, view_all: false, manage_limits: false });
+    expect(await ok(await call('GET', '/campaigns/access', T.alice))).toEqual({ plan_enabled: true, read: true, send: true, view_all: true, manage_limits: true, manage_settings: true, cancel_others: true });
+    expect(await ok(await call('GET', '/campaigns/access', T.carol))).toEqual({ plan_enabled: true, read: true, send: true, view_all: false, manage_limits: false, manage_settings: false, cancel_others: false });
+    expect(await ok(await call('GET', '/campaigns/access', T.eve))).toEqual({ plan_enabled: true, read: false, send: false, view_all: false, manage_limits: false, manage_settings: false, cancel_others: false });
     const off = (await admin.query(`INSERT INTO plans(id, name, features) VALUES (gen_random_uuid(), 'Básico', '{"campaigns": false}') RETURNING id`)).rows[0].id as string;
     await admin.query(`UPDATE organizations SET plan_id = $1 WHERE id = $2`, [off, ORG_A]);
     expect((await ok<{ plan_enabled: boolean }>(await call('GET', '/campaigns/access', T.alice))).plan_enabled).toBe(false); // el menú puede mostrar la sección bloqueada
@@ -546,5 +554,292 @@ describe('rutas de apoyo de la pantalla (17.2)', () => {
     expect((await list(T.alice, { audience: { source: 'all' }, cursor: 'zzz' })).status).toBe(400);
     expect((await ok<Page>(await list(T.bob, { audience: { source: 'all' } }))).total).toBe(0); // B no ve nada de A
     expect((await list(T.eve, { audience: { source: 'all' } })).status).toBe(403);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+describe('envío por WhatsApp oficial (17.3)', () => {
+  const sender = (): CampaignSenderService => app.get(CampaignSenderService);
+  /** Una pasada de la tarea de envío para la empresa A, «ahora + offset». */
+  const tick = (offsetMs = 1000, org = ORG_A): Promise<number> => TenantContext.run({ organizationId: org }, () => sender().runDue(new Date(Date.now() + offsetMs)));
+  const launch = (token: string, id: string, k: string | null = key()) => call('POST', `/campaigns/${id}/launch`, token, undefined, k ? { 'idempotency-key': k } : {});
+  const act = (token: string, id: string, what: 'pause' | 'resume' | 'cancel') => call('POST', `/campaigns/${id}/${what}`, token);
+  const recipients = async (id: string) => (await admin.query(`SELECT r.status, r.skip_reason, r.error, r.phone, r.message_id, r.conversation_id, c.name FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id WHERE r.campaign_id = $1 ORDER BY c.name`, [id])).rows as Array<{ status: string; skip_reason: string | null; error: string | null; phone: string | null; message_id: string | null; conversation_id: string | null; name: string }>;
+  const byName = (rows: Awaited<ReturnType<typeof recipients>>, name: string) => rows.find((r) => r.name === name)!;
+  const dbCamp = async (id: string) => (await admin.query(`SELECT status, status_reason, launched_at, next_send_at, finished_at FROM campaigns WHERE id = $1`, [id])).rows[0] as { status: string; status_reason: string | null; launched_at: Date | null; next_send_at: Date | null; finished_at: Date | null };
+  const messagesOf = async (id: string) => (await admin.query(`SELECT m.id, m.sender_type, m.kind, m.direction, m.status, m.body, m.conversation_id, c.name AS contact FROM messages m JOIN conversations v ON v.id = m.conversation_id JOIN contacts c ON c.id = v.contact_id WHERE m.id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [id])).rows as Array<{ id: string; sender_type: string; kind: string; direction: string; status: string; body: string; conversation_id: string; contact: string }>;
+  const people = async (names: string[], over: Parameters<typeof mkContact>[0] = {}) => { for (const n of names) await mkContact({ owner: IDS.alice, name: n, ...over }); };
+
+  it('lanzar congela la audiencia (destinatarios y omitidos con su motivo), es idempotente y solo lo hace quien la creó; sin llave 400; por QR todavía no', async () => {
+    await people(['Ana', 'Beto']);
+    await mkContact({ owner: IDS.alice, name: 'Baja', consent: 'revoked' });
+    await mkContact({ owner: IDS.alice, name: 'Sin permiso', consent: 'unknown' });
+    const c = await mk(T.alice, tplBody());
+    expect((await launch(T.alice, c.id, null)).status).toBe(400);
+    expect((await launch(T.carol, c.id)).status).toBe(404); // ajena
+    expect((await launch(T.bob, c.id)).status).toBe(404); // otra empresa
+    const k = key();
+    const first = await ok<Camp>(await launch(T.alice, c.id, k), 201);
+    expect(first).toMatchObject({ status: 'running', counts: { total: 4, skipped: 2 }, can_edit: false, can_pause: true, can_resume: false, can_cancel: true });
+    const rows = await recipients(c.id);
+    expect(rows.map((r) => [r.name, r.status, r.skip_reason])).toEqual([['Ana', 'pending', null], ['Baja', 'skipped', 'revoked'], ['Beto', 'pending', null], ['Sin permiso', 'skipped', 'no_consent']]);
+    expect(byName(rows, 'Ana').phone).toMatch(/^\+5939881/);
+    // repetirlo: la misma campaña, sin congelar de nuevo (aunque aparezcan contactos nuevos)
+    await mkContact({ owner: IDS.alice, name: 'Llegó después' });
+    const again = await ok<Camp>(await launch(T.alice, c.id, k), 200);
+    expect(again.id).toBe(c.id);
+    expect((await recipients(c.id)).length).toBe(4);
+    // ya no se edita
+    expect((await call('PATCH', `/campaigns/${c.id}`, T.alice, { name: 'tarde' })).status).toBe(409);
+    expect((await admin.query(`SELECT field FROM audit_logs WHERE entity_type = 'campaign' AND entity_id = $1 ORDER BY at, id`, [c.id])).rows.map((r) => r.field)).toEqual([null, 'launched']);
+    // por QR todavía no se envía (17.4); sin destinatarios no se lanza
+    const qr = await mk(T.alice, textBody());
+    const r = await launch(T.alice, qr.id);
+    expect(r.status).toBe(409);
+    expect(await code(r)).toBe('CHANNEL_NOT_SUPPORTED_YET');
+    const empty = await mk(T.carol, tplBody({ name: 'Vacía' }));
+    const r2 = await launch(T.carol, empty.id);
+    expect(r2.status).toBe(409);
+    expect(await code(r2)).toBe('NO_RECIPIENTS');
+  });
+
+  it('un mensaje por pasada respetando la pausa; no más de 2 en camino; la conversación se abre o se reutiliza con su responsable, sin Lead ni reparto; al final la campaña termina', async () => {
+    const [a, b, d] = [await mkContact({ owner: IDS.carol, name: 'Ana' }), await mkContact({ owner: null, name: 'Beto' }), await mkContact({ owner: IDS.carol, name: 'Dani' })];
+    // Dani ya tiene una conversación abierta en esa conexión: se reutiliza
+    const conv = (await admin.query(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, owner_id, assigned_at, last_message_at, last_inbound_at, unread_count, peer_id) VALUES (gen_random_uuid(), $1, $2, $3, 'working', $4, now(), now(), now(), 0, '593988100001') RETURNING id`, [ORG_A, d, officialA, IDS.carol])).rows[0].id as string;
+    const c = await mk(T.alice, tplBody({ gap_seconds: 10, daily_cap: 100 }));
+    await ok(await launch(T.alice, c.id), 201);
+    expect(await tick(1000)).toBeGreaterThan(0);
+    let rows = await recipients(c.id);
+    expect(rows.filter((r) => r.status === 'queued')).toHaveLength(1);
+    expect(await tick(2000)).toBe(0); // la pausa de 10 s no pasó
+    expect((await dbCamp(c.id)).next_send_at!.getTime()).toBeGreaterThan(Date.now() + 5000);
+    await tick(12_000);
+    expect((await recipients(c.id)).filter((r) => r.status === 'queued')).toHaveLength(2);
+    await tick(24_000); // ya hay 2 en camino: no sale otro hasta que salgan
+    expect((await recipients(c.id)).filter((r) => r.status === 'queued')).toHaveLength(2);
+    await admin.query(`UPDATE messages SET status = 'sent' WHERE id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [c.id]);
+    await tick(26_000); // pone al día los estados y, como ya no hay mensajes en camino, sale el tercero
+    await tick(40_000);
+    rows = await recipients(c.id);
+    expect(rows.map((r) => r.status).sort()).toEqual(['queued', 'sent', 'sent']);
+    await admin.query(`UPDATE messages SET status = 'sent' WHERE id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [c.id]);
+    await tick(60_000);
+    await tick(80_000);
+    expect((await dbCamp(c.id)).status).toBe('completed');
+    expect((await dbCamp(c.id)).finished_at).not.toBeNull();
+    // los mensajes: de campaña, plantilla, saliente, en la conversación de cada contacto
+    const msgs = await messagesOf(c.id);
+    expect(msgs).toHaveLength(3);
+    expect(msgs.every((m) => m.sender_type === 'campaign' && m.kind === 'template' && m.direction === 'out')).toBe(true);
+    expect(msgs.find((m) => m.contact === 'Ana')!.body).toContain('Ana');
+    // conversaciones: Ana nueva «pendiente» para su responsable; Beto sin responsable → quien creó la campaña; Dani reutiliza la suya
+    const convs = (await admin.query(`SELECT c.name, v.id, v.status, v.owner_id FROM conversations v JOIN contacts c ON c.id = v.contact_id ORDER BY c.name`)).rows as Array<{ name: string; id: string; status: string; owner_id: string | null }>;
+    expect(convs).toHaveLength(3);
+    expect(convs.find((x) => x.name === 'Ana')).toMatchObject({ status: 'pending', owner_id: IDS.carol });
+    expect(convs.find((x) => x.name === 'Beto')).toMatchObject({ status: 'pending', owner_id: IDS.alice });
+    expect(convs.find((x) => x.name === 'Dani')).toMatchObject({ id: conv, status: 'working', owner_id: IDS.carol });
+    // sin reparto, sin Lead, sin cronómetro de respuesta
+    expect((await admin.query(`SELECT count(*)::int AS n FROM contact_tags`)).rows[0].n).toBe(0);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM response_timers`)).rows[0].n).toBe(0);
+    expect([a, b].length).toBe(2);
+  });
+
+  it('un contacto que pidió la baja DESPUÉS de lanzar jamás recibe el mensaje; el dato que falta descarta solo a ese contacto', async () => {
+    const f = await ok<{ key: string }>(await call('POST', '/custom-fields', T.alice, { name: 'Ciudad', type: 'text' }), 201);
+    const con = await mkContact({ owner: IDS.alice, name: 'Con ciudad' });
+    await ok(await call('PATCH', `/contacts/${con}`, T.alice, { custom_fields: { [f.key]: 'Quito' } }));
+    const sin = await mkContact({ owner: IDS.alice, name: 'Sin ciudad' });
+    const baja = await mkContact({ owner: IDS.alice, name: 'Pidió baja luego' });
+    const c = await mk(T.alice, tplBody({ gap_seconds: 5, template_params: { 'body:1': '{{primer_nombre}}', 'body:2': '{{contact.ciudad}}', 'body:3': '10:00' } }));
+    await ok(await launch(T.alice, c.id), 201);
+    await admin.query(`UPDATE contacts SET consent = 'revoked' WHERE id = $1`, [baja]);
+    for (let i = 1; i <= 8; i += 1) {
+      await admin.query(`UPDATE messages SET status = 'sent' WHERE id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [c.id]);
+      await tick(i * 6000);
+    }
+    const rows = await recipients(c.id);
+    expect(byName(rows, 'Pidió baja luego')).toMatchObject({ status: 'skipped', skip_reason: 'revoked', message_id: null });
+    expect(byName(rows, 'Sin ciudad')).toMatchObject({ status: 'skipped', skip_reason: 'missing_variable', message_id: null });
+    expect(byName(rows, 'Con ciudad').status).toBe('sent');
+    const msgs = await messagesOf(c.id);
+    expect(msgs.map((m) => m.contact)).toEqual(['Con ciudad']);
+    expect(msgs[0]!.body).toContain('Quito');
+    expect(sin && baja).toBeTruthy();
+    expect((await dbCamp(c.id)).status).toBe('completed');
+  });
+
+  it('topes diarios: el de la campaña, el del asesor y el de la empresa (configurable); alcanzado uno, espera sin enviar', async () => {
+    await people(['A1', 'A2', 'A3']);
+    const c = await mk(T.alice, tplBody({ gap_seconds: 5, daily_cap: 1 }));
+    await ok(await launch(T.alice, c.id), 201);
+    await tick(1000);
+    await admin.query(`UPDATE messages SET status = 'sent' WHERE id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [c.id]);
+    await tick(8000);
+    await tick(20_000);
+    expect((await recipients(c.id)).filter((r) => r.message_id).length).toBe(1); // el tope de la campaña es 1 al día
+    expect((await dbCamp(c.id)).next_send_at!.getTime()).toBeGreaterThan(Date.now() + 8 * 60_000); // vuelve a mirar en ~10 min
+    // el tope de la EMPRESA se configura y se aplica entre campañas: 2 al día en total
+    expect((await call('PUT', '/campaigns/settings', T.carol, { official_daily_cap: 2 })).status).toBe(403);
+    expect(await ok(await call('PUT', '/campaigns/settings', T.alice, { official_daily_cap: 2 }))).toMatchObject({ official_daily_cap: 2, default_cap: 1000 });
+    expect(await ok(await call('GET', '/campaigns/settings', T.alice))).toMatchObject({ official_daily_cap: 2 });
+    for (const bad of [{ official_daily_cap: 0 }, { official_daily_cap: 100001 }, { official_daily_cap: 1.5 }, {}]) expect((await call('PUT', '/campaigns/settings', T.alice, bad)).status).toBe(400);
+    const d = await mk(T.alice, tplBody({ name: 'Otra', gap_seconds: 5, daily_cap: 2 }));
+    await ok(await launch(T.alice, d.id), 201);
+    for (let i = 1; i <= 6; i += 1) {
+      await admin.query(`UPDATE messages SET status = 'sent' WHERE status = 'queued'`);
+      await tick(i * 7000 + 30_000);
+    }
+    expect((await recipients(d.id)).filter((r) => r.message_id).length).toBe(1); // 1 de la primera + 1 de esta = 2 en la conexión
+    expect((await ok<{ limits: { official_daily_cap: number } }>(await call('GET', '/campaigns/options', T.alice))).limits.official_daily_cap).toBe(2);
+    // el tope del ASESOR cuenta todas sus campañas
+    await admin.query(`UPDATE campaigns SET next_send_at = NULL`);
+    await call('PUT', '/campaigns/settings', T.alice, { official_daily_cap: 1000 });
+    await ok(await call('PUT', `/campaigns/advisor-limits/${IDS.alice}`, T.alice, { daily_cap: 2 }));
+    await tick(120_000);
+    expect((await recipients(d.id)).filter((r) => r.message_id).length).toBe(1); // alice ya mandó 2 hoy
+    const audit = (await admin.query(`SELECT old_value, new_value FROM audit_logs WHERE entity_type = 'campaign_settings' ORDER BY at, id`)).rows;
+    expect(audit.map((r) => [r.old_value, r.new_value])).toEqual([[null, 2], [2, 1000]]);
+  });
+
+  it('los estados salen de los mensajes (en cola → enviado → entregado → leído), nunca retroceden, y los totales de la campaña son acumulados; un fallo del contacto no frena la campaña', async () => {
+    await people(['Ana', 'Beto', 'Cata']);
+    const c = await mk(T.alice, tplBody({ gap_seconds: 5 }));
+    await ok(await launch(T.alice, c.id), 201);
+    await tick(1000);
+    await tick(7000);
+    let rows = await recipients(c.id);
+    const [m1, m2] = rows.filter((r) => r.message_id).map((r) => r.message_id!);
+    await admin.query(`UPDATE messages SET status = 'read', delivered_at = now(), read_at = now() WHERE id = $1`, [m1]);
+    await admin.query(`UPDATE messages SET status = 'failed', error = 'WhatsApp no pudo entregar el mensaje a este número', meta = meta || '{"error_code":"recipient_invalid"}'::jsonb WHERE id = $1`, [m2]);
+    await tick(14_000);
+    rows = await recipients(c.id);
+    expect(rows.find((r) => r.message_id === m1)!.status).toBe('read');
+    expect(rows.find((r) => r.message_id === m2)).toMatchObject({ status: 'failed', error: 'WhatsApp no pudo entregar el mensaje a este número' });
+    expect((await dbCamp(c.id)).status).toBe('running'); // el problema fue del número, no de la conexión
+    await admin.query(`UPDATE messages SET status = 'sent' WHERE id = $1`, [m1]); // un aviso atrasado no baja el estado
+    await tick(21_000);
+    expect((await recipients(c.id)).find((r) => r.message_id === m1)!.status).toBe('read');
+    const v = await ok<Camp>(await call('GET', `/campaigns/${c.id}`, T.alice));
+    expect(v.counts).toMatchObject({ total: 3, sent: 1, delivered: 1, read: 1, failed: 1 }); // acumulados: el leído cuenta como entregado y enviado; el que sigue «en cola» y el fallido no
+    expect((await admin.query(`SELECT delivered_at IS NOT NULL AS d, read_at IS NOT NULL AS r FROM campaign_recipients WHERE message_id = $1`, [m1])).rows[0]).toEqual({ d: true, r: true });
+  });
+
+  it('un fallo de la conexión o del límite de WhatsApp PAUSA la campaña con su motivo; reanudarla la hace seguir; si la conexión se apaga o la plantilla deja de estar aprobada, también se pausa', async () => {
+    await people(['Ana', 'Beto', 'Cata', 'Dani']);
+    const c = await mk(T.alice, tplBody({ gap_seconds: 5 }));
+    await ok(await launch(T.alice, c.id), 201);
+    await tick(1000);
+    const first = (await recipients(c.id)).find((r) => r.message_id)!;
+    await admin.query(`UPDATE messages SET status = 'failed', error = 'WhatsApp limitó los envíos', meta = meta || '{"error_code":"rate_limited"}'::jsonb WHERE id = $1`, [first.message_id]);
+    await tick(8000);
+    expect(await dbCamp(c.id)).toMatchObject({ status: 'paused', status_reason: expect.stringContaining('limitó los envíos') });
+    expect(await tick(20_000)).toBe(0); // pausada: no sale nada
+    const paused = await ok<Camp>(await call('GET', `/campaigns/${c.id}`, T.alice));
+    expect(paused).toMatchObject({ status: 'paused', can_resume: true, can_pause: false });
+    expect(paused.status_reason).toContain('limitó');
+    expect(await ok<Camp>(await act(T.alice, c.id, 'resume'))).toMatchObject({ status: 'running', status_reason: null });
+    await tick(30_000);
+    expect((await recipients(c.id)).filter((r) => r.message_id).length).toBe(2);
+    // la conexión se desactiva
+    await admin.query(`UPDATE channel_accounts SET status = 'disabled' WHERE id = $1`, [officialA]);
+    await tick(40_000);
+    expect(await dbCamp(c.id)).toMatchObject({ status: 'paused', status_reason: expect.stringContaining('conexión') });
+    await admin.query(`UPDATE channel_accounts SET status = 'active' WHERE id = $1`, [officialA]);
+    await ok(await act(T.alice, c.id, 'resume'));
+    // la plantilla deja de estar aprobada
+    await admin.query(`UPDATE message_templates SET status = 'paused', sendable = false, unsupported_reason = 'Meta la pausó' WHERE id = $1`, [tplA]);
+    await tick(60_000);
+    expect(await dbCamp(c.id)).toMatchObject({ status: 'paused', status_reason: expect.stringContaining('plantilla') });
+  });
+
+  it('pausar, reanudar y cancelar: el estado importa (409), quien la creó o quien tiene campaigns.cancel (el administrador) puede, un asesor no toca las ajenas (404); cancelar deja lo pendiente como omitido y no sale nada más', async () => {
+    await people(['Ana', 'Beto', 'Cata']);
+    await mkContact({ owner: IDS.carol, name: 'De Carolina' });
+    await mkContact({ owner: IDS.carol, name: 'De Carolina 2' });
+    const mine = await mk(T.carol, tplBody({ name: 'De Carolina', gap_seconds: 5 }));
+    const others = await mk(T.alice, tplBody({ name: 'De Alicia', gap_seconds: 5 }));
+    await ok(await launch(T.carol, mine.id), 201);
+    await ok(await launch(T.alice, others.id), 201);
+    await ok(await act(T.alice, others.id, 'pause')); // la de Alicia no debe enviar nada mientras se prueban las demás cosas
+    for (const w of ['pause', 'resume', 'cancel'] as const) {
+      expect((await act(T.bob, mine.id, w)).status, `B ${w}`).toBe(404);
+      expect((await act(T.eve, mine.id, w)).status, `sin permiso ${w}`).toBe(403);
+      expect((await act(T.carol, others.id, w)).status, `ajena ${w}`).toBe(404);
+    }
+    expect((await act(T.carol, mine.id, 'resume')).status).toBe(409); // no está pausada
+    expect(await ok<Camp>(await act(T.carol, mine.id, 'pause'))).toMatchObject({ status: 'paused', status_reason: 'Pausada a mano' });
+    expect((await act(T.carol, mine.id, 'pause')).status).toBe(409);
+    expect(await tick(5000)).toBeGreaterThanOrEqual(0);
+    expect((await recipients(mine.id)).filter((r) => r.message_id)).toHaveLength(0); // pausada: no sale
+    // el administrador (campaigns.cancel) puede con la de Carolina
+    expect(await ok<Camp>(await act(T.alice, mine.id, 'resume'))).toMatchObject({ status: 'running' });
+    await tick(8000);
+    expect((await recipients(mine.id)).filter((r) => r.message_id)).toHaveLength(1);
+    // a mitad: lo ya enviado queda y lo pendiente se cancela
+    await ok(await act(T.carol, mine.id, 'cancel'));
+    expect((await recipients(mine.id)).map((r) => r.status)).toEqual(['queued', 'skipped']);
+    const done = await ok<Camp>(await act(T.alice, others.id, 'cancel'));
+    expect(done).toMatchObject({ status: 'cancelled', can_cancel: false, can_pause: false });
+    const rows = await recipients(others.id);
+    expect(rows.every((r) => r.status === 'skipped' && r.skip_reason === 'cancelled')).toBe(true);
+    await tick(20_000);
+    expect((await messagesOf(others.id)).length).toBe(0);
+    expect((await messagesOf(mine.id)).length).toBe(1); // y a la cancelada no le sale nada más
+    expect((await act(T.alice, others.id, 'cancel')).status).toBe(409);
+    expect((await dbCamp(others.id)).finished_at).not.toBeNull();
+    const log = (await admin.query(`SELECT field FROM audit_logs WHERE entity_type = 'campaign' AND entity_id = $1 ORDER BY at, id`, [mine.id])).rows.map((r) => r.field);
+    expect(log).toEqual([null, 'launched', 'paused', 'resumed', 'cancelled']);
+  });
+
+  it('programar: no sale nada antes de su hora; al llegar la hora pasa a «en curso» y envía', async () => {
+    await people(['Ana', 'Beto']);
+    const c = await mk(T.alice, tplBody({ gap_seconds: 5, scheduled_at: new Date(Date.now() + 3 * 3600_000).toISOString() }));
+    const l = await ok<Camp>(await launch(T.alice, c.id), 201);
+    expect(l.status).toBe('scheduled');
+    expect(l.can_pause).toBe(true);
+    await tick(10_000);
+    expect(await messagesOf(c.id)).toHaveLength(0);
+    await admin.query(`UPDATE campaigns SET scheduled_at = now() - interval '1 minute' WHERE id = $1`, [c.id]);
+    await tick(10_000);
+    expect((await dbCamp(c.id)).status).toBe('running');
+    await tick(20_000);
+    expect((await messagesOf(c.id)).length).toBeGreaterThan(0);
+  });
+
+  it('dos pasadas a la vez (dos instancias) no duplican el mensaje de ningún contacto', async () => {
+    await people(['Ana', 'Beto', 'Cata', 'Dani', 'Eli']);
+    const c = await mk(T.alice, tplBody({ gap_seconds: 5 }));
+    await ok(await launch(T.alice, c.id), 201);
+    await Promise.all([tick(1000), tick(1000), tick(1000), tick(1000)]);
+    const msgs = await messagesOf(c.id);
+    expect(msgs).toHaveLength(1);
+    expect(new Set(msgs.map((m) => m.contact)).size).toBe(msgs.length);
+    await admin.query(`UPDATE messages SET status = 'sent' WHERE id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [c.id]);
+    for (let i = 1; i <= 12; i += 1) {
+      await Promise.all([tick(i * 6000), tick(i * 6000)]);
+      await admin.query(`UPDATE messages SET status = 'sent' WHERE id IN (SELECT message_id FROM campaign_recipients WHERE campaign_id = $1)`, [c.id]);
+    }
+    const all = await messagesOf(c.id);
+    expect(all).toHaveLength(5);
+    expect(new Set(all.map((m) => m.contact)).size).toBe(5); // uno por contacto: ninguno duplicado
+    expect((await dbCamp(c.id)).status).toBe('completed');
+  });
+
+  it('A↔B: la tarea de una empresa no toca las campañas de otra; la empresa B envía por su propia conexión', async () => {
+    await people(['De A']);
+    await mkContact({ org: ORG_B, owner: IDS.bob, name: 'De B' });
+    const a = await mk(T.alice, tplBody({ gap_seconds: 5 }));
+    const b = await mk(T.bob, tplBody({ channel_id: officialB, template_id: tplB, gap_seconds: 5 }));
+    await ok(await launch(T.alice, a.id), 201);
+    await ok(await launch(T.bob, b.id), 201);
+    await tick(1000, ORG_A);
+    expect(await messagesOf(a.id)).toHaveLength(1);
+    expect(await messagesOf(b.id)).toHaveLength(0); // B todavía no tuvo su pasada
+    await tick(1000, ORG_B);
+    const mb = await messagesOf(b.id);
+    expect(mb).toHaveLength(1);
+    expect(mb[0]!.contact).toBe('De B');
+    expect((await admin.query(`SELECT count(*)::int AS n FROM messages m JOIN conversations v ON v.id = m.conversation_id WHERE v.organization_id = $1 AND m.sender_type = 'campaign'`, [ORG_B])).rows[0].n).toBe(1);
   });
 });

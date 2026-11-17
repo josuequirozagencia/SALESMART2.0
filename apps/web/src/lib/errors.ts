@@ -62,7 +62,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Formularios (ADR-09/54): el servidor ya redacta el motivo
     case 'FORM_EXISTS': case 'FORM_LIMIT': case 'FORM_INCOMPLETE': return e.message;
     // Campañas masivas (ADR-72): el servidor redacta el motivo (plan, consentimiento, límites, borradores)
-    case 'PLAN_FEATURE_DISABLED': case 'CONSENT_DECLARATION_FORBIDDEN': case 'IDEMPOTENCY_KEY_IN_USE': case 'CAMPAIGN_NOT_EDITABLE': case 'CAMPAIGN_DRAFT_LIMIT': case 'AUDIENCE_TOO_LARGE': return e.message;
+    case 'PLAN_FEATURE_DISABLED': case 'CONSENT_DECLARATION_FORBIDDEN': case 'IDEMPOTENCY_KEY_IN_USE': case 'CAMPAIGN_NOT_EDITABLE': case 'CAMPAIGN_DRAFT_LIMIT': case 'AUDIENCE_TOO_LARGE': case 'CHANNEL_NOT_SUPPORTED_YET': case 'NO_RECIPIENTS': case 'CAMPAIGN_STATE': case 'CAMPAIGN_NOT_YOURS': return e.message;
     // Automatizaciones (ADR-54): el servidor redacta el motivo
     case 'AUTOMATION_LIMIT': case 'AUTOMATION_NAME_TAKEN': case 'AUTOMATION_NOT_ACTIVE': return e.message;
     // SLA y feriados (ADR-50): el servidor ya redacta el motivo

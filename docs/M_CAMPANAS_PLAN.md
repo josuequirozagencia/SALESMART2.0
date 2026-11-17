@@ -28,7 +28,7 @@
 |---|---|---|
 | **17.1** | Modelo (`campaigns`, `campaign_recipients`, `campaign_advisor_limits`), permisos, bloqueo por plan, audiencia con vista previa (sin enviar), API `/v1/campaigns` y tope por asesor | construida 2026-11-16 |
 | 17.2 | Pantalla «Campañas masivas» (una sola pantalla con cinco secciones, como el prototipo), vista previa, avisos de riesgo y de costo, tope por asesor en Equipo › Usuarios | construida 2026-11-16 |
-| 17.3 | Envío por WhatsApp oficial: lanzar (congela la audiencia), tarea `campaign-sender`, pausar/reanudar/cancelar, programar, tope diario por empresa | pendiente |
+| 17.3 | Envío por WhatsApp oficial: lanzar (congela la audiencia), tarea `campaign-sender`, pausar/reanudar/cancelar, programar, tope diario por empresa | construida 2026-11-17 |
 | 17.4 | Envío por QR: «abrir y enviar texto», 45 s mínimo, cupo compartido con reserva, sesión caída ⇒ pausa | pendiente |
 | 17.5 | Resultados por campaña y destinatario, CSV, baja por palabra clave, tarjeta en Analítica | pendiente |
 

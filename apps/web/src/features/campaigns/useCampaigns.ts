@@ -49,10 +49,13 @@ export interface Campaign {
   finished_at: string | null;
   counts: CampaignCounts;
   can_edit: boolean;
+  can_pause: boolean;
+  can_resume: boolean;
+  can_cancel: boolean;
 }
 export interface CampaignList { items: Campaign[]; next_cursor: string | null }
 
-export interface CampaignAccessInfo { plan_enabled: boolean; read: boolean; send: boolean; view_all: boolean; manage_limits: boolean }
+export interface CampaignAccessInfo { plan_enabled: boolean; read: boolean; send: boolean; view_all: boolean; manage_limits: boolean; manage_settings: boolean; cancel_others: boolean }
 export interface CampaignOptions {
   channels: Array<{ id: string; name: string; kind: ChannelKind }>;
   limits: { official_daily_cap: number; qr_min_gap_seconds: number; official_min_gap_seconds: number; advisor_daily_cap: number | null; max_audience: number };
@@ -126,6 +129,8 @@ export function useCampaigns(enabled: boolean) {
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api<CampaignList>(`/campaigns?limit=25${pageParam ? `&cursor=${encodeURIComponent(pageParam)}` : ''}`),
     getNextPageParam: (last) => last.next_cursor ?? undefined,
+    // Mientras alguna campaña esté en curso o programada, la tabla se actualiza sola (enviados, entregados, pausas)
+    refetchInterval: (q) => ((q.state.data?.pages ?? []).some((p) => p.items.some((c) => c.status === 'running' || c.status === 'scheduled')) ? 5000 : false),
   });
 }
 
@@ -197,4 +202,25 @@ export function useAdvisorLimits(enabled: boolean) {
 export function useSetAdvisorLimit(userId: string) {
   const done = useDone();
   return useMutation({ mutationFn: (daily_cap: number) => api<{ user_id: string; daily_cap: number }>(`/campaigns/advisor-limits/${userId}`, { method: 'PUT', body: { daily_cap } }), onSettled: done });
+}
+
+/** Lanza la campaña (congela la audiencia y empieza a enviar, o queda programada). Idempotente: con la misma llave devuelve la campaña como quedó. */
+export function useLaunchCampaign() {
+  const done = useDone();
+  return useMutation({ mutationFn: ({ id, key }: { id: string; key: string }) => api<Campaign>(`/campaigns/${id}/launch`, { method: 'POST', headers: idem(key) }), onSettled: done });
+}
+
+export type CampaignAction = 'pause' | 'resume' | 'cancel';
+export function useCampaignAction() {
+  const done = useDone();
+  return useMutation({ mutationFn: ({ id, action }: { id: string; action: CampaignAction }) => api<Campaign>(`/campaigns/${id}/${action}`, { method: 'POST' }), onSettled: done });
+}
+
+/** El tope diario de la empresa por WhatsApp oficial (quien administra las conexiones). */
+export function useCampaignSettings(enabled: boolean) {
+  return useQuery({ queryKey: ['campaigns', 'settings'], enabled, staleTime: 15_000, retry: false, queryFn: () => api<{ official_daily_cap: number; default_cap: number }>('/campaigns/settings') });
+}
+export function useSetCampaignSettings() {
+  const done = useDone();
+  return useMutation({ mutationFn: (official_daily_cap: number) => api<{ official_daily_cap: number; default_cap: number }>('/campaigns/settings', { method: 'PUT', body: { official_daily_cap } }), onSettled: done });
 }

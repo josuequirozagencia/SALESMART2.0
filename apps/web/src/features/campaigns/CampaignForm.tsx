@@ -4,6 +4,7 @@ import { useLists } from '../contacts/useLists';
 import { Alert, Button, Field, Input } from '../../ui/controls';
 import { Pill } from '../../ui/Pill';
 import { campaignError, KIND_HINT, KIND_TITLE } from './labels';
+import { LaunchDialog } from './LaunchDialog';
 import { RecipientsPicker } from './RecipientsPicker';
 import { useCampaignTemplates, useCreateCampaign, useIdempotencyKey, useLivePreview, useUpdateCampaign, type Campaign, type CampaignAccessInfo, type CampaignAudience, type CampaignInput, type CampaignOptions, type PreviewInput } from './useCampaigns';
 
@@ -34,7 +35,7 @@ function useSettled<T>(value: T, ms: number): T {
  * «Nueva campaña» del prototipo: UNA sola pantalla con cinco secciones numeradas — 1 · Nombre, 2 · Base y destinatarios, 3 · Conexión de WhatsApp, 4 · Mensaje y 5 · Envío — con los números
  * al día mientras se escribe (vista previa en vivo, sin guardar). Guarda un BORRADOR; el envío llega en la próxima versión (17.3 y 17.4).
  */
-export function CampaignForm({ access, options, editing, onSaved, onCancel }: { access: CampaignAccessInfo; options: CampaignOptions; editing: Campaign | null; onSaved: (c: Campaign, created: boolean) => void; onCancel: () => void }) {
+export function CampaignForm({ access, options, editing, onSaved, onLaunched, onCancel }: { access: CampaignAccessInfo; options: CampaignOptions; editing: Campaign | null; onSaved: (c: Campaign, created: boolean) => void; onLaunched: (c: Campaign) => void; onCancel: () => void }) {
   const lists = useLists();
   const fields = useCustomFields();
   const channels = options.channels;
@@ -54,7 +55,10 @@ export function CampaignForm({ access, options, editing, onSaved, onCancel }: { 
   const [error, setError] = useState<string>();
   const idem = useIdempotencyKey();
   const create = useCreateCampaign();
-  const update = useUpdateCampaign(editing?.id ?? '');
+  // El borrador que ya existe (el que se edita o el que se guardó al pedir el envío): los guardados siguientes lo cambian en vez de crear otro
+  const [draftId, setDraftId] = useState<string | null>(editing?.id ?? null);
+  const [confirm, setConfirm] = useState<Campaign | null>(null);
+  const update = useUpdateCampaign(draftId ?? '');
 
   const channel = channels.find((c) => c.id === channelId);
   const kind = channel?.kind;
@@ -112,16 +116,19 @@ export function CampaignForm({ access, options, editing, onSaved, onCancel }: { 
   const ready = name.trim() !== '' && channelId !== '' && (kind === 'qr' ? body.trim() !== '' : kind === 'official' ? templateId !== '' && !missingTemplateData : false);
   const busy = create.isPending || update.isPending;
 
-  const save = (): void => {
-    setError(undefined);
-    if (!channel || !kind) return;
+  /** Arma lo que se manda al servidor con lo que hay en pantalla (el servidor vuelve a validar todo); null si falta algo que se explica aquí. */
+  const build = (): CampaignInput | null => {
+    if (!channel || !kind) return null;
     let scheduled: string | null = null;
     if (when === 'later') {
       const d = new Date(at);
-      if (!at || Number.isNaN(d.getTime())) return setError('Elige el día y la hora de envío.');
+      if (!at || Number.isNaN(d.getTime())) {
+        setError('Elige el día y la hora de envío.');
+        return null;
+      }
       scheduled = d.toISOString();
     }
-    const input: CampaignInput = {
+    return {
       name: name.trim(),
       channel_id: channelId,
       mode: kind === 'qr' ? 'text' : 'template',
@@ -132,16 +139,39 @@ export function CampaignForm({ access, options, editing, onSaved, onCancel }: { 
       gap_seconds: gap,
       daily_cap: capNow,
     };
-    const done = (c: Campaign, created: boolean): void => { idem.reset(); onSaved(c, created); };
-    const fail = (e: unknown): void => setError(campaignError(e, 'No pudimos guardar la campaña.'));
-    if (editing) update.mutate(input, { onSuccess: (c) => done(c, false), onError: fail });
-    else create.mutate({ key: idem.keyFor(input), input }, { onSuccess: (c) => done(c, true), onError: fail });
+  };
+  /** Guarda el borrador (lo crea o lo cambia); null si falló (el motivo queda en pantalla). */
+  const persist = async (): Promise<{ campaign: Campaign; created: boolean } | null> => {
+    setError(undefined);
+    const input = build();
+    if (!input) return null;
+    try {
+      if (draftId) return { campaign: await update.mutateAsync(input), created: false };
+      const campaign = await create.mutateAsync({ key: idem.keyFor(input), input });
+      setDraftId(campaign.id);
+      return { campaign, created: true };
+    } catch (e) {
+      setError(campaignError(e, 'No pudimos guardar la campaña.'));
+      return null;
+    }
+  };
+  const save = async (): Promise<void> => {
+    const r = await persist();
+    if (r) {
+      idem.reset();
+      onSaved(r.campaign, r.created && !editing);
+    }
+  };
+  /** «Enviar»: guarda lo que hay en pantalla y pide la confirmación; el envío en sí lo hace el diálogo. */
+  const send = async (): Promise<void> => {
+    const r = await persist();
+    if (r) setConfirm(r.campaign);
   };
 
   const eligible = p?.audience.eligible ?? 0;
   const sk = p?.audience.skipped;
   return (
-    <form className="grid gap-[18px]" onSubmit={(e) => { e.preventDefault(); save(); }} aria-label={editing ? 'Editar campaña' : 'Nueva campaña'}>
+    <form className="grid gap-[18px]" onSubmit={(e) => { e.preventDefault(); void save(); }} aria-label={editing ? 'Editar campaña' : 'Nueva campaña'}>
       <h2 className="text-[18px] font-bold">{editing ? 'Editar borrador' : 'Nueva campaña'}</h2>
 
       <section className={SECTION}>
@@ -264,11 +294,20 @@ export function CampaignForm({ access, options, editing, onSaved, onCancel }: { 
 
       {error ? <Alert>{error}</Alert> : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Button variant="primary" type="submit" loading={busy} disabled={!ready}>{editing ? 'Guardar cambios' : 'Guardar borrador'}</Button>
+        <Button type="submit" loading={busy} disabled={!ready}>{editing || draftId ? 'Guardar cambios' : 'Guardar borrador'}</Button>
+        <Button variant="primary" loading={busy} disabled={!ready || !access.send || kind !== 'official' || eligible === 0} onClick={() => void send()} title={kind === 'qr' ? 'El envío por WhatsApp QR llega en la próxima versión' : undefined}>{when === 'later' ? 'Programar campaña' : 'Enviar campaña'}</Button>
         <Button onClick={onCancel}>Cancelar</Button>
-        <Button disabled title="El envío se activa en la próxima versión">Enviar campaña (próximamente)</Button>
       </div>
-      <p className="text-[12px] text-muted">Por ahora la campaña se guarda como borrador con su audiencia, mensaje y límites revisados. El envío se activa en la próxima versión.</p>
+      {kind === 'qr' ? <p className="text-[12px] text-muted">El envío por WhatsApp QR llega en la próxima versión: por ahora puedes guardar el borrador. Las campañas se envían por WhatsApp oficial.</p> : null}
+      {confirm ? (
+        <LaunchDialog
+          campaign={confirm}
+          preview={p}
+          templateName={template ? template.name : null}
+          onClose={() => setConfirm(null)}
+          onLaunched={(c) => { setConfirm(null); onLaunched(c); }}
+        />
+      ) : null}
     </form>
   );
 }

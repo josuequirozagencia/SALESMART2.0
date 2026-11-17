@@ -80,7 +80,9 @@ test.describe('escritorio 1440 × 900', () => {
     const msg = form.getByRole('textbox', { name: 'Mensaje' });
     await msg.fill('Hola {{primer_nombre}}, tenemos cupos para esta semana.');
     await expect(form.getByText('Hola Ana, tenemos cupos para esta semana.')).toBeVisible();
-    await expect(form.getByRole('button', { name: 'Enviar campaña (próximamente)' })).toBeDisabled();
+    // por QR el envío llega en la próxima versión (17.4): el botón está desactivado y se explica
+    await expect(form.getByRole('button', { name: 'Enviar campaña' })).toBeDisabled();
+    await expect(form.getByText(/El envío por WhatsApp QR llega en la próxima versión/)).toBeVisible();
 
     await form.getByRole('button', { name: 'Guardar borrador' }).click();
     await expect(page.getByRole('status').filter({ hasText: 'Campaña «Cupos de octubre» guardada como borrador' })).toBeVisible();

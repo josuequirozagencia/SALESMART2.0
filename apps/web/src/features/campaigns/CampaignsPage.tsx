@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useLists } from '../contacts/useLists';
-import { Alert, Button, Spinner } from '../../ui/controls';
+import { Alert, Button, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { PageHeader } from '../../ui/PageHeader';
 import { Pill } from '../../ui/Pill';
@@ -9,7 +9,7 @@ import { useDocumentTitle } from '../../lib/platformBrand';
 import { friendlyError } from '../../lib/errors';
 import { CampaignForm } from './CampaignForm';
 import { baseLabel, campaignError, channelLabel, STATUS_KIND, STATUS_LABEL, whenLabel } from './labels';
-import { newKey, useCampaignAccess, useCampaignOptions, useCampaigns, useDuplicateCampaign, useLivePreview, type Campaign, type CampaignAccessInfo, type CampaignOptions } from './useCampaigns';
+import { newKey, useCampaignAccess, useCampaignAction, useCampaignOptions, useCampaignSettings, useCampaigns, useDuplicateCampaign, useLivePreview, useSetCampaignSettings, type Campaign, type CampaignAccessInfo, type CampaignOptions } from './useCampaigns';
 
 const n = (v: number): string => v.toLocaleString('es-EC');
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
@@ -61,7 +61,7 @@ function Scope({ options }: { options: CampaignOptions }) {
   );
 }
 
-/** Resultados de una campaña (prototipo: «Resultados»): los totales. El detalle por destinatario llega cuando la campaña se envía (17.5). */
+/** Resultados de una campaña (prototipo: «Resultados»): los totales al día. El detalle por destinatario llega en 17.5. */
 function ResultsDialog({ c, onClose }: { c: Campaign; onClose: () => void }) {
   const k = c.counts;
   const cells: Array<[string, number]> = [['Destinatarios', k.total], ['Enviados', k.sent], ['Entregados', k.delivered], ['Leídos', k.read], ['Respondieron', k.replied], ['Fallidos', k.failed]];
@@ -73,9 +73,65 @@ function ResultsDialog({ c, onClose }: { c: Campaign; onClose: () => void }) {
           <div key={label} className="rounded-xl border border-line p-3"><dt className="text-[11.5px] font-semibold uppercase tracking-wide text-muted">{label}</dt><dd className="text-[22px] font-bold">{n(v)}</dd></div>
         ))}
       </dl>
-      {c.status === 'draft' ? <Alert kind="info">Esta campaña es un borrador: todavía no se envió, por eso los resultados están en cero. Se actualizan con los estados que reporta WhatsApp cuando se envíe.</Alert> : null}
+      {c.status === 'draft' ? <Alert kind="info">Esta campaña es un borrador: todavía no se envió, por eso los resultados están en cero.</Alert> : <p className="text-[12px] text-muted">Los números se actualizan con los estados que reporta WhatsApp (enviado, entregado, leído). El detalle por destinatario llega en la próxima versión.</p>}
       <div className="flex justify-end"><Button onClick={onClose}>Cerrar</Button></div>
     </Modal>
+  );
+}
+
+/** El tope diario de la empresa por WhatsApp oficial (lo administra quien administra las conexiones). Nunca debe pasar del nivel de mensajería de Meta de ese número: si Meta lo rechaza, la campaña se pausa sola. */
+function CompanyCapCard() {
+  const q = useCampaignSettings(true);
+  const save = useSetCampaignSettings();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [note, setNote] = useState<string>();
+  const [error, setError] = useState<string>();
+  const saved = q.data?.official_daily_cap;
+  const value = draft ?? (saved !== undefined ? String(saved) : '');
+  const cap = Number(value);
+  const submit = (): void => {
+    setNote(undefined);
+    setError(undefined);
+    if (!Number.isInteger(cap) || cap < 1 || cap > 100000) return setError('Escribe un número entero entre 1 y 100 000.');
+    save.mutate(cap, { onSuccess: () => { setDraft(null); setNote('Tope guardado.'); }, onError: (e) => setError(campaignError(e, 'No pudimos guardar el tope.')) });
+  };
+  return (
+    <section aria-label="Tope diario de la empresa" className="grid gap-2 rounded-2xl border border-line bg-surface p-4">
+      <h2 className="text-[16px] font-bold">Tope diario de la empresa</h2>
+      <p className="text-[13px] text-muted">Máximo de mensajes de campaña por día entre todas las campañas por WhatsApp oficial. Nunca debe pasar del nivel de mensajería de Meta de tu número: si Meta lo rechaza, la campaña se pausa sola.</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="w-[160px]"><Input type="number" inputMode="numeric" min={1} max={100000} aria-label="Mensajes por día" value={value} disabled={q.isPending} onChange={(e) => setDraft(e.target.value)} /></div>
+        <Button loading={save.isPending} disabled={value === '' || value === String(saved)} onClick={submit}>Guardar tope</Button>
+      </div>
+      {q.data ? <p className="text-[12px] text-muted">Sin tope propio rige {n(q.data.default_cap)} por día.</p> : null}
+      {error ? <Alert>{error}</Alert> : null}
+      {note ? <Alert kind="ok">{note}</Alert> : null}
+    </section>
+  );
+}
+
+/** Pausar, reanudar y cancelar desde la tabla. Cancelar pide confirmación: no se deshace. */
+function RowActions({ c, onNotice, onError }: { c: Campaign; onNotice: (t: string) => void; onError: (t: string) => void }) {
+  const act = useCampaignAction();
+  const [asking, setAsking] = useState(false);
+  const run = (action: 'pause' | 'resume' | 'cancel', done: string): void => {
+    act.mutate({ id: c.id, action }, { onSuccess: () => { setAsking(false); onNotice(done); }, onError: (e) => { setAsking(false); onError(campaignError(e, 'No pudimos completar la acción.')); } });
+  };
+  return (
+    <>
+      {c.can_pause ? <Button className={SMALL} loading={act.isPending} onClick={() => run('pause', `Campaña «${c.name}» pausada.`)} aria-label={`Pausar ${c.name}`}>Pausar</Button> : null}
+      {c.can_resume ? <Button className={SMALL} loading={act.isPending} onClick={() => run('resume', `Campaña «${c.name}» reanudada.`)} aria-label={`Reanudar ${c.name}`}>Reanudar</Button> : null}
+      {c.can_cancel ? <Button variant="danger" className={SMALL} onClick={() => setAsking(true)} aria-label={`Cancelar ${c.name}`}>Cancelar</Button> : null}
+      {asking ? (
+        <Modal title="¿Cancelar la campaña?" onClose={() => setAsking(false)}>
+          <p className="text-[13.5px]">«<b>{c.name}</b>» dejará de enviarse. Lo que ya salió queda; lo pendiente no se enviará. No se puede deshacer.</p>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setAsking(false)} disabled={act.isPending}>Volver</Button>
+            <Button variant="danger" loading={act.isPending} onClick={() => run('cancel', `Campaña «${c.name}» cancelada.`)}>Sí, cancelar</Button>
+          </div>
+        </Modal>
+      ) : null}
+    </>
   );
 }
 
@@ -137,7 +193,10 @@ function Content({ access, options }: { access: CampaignAccessInfo; options: Cam
                   {access.view_all ? <td className="px-3 py-2.5">{c.created_by.name || '—'}</td> : null}
                   <td className="px-3 py-2.5">{baseLabel(c, lists.data ?? [])}</td>
                   <td className="px-3 py-2.5 text-muted">{channelLabel(c)}</td>
-                  <td className="px-3 py-2.5"><Pill kind={STATUS_KIND[c.status]}>{STATUS_LABEL[c.status]}</Pill></td>
+                  <td className="px-3 py-2.5">
+                    <Pill kind={STATUS_KIND[c.status]}>{STATUS_LABEL[c.status]}</Pill>
+                    {c.status_reason && (c.status === 'paused' || c.status === 'failed') ? <span className="mt-1 block max-w-[220px] text-[11.5px] text-warn">{c.status_reason}</span> : null}
+                  </td>
                   <td className="px-3 py-2.5 text-right font-mono">{c.status === 'draft' ? '—' : n(c.counts.total)}</td>
                   <td className="px-3 py-2.5 text-right font-mono">{n(c.counts.sent)}</td>
                   <td className="px-3 py-2.5 text-right font-mono">{n(c.counts.delivered)}</td>
@@ -147,6 +206,7 @@ function Content({ access, options }: { access: CampaignAccessInfo; options: Cam
                     <div className="flex flex-wrap justify-end gap-1.5">
                       <Button className={SMALL} onClick={() => setResults(c)} aria-label={`Resultados de ${c.name}`}>Resultados</Button>
                       {c.can_edit ? <Button className={SMALL} onClick={() => { setNotice(undefined); setEditing(c); }} aria-label={`Editar ${c.name}`}>Editar</Button> : null}
+                      <RowActions c={c} onNotice={(t) => { setError(undefined); setNotice(t); }} onError={(t) => { setNotice(undefined); setError(t); }} />
                       {access.send ? <Button className={SMALL} loading={dup.isPending && dup.variables?.id === c.id} onClick={() => duplicate(c)} aria-label={`Duplicar ${c.name}`}>Duplicar</Button> : null}
                     </div>
                   </td>
@@ -167,12 +227,14 @@ function Content({ access, options }: { access: CampaignAccessInfo; options: Cam
               options={options}
               editing={editing}
               onSaved={(c, created) => { setEditing(null); setNotice(created ? `Campaña «${c.name}» guardada como borrador.` : `Cambios de «${c.name}» guardados.`); }}
+              onLaunched={(c) => { setEditing(null); setNotice(c.status === 'scheduled' ? `Campaña «${c.name}» programada.` : `Campaña «${c.name}» en curso: ya empezó a enviarse.`); }}
               onCancel={() => setEditing(null)}
             />
           </section>
         ) : null}
         <div className="grid gap-4">
           <Rules />
+          {access.manage_settings ? <CompanyCapCard /> : null}
           {access.view_all ? (
             <section aria-label="Quién puede enviar campañas" className="grid gap-2 rounded-2xl border border-line bg-surface p-4">
               <h2 className="text-[16px] font-bold">Quién puede enviar campañas</h2>

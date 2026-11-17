@@ -43,8 +43,8 @@ export function classify(contacts: readonly AudienceContact[], opts: { excluded:
  * Cuántos mensajes puede mandar la campaña por día (ADR-72 #4, #5, #7): el mínimo entre lo que pidió la campaña, el tope del asesor (si tiene) y el de la conexión. Por WhatsApp oficial el de la
  * conexión es el de la empresa (provisional); por QR es el 70 % del cupo del calentamiento del día (el resto queda para las conversaciones normales). Nunca baja de 1.
  */
-export function effectiveDailyCap(input: { mode: 'template' | 'text'; campaignCap: number; advisorCap: number | null; qrWarmupLimit: number }): { cap: number; channelCap: number } {
-  const channelCap = input.mode === 'text' ? Math.max(1, Math.floor(input.qrWarmupLimit * QR_CAMPAIGN_SHARE)) : OFFICIAL_DAILY_CAP;
+export function effectiveDailyCap(input: { mode: 'template' | 'text'; campaignCap: number; advisorCap: number | null; qrWarmupLimit: number; officialCap?: number }): { cap: number; channelCap: number } {
+  const channelCap = input.mode === 'text' ? Math.max(1, Math.floor(input.qrWarmupLimit * QR_CAMPAIGN_SHARE)) : (input.officialCap ?? OFFICIAL_DAILY_CAP);
   const cap = Math.max(1, Math.min(input.campaignCap, input.advisorCap ?? Number.POSITIVE_INFINITY, channelCap));
   return { cap, channelCap };
 }
