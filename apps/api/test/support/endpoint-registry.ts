@@ -369,6 +369,10 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/conversations/:id/quick-replies', kind: 'tenant', isolationTest: '../../quick-replies/quick-replies.test.ts' },
   // Campañas masivas (v17 · 17.1, ADR-72). Pruebas: test/campaigns/campaigns.test.ts (A↔B, alcance del asesor, plan, idempotencia, audiencia con consentimiento, topes)
   { route: 'GET /v1/campaigns/options', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'GET /v1/campaigns/access', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'GET /v1/campaigns/channels/:channelId/templates', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'POST /v1/campaigns/preview', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  { route: 'POST /v1/campaigns/audience', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'GET /v1/campaigns/advisor-limits', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'PUT /v1/campaigns/advisor-limits/:userId', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'POST /v1/campaigns', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },

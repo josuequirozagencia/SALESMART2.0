@@ -9,6 +9,8 @@ export interface Classified {
   eligible: AudienceContact[];
   skipped: Array<{ id: string; reason: AudienceSkip }>;
   counts: Record<AudienceSkip, number>;
+  /** TODOS los contactos de la audiencia con su estado, en el orden de la audiencia (la lista de destinatarios de la pantalla). */
+  states: Array<{ id: string; name: string; phone: string | null; state: AudienceSkip | 'eligible' }>;
 }
 
 /**
@@ -20,10 +22,12 @@ export function classify(contacts: readonly AudienceContact[], opts: { excluded:
   const counts: Record<AudienceSkip, number> = { revoked: 0, excluded: 0, no_phone: 0, no_consent: 0, duplicate: 0 };
   const eligible: AudienceContact[] = [];
   const skipped: Classified['skipped'] = [];
+  const states: Classified['states'] = [];
   const seen = new Set<string>();
   for (const c of contacts) {
     const reason: AudienceSkip | null =
       c.consent === 'revoked' ? 'revoked' : opts.excluded.has(c.id) ? 'excluded' : !c.phone ? 'no_phone' : c.consent === 'unknown' && !opts.includeUnknownConsent ? 'no_consent' : seen.has(c.phone) ? 'duplicate' : null;
+    states.push({ id: c.id, name: c.name, phone: c.phone, state: reason ?? 'eligible' });
     if (reason) {
       counts[reason] += 1;
       skipped.push({ id: c.id, reason });
@@ -32,7 +36,7 @@ export function classify(contacts: readonly AudienceContact[], opts: { excluded:
     seen.add(c.phone!);
     eligible.push(c);
   }
-  return { eligible, skipped, counts };
+  return { eligible, skipped, counts, states };
 }
 
 /**

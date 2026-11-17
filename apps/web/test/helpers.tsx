@@ -105,6 +105,8 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   // Fotos de perfil (v5): sin fotos por omisión
   'GET /photos': () => ({ body: { contacts: {}, users: {} } }),
   'GET /me/photo': () => ({ body: { photo_url: null } }),
+  // Campañas masivas (v17): el menú pregunta qué puede hacer la persona; sin acceso por omisión (no aparece la sección)
+  'GET /campaigns/access': () => ({ body: { plan_enabled: true, read: false, send: false, view_all: false, manage_limits: false } }),
 });
 
 export const EMPTY_SUMMARY = {

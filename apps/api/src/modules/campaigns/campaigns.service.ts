@@ -11,7 +11,7 @@ import { dailyLimit } from '../qr';
 import { customKeysIn, resolveQuickReply, unknownVariables, variablesIn, type ResolveContext } from '../quick-replies';
 import { renderedText, TemplatesService } from '../templates';
 import { classify, effectiveDailyCap, estimate } from './audience';
-import { MAX_AUDIENCE, MAX_DRAFTS_PER_USER, MIN_GAP_OFFICIAL_S, OFFICIAL_DAILY_CAP, MIN_GAP_QR_S, type AdvisorLimitDto, type AudienceDto, type CreateCampaignDto, type ListCampaignsQuery, type UpdateCampaignDto } from './campaigns.dto';
+import { MAX_AUDIENCE, MAX_DRAFTS_PER_USER, MIN_GAP_OFFICIAL_S, OFFICIAL_DAILY_CAP, MIN_GAP_QR_S, type AdvisorLimitDto, type AudienceDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type AudienceListDto, type UpdateCampaignDto } from './campaigns.dto';
 
 type Row = typeof campaigns.$inferSelect;
 
@@ -69,7 +69,8 @@ export interface CampaignList {
 }
 
 export interface AudiencePreview {
-  campaign_id: string;
+  /** El borrador al que corresponde; null en la vista previa en vivo (aún sin guardar). */
+  campaign_id: string | null;
   audience: {
     /** Contactos que el alcance de la persona deja ver y cumplen lo elegido. */
     in_scope: number;
@@ -80,8 +81,9 @@ export interface AudiencePreview {
     /** Algunos de los que recibirían el mensaje (sin teléfono: lo mínimo para reconocerlos). */
     sample: Array<{ id: string; name: string }>;
   };
-  limits: { channel_kind: ChannelKind; daily_cap: number; channel_cap: number; advisor_cap: number | null; min_gap_seconds: number };
-  estimate: { days: number; first_day_minutes: number };
+  /** Null mientras no se haya elegido una conexión que la persona pueda usar. */
+  limits: { channel_kind: ChannelKind; daily_cap: number; channel_cap: number; advisor_cap: number | null; min_gap_seconds: number } | null;
+  estimate: { days: number; first_day_minutes: number } | null;
   /** El mensaje ya con los datos del primer contacto que lo recibiría (vista previa con un contacto real). */
   message: { text: string; missing: string[]; contact: { id: string; name: string } } | null;
   warnings: Array<'official_marketing_cost' | 'qr_unofficial_risk' | 'unknown_consent_included' | 'spans_days'>;
@@ -270,8 +272,8 @@ export class CampaignsService {
   }
 
   /**
-   * Vista previa de la audiencia y del mensaje, SIN enviar ni guardar nada. Solo para quien creó la campaña: la audiencia se arma con el ALCANCE de contactos de quien la lanza, así que otra
-   * persona vería números que no son los de ella (la campaña de un asesor ve solo sus contactos). Una persona ajena recibe el mismo 404 que si no existiera.
+   * Vista previa de la audiencia y del mensaje de un borrador, SIN enviar ni guardar nada. Solo para quien creó la campaña: la audiencia se arma con el ALCANCE de contactos de quien la lanza, así
+   * que otra persona vería números que no son los de ella (la campaña de un asesor ve solo sus contactos). Una persona ajena recibe el mismo 404 que si no existiera.
    */
   async preview(a: CampaignAccess, id: string): Promise<AudiencePreview> {
     await this.assertPlan();
@@ -279,38 +281,123 @@ export class CampaignsService {
       const [row] = await tx.select().from(campaigns).where(and(eq(campaigns.id, id), isNull(campaigns.deletedAt), eq(campaigns.createdBy, a.userId))).limit(1);
       if (!row) throw new NotFoundError();
       const c = fromRow(row);
-      const [ch] = await tx.select({ id: channelAccounts.id, provider: channelAccounts.provider }).from(channelAccounts).where(and(eq(channelAccounts.id, c.channelId), isNull(channelAccounts.deletedAt))).limit(1);
-      const kind = ch ? kindOf(ch.provider) : null;
-      if (!ch || !kind) throw new ConflictError('CHANNEL_UNAVAILABLE', 'La conexión de esta campaña ya no está disponible');
-      const src = this.source(c.audience);
-      const aud = await this.contacts.audienceIn(tx, { viewAll: a.contactsViewAll }, src, MAX_AUDIENCE);
-      const out = classify(aud.contacts, { excluded: new Set(c.audience.excluded_contact_ids ?? []), includeUnknownConsent: c.includeUnknownConsent });
+      return this.buildPreview(tx, a, { ...c, templateId: c.templateId, gapSeconds: c.gapSeconds, dailyCap: c.dailyCap }, id, true);
+    });
+  }
+
+  /** La misma vista previa EN VIVO, mientras se arma la campaña y antes de guardar el borrador: con lo que haya (la audiencia es lo único obligatorio). */
+  async previewDraft(a: CampaignAccess, input: PreviewDto): Promise<AudiencePreview> {
+    await this.assertPlan();
+    if (input.include_unknown_consent && !a.viewAll) throw new ForbiddenError('CONSENT_DECLARATION_FORBIDDEN', 'Solo el administrador puede incluir contactos sin consentimiento definido');
+    return this.db.withTenant((tx) =>
+      this.buildPreview(
+        tx,
+        a,
+        {
+          audience: input.audience,
+          includeUnknownConsent: input.include_unknown_consent ?? false,
+          channelId: input.channel_id ?? '',
+          mode: input.mode ?? 'text',
+          templateId: input.template_id ?? null,
+          templateParams: input.template_params ?? {},
+          body: input.body ?? null,
+          gapSeconds: input.gap_seconds ?? 0,
+          dailyCap: input.daily_cap ?? 0,
+          name: '',
+          scheduledAt: null,
+        },
+        null,
+        false,
+      ),
+    );
+  }
+
+  /** Una página de la lista de destinatarios con el estado de cada uno (se escribe / por qué no), para marcar y desmarcar a mano. */
+  async audienceList(a: CampaignAccess, input: AudienceListDto): Promise<{ items: Array<{ id: string; name: string; phone: string | null; state: string }>; total: number; next_cursor: string | null }> {
+    await this.assertPlan();
+    if (input.include_unknown_consent && !a.viewAll) throw new ForbiddenError('CONSENT_DECLARATION_FORBIDDEN', 'Solo el administrador puede incluir contactos sin consentimiento definido');
+    const offset = (() => {
+      if (!input.cursor) return 0;
+      const n = Number(Buffer.from(input.cursor, 'base64url').toString('utf8'));
+      if (!Number.isInteger(n) || n < 0) throw new ValidationError([{ path: 'cursor', code: 'invalid', message: 'Cursor inválido' }]);
+      return n;
+    })();
+    return this.db.withTenant(async (tx) => {
+      const aud = await this.contacts.audienceIn(tx, { viewAll: a.contactsViewAll }, this.source(input.audience), MAX_AUDIENCE);
+      const out = classify(aud.contacts, { excluded: new Set(input.audience.excluded_contact_ids ?? []), includeUnknownConsent: input.include_unknown_consent ?? false });
+      const page = out.states.slice(offset, offset + input.limit);
+      const next = offset + input.limit < out.states.length ? Buffer.from(String(offset + input.limit)).toString('base64url') : null;
+      return { items: page, total: out.states.length, next_cursor: next };
+    });
+  }
+
+  /** Las plantillas aprobadas y enviables de una conexión oficial que la persona puede usar (el asesor no tiene `channels.manage`, así que no podría pedirlas de otro modo). */
+  async templatesFor(a: CampaignAccess, channelId: string): Promise<{ items: Array<Awaited<ReturnType<TemplatesService['forChannel']>>['items'][number]> }> {
+    await this.assertPlan();
+    const kind = await this.db.withTenant((tx) => this.usableKind(tx, a, channelId));
+    if (kind !== 'official') throw new NotFoundError();
+    const list = await this.templates.forChannel(channelId);
+    return { items: list.items.filter((t) => t.sendable) };
+  }
+
+  /** Qué puede hacer la persona con campañas (para la pantalla y el menú): permisos verificados y si el plan las incluye. */
+  async accessInfo(flags: { read: boolean; send: boolean; viewAll: boolean; manageLimits: boolean }): Promise<{ plan_enabled: boolean; read: boolean; send: boolean; view_all: boolean; manage_limits: boolean }> {
+    return { plan_enabled: await this.directory.featureEnabled('campaigns'), read: flags.read, send: flags.send, view_all: flags.viewAll, manage_limits: flags.manageLimits };
+  }
+
+  /** El tipo de la conexión si está activa y la persona puede usarla para campañas (oficial: cualquiera; QR: la que creó, o cualquiera si ve todo); null si no. */
+  private async usableKind(tx: TenantTx, a: CampaignAccess, channelId: string): Promise<ChannelKind | null> {
+    const [ch] = await tx.select({ provider: channelAccounts.provider, createdBy: channelAccounts.createdBy }).from(channelAccounts).where(and(eq(channelAccounts.id, channelId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'))).limit(1);
+    const kind = ch ? kindOf(ch.provider) : null;
+    if (!ch || !kind || (!a.viewAll && kind === 'qr' && ch.createdBy !== a.userId)) return null;
+    return kind;
+  }
+
+  /** Arma la vista previa. `strict`: un borrador guardado con la conexión caída es un 409; en vivo, simplemente no hay límites que mostrar. */
+  private async buildPreview(tx: TenantTx, a: CampaignAccess, c: Composed, campaignId: string | null, strict: boolean): Promise<AudiencePreview> {
+    const kind = c.channelId ? await this.usableKind(tx, a, c.channelId) : null;
+    if (strict && !kind) throw new ConflictError('CHANNEL_UNAVAILABLE', 'La conexión de esta campaña ya no está disponible');
+    const aud = await this.contacts.audienceIn(tx, { viewAll: a.contactsViewAll }, this.source(c.audience), MAX_AUDIENCE);
+    const out = classify(aud.contacts, { excluded: new Set(c.audience.excluded_contact_ids ?? []), includeUnknownConsent: c.includeUnknownConsent });
+    let limits: AudiencePreview['limits'] = null;
+    let est: AudiencePreview['estimate'] = null;
+    if (kind) {
+      const mode = kind === 'qr' ? 'text' : 'template';
       const qrLimit = kind === 'qr' ? await this.qrWarmupLimit(tx, c.channelId) : 0;
       const advisorCap = a.viewAll ? null : await this.advisorCap(tx, a.userId);
-      const { cap, channelCap } = effectiveDailyCap({ mode: c.mode, campaignCap: c.dailyCap, advisorCap, qrWarmupLimit: qrLimit });
-      const est = estimate(out.eligible.length, cap, c.gapSeconds);
-      const first = out.eligible[0];
-      const message = first ? await this.messageFor(tx, c, row.templateId, first) : null;
-      const warnings: AudiencePreview['warnings'] = [];
-      if (kind === 'official') warnings.push('official_marketing_cost');
-      if (kind === 'qr') warnings.push('qr_unofficial_risk');
-      if (c.includeUnknownConsent && out.eligible.some((x) => x.consent === 'unknown')) warnings.push('unknown_consent_included');
-      if (est.days > 1) warnings.push('spans_days');
-      return {
-        campaign_id: id,
-        audience: {
-          in_scope: aud.visible,
-          out_of_scope: Math.max(0, aud.company - aud.visible),
-          eligible: out.eligible.length,
-          skipped: { revoked: out.counts.revoked, excluded: out.counts.excluded, no_phone: out.counts.no_phone, no_consent: out.counts.no_consent, duplicate: out.counts.duplicate },
-          sample: out.eligible.slice(0, 5).map((x) => ({ id: x.id, name: x.name })),
-        },
-        limits: { channel_kind: kind, daily_cap: cap, channel_cap: channelCap, advisor_cap: advisorCap, min_gap_seconds: kind === 'qr' ? MIN_GAP_QR_S : MIN_GAP_OFFICIAL_S },
-        estimate: est,
-        message,
-        warnings,
-      };
-    });
+      const minGap = kind === 'qr' ? MIN_GAP_QR_S : MIN_GAP_OFFICIAL_S;
+      const { cap, channelCap } = effectiveDailyCap({ mode, campaignCap: c.dailyCap > 0 ? c.dailyCap : 10000, advisorCap, qrWarmupLimit: qrLimit });
+      limits = { channel_kind: kind, daily_cap: cap, channel_cap: channelCap, advisor_cap: advisorCap, min_gap_seconds: minGap };
+      est = estimate(out.eligible.length, cap, Math.max(c.gapSeconds, minGap));
+    }
+    const first = out.eligible[0];
+    let message: AudiencePreview['message'] = null;
+    if (first && kind && ((kind === 'qr' && c.body) || (kind === 'official' && c.templateId))) {
+      try {
+        message = await this.messageFor(tx, { ...c, mode: kind === 'qr' ? 'text' : 'template' }, c.templateId, first);
+      } catch (e) {
+        if (!(e instanceof NotFoundError) && !(e instanceof ConflictError)) throw e; // una plantilla que ya no existe: sin ejemplo, no un error de la vista previa
+      }
+    }
+    const warnings: AudiencePreview['warnings'] = [];
+    if (kind === 'official') warnings.push('official_marketing_cost');
+    if (kind === 'qr') warnings.push('qr_unofficial_risk');
+    if (c.includeUnknownConsent && out.eligible.some((x) => x.consent === 'unknown')) warnings.push('unknown_consent_included');
+    if (est && est.days > 1) warnings.push('spans_days');
+    return {
+      campaign_id: campaignId,
+      audience: {
+        in_scope: aud.visible,
+        out_of_scope: Math.max(0, aud.company - aud.visible),
+        eligible: out.eligible.length,
+        skipped: { revoked: out.counts.revoked, excluded: out.counts.excluded, no_phone: out.counts.no_phone, no_consent: out.counts.no_consent, duplicate: out.counts.duplicate },
+        sample: out.eligible.slice(0, 5).map((x) => ({ id: x.id, name: x.name })),
+      },
+      limits,
+      estimate: est,
+      message,
+      warnings,
+    };
   }
 
   // ── tope diario por asesor ───────────────────────────────────────────────

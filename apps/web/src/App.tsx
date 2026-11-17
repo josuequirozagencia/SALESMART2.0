@@ -19,6 +19,7 @@ import { AiCreditsPage } from './features/platform/AiCreditsPage';
 import { CalendarPage } from './features/calendar/CalendarPage';
 import { GhlPage } from './features/ghl/GhlPage';
 import { SalesPage } from './features/sales/SalesPage';
+import { CampaignsPage } from './features/campaigns/CampaignsPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
 import { UsersPage } from './features/team/UsersPage';
@@ -128,6 +129,7 @@ export function App() {
         <Route path="/inbox/:id?" element={<InboxPage />} />
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />
+        <Route path="/campaigns" element={<CampaignsPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/companies" element={<ClientCompaniesPage />} />

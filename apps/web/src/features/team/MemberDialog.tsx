@@ -1,3 +1,4 @@
+import { CampaignLimitSection } from '../campaigns/CampaignLimitSection';
 import { useState } from 'react';
 import { friendlyError } from '../../lib/errors';
 import { initials, shortDateTime } from '../../lib/format';
@@ -94,6 +95,8 @@ function General({ m }: { m: TeamMemberFull }) {
         </label>
         {ownHours ? <HoursEditor value={week} onChange={setWeek} /> : null}
       </section>
+
+      <CampaignLimitSection userId={m.user_id} role={m.role} active={active} />
 
       {error ? <Alert>{error}</Alert> : null}
       {note ? <Alert kind="ok">{note}</Alert> : null}
