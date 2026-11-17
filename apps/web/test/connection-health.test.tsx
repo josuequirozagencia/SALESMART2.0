@@ -46,7 +46,7 @@ const open = async (w: World, extra: Record<string, Handler> = {}) => {
 describe('Salud de las conexiones', () => {
   it('una conexión sana: «Todo bien», último aviso, mensajes y retraso de 24 h, sin avisos ni motivos', async () => {
     const { section } = await open(world());
-    const card = within(await section.findByRole('listitem', { name: 'Salud de Chip principal' }));
+    const card = within(await section.findByRole('article', { name: 'Salud de Chip principal' }));
     expect(card.getByText('Todo bien')).toBeInTheDocument();
     expect(card.getByText('WhatsApp por QR')).toBeInTheDocument();
     expect(card.getByText('hace menos de 1 min')).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe('Salud de las conexiones', () => {
       failed_events: [{ id: 'ev1', received_at: iso(3_600_000), attempts: 5, reason: 'La base de datos rechazó un dato del aviso (llave repetida o dato inválido).', retryable: true }, { id: 'ev2', received_at: iso(86_400_000), attempts: 5, reason: 'El aviso trae un formato que no se pudo leer.', retryable: false }],
     });
     const { section } = await open(world([bad]));
-    const card = within(await section.findByRole('listitem', { name: 'Salud de Chip principal' }));
+    const card = within(await section.findByRole('article', { name: 'Salud de Chip principal' }));
     expect(card.getByText('Requiere acción')).toBeInTheDocument();
     expect(card.getByText(/Hay 1 aviso que no se pudo procesar/)).toBeInTheDocument();
     expect(card.getByText(/entrando con 10 min de retraso/)).toBeInTheDocument();
@@ -81,10 +81,10 @@ describe('Salud de las conexiones', () => {
     const bad = health({ level: 'crit', reasons: ['failed'], events: { pending: 0, overdue: 0, failed: 1 }, failed_events: [{ id: 'ev1', received_at: iso(3_600_000), attempts: 5, reason: 'x', retryable: true }] });
     const w = world([bad]);
     const { section } = await open(w);
-    const card = within(await section.findByRole('listitem', { name: 'Salud de Chip principal' }));
+    const card = within(await section.findByRole('article', { name: 'Salud de Chip principal' }));
     await userEvent.click(card.getByRole('button', { name: /^Reintentar el aviso/ }));
     await waitFor(() => expect(w.retries).toHaveLength(1));
-    await waitFor(() => expect(within(screen.getByRole('listitem', { name: 'Salud de Chip principal' })).getByText('Todo bien')).toBeInTheDocument());
+    await waitFor(() => expect(within(screen.getByRole('article', { name: 'Salud de Chip principal' })).getByText('Todo bien')).toBeInTheDocument());
   });
 
   it('un rechazo del servidor al reintentar se muestra con su motivo', async () => {
@@ -92,7 +92,7 @@ describe('Salud de las conexiones', () => {
     const w = world([bad]);
     w.failRetry = true;
     const { section } = await open(w);
-    const card = within(await section.findByRole('listitem', { name: 'Salud de Chip principal' }));
+    const card = within(await section.findByRole('article', { name: 'Salud de Chip principal' }));
     await userEvent.click(card.getByRole('button', { name: /^Reintentar el aviso/ }));
     expect(await card.findByRole('alert')).toBeInTheDocument();
   });
@@ -100,7 +100,7 @@ describe('Salud de las conexiones', () => {
   it('una sesión caída o una conexión desactivada se dicen sin alarmar de más', async () => {
     const { section } = await open(world([health({ id: 'a', name: 'Caído', level: 'crit', reasons: ['session_down'], session: { state: 'closed', down_since: iso(3_600_000) } }), health({ id: 'b', name: 'Apagado', status: 'inactive', level: 'ok' })]));
     expect(await section.findByText(/La sesión de WhatsApp está caída/)).toBeInTheDocument();
-    expect(within(section.getByRole('listitem', { name: 'Salud de Apagado' })).getByText('Desactivada')).toBeInTheDocument();
+    expect(within(section.getByRole('article', { name: 'Salud de Apagado' })).getByText('Desactivada')).toBeInTheDocument();
   });
 
   it('sin conexiones invita a conectar un número', async () => {

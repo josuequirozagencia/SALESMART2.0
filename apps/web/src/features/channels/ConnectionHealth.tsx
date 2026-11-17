@@ -43,7 +43,7 @@ function Card({ c, now }: { c: Health; now: number }) {
   const last = c.last_event_at ? Math.max(0, Math.round((now - new Date(c.last_event_at).getTime()) / 1000)) : null;
   const ignored = (Object.entries(c.ignored_24h) as Array<[IgnoredReason, number]>).filter(([, v]) => v > 0);
   return (
-    <li aria-label={`Salud de ${c.name}`} className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
+    <article aria-label={`Salud de ${c.name}`} className="grid gap-3 rounded-2xl border border-line bg-surface p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="grid gap-0.5">
           <span className="text-[15px] font-bold">{c.name}</span>
@@ -80,7 +80,7 @@ function Card({ c, now }: { c: Health; now: number }) {
         </ul>
       ) : null}
       {retry.isError ? <Alert>{friendlyError(retry.error, 'No pudimos reintentar el aviso.')}</Alert> : null}
-    </li>
+    </article>
   );
 }
 
@@ -126,7 +126,7 @@ export function ConnectionHealth() {
       {q.isPending ? <div className="grid place-items-center py-6 text-muted"><Spinner label="Cargando la salud de las conexiones" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar la salud de las conexiones.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
       {q.isSuccess && list.length === 0 ? <p className="text-[13px] text-muted">Cuando conectes un número aparecerá aquí cuánto tardan sus mensajes y si hay avisos con problemas.</p> : null}
-      {list.length > 0 ? <ul aria-label="Salud por conexión" className="grid gap-3 lg:grid-cols-2">{list.map((c) => <Card key={c.id} c={c} now={now} />)}</ul> : null}
+      {list.length > 0 ? <div className="grid gap-3 lg:grid-cols-2">{list.map((c) => <Card key={c.id} c={c} now={now} />)}</div> : null}
       <BrowserRealtime now={now} />
     </section>
   );
