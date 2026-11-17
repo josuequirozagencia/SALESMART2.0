@@ -1,12 +1,24 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { api } from '../../lib/api';
 import { playIncomingSound, soundEnabled } from '../../lib/notifySound';
 import { PRESENCE_HEARTBEAT_MS, reportPresence, startRealtime } from '../../lib/realtime';
-import type { Conversation } from '../../lib/types';
+import { recordMissingGaveUp, recordMissingRetry } from '../../lib/realtimeStats';
+import type { ChatMessagePage, Conversation } from '../../lib/types';
 
 /** Junta los avisos que llegan en ráfaga (un mensaje nuevo suele traer tres) y vuelve a pedir lo afectado una sola vez. */
 const COALESCE_MS = 300;
+/** Si el aviso anunciaba un mensaje que al pedir el hilo aún no estaba (el dato se confirmó un instante después), se vuelve a pedir a estos plazos y luego se deja al respaldo. */
+export const MISSING_RETRY_MS = [1_200, 3_500] as const;
+
+/**
+ * ¿El hilo abierto de esa conversación ya trae ese mensaje? `true` también cuando el hilo no está en memoria (no está abierto: no hay nada que reintentar). Función pura sobre la caché.
+ */
+export function threadHasMessage(qc: QueryClient, conversationId: string, messageId: string): boolean {
+  const data = qc.getQueryData<InfiniteData<ChatMessagePage>>(['messages', conversationId]);
+  if (!data) return true;
+  return data.pages.some((p) => p.items.some((m) => m.id === messageId));
+}
 
 /**
  * Conexión en vivo del Inbox (M5.7). Cada aviso trae solo identificadores: aquí se marcan como desactualizados el listado y lo abierto de esa conversación, y
@@ -58,6 +70,29 @@ export function useInboxRealtime(userId: string, organizationId: string, pathnam
         // sin permiso para verla o sin red: no suena
       }
     };
+    /** Mensajes nuevos anunciados por conversación, a comprobar después de pedir el hilo. */
+    const announced = new Map<string, Set<string>>();
+    const retryTimers = new Set<ReturnType<typeof setTimeout>>();
+    const verify = (conversationId: string, messageId: string, attempt: number): void => {
+      const wait = MISSING_RETRY_MS[attempt];
+      if (wait === undefined) return;
+      const t = setTimeout(() => {
+        retryTimers.delete(t);
+        if (threadHasMessage(qc, conversationId, messageId)) return;
+        recordMissingRetry();
+        void qc.invalidateQueries({ queryKey: ['messages', conversationId] });
+        void qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
+        if (attempt + 1 < MISSING_RETRY_MS.length) verify(conversationId, messageId, attempt + 1);
+        else {
+          const last = setTimeout(() => {
+            retryTimers.delete(last);
+            if (!threadHasMessage(qc, conversationId, messageId)) recordMissingGaveUp();
+          }, 1_500);
+          retryTimers.add(last);
+        }
+      }, wait);
+      retryTimers.add(t);
+    };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const flush = (): void => {
       timer = undefined;
@@ -72,10 +107,15 @@ export function useInboxRealtime(userId: string, organizationId: string, pathnam
       // La vista global de programados (M5.10) cuelga de ['scheduled', 'all', …]: cualquier cambio de una conversación puede moverla
       if (conversations.size > 0) void qc.invalidateQueries({ queryKey: ['scheduled', 'all'] });
       conversations.clear();
+      for (const [conversationId, ids] of announced) for (const id of ids) verify(conversationId, id, 0);
+      announced.clear();
     };
     const stop = startRealtime({
-      onChange: ({ conversationId, event }) => {
-        if (event === 'message.created') void maybeSound(conversationId);
+      onChange: ({ conversationId, event, messageId }) => {
+        if (event === 'message.created') {
+          void maybeSound(conversationId);
+          if (messageId) announced.set(conversationId, (announced.get(conversationId) ?? new Set<string>()).add(messageId));
+        }
         conversations.add(conversationId);
         timer ??= setTimeout(flush, COALESCE_MS);
       },
@@ -88,6 +128,8 @@ export function useInboxRealtime(userId: string, organizationId: string, pathnam
     });
     return () => {
       clearTimeout(timer);
+      for (const t of retryTimers) clearTimeout(t);
+      retryTimers.clear();
       stop();
     };
   }, [qc, userId, organizationId]);

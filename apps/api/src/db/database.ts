@@ -9,6 +9,15 @@ import { DatabaseContextMismatchError } from './errors';
 import { guardClient, type GuardState } from './guarded-client';
 import type { DrizzleTx, IdentityTx, PlatformTx, TenantTx } from './types';
 
+/** Ejecuta un aviso posterior al COMMIT: un fallo se registra y nunca propaga (lo que se anota con `afterCommit` es un aviso, no parte del dato). */
+function runHook(fn: () => void, log: AppLogger | undefined): void {
+  try {
+    fn();
+  } catch (err) {
+    log?.error({ err }, 'falló un aviso posterior a confirmar la transacción');
+  }
+}
+
 export interface DatabasePools {
   app: Pool;
   platform: Pool;
@@ -18,6 +27,8 @@ export interface DatabasePools {
 interface ActiveTx {
   kind: 'tenant' | 'platform' | 'identity';
   tx: unknown;
+  /** Lo que debe ocurrir SOLO si la transacción se confirma (avisos en vivo, notificaciones): se ejecuta después del COMMIT y se descarta si hay ROLLBACK. */
+  afterCommit: Array<() => void>;
 }
 
 /**
@@ -50,6 +61,17 @@ export class Database {
       },
       log,
     );
+  }
+
+  /**
+   * Registra algo para después de confirmar la transacción en curso (en la más externa: las llamadas anidadas la comparten). Si la transacción se revierte, nunca se ejecuta. Sin transacción
+   * abierta se ejecuta enseguida. Un fallo de `fn` se registra y NUNCA propaga: lo que se anota aquí es un aviso, no parte del dato. Sirve para que un aviso en vivo no llegue al navegador antes
+   * de que el dato exista (v19 B2).
+   */
+  afterCommit(fn: () => void): void {
+    const store = this.active.getStore();
+    if (store) store.afterCommit.push(fn);
+    else runHook(fn, this.log);
   }
 
   async withTenant<T>(fn: (tx: TenantTx) => Promise<T>): Promise<T> {
@@ -98,17 +120,21 @@ export class Database {
 
     const client: PoolClient = await pool.connect();
     const state: GuardState = { open: true, sealed: false };
+    const hooks: Array<() => void> = [];
     let destroy = false;
     try {
       const d = drizzle(guardClient(client, state));
-      return await d.transaction(async (tx) => {
+      const result = await d.transaction(async (tx) => {
         await prepare(tx);
         try {
-          return await this.active.run({ kind, tx }, () => fn(tx));
+          return await this.active.run({ kind, tx, afterCommit: hooks }, () => fn(tx));
         } finally {
           state.sealed = true;
         }
       });
+      // La transacción ya se confirmó: ahora sí salen los avisos que quedaron en espera
+      for (const hook of hooks) runHook(hook, this.log);
+      return result;
     } catch (err) {
       // Asegura que no quede transacción abierta/abortada en la conexión que vuelve al pool.
       try {

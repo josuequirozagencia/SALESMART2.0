@@ -21,8 +21,8 @@ export const MAX_SOCKETS_PER_USER = 3;
 const HANDSHAKES_PER_MINUTE = 30;
 /** Cada cuánto se vuelve a comprobar que la sesión sigue vigente y en la misma empresa. */
 const REVALIDATE_MS = 60_000;
-/** Espera antes de avisar: junta ráfagas y deja que termine la transacción que cambió el dato. */
-const DELAY_MS = 250;
+/** Espera antes de avisar: solo junta ráfagas (el aviso ya se pide DESPUÉS de confirmar la transacción que cambió el dato; v19 B2). */
+const DELAY_MS = 100;
 const FLUSH_EVERY_MS = 100;
 /** Si un mensaje cambia muchas veces en la misma ráfaga, basta con avisar de la conversación. */
 const MAX_MESSAGES_PER_BURST = 20;
@@ -240,10 +240,15 @@ export class RealtimeService implements OnApplicationBootstrap, OnModuleDestroy 
     for (const u of opts.alsoUsers ?? []) p.also.add(u);
   }
 
-  /** Lo mismo que `touch`, para código que corre dentro de una petición o tarea con contexto de empresa: la empresa sale de ahí, nunca de un parámetro. */
+  /**
+   * Lo mismo que `touch`, para código que corre dentro de una petición o tarea con contexto de empresa: la empresa sale de ahí, nunca de un parámetro. **Si hay una transacción abierta, el aviso sale
+   * DESPUÉS de confirmarla** (v19 B2): antes salía 250 ms después de pedirlo, y una transacción más larga que eso (un lote de avisos del webhook) dejaba que el navegador pidiera el mensaje antes de que existiera.
+   * Si la transacción se revierte, no sale nada.
+   */
   touchHere(conversationId: string, opts: TouchOptions = {}): void {
     const organizationId = TenantContext.currentOrNull()?.organizationId;
-    if (organizationId) this.touch(organizationId, conversationId, opts);
+    if (!organizationId) return;
+    this.db.afterCommit(() => this.touch(organizationId, conversationId, opts));
   }
 
   /**

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import { refreshSession, tokens } from './api';
+import { recordRealtimeEvent, resetRealtimeStats } from './realtimeStats';
 
 /** Dónde está el tiempo real (Socket.IO en el mismo origen que la API, ADR-36/50). */
 export const REALTIME_PATH = '/v1/realtime';
@@ -11,6 +12,8 @@ export interface RealtimeChange {
   event: RealtimeEventName;
   conversationId: string;
   messageId: string | undefined;
+  /** Hora (ISO) con que el servidor emitió el aviso. */
+  at: string | undefined;
 }
 
 const EVENTS: readonly RealtimeEventName[] = ['conversation.created', 'conversation.updated', 'message.created', 'message.updated', 'scheduled.updated'];
@@ -69,6 +72,7 @@ export function startRealtime(h: Handlers): () => void {
   let wasDown = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   setStatus('connecting');
+  resetRealtimeStats();
   const socket: Socket = io({ path: REALTIME_PATH, transports: ['websocket', 'polling'], reconnectionDelayMax: 30_000, auth: (cb) => cb({ token: tokens.get() ?? '' }) });
 
   const retry = (): void => {
@@ -109,9 +113,11 @@ export function startRealtime(h: Handlers): () => void {
   });
   socket.on('notification.created', () => h.onNotification?.());
   for (const event of EVENTS) {
-    socket.on(event, (body: { data?: { conversation_id?: string; message_id?: string } } | undefined) => {
+    socket.on(event, (body: { at?: string; data?: { conversation_id?: string; message_id?: string } } | undefined) => {
       const conversationId = body?.data?.conversation_id;
-      if (typeof conversationId === 'string') h.onChange({ event, conversationId, messageId: body?.data?.message_id });
+      if (typeof conversationId !== 'string') return;
+      recordRealtimeEvent(body?.at);
+      h.onChange({ event, conversationId, messageId: body?.data?.message_id, at: body?.at });
     });
   }
 
