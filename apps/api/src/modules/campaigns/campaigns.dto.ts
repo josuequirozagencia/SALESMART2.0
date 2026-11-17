@@ -68,5 +68,27 @@ export const listCampaignsQuerySchema = z
   .strict();
 export type ListCampaignsQuery = z.infer<typeof listCampaignsQuerySchema>;
 
+/** Vista previa EN VIVO, sin borrador guardado: solo la audiencia es obligatoria; lo demás se usa si llega (conexión → límites, mensaje → ejemplo con un contacto real). Nada se valida a fondo ni se guarda. */
+export const previewSchema = z
+  .object({
+    audience: audienceSchema,
+    include_unknown_consent: z.boolean().optional(),
+    channel_id: z.uuid().nullable().optional(),
+    mode: z.enum(['template', 'text']).nullable().optional(),
+    template_id: z.uuid().nullable().optional(),
+    template_params: paramsSchema.optional(),
+    body: z.string().max(1000).nullable().optional(),
+    gap_seconds: z.number().int().min(5).max(3600).nullable().optional(),
+    daily_cap: z.number().int().min(1).max(10000).nullable().optional(),
+  })
+  .strict();
+export type PreviewDto = z.infer<typeof previewSchema>;
+
+/** Una página de la lista de destinatarios (con su estado) para marcar y desmarcar uno por uno, como en el prototipo. */
+export const audienceListSchema = z
+  .object({ audience: audienceSchema, include_unknown_consent: z.boolean().optional(), limit: z.number().int().min(1).max(200).default(50), cursor: z.string().min(1).max(20).optional() })
+  .strict();
+export type AudienceListDto = z.infer<typeof audienceListSchema>;
+
 export const advisorLimitSchema = z.object({ daily_cap: z.number().int().min(1).max(10000) }).strict();
 export type AdvisorLimitDto = z.infer<typeof advisorLimitSchema>;

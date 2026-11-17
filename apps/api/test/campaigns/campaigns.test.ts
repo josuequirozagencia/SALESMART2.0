@@ -1,5 +1,9 @@
 // v17 · 17.1 — Campañas masivas: modelo, permisos y audiencia, SIN enviar (ADR-72). Rutas cubiertas (el registro de endpoints exige que este archivo escriba cada una tal cual):
+//   GET /v1/campaigns/access
 //   GET /v1/campaigns/options
+//   GET /v1/campaigns/channels/:channelId/templates
+//   POST /v1/campaigns/preview
+//   POST /v1/campaigns/audience
 //   GET /v1/campaigns/advisor-limits
 //   PUT /v1/campaigns/advisor-limits/:userId
 //   POST /v1/campaigns
@@ -128,8 +132,8 @@ interface Camp {
 interface Preview {
   campaign_id: string;
   audience: { in_scope: number; out_of_scope: number; eligible: number; skipped: { revoked: number; excluded: number; no_phone: number; no_consent: number; duplicate: number }; sample: Array<{ id: string; name: string }> };
-  limits: { channel_kind: string; daily_cap: number; channel_cap: number; advisor_cap: number | null; min_gap_seconds: number };
-  estimate: { days: number; first_day_minutes: number };
+  limits: { channel_kind: string; daily_cap: number; channel_cap: number; advisor_cap: number | null; min_gap_seconds: number } | null;
+  estimate: { days: number; first_day_minutes: number } | null;
   message: { text: string; missing: string[]; contact: { id: string; name: string } } | null;
   warnings: string[];
 }
@@ -423,7 +427,7 @@ describe('vista previa de la audiencia', () => {
     await ok(await call('PUT', `/campaigns/advisor-limits/${IDS.carol}`, T.alice, { daily_cap: 2 }));
     p = await preview(T.carol, qr.id);
     expect(p.limits).toMatchObject({ daily_cap: 2, advisor_cap: 2 });
-    expect(p.estimate.days).toBe(3);
+    expect(p.estimate!.days).toBe(3);
     expect(p.warnings).toContain('spans_days');
     // y ya no puede crear ni editar campañas por encima de su tope
     const over = await create(T.carol, textBody({ channel_id: qrCarol, daily_cap: 3 }));
@@ -459,5 +463,88 @@ describe('tope diario por asesor', () => {
     expect((await call('PUT', `/campaigns/advisor-limits/${NOBODY}`, T.alice, { daily_cap: 10 })).status).toBe(404);
     // Bob (otra empresa) no ve los topes de A
     expect((await ok<{ items: unknown[] }>(await call('GET', '/campaigns/advisor-limits', T.bob))).items).toEqual([]);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+describe('rutas de apoyo de la pantalla (17.2)', () => {
+  it('acceso: cada persona ve lo que puede hacer y si su plan lo incluye, sin datos de la empresa; la plataforma 403', async () => {
+    expect(await ok(await call('GET', '/campaigns/access', T.alice))).toEqual({ plan_enabled: true, read: true, send: true, view_all: true, manage_limits: true });
+    expect(await ok(await call('GET', '/campaigns/access', T.carol))).toEqual({ plan_enabled: true, read: true, send: true, view_all: false, manage_limits: false });
+    expect(await ok(await call('GET', '/campaigns/access', T.eve))).toEqual({ plan_enabled: true, read: false, send: false, view_all: false, manage_limits: false });
+    const off = (await admin.query(`INSERT INTO plans(id, name, features) VALUES (gen_random_uuid(), 'Básico', '{"campaigns": false}') RETURNING id`)).rows[0].id as string;
+    await admin.query(`UPDATE organizations SET plan_id = $1 WHERE id = $2`, [off, ORG_A]);
+    expect((await ok<{ plan_enabled: boolean }>(await call('GET', '/campaigns/access', T.alice))).plan_enabled).toBe(false); // el menú puede mostrar la sección bloqueada
+    expect((await ok<{ plan_enabled: boolean }>(await call('GET', '/campaigns/access', T.bob))).plan_enabled).toBe(true); // B no depende del plan de A
+    expect((await call('GET', '/campaigns/access', undefined)).status).toBe(401);
+    expect((await call('GET', '/campaigns/access', T.root)).status).toBe(403);
+  });
+
+  it('plantillas: solo las enviables de una conexión OFICIAL que la persona puede usar, con sus variables; un QR, una conexión de otra empresa o sin permiso no existen', async () => {
+    const t = await ok<{ items: Array<{ id: string; name: string; sendable: boolean; variables: Array<{ id: string }> }> }>(await call('GET', `/campaigns/channels/${officialA}/templates`, T.carol));
+    expect(t.items.length).toBeGreaterThan(0);
+    expect(t.items.every((x) => x.sendable)).toBe(true);
+    expect(t.items.find((x) => x.id === tplA)!.variables.map((v) => v.id)).toEqual(['body:1', 'body:2', 'body:3']);
+    expect((await call('GET', `/campaigns/channels/${qrAdmin}/templates`, T.alice)).status).toBe(404);
+    expect((await call('GET', `/campaigns/channels/${officialB}/templates`, T.alice)).status).toBe(404);
+    expect((await call('GET', `/campaigns/channels/${officialA}/templates`, T.bob)).status).toBe(404);
+    expect((await call('GET', `/campaigns/channels/${NOBODY}/templates`, T.alice)).status).toBe(404);
+    expect((await call('GET', `/campaigns/channels/${officialA}/templates`, T.eve)).status).toBe(403);
+  });
+
+  it('vista previa en vivo: con solo la audiencia cuenta; con la conexión suma límites; con el mensaje, el ejemplo real; no guarda nada y respeta el alcance, el consentimiento y la empresa', async () => {
+    await mkContact({ owner: IDS.carol, name: 'Lucía Mora' });
+    await mkContact({ owner: IDS.carol, name: 'Baja', consent: 'revoked' });
+    await mkContact({ owner: IDS.eve, name: 'De Eva' });
+    await mkContact({ org: ORG_B, owner: IDS.bob, name: 'De B' });
+    const live = (token: string, body: unknown) => call('POST', '/campaigns/preview', token, body);
+    const only = await ok<Preview>(await live(T.carol, { audience: { source: 'all' } }));
+    expect(only).toMatchObject({ campaign_id: null, limits: null, estimate: null, message: null, audience: { in_scope: 2, out_of_scope: 1, eligible: 1, skipped: { revoked: 1 } } });
+    const withChannel = await ok<Preview>(await live(T.carol, { audience: { source: 'all' }, channel_id: qrCarol, gap_seconds: 60, daily_cap: 100, mode: 'text', body: 'Hola {{primer_nombre}}' }));
+    expect(withChannel.limits).toMatchObject({ channel_kind: 'qr', daily_cap: 100, min_gap_seconds: 45 });
+    expect(withChannel.message).toMatchObject({ text: 'Hola Lucía', missing: [] });
+    expect(withChannel.warnings).toContain('qr_unofficial_risk');
+    // una conexión que no puede usar no es un error: simplemente no hay límites
+    expect((await ok<Preview>(await live(T.carol, { audience: { source: 'all' }, channel_id: qrAdmin }))).limits).toBeNull();
+    // plantilla oficial con sus valores
+    const tpl = await ok<Preview>(await live(T.carol, { audience: { source: 'all' }, channel_id: officialA, mode: 'template', template_id: tplA, template_params: { 'body:1': '{{primer_nombre}}', 'body:2': 'el viernes', 'body:3': '10:00' } }));
+    expect(tpl.message!.text).toContain('Lucía');
+    expect(tpl.warnings).toContain('official_marketing_cost');
+    // reglas: el asesor no declara permiso; sin audiencia 400; lista ajena 404; no se guardó nada
+    expect((await live(T.carol, { audience: { source: 'all' }, include_unknown_consent: true })).status).toBe(403);
+    expect((await live(T.carol, {})).status).toBe(400);
+    expect((await live(T.carol, { audience: { source: 'list', list_id: NOBODY } })).status).toBe(404);
+    expect((await live(T.eve, { audience: { source: 'all' } })).status).toBe(403);
+    expect((await live(T.root, { audience: { source: 'all' } })).status).toBe(403);
+    expect((await admin.query(`SELECT (SELECT count(*)::int FROM campaigns) AS c, (SELECT count(*)::int FROM audit_logs WHERE entity_type = 'campaign') AS a`)).rows[0]).toEqual({ c: 0, a: 0 });
+    // B solo cuenta lo suyo
+    expect((await ok<Preview>(await live(T.bob, { audience: { source: 'all' } }))).audience).toMatchObject({ in_scope: 1, eligible: 1 });
+  });
+
+  it('lista de destinatarios: cada contacto con su estado (se escribe, baja, sin teléfono, sin consentimiento, desmarcado), por páginas; el asesor solo ve los suyos', async () => {
+    const a = await mkContact({ owner: IDS.alice, name: 'A Ana' });
+    await mkContact({ owner: IDS.alice, name: 'B Beto', consent: 'revoked' });
+    await mkContact({ owner: IDS.alice, name: 'C Cata', phone: null });
+    await mkContact({ owner: IDS.alice, name: 'D Dani', consent: 'unknown' });
+    const e = await mkContact({ owner: IDS.alice, name: 'E Eli' });
+    await mkContact({ owner: IDS.eve, name: 'F de Eva' });
+    const list = (token: string, body: unknown) => call('POST', '/campaigns/audience', token, body);
+    interface Page { items: Array<{ id: string; name: string; phone: string | null; state: string }>; total: number; next_cursor: string | null }
+    const p1 = await ok<Page>(await list(T.alice, { audience: { source: 'all', excluded_contact_ids: [e] }, limit: 4 }));
+    expect(p1.total).toBe(6);
+    expect(p1.items.map((x) => [x.name, x.state])).toEqual([['A Ana', 'eligible'], ['B Beto', 'revoked'], ['C Cata', 'no_phone'], ['D Dani', 'no_consent']]);
+    expect(p1.items[0]!.id).toBe(a);
+    const p2 = await ok<Page>(await list(T.alice, { audience: { source: 'all', excluded_contact_ids: [e] }, limit: 4, cursor: p1.next_cursor }));
+    expect(p2.items.map((x) => [x.name, x.state])).toEqual([['E Eli', 'excluded'], ['F de Eva', 'eligible']]);
+    expect(p2.next_cursor).toBeNull();
+    // declarando permiso, los «sin definir» entran
+    const decl = await ok<Page>(await list(T.alice, { audience: { source: 'all' }, include_unknown_consent: true, limit: 10 }));
+    expect(decl.items.find((x) => x.name === 'D Dani')!.state).toBe('eligible');
+    // la asesora solo ve los suyos (ninguno tiene) y no puede declarar permiso; cursor inválido 400
+    expect((await ok<Page>(await list(T.carol, { audience: { source: 'all' } }))).total).toBe(0);
+    expect((await list(T.carol, { audience: { source: 'all' }, include_unknown_consent: true })).status).toBe(403);
+    expect((await list(T.alice, { audience: { source: 'all' }, cursor: 'zzz' })).status).toBe(400);
+    expect((await ok<Page>(await list(T.bob, { audience: { source: 'all' } }))).total).toBe(0); // B no ve nada de A
+    expect((await list(T.eve, { audience: { source: 'all' } })).status).toBe(403);
   });
 });

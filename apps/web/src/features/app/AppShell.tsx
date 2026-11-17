@@ -6,6 +6,7 @@ import { useInboxRealtime } from '../inbox/useInboxRealtime';
 import { useMyPhoto } from '../photos/usePhotos';
 import { useInboxUnread } from '../inbox/useInbox';
 import { useCustomFields } from '../custom-fields/useCustomFields';
+import { useCampaignAccess } from '../campaigns/useCampaigns';
 import { TrialBanner } from '../trial/TrialBanner';
 import type { Me, Trial } from '../../lib/types';
 import { useBreakpoint } from '../../ui/breakpoints';
@@ -30,7 +31,7 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
   // El Inbox necesita más ancho que el resto de las secciones: lista y hilo, uno al lado del otro
   const inInbox = pathname.startsWith('/inbox');
   // Las pantallas de datos usan todo el ancho (v11, punto 8); Configuración y los formularios conservan un ancho de lectura
-  const fluid = ['/contacts', '/opportunities', '/tasks', '/sales', '/agenda', '/analytics'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
+  const fluid = ['/contacts', '/opportunities', '/tasks', '/sales', '/agenda', '/analytics', '/campaigns'].some((p) => pathname === p || pathname.startsWith(`${p}/`));
   const unread = useInboxUnread(!inInbox);
   const mobile = useBreakpoint() === 'mobile';
   const keyboard = useKeyboardOpen();
@@ -39,7 +40,9 @@ export function AppShell({ me, trial, onLogout, children }: { me: Me; trial: Tri
   // El Inbox ocupa toda la altura de la ventana: sin márgenes ni barra de utilidades (esos botones viven en la cabecera de su lista)
   const flush = isInboxMain(pathname);
   const myPhoto = useMyPhoto();
-  const groups = useMemo(() => buildNavGroups({ admin, unread }), [admin, unread]);
+  const campaignAccess = useCampaignAccess().data;
+  const campaigns = !campaignAccess || !(campaignAccess.read || campaignAccess.send) ? 'hidden' : campaignAccess.plan_enabled ? 'ok' : 'locked';
+  const groups = useMemo(() => buildNavGroups({ admin, unread, campaigns }), [admin, unread, campaigns]);
   const nav = useMemo(() => ({ me, groups, unread, onLogout }), [me, groups, unread, onLogout]);
   return (
     <AppNavContext.Provider value={nav}>

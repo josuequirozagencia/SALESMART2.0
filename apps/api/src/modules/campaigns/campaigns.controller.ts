@@ -6,7 +6,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import { TenantContext } from '../../tenant';
-import { advisorLimitSchema, createCampaignSchema, idempotencyKeySchema, listCampaignsQuerySchema, updateCampaignSchema, type AdvisorLimitDto, type CreateCampaignDto, type ListCampaignsQuery, type UpdateCampaignDto } from './campaigns.dto';
+import { advisorLimitSchema, audienceListSchema, createCampaignSchema, idempotencyKeySchema, listCampaignsQuerySchema, previewSchema, updateCampaignSchema, type AdvisorLimitDto, type AudienceListDto, type CreateCampaignDto, type ListCampaignsQuery, type PreviewDto, type UpdateCampaignDto } from './campaigns.dto';
 import { CampaignsService, type CampaignAccess } from './campaigns.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -32,10 +32,41 @@ function keyOf(raw: string | undefined): string {
 export class CampaignsController {
   constructor(@Inject(CampaignsService) private readonly campaigns: CampaignsService) {}
 
+  /** Qué puede hacer la persona con campañas y si su plan las incluye: la pantalla y el menú se arman con esto (no devuelve datos de la empresa). */
+  @RequirePermission('inbox.read')
+  @Get('access')
+  access(@Req() req: AuthedRequest) {
+    const has = (k: 'campaigns.read' | 'campaigns.send' | 'campaigns.view_all' | 'users.manage'): boolean => req.principal?.permissions?.has(k) === true;
+    return this.campaigns.accessInfo({ read: has('campaigns.read'), send: has('campaigns.send'), viewAll: has('campaigns.view_all'), manageLimits: has('users.manage') });
+  }
+
   @RequirePermission('campaigns.send')
   @Get('options')
   options(@Req() req: AuthedRequest) {
     return this.campaigns.options(accessOf(req));
+  }
+
+  /** Las plantillas enviables de una conexión oficial que la persona puede usar (para elegir la del mensaje). */
+  @RequirePermission('campaigns.send')
+  @Get('channels/:channelId/templates')
+  templates(@Req() req: AuthedRequest, @Param('channelId', idParam) channelId: string) {
+    return this.campaigns.templatesFor(accessOf(req), channelId);
+  }
+
+  /** Vista previa EN VIVO (sin borrador guardado): cuántos recibirían, a quiénes se omite y por qué, límites y mensaje de ejemplo. No guarda nada. */
+  @RequirePermission('campaigns.send')
+  @Post('preview')
+  @HttpCode(200)
+  previewLive(@Req() req: AuthedRequest, @Body(new ZodValidationPipe(previewSchema)) b: PreviewDto) {
+    return this.campaigns.previewDraft(accessOf(req), b);
+  }
+
+  /** Una página de la lista de destinatarios con su estado, para marcar o desmarcar a mano. */
+  @RequirePermission('campaigns.send')
+  @Post('audience')
+  @HttpCode(200)
+  audience(@Req() req: AuthedRequest, @Body(new ZodValidationPipe(audienceListSchema)) b: AudienceListDto) {
+    return this.campaigns.audienceList(accessOf(req), b);
   }
 
   @RequirePermission('users.manage')
