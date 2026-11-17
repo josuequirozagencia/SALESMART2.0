@@ -23,7 +23,7 @@ const PEOPLE: AudienceItem[] = [
   { id: 'k4', name: 'Sin Permiso', phone: '+593988000004', state: 'no_consent' },
 ];
 const DRAFT: Campaign = {
-  id: 'cmp1', name: 'Recordatorio de cupos', status: 'draft', status_reason: null, mode: 'text', channel: { id: 'c-qr', name: 'Chip QR', kind: 'qr' }, template_id: null, template_params: {}, body: 'Hola {{primer_nombre}}',
+  id: 'cmp1', name: 'Recordatorio de cupos', status: 'draft', status_reason: null, mode: 'text', channel: { id: 'c-qr', name: 'Chip QR', kind: 'qr' }, template_id: null, template_params: {}, body: 'Hola {{primer_nombre}}', body_variants: [],
   audience: { source: 'all' }, include_unknown_consent: false, scheduled_at: null, gap_seconds: 60, daily_cap: 50, created_by: { id: 'u1', name: 'Ana Pérez' }, created_at: '2026-11-16T10:00:00.000Z', updated_at: '2026-11-16T10:00:00.000Z',
   launched_at: null, finished_at: null, counts: { total: 0, by_status: {}, sent: 0, delivered: 0, read: 0, replied: 0, failed: 0, skipped: 0 }, can_edit: true, can_pause: false, can_resume: false, can_cancel: false,
 };

@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, foreignKey, index, integer, jsonb, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, foreignKey, index, integer, jsonb, primaryKey, smallint, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { channelAccounts } from './channels';
 import { conversations, messages } from './conversations';
@@ -33,6 +33,8 @@ export const campaigns = tenantTable(
     templateParams: jsonb('template_params').$type<Record<string, string>>().notNull().default(sql`'{}'::jsonb`),
     /** El texto libre (solo `mode = 'text'`), con las mismas variables. */
     body: text('body'),
+    /** Versiones distintas del mismo mensaje (solo `mode = 'text'`, por QR; hasta 10), escritas por la persona o generadas con IA y revisadas por ella. Cada destinatario recibe UNA de `[body, ...body_variants]` (v17 · variantes). */
+    bodyVariants: jsonb('body_variants').$type<string[]>().notNull().default(sql`'[]'::jsonb`),
     /** De dónde salen los destinatarios: `{ source: 'all' | 'list' | 'filters', list_id?, filters?, excluded_contact_ids? }`. Validado en el servidor. */
     audience: jsonb('audience').$type<Record<string, unknown>>().notNull(),
     includeUnknownConsent: boolean('include_unknown_consent').notNull().default(false),
@@ -62,6 +64,7 @@ export const campaigns = tenantTable(
     check('campaigns_mode_valid', sql`${t['mode']!} IN ('template', 'text')`),
     check('campaigns_status_valid', sql`${t['status']!} IN ('draft', 'scheduled', 'running', 'paused', 'completed', 'cancelled', 'failed')`),
     check('campaigns_mode_content', sql`(${t['mode']!} = 'template' AND ${t['templateId']!} IS NOT NULL AND ${t['body']!} IS NULL) OR (${t['mode']!} = 'text' AND ${t['templateId']!} IS NULL AND ${t['body']!} IS NOT NULL AND length(btrim(${t['body']!})) BETWEEN 1 AND 1000)`),
+    check('campaigns_variants_shape', sql`jsonb_typeof(${t['bodyVariants']!}) = 'array' AND jsonb_array_length(${t['bodyVariants']!}) <= 10 AND (${t['mode']!} = 'text' OR jsonb_array_length(${t['bodyVariants']!}) = 0)`),
     check('campaigns_params_object', sql`jsonb_typeof(${t['templateParams']!}) = 'object'`),
     check('campaigns_audience_object', sql`jsonb_typeof(${t['audience']!}) = 'object'`),
     check('campaigns_gap_valid', sql`${t['gapSeconds']!} BETWEEN 5 AND 3600`),
@@ -101,6 +104,8 @@ export const campaignRecipients = tenantTable(
     failedAt: ts('failed_at'),
     /** El contacto respondió pidiendo la baja («BAJA», «STOP»…) a un mensaje de la campaña (17.5): pasó a `revoked`. */
     optedOutAt: ts('opted_out_at'),
+    /** Qué versión del texto recibió: 0 = el mensaje principal, 1..10 = una variante (v17 · variantes). Nulo si no se envió o la campaña no tiene variantes. */
+    variantIndex: smallint('variant_index'),
     createdAt: ts('created_at').notNull().defaultNow(),
     updatedAt: ts('updated_at').notNull().defaultNow(),
   },
@@ -111,6 +116,7 @@ export const campaignRecipients = tenantTable(
     foreignKey({ name: 'campaign_recipients_message_fk', columns: [t['organizationId']!, t['messageId']!], foreignColumns: [messages.organizationId, messages.id] }),
     check('campaign_recipients_status_valid', sql`${t['status']!} IN ('pending', 'queued', 'sent', 'delivered', 'read', 'replied', 'failed', 'skipped')`),
     check('campaign_recipients_skip_valid', sql`(${t['status']!} = 'skipped') = (${t['skipReason']!} IS NOT NULL) AND (${t['skipReason']!} IS NULL OR ${t['skipReason']!} IN ('revoked', 'no_consent', 'no_phone', 'duplicate', 'out_of_scope', 'excluded', 'missing_variable', 'cancelled'))`),
+    check('campaign_recipients_variant_valid', sql`${t['variantIndex']!} IS NULL OR ${t['variantIndex']!} BETWEEN 0 AND 10`),
     check('campaign_recipients_error_len', sql`${t['error']!} IS NULL OR length(${t['error']!}) <= 200`),
     uniqueIndex('campaign_recipients_contact_uq').on(t['organizationId']!, t['campaignId']!, t['contactId']!),
     index('campaign_recipients_pending_idx').on(t['organizationId']!, t['campaignId']!, t['id']!).where(sql`${t['status']!} = 'pending'`),

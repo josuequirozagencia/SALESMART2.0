@@ -239,3 +239,37 @@ test.describe('resultados 360 × 800', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 });
+
+for (const size of [{ width: 1440, height: 900 }, { width: 412, height: 915 }, { width: 360, height: 800 }] as const) {
+  test.describe(`versiones del mensaje ${size.width} × ${size.height}`, () => {
+    test.use({ viewport: size, reducedMotion: 'reduce' });
+
+    test('por QR se ve la sección de versiones, se escribe una a mano, y sin IA configurada se explica; nada se desborda', async ({ page, request }) => {
+      const email = await fixture(request);
+      await uiLogin(page, email);
+      await page.goto('/campaigns');
+      const form = page.getByRole('form', { name: 'Nueva campaña' });
+      const section = form.getByRole('region', { name: 'Versiones del mensaje' });
+      await expect(section).toBeVisible();
+      await expect(section.getByText(/Escríbelo una vez. La IA crea versiones distintas/)).toBeVisible();
+      await section.getByRole('button', { name: '+ Escribir versión' }).click();
+      const area = section.getByRole('textbox', { name: 'Versión 2' });
+      await area.fill('Qué tal {{primer_nombre}}, hay cupos esta semana.');
+      await expect(section.getByText('Cada contacto recibirá una de las 2 versiones (la principal y una más).')).toBeVisible();
+      // la plataforma de pruebas no tiene IA configurada: el motivo se muestra en la propia sección y lo escrito no se pierde
+      await section.getByRole('button', { name: 'Generar versiones' }).click();
+      await expect(section.getByRole('alert')).toBeVisible();
+      await expect(area).toHaveValue('Qué tal {{primer_nombre}}, hay cupos esta semana.');
+      const over = await page.evaluate(() => {
+        const bad: string[] = [];
+        for (const el of Array.from(document.querySelectorAll('main *'))) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 0 && r.right > window.innerWidth + 0.5 && !el.closest('.sr-only, [class*="overflow-x-auto"]')) bad.push(`${el.tagName.toLowerCase()}.${String(el.className).slice(0, 40)} → ${Math.round(r.right)}`);
+        }
+        return bad.slice(0, 6);
+      });
+      expect(over).toEqual([]);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    });
+  });
+}

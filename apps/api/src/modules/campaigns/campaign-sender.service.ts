@@ -10,6 +10,7 @@ import { customKeysIn, resolveQuickReply, type ResolveContext } from '../quick-r
 import { TemplatesService } from '../templates';
 import { qrChannelCap } from './audience';
 import { MIN_GAP_QR_S, OFFICIAL_DAILY_CAP } from './campaigns.dto';
+import { pickVariant } from './variants';
 
 type Campaign = typeof campaigns.$inferSelect;
 
@@ -224,7 +225,10 @@ export class CampaignSenderService {
 
     // Las variables (de la plantilla o del texto) con los datos de ESTE contacto; sin el dato, no se manda la llave cruda: se descarta con su motivo
     const isText = c.mode === 'text';
-    const texts = isText ? [c.body ?? ''] : Object.values(c.templateParams);
+    // Con versiones del mensaje, cada destinatario recibe UNA (reparto estable por su id: un reintento nunca le cambia la versión)
+    const pool = isText ? [c.body ?? '', ...c.bodyVariants] : [];
+    const variant = isText ? pickVariant(r.id, pool.length) : 0;
+    const texts = isText ? [pool[variant] ?? ''] : Object.values(c.templateParams);
     const wanted = new Set(texts.flatMap((t) => customKeysIn(t)));
     const values: CustomValues = wanted.size === 0 ? {} : ((await this.custom.valuesFor(tx, 'contact', [contact.id])).get(contact.id) ?? {});
     const ctx: ResolveContext = { contactName: contact.name, contactPhone: r.phone, agentName: '', orgName: '', custom: Object.fromEntries(Object.entries(values).filter(([k]) => wanted.has(k))) };
@@ -233,7 +237,7 @@ export class CampaignSenderService {
 
     let sent: { sent: true; conversationId: string; messageId: string } | { sent: false; reason: string };
     if (isText) {
-      const out = resolveQuickReply(c.body ?? '', ctx);
+      const out = resolveQuickReply(pool[variant] ?? '', ctx);
       if (out.missing.length > 0) return skip('missing_variable', missingData(out.missing));
       sent = await this.outreach.openAndSendText(tx, { contactId: contact.id, phone: r.phone, channelId: c.channelAccountId, text: out.text.trim(), queueId: null, ownerId: owner, now });
     } else {
@@ -246,7 +250,7 @@ export class CampaignSenderService {
       sent = await this.outreach.sendTemplate(tx, { contactId: contact.id, phone: r.phone, channelId: c.channelAccountId, templateId: c.templateId!, params, queueId: null, ownerId: owner, now, senderType: 'campaign' });
     }
     if (sent.sent) {
-      await tx.update(campaignRecipients).set({ status: 'queued', messageId: sent.messageId, conversationId: sent.conversationId, queuedAt: now, updatedAt: now }).where(eq(campaignRecipients.id, r.id));
+      await tx.update(campaignRecipients).set({ status: 'queued', messageId: sent.messageId, conversationId: sent.conversationId, queuedAt: now, updatedAt: now, ...(isText && pool.length > 1 ? { variantIndex: variant } : {}) }).where(eq(campaignRecipients.id, r.id));
       return 'queued';
     }
     if (sent.reason === 'revoked') return skip('revoked');

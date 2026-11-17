@@ -32,6 +32,7 @@ export function LaunchDialog({ campaign, preview, templateName, onClose, onLaunc
         <li>Un mensaje cada {campaign.gap_seconds} segundos{limits ? `, hasta ${limits.daily_cap} por día${days > 1 ? ` (tardará ${days} días)` : ''}` : ''}.</li>
         {preview?.warnings.includes('official_marketing_cost') ? <li>Las plantillas de marketing tienen costo en Meta: se estiman {eligible} mensajes.</li> : null}
         {qr ? <li>La campaña usa como máximo el 70 % del cupo diario del número: el resto queda para tus conversaciones.</li> : null}
+        {qr && campaign.body_variants.length > 0 ? <li>Cada contacto recibirá una de las {campaign.body_variants.length + 1} versiones del mensaje.</li> : null}
         <li>Quien pidió la baja o no dio su consentimiento no recibe nada. Puedes pausarla o cancelarla cuando quieras: lo que ya salió queda.</li>
         {campaign.channel ? <li>Conexión: {KIND_TITLE[campaign.channel.kind]}.</li> : null}
       </ul>

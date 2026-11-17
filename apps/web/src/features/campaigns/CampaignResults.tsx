@@ -13,11 +13,12 @@ const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] te
 
 /** La línea de detalle de un destinatario: por qué se omitió, qué falló o cuándo respondió. */
 function detail(r: CampaignRecipient): string {
+  const v = r.variant !== null ? ` · versión ${r.variant}` : '';
   if (r.status === 'skipped') return r.skip_reason ? SKIP_REASON_LABEL[r.skip_reason] : '';
-  if (r.status === 'failed') return r.error ?? 'No se pudo enviar';
-  if (r.status === 'replied') return `${when(r.replied_at)}${r.opted_out_at ? ' · pidió la baja' : ''}`;
-  if (r.opted_out_at) return 'Pidió la baja';
-  return when(r.sent_at);
+  if (r.status === 'failed') return `${r.error ?? 'No se pudo enviar'}${v}`;
+  if (r.status === 'replied') return `${when(r.replied_at)}${r.opted_out_at ? ' · pidió la baja' : ''}${v}`;
+  if (r.opted_out_at) return `Pidió la baja${v}`;
+  return `${when(r.sent_at)}${v}`;
 }
 
 /**

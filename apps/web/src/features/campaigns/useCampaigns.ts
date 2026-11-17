@@ -37,6 +37,8 @@ export interface Campaign {
   template_id: string | null;
   template_params: Record<string, string>;
   body: string | null;
+  /** Otras versiones del texto (solo por QR): cada destinatario recibe una distinta. */
+  body_variants: string[];
   audience: CampaignAudience & { source: string };
   include_unknown_consent: boolean;
   scheduled_at: string | null;
@@ -91,6 +93,7 @@ export interface CampaignInput {
   template_id?: string | null;
   template_params?: Record<string, string>;
   body?: string | null;
+  body_variants?: string[];
   audience: CampaignAudience;
   include_unknown_consent?: boolean;
   scheduled_at?: string | null;
@@ -245,6 +248,8 @@ export interface CampaignRecipient {
   replied_at: string | null;
   failed_at: string | null;
   opted_out_at: string | null;
+  /** Qué versión del texto recibió (1 = el principal); null si la campaña no tiene versiones. */
+  variant: number | null;
 }
 
 export interface CampaignResultsSummary {
@@ -300,4 +305,16 @@ export interface CampaignsSummary {
 /** Las campañas lanzadas en el periodo y lo que dieron (la tarjeta de Analítica). Solo se pide si la persona tiene campañas y su plan las incluye. */
 export function useCampaignsSummary(p: { from: string; to: string }, enabled: boolean) {
   return useQuery({ queryKey: ['campaigns', 'summary', p], enabled, retry: false, staleTime: 30_000, queryFn: () => api<CampaignsSummary>(`/campaigns/summary?from=${encodeURIComponent(p.from)}&to=${encodeURIComponent(p.to)}`) });
+}
+
+export interface GeneratedVariants { variants: string[]; requested: number; rejected: number; credits_used: number; remaining_today: number }
+
+/** Le pide a la IA otras versiones del mensaje (solo por QR). Cuesta créditos de la empresa y no guarda nada: las versiones se revisan y se guardan con la campaña. */
+export function useGenerateVariants() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { text: string; count: number }) => api<GeneratedVariants>('/campaigns/variants', { method: 'POST', body: input }),
+    // El saldo de créditos cambió
+    onSettled: () => { void qc.invalidateQueries({ queryKey: ['ai-credits'] }); },
+  });
 }

@@ -32,6 +32,7 @@ import { CoreModule } from '../../src/core.module';
 import { Database, DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
+import { AI_PROVIDER, AiProviderError, FakeAiProvider } from '../../src/modules/ai';
 import { CampaignResponsesService, CampaignSenderService, CampaignsModule } from '../../src/modules/campaigns';
 import { ChannelsModule, FAKE_WHATSAPP_TOKEN } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
@@ -73,8 +74,8 @@ let tplB = '';
 const saved = { ...process.env };
 
 async function start(): Promise<void> {
-  for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'PROVIDER_CREDENTIALS_KEY', 'WHATSAPP_PROVIDER']) delete process.env[k];
-  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: 'https://app.ejemplo.test', MAIL_PROVIDER: 'memory', CAPTCHA_PROVIDER: 'fake', WHATSAPP_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: KEY });
+  for (const k of ['FRONTEND_BASE_URL', 'MAIL_PROVIDER', 'CAPTCHA_PROVIDER', 'PROVIDER_CREDENTIALS_KEY', 'WHATSAPP_PROVIDER', 'AI_PROVIDER']) delete process.env[k];
+  Object.assign(process.env, { NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL_APP: info.rwUrl, DATABASE_URL_PLATFORM: info.platformUrl, DATABASE_URL_IDENTITY: info.identityUrl, AUTH_THROTTLE_KEY: TEST_AUTH_KEY, FRONTEND_BASE_URL: 'https://app.ejemplo.test', MAIL_PROVIDER: 'memory', CAPTCHA_PROVIDER: 'fake', WHATSAPP_PROVIDER: 'fake', AI_PROVIDER: 'fake', PROVIDER_CREDENTIALS_KEY: KEY });
   delete process.env['DATABASE_URL_OWNER'];
   app = await NestFactory.create(TestAppModule, { logger: false, abortOnError: false });
   configureApp(app);
@@ -83,7 +84,7 @@ async function start(): Promise<void> {
 }
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE campaign_recipients, campaign_advisor_limits, campaign_settings, campaigns, message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, queue_distribution_state, queue_members, qr_accounts, whatsapp_accounts, channel_accounts, queues, channel_routes, contact_tags, contact_phones, contacts, custom_field_values, custom_field_definitions, tags, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, plans, users CASCADE');
+  await admin.query('TRUNCATE ai_holds, ai_ledger, ai_wallets, campaign_recipients, campaign_advisor_limits, campaign_settings, campaigns, message_templates, response_timers, messages, conversation_participants, conversations, webhook_events, queue_distribution_state, queue_members, qr_accounts, whatsapp_accounts, channel_accounts, queues, channel_routes, contact_tags, contact_phones, contacts, custom_field_values, custom_field_definitions, tags, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, plans, users CASCADE');
   const orgs: Array<[string, string, string]> = [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']];
   for (const [id, kind, name] of orgs) await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'America/Guayaquil')`, [id, kind, name]);
   const users: Array<[string, string, string | null]> = [[IDS.alice, 'alice@a.test', 'Alicia Torres'], [IDS.carol, 'carol@a.test', 'Carolina Vera'], [IDS.eve, 'eve@a.test', 'Eva Mora'], [IDS.bob, 'bob@b.test', 'Beto Luna'], [IDS.root, 'root@plat.test', null]];
@@ -1167,7 +1168,7 @@ describe('resultados, CSV y baja por palabra clave (17.5)', () => {
     const bytes = new Uint8Array(await r.arrayBuffer());
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
     const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes).replace(/^\uFEFF/, '');
-    expect(text.startsWith('Contacto,Teléfono,Estado,Motivo de omisión,En cola,Enviado,Entregado,Leído,Respondió,Falló,Error,Pidió la baja\r\n')).toBe(true);
+    expect(text.startsWith('Contacto,Teléfono,Estado,Motivo de omisión,En cola,Enviado,Entregado,Leído,Respondió,Falló,Error,Pidió la baja,Versión\r\n')).toBe(true);
     const lines = text.trim().split('\r\n');
     expect(lines).toHaveLength(4);
     expect(lines.find((l) => l.includes('SUMA'))!.startsWith("'=SUMA(A1),")).toBe(true); // la fórmula no se ejecuta al abrir el archivo
@@ -1214,5 +1215,138 @@ describe('resultados, CSV y baja por palabra clave (17.5)', () => {
     expect(blocked.status).toBe(403);
     expect(await code(blocked)).toBe('PLAN_FEATURE_DISABLED');
     expect((await results(T.alice, c.id)).status).toBe(403);
+  });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+describe('variantes del mensaje con IA (solo QR)', () => {
+  const sender = (): CampaignSenderService => app.get(CampaignSenderService);
+  const tick = (offsetMs = 1000, org = ORG_A): Promise<number> => TenantContext.run({ organizationId: org }, () => sender().runDue(new Date(Date.now() + offsetMs)));
+  const gen = (token: string | undefined, body: unknown) => call('POST', '/campaigns/variants', token, body);
+  const ORIGINAL = 'Hola {{primer_nombre}}, tenemos cupos desde las 10:00 esta semana.';
+  const GOOD = ['Buen día {{primer_nombre}}, esta semana hay cupos desde las 10:00.', '{{primer_nombre}}, te cuento que desde las 10:00 tenemos cupos esta semana.', 'Qué tal {{primer_nombre}}: abrimos cupos esta semana, desde las 10:00.'];
+  const ledgerRows = async (org = ORG_A) => (await admin.query(`SELECT kind, credits FROM ai_ledger WHERE organization_id = $1 AND kind = 'variants' ORDER BY created_at, id`, [org])).rows as Array<{ kind: string; credits: number }>;
+  const chats = () => (app.get<FakeAiProvider>(AI_PROVIDER)).calls.filter((c) => c.kind === 'chat') as Array<{ kind: 'chat'; request: { model: string; messages: Array<{ role: string; content: string }>; temperature: number; maxTokens: number } }>;
+  const aiFake = (): FakeAiProvider => app.get<FakeAiProvider>(AI_PROVIDER);
+
+  beforeEach(() => {
+    aiFake().calls.length = 0;
+    aiFake().clearFailures();
+    aiFake().chatReply = () => JSON.stringify([...GOOD, 'Hola {{primer_nombre}}, cupos desde las 18:30', 'Hola {{nombre}}, cupos desde las 10:00', GOOD[0]]);
+  });
+
+  interface Gen { variants: string[]; requested: number; rejected: number; credits_used: number; remaining_today: number }
+
+  it('genera versiones con la clave de la plataforma y los créditos de la empresa; descarta las que cambian variables, inventan números o repiten; no guarda nada; queda en el libro como «variants»', async () => {
+    const before = (await admin.query(`SELECT count(*)::int AS n FROM campaigns`)).rows[0].n as number;
+    const g = await ok<Gen>(await gen(T.alice, { text: ORIGINAL, count: 5 }));
+    expect(g.variants).toEqual(GOOD); // las tres buenas, en orden; se cayeron: la que inventa «18:30», la que cambia la variable y la repetida
+    expect(g).toMatchObject({ requested: 5, rejected: 3, remaining_today: 19 });
+    expect(g.credits_used).toBeGreaterThan(0);
+    const rows = await ledgerRows();
+    expect(rows).toEqual([{ kind: 'variants', credits: -g.credits_used }]);
+    // el modelo recibió las reglas fijas y el texto original como DATOS; ninguna clave de empresa
+    const call = chats()[0]!.request;
+    expect(call.messages[0]!.content).toContain('Conserva TAL CUAL cada variable');
+    expect(call.messages[0]!.content).toContain('5 versiones');
+    expect(call.messages[1]!.content).toContain(ORIGINAL);
+    expect(call.temperature).toBeGreaterThan(0.5);
+    // nada se guardó: las versiones solo viven en el navegador hasta que se guarda la campaña
+    expect((await admin.query(`SELECT count(*)::int AS n FROM campaigns`)).rows[0].n).toBe(before);
+  });
+
+  it('valida lo que se pide, respeta los permisos, el plan y la empresa; sin créditos, con el tope diario o si la IA falla, no cobra de más', async () => {
+    expect((await gen(T.alice, { text: ORIGINAL, count: 0 })).status).toBe(400);
+    expect((await gen(T.alice, { text: ORIGINAL, count: 11 })).status).toBe(400);
+    expect((await gen(T.alice, { text: '   ', count: 3 })).status).toBe(400);
+    expect((await gen(T.alice, { text: 'x'.repeat(1001), count: 3 })).status).toBe(400);
+    expect((await gen(T.alice, { text: ORIGINAL, count: 3, extra: 1 })).status).toBe(400);
+    expect((await gen(undefined, { text: ORIGINAL, count: 3 })).status).toBe(401);
+    expect((await gen(T.root, { text: ORIGINAL, count: 3 })).status).toBe(403);
+    expect((await gen(T.eve, { text: ORIGINAL, count: 3 })).status).toBe(403); // sin permiso de campañas
+    expect(await ledgerRows()).toEqual([]);
+    // la IA falla: se libera la reserva y no se cobra nada
+    aiFake().failNext(new AiProviderError('caída', true));
+    const down = await gen(T.alice, { text: ORIGINAL, count: 3 });
+    expect([502, 503]).toContain(down.status);
+    expect(await ledgerRows()).toEqual([]);
+    expect((await admin.query(`SELECT status FROM ai_holds WHERE kind = 'variants'`)).rows).toEqual([{ status: 'released' }]);
+    // el modelo no entrega nada utilizable: se avisa (el uso ya ocurrió, se cobra)
+    aiFake().chatReply = () => 'Lo siento, no puedo ayudar con eso';
+    const none = await gen(T.alice, { text: ORIGINAL, count: 3 });
+    expect(none.status).toBe(409);
+    expect(await code(none)).toBe('VARIANTS_NONE_VALID');
+    expect((await ledgerRows()).length).toBe(1);
+    // el tope diario por empresa (20 pedidos en 24 h)
+    for (let i = 0; i < 19; i += 1) await admin.query(`INSERT INTO ai_ledger(id, organization_id, kind, credits, balance_after) VALUES (gen_random_uuid(), $1, 'variants', -1, 100)`, [ORG_A]);
+    const limit = await gen(T.alice, { text: ORIGINAL, count: 3 });
+    expect(limit.status).toBe(409);
+    expect(await code(limit)).toBe('VARIANTS_DAILY_LIMIT');
+    // sin créditos suficientes
+    await admin.query(`INSERT INTO ai_wallets(id, organization_id, balance_cache) VALUES (gen_random_uuid(), $1, 0)`, [ORG_B]);
+    aiFake().chatReply = () => JSON.stringify(GOOD);
+    const poor = await gen(T.bob, { text: ORIGINAL, count: 3 });
+    expect(poor.status).toBe(409);
+    expect(await code(poor)).toBe('AI_NO_CREDITS');
+    // un plan sin «Campañas» no la ofrece
+    const off = (await admin.query(`INSERT INTO plans(id, name, features) VALUES (gen_random_uuid(), 'Básico', '{"campaigns": false}') RETURNING id`)).rows[0].id as string;
+    await admin.query(`UPDATE organizations SET plan_id = $1 WHERE id = $2`, [off, ORG_A]);
+    expect(await code(await gen(T.alice, { text: ORIGINAL, count: 3 }))).toBe('PLAN_FEATURE_DISABLED');
+  });
+
+  it('A↔B: lo que se gasta sale del monedero de SU empresa', async () => {
+    aiFake().chatReply = () => JSON.stringify(GOOD);
+    const g = await ok<Gen>(await gen(T.bob, { text: ORIGINAL, count: 3 }));
+    expect(g.variants).toHaveLength(3);
+    expect((await ledgerRows(ORG_B)).length).toBe(1);
+    expect(await ledgerRows(ORG_A)).toEqual([]);
+  });
+
+  it('las versiones se guardan con la campaña por QR (hasta 10, solo texto libre, variables válidas, ninguna repetida); no van en plantillas; copiar la campaña las copia; la auditoría solo cuenta', async () => {
+    const c = await mk(T.alice, textBody({ body: ORIGINAL, body_variants: GOOD }));
+    expect((c as unknown as { body_variants: string[] }).body_variants).toEqual(GOOD);
+    const again = await ok<Camp>(await call('GET', `/campaigns/${c.id}`, T.alice));
+    expect((again as unknown as { body_variants: string[] }).body_variants).toEqual(GOOD);
+    // editar las versiones
+    const edited = await ok<Camp>(await call('PATCH', `/campaigns/${c.id}`, T.alice, { body_variants: [GOOD[0]] }));
+    expect((edited as unknown as { body_variants: string[] }).body_variants).toEqual([GOOD[0]]);
+    // reglas
+    const bad = async (over: Record<string, unknown>) => create(T.alice, textBody({ body: ORIGINAL, ...over }));
+    expect((await bad({ body_variants: Array.from({ length: 11 }, (_, i) => `Versión número ${i} {{primer_nombre}}`) })).status).toBe(400);
+    expect((await bad({ body_variants: ['Hola {{precio_secreto}}'] })).status).toBe(400); // variable desconocida
+    const dup = await bad({ body_variants: [ORIGINAL.toUpperCase(), GOOD[0]] }); // igual al principal (sin importar mayúsculas)
+    expect(dup.status).toBe(400);
+    expect(JSON.stringify(await dup.json())).toContain('duplicate_variant');
+    expect((await bad({ body_variants: ['  '] })).status).toBe(400);
+    const tpl = await create(T.alice, tplBody({ body_variants: ['Otra versión'] }));
+    expect(tpl.status).toBe(400); // por WhatsApp oficial las versiones no existen
+    // copiar la campaña copia las versiones
+    const copy = await ok<Camp>(await call('POST', `/campaigns/${c.id}/duplicate`, T.alice, undefined, { 'idempotency-key': key() }), 201);
+    expect((copy as unknown as { body_variants: string[] }).body_variants).toEqual([GOOD[0]]);
+    // auditoría: solo cuántas versiones, nunca el texto
+    const log = (await audit(c.id)).find((a) => a.new_value && 'variants' in a.new_value)!;
+    expect(log.new_value).toMatchObject({ variants: 3 });
+    expect(JSON.stringify(await audit(c.id))).not.toContain('Buen día');
+  });
+
+  it('cada destinatario recibe UNA versión (estable por su id), con sus datos; la versión queda registrada y se ve en el informe y el CSV; sin versiones no se registra nada', async () => {
+    const names = ['Ana', 'Beto', 'Cata', 'Dani', 'Eli', 'Fer', 'Gabi', 'Hugo'];
+    for (const n of names) await mkContact({ owner: IDS.alice, name: n });
+    const c = await mk(T.alice, textBody({ body: ORIGINAL, body_variants: GOOD, gap_seconds: 45, daily_cap: 50 }));
+    await ok(await call('POST', `/campaigns/${c.id}/launch`, T.alice, { accept_qr_risk: true }, { 'idempotency-key': key() }), 201);
+    for (let i = 1; i <= 12; i += 1) {
+      await tick(i * 50_000);
+      await admin.query(`UPDATE messages SET status = 'sent' WHERE status = 'queued' AND sender_type = 'campaign'`);
+    }
+    const rows = (await admin.query(`SELECT r.variant_index AS v, m.body, c.name FROM campaign_recipients r JOIN contacts c ON c.id = r.contact_id JOIN messages m ON m.id = r.message_id WHERE r.campaign_id = $1`, [c.id])).rows as Array<{ v: number; body: string; name: string }>;
+    expect(rows).toHaveLength(8);
+    const pool = [ORIGINAL, ...GOOD];
+    for (const r of rows) expect(r.body).toBe(pool[r.v]!.replace('{{primer_nombre}}', r.name)); // la versión elegida, con el nombre de ese contacto
+    expect(new Set(rows.map((r) => r.v)).size).toBeGreaterThan(1); // no todos reciben lo mismo
+    // el informe y el CSV dicen qué versión recibió cada quien (1 = el mensaje principal)
+    const res = await ok<{ items: Array<{ contact: { name: string }; variant: number | null }> }>(await call('GET', `/campaigns/${c.id}/results`, T.alice));
+    for (const i of res.items) expect(i.variant).toBe(rows.find((r) => r.name === i.contact.name)!.v + 1);
+    const csv = await (await call('POST', `/campaigns/${c.id}/export`, T.alice)).text();
+    expect(csv.split('\r\n')[0]).toMatch(/Pidió la baja,Versión$/);
   });
 });
