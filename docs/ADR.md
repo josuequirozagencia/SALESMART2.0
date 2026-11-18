@@ -3044,3 +3044,14 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 - **Salida (corrección de un fallo latente):** `QrOutboundService` ya no convierte un `…@lid` en dígitos (eran los de OTRO número). Con un `@lid` usa el teléfono principal del contacto; si no lo hay, el mensaje falla con `lid_no_phone` y su motivo en español. **El envío al jid `@lid` es la entrega 2** y no está habilitado.
 - Web: la ficha dice «Sin teléfono» en vez de «—».
 **Sin validar:** el efecto en Jakilu con mensajes reales (se comprueba tras aplicar `0149` y reprocesar con «Recuperar mensajes»); el comportamiento de los contactos sin teléfono en campañas, exportaciones y GoHighLevel (campañas ya los salta como «sin teléfono»; exportación y GoHighLevel no se probaron con ellos).
+
+
+### Enmienda v19 — Los envíos por QR no se atoran por el calentamiento (2026-11-17) — PROPUESTA
+**Origen:** el responsable pidió que los mensajes salgan sin retraso y no se queden atorados. Diagnóstico en staging el 2026-11-17: 6 mensajes de Jakilu llevaban hasta 7,8 h en cola sin un solo intento.
+**Causa:** el calentamiento (ADR-54, `sendGate`) contaba como «enviados por la plataforma» TODOS los mensajes de salida de las últimas 24 h, también los que la persona escribió desde su TELÉFONO (y los que «ponerse al día» importó). Jakilu tenía 221 en 24 h frente a un límite de 20 (primer día de la conexión), Pasiel 194 de 250 y Academia SICP 83 de 100: cada mensaje real esperaba una hora y volvía a esperar.
+**Decisión:**
+1. **Lo escrito desde el teléfono no cuenta** ni para el límite del día ni para la pausa mínima (`meta.origin = 'device'`): no pasó por la plataforma ni es envío automático.
+2. **Contestar a quien escribió primero no se frena con el límite del día**: si el cliente escribió en las últimas 24 h (`conversations.last_inbound_at`) y el mensaje no es de una campaña, solo rige la pausa mínima de 4 s. El límite del día queda para lo que sí es riesgoso: campañas, contacto en frío (el cliente no escribió en 24 h) y seguimientos fuera de esa ventana.
+**Alternativas:** subir el límite del primer día (los números siguen siendo arbitrarios y el síntoma vuelve); quitar el calentamiento (pierde la protección del envío en frío en un chip nuevo).
+**Riesgo:** responder a quien escribió primero es el tráfico más seguro de un chip, pero el límite ya no lo acota: si un asesor o el agente de IA contestan cientos de veces en un día a clientes que escribieron, WhatsApp podría ver un volumen alto. Se mide con el panel de salud y se puede volver a acotar con una constante.
+**Sin validar** contra el comportamiento real de WhatsApp (bloqueos).

@@ -21,11 +21,13 @@ export type SendGate = { ok: true } | { ok: false; reason: 'gap' | 'daily'; retr
 
 /**
  * ¿Se puede enviar AHORA? `sentLast24h` son los mensajes que la sesión ya envió en las últimas 24 h y `lastSentAt` la hora del último. Si no, devuelve cuándo volver a intentar: tras la pausa
- * mínima, o cuando el envío más antiguo de la ventana salga de ella (aproximado con una hora desde ahora, porque el límite es por ventana móvil).
+ * mínima, o cuando el envío más antiguo de la ventana salga de ella (aproximado con una hora desde ahora, porque el límite es por ventana móvil). `replyInWindow`: es la respuesta a un cliente que escribió
+ * en las últimas 24 h (la campaña y el contacto en frío NO lo son): esa no cuenta contra el límite del día. Lo que se escribió desde el TELÉFONO no se cuenta (quien llama lo excluye).
  */
-export function sendGate(input: { sentLast24h: number; lastSentAt: Date | null; firstConnectedAt: Date | null; now: Date }): SendGate {
+export function sendGate(input: { sentLast24h: number; lastSentAt: Date | null; firstConnectedAt: Date | null; now: Date; replyInWindow?: boolean }): SendGate {
   const { now } = input;
   if (input.lastSentAt && now.getTime() - input.lastSentAt.getTime() < MIN_GAP_MS) return { ok: false, reason: 'gap', retryAt: new Date(input.lastSentAt.getTime() + MIN_GAP_MS) };
-  if (input.sentLast24h >= dailyLimit(input.firstConnectedAt, now)) return { ok: false, reason: 'daily', retryAt: new Date(now.getTime() + 60 * 60_000) };
+  // Contestar a quien escribió primero (dentro de sus 24 h) no es envío en frío: no se frena con el límite del día, solo con la pausa mínima (ADR-54, enmienda v19)
+  if (!input.replyInWindow && input.sentLast24h >= dailyLimit(input.firstConnectedAt, now)) return { ok: false, reason: 'daily', retryAt: new Date(now.getTime() + 60 * 60_000) };
   return { ok: true };
 }
