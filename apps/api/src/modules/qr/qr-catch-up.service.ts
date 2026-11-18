@@ -8,8 +8,8 @@ import { errorLabel, lidFromJid, parseEvolutionWebhook, phoneFromJid, WebhookEve
 import { QrConnectionsService } from './qr-connections.service';
 import { QR_SESSION, QrSessionError, type QrSessionProvider } from './qr-session.port';
 
-/** Tope de registros que se leen de Evolution en una pasada (v19 B3): acota memoria y tiempo; si hay más, se avisa. */
-export const CATCH_UP_MAX_RECORDS = 1_000;
+/** Tope de registros 1:1 que se leen de Evolution por sentido en una pasada (v19 B3): acota memoria y tiempo; si hay más, se avisa. Evolution guarda también acuses, reacciones y mensajes de protocolo, que ocupan cupo sin ser mensajes: con Jakilu 1 000 dejó fuera lo de más de 31 h. */
+export const CATCH_UP_MAX_RECORDS = 4_000;
 /** Horas que cubre cada pasada automática y margen que se solapa con la anterior (los avisos pueden llegar fuera de orden). */
 export const CATCH_UP_AUTO_HOURS = 48;
 /** La PRIMERA pasada de una conexión mira tan atrás como el máximo manual: lo que ya estaba perdido cuando se encendió esta función también se recupera. */
@@ -66,6 +66,9 @@ export function withKnownPhones(records: ReadonlyArray<Record<string, unknown>>)
  */
 @Injectable()
 export class QrCatchUpService {
+  /** Tope vigente (las pruebas lo bajan para no fabricar miles de registros). */
+  maxRecords = CATCH_UP_MAX_RECORDS;
+
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(QR_SESSION) private readonly provider: QrSessionProvider,
@@ -104,7 +107,7 @@ export class QrCatchUpService {
     const creds = await this.connections.mustCredentials();
     let recent;
     try {
-      recent = await this.provider.listRecentMessages(creds, row.instance, { sinceMs: since.getTime(), maxRecords: CATCH_UP_MAX_RECORDS });
+      recent = await this.provider.listRecentMessages(creds, row.instance, { sinceMs: since.getTime(), maxRecords: this.maxRecords });
     } catch (e) {
       if (rethrow) throw this.connections.translate(e);
       throw e;
