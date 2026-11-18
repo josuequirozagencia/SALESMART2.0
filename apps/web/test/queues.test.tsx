@@ -571,7 +571,7 @@ describe('Archivar y permisos', () => {
 
 describe('Departamentos · «Conexiones que usan este departamento» (v7 fase B, ADR-65)', () => {
   const official = (id: string, name: string, queue_id: string | null) => ({ id, provider: 'meta_cloud', is_official: true, name, status: 'active', queue_id, waba_id: '1', phone_number_id: '2', display_phone: null, verified_name: null, token_last4: '1234', last_error: null, created_at: '2026-10-18T15:00:00.000Z', updated_at: '2026-10-18T15:00:00.000Z' });
-  const qrConn = (id: string, name: string, queue_id: string | null) => ({ id, provider: 'evolution', is_official: false, name, state: 'open', phone: null, profile_name: null, queue_id, connected_at: null, last_event_at: null, down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, created_at: '2026-10-18T15:00:00.000Z' });
+  const qrConn = (id: string, name: string, queue_id: string | null) => ({ id, provider: 'evolution', is_official: false, name, state: 'open', phone: null, profile_name: null, queue_id, connected_at: null, last_event_at: null, down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, volume: { sent_24h: 0, limit: 20, level: 'ok' }, created_at: '2026-10-18T15:00:00.000Z' });
 
   /** Dos departamentos (Ventas q1 usa «Ventas WhatsApp»; Soporte q2 usa el chip QR «Chip soporte») y una conexión libre. */
   function setup(opts: { denied?: boolean; put?: (b: unknown) => ReturnType<Handler> } = {}) {

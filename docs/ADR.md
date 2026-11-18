@@ -3055,3 +3055,5 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 **Alternativas:** subir el límite del primer día (los números siguen siendo arbitrarios y el síntoma vuelve); quitar el calentamiento (pierde la protección del envío en frío en un chip nuevo).
 **Riesgo:** responder a quien escribió primero es el tráfico más seguro de un chip, pero el límite ya no lo acota: si un asesor o el agente de IA contestan cientos de veces en un día a clientes que escribieron, WhatsApp podría ver un volumen alto. Se mide con el panel de salud y se puede volver a acotar con una constante.
 **Sin validar** contra el comportamiento real de WhatsApp (bloqueos).
+
+**Aclaración (2026-11-18, pedido del responsable):** las respuestas a clientes quedan **sin tope diario** (solo pausa mínima de 4 s). Para que el riesgo se vea, la tarjeta de cada conexión QR muestra el volumen de 24 h (`volume`: `ok`, `near` al 80 % del límite, `over` por encima) con un aviso «Atención» o «Advertencia»; es solo un aviso y no bloquea nada. Lo escrito desde el teléfono no cuenta.

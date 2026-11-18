@@ -978,3 +978,27 @@ describe('teléfonos que Evolution entrega en algunos registros (withKnownPhones
     expect((a['key'] as Record<string, unknown>)['remoteJidAlt']).toBeUndefined(); // el original no cambió
   });
 });
+
+describe('aviso de volumen por conexión QR (v19, sin bloquear)', () => {
+  it('la lista y el detalle dicen cuántos mensajes envió la plataforma en 24 h y si pasan del límite del día (ok / cerca 80 % / por encima); lo escrito desde el teléfono no cuenta', async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    const conv = (await admin.query(`SELECT 1`)).rows; void conv;
+    const cv = await json<{ items: Array<{ id: string; volume: { sent_24h: number; limit: number; level: string } }> }>(await call('GET', '/qr-channels', T.alice));
+    expect(cv.items.find((i) => i.id === v.id)?.volume).toEqual({ sent_24h: 0, limit: 20, level: 'ok' });
+    const insert = (n: number, origin: string | null) =>
+      admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id, meta) SELECT gen_random_uuid(), $1, c.id, $2, 'out', 'human', 'text', 'x', 'sent', now() - interval '1 hour', $3 || g::text, $4::jsonb FROM generate_series(1, $5) g CROSS JOIN LATERAL (SELECT id FROM conversations WHERE channel_account_id = $2 LIMIT 1) c`, [ORG_A, v.id, `VOL-${origin ?? 'p'}-${randomBytes(4).toString('hex')}-`, origin ? JSON.stringify({ origin }) : '{}', n]);
+    // no hay conversación todavía: se crea una con un cliente
+    await post(v.id, upsert(await instanceOf(v.id), 'VOL-IN-0000000001', { conversation: 'hola' }));
+    await runEvents();
+    await insert(17, null); // 17 de 20 → cerca del límite
+    await insert(50, 'device'); // del teléfono: no cuenta
+    const near = await json<{ items: Array<{ id: string; volume: { sent_24h: number; limit: number; level: string } }> }>(await call('GET', '/qr-channels', T.alice));
+    expect(near.items.find((i) => i.id === v.id)?.volume).toEqual({ sent_24h: 17, limit: 20, level: 'near' });
+    await insert(10, null); // 27 → por encima
+    const one = await json<{ volume: { sent_24h: number; level: string } }>(await call('GET', `/qr-channels/${v.id}`, T.alice));
+    expect(one.volume).toMatchObject({ sent_24h: 27, level: 'over' });
+    // a otra empresa no le sale nada de esta conexión
+    expect((await call('GET', `/qr-channels/${v.id}`, T.bob)).status).toBe(404);
+  });
+});

@@ -9,7 +9,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const AT = '2026-10-27T15:00:00.000Z';
 const chan = (over: Partial<QrChannel> = {}): QrChannel => ({
   id: 'qc1', provider: 'evolution', is_official: false, name: 'Chip de ventas', state: 'open', phone: '+593990000001', profile_name: 'Negocio', queue_id: null, connected_at: AT, last_event_at: AT,
-  down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, catch_up: null, created_at: AT, ...over,
+  down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, volume: { sent_24h: 0, limit: 20, level: 'ok' }, catch_up: null, created_at: AT, ...over,
 });
 
 interface World { items: QrChannel[]; available: boolean; calls: Record<string, Call[]>; qr: string | null; stateAfterQr: QrState | null }
@@ -169,5 +169,26 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
     expect((w.calls['catchup']![0] as Call).body).toEqual({ hours: 168 });
     expect(await panel.findByText(/Se recuperaron 5 mensajes \(7 ya estaban\)/)).toBeInTheDocument();
     expect(panel.getByText(/Los archivos y notas de voz de esos mensajes no se recuperan/)).toBeInTheDocument();
+  });
+});
+
+describe('aviso de volumen en la conexión QR (sin bloquear)', () => {
+  it('con el número cerca del límite del día muestra «Atención»; por encima, «Advertencia» con lo que significa; en ambos casos las respuestas siguen saliendo', async () => {
+    const w = world({ items: [chan({ volume: { sent_24h: 17, limit: 20, level: 'near' } })] });
+    mockApi(server(w));
+    renderApp('/settings/connections');
+    const s = await section();
+    expect(await s.findByText(/Atención: este número va en 17 de 20 mensajes del día/)).toBeInTheDocument();
+    expect(s.queryByText(/Advertencia: este número/)).toBeNull();
+  });
+
+  it('por encima del límite muestra la advertencia y deja claro que las respuestas a clientes siguen saliendo', async () => {
+    const w = world({ items: [chan({ volume: { sent_24h: 27, limit: 20, level: 'over' } })] });
+    mockApi(server(w));
+    renderApp('/settings/connections');
+    const s = await section();
+    expect(await s.findByText(/Advertencia: este número envió 27 mensajes en las últimas 24 h/)).toBeInTheDocument();
+    expect(s.getByText(/Las respuestas a clientes siguen saliendo/)).toBeInTheDocument();
+    expect(s.getByText('Volumen 24 h')).toBeInTheDocument();
   });
 });

@@ -353,7 +353,7 @@ describe('Configuración › Conexiones como tarjetas (M5.9)', () => {
 
   it('la tarjeta de WhatsApp por QR lleva SIEMPRE el aviso de que no es oficial, esté conectada o no', async () => {
     const warning = 'No es la API oficial de WhatsApp. WhatsApp puede bloquear o suspender el número, la sesión puede desconectarse y no hay plantillas aprobadas. No lo uses con tu número principal.';
-    mockApi(full(server(), { 'GET /qr-channels': () => ({ body: { items: [{ id: 'q1', provider: 'evolution', is_official: false, name: 'Chip nuevo', state: 'open', phone: '+593999', profile_name: null, queue_id: null, connected_at: null, last_event_at: null, down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, created_at: '' }], available: true, limits: { max_channels: 5 } } }) }));
+    mockApi(full(server(), { 'GET /qr-channels': () => ({ body: { items: [{ id: 'q1', provider: 'evolution', is_official: false, name: 'Chip nuevo', state: 'open', phone: '+593999', profile_name: null, queue_id: null, connected_at: null, last_event_at: null, down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, volume: { sent_24h: 0, limit: 20, level: 'ok' }, created_at: '' }], available: true, limits: { max_channels: 5 } } }) }));
     renderApp('/settings/connections');
     const qr = within(await screen.findByRole('listitem', { name: 'WhatsApp por QR' }));
     expect(qr.getByText(warning)).toBeInTheDocument();

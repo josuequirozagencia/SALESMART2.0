@@ -20,6 +20,8 @@ export interface QrChannel {
   last_error: string | null;
   /** Calentamiento del número: día en que va y cuántos mensajes puede enviar hoy. */
   warmup: { day: number; daily_limit: number };
+  /** Volumen enviado por la plataforma en 24 h frente al límite del día (es un aviso; no bloquea). */
+  volume: { sent_24h: number; limit: number; level: 'ok' | 'near' | 'over' };
   /** La última «puesta al día» con Evolution (v19 B3), o null si nunca corrió. */
   catch_up: { at: string; found: number; recovered: number; truncated: boolean; error: string | null } | null;
   created_at: string;
