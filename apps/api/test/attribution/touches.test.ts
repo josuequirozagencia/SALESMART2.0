@@ -172,7 +172,7 @@ describe('historial de toques', () => {
   });
 
   it('el primer mensaje de alguien nuevo es un toque «message_in» y uno que llegó por un clic a un anuncio es un «ad_click» con su anuncio (aviso de Meta)', async () => {
-    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date('2026-10-15T15:00:00Z'), ...over });
+    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date(Date.now() - 3_600_000), ...over });
     const run = (m: NormalizedMessage) => TenantContext.run({ organizationId: ORG_A }, () => import('../../src/db').then(({ Database }) => app.get(Database).withTenant((tx) => conversations.ingestInbound(tx, channelA, m, { now: new Date(), timeZone: 'America/Guayaquil', assignable: new Set() }))));
     await run(msg({ externalId: 'wamid.A1', from: '+593984000001' }));
     await run(msg({ externalId: 'wamid.A2', from: '+593984000001', text: 'Otra vez' })); // el mismo contacto, ya no es nuevo
@@ -321,7 +321,7 @@ describe('canal del lead (M3.3 §11)', () => {
   });
 
   it('un mensaje de WhatsApp sin anuncio crea el contacto como whatsapp; con el aviso de un anuncio (referral), como facebook', async () => {
-    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date('2026-10-15T15:00:00Z'), ...over });
+    const msg = (over: Partial<NormalizedMessage> & { externalId: string; from: string }): NormalizedMessage => ({ fromRaw: over.from.slice(1), profileName: 'Ana', kind: 'text', text: 'Hola', media: null, extra: {}, sentAt: new Date(Date.now() - 3_600_000), ...over });
     await ingest(msg({ externalId: 'wamid.CH1', from: '+593984100004' }));
     await ingest(msg({ externalId: 'wamid.CH2', from: '+593984100005', referral: { sourceId: '120077', sourceType: 'ad', sourceUrl: null, headline: 'Promo', body: null, thumbnailUrl: null, ctwaClid: 'clid-ch2' } }));
     expect(await channelOfContact(await contactOf('+593984100004'))).toBe('whatsapp');
