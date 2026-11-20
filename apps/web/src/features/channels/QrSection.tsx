@@ -181,10 +181,16 @@ function QrCard({ c, queueName, queues, onPair, onError }: { c: QrChannel; queue
         </div>
         <Pill kind={pill.kind}>{pill.label}</Pill>
       </div>
+      {c.volume.level === 'over' ? (
+        <Alert>{`Advertencia: este número envió ${c.volume.sent_24h} mensajes en las últimas 24 h, más que el límite de calentamiento de hoy (${c.volume.limit}). WhatsApp puede bloquear números que envían muchos mensajes en poco tiempo. Las respuestas a clientes siguen saliendo; revisa las campañas y el volumen del equipo.`}</Alert>
+      ) : c.volume.level === 'near' ? (
+        <Alert kind="info">{`Atención: este número va en ${c.volume.sent_24h} de ${c.volume.limit} mensajes del día (calentamiento). Si sigue subiendo, WhatsApp puede bloquearlo.`}</Alert>
+      ) : null}
       {down ? <Alert>{c.last_error ?? 'La sesión de WhatsApp está caída.'}{c.down_since ? ` Desde ${shortDateTime(c.down_since)}.` : ''} Los mensajes que escribas esperan y salen cuando vuelvas a escanear el QR.</Alert> : null}
       <dl className="grid gap-x-6 gap-y-1 text-[12.5px] sm:grid-cols-2">
         <div className="flex gap-1.5"><dt className="text-muted">Departamento</dt><dd>{queueName ?? 'sin departamento'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
+        <div className="flex gap-1.5"><dt className="text-muted">Volumen 24 h</dt><dd className="font-mono">{c.volume.sent_24h} de {c.volume.limit}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Calentamiento</dt><dd>Día {c.warmup.day}: hasta {c.warmup.daily_limit} mensajes al día</dd></div>
         {c.catch_up ? <div className="flex gap-1.5"><dt className="text-muted">Última revisión de mensajes</dt><dd>{shortDateTime(c.catch_up.at)}{c.catch_up.error ? ' · con error' : c.catch_up.recovered > 0 ? ` · recuperó ${c.catch_up.recovered}` : ' · al día'}</dd></div> : null}
       </dl>

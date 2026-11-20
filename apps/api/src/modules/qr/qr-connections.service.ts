@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { uuidv7 } from '@sales-smart/shared';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { channelAccounts, Database, qrAccounts, type TenantTx } from '../../db';
+import { channelAccounts, Database, messages, qrAccounts, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ServiceUnavailableError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_CONFIG, APP_LOGGER } from '../../tokens';
@@ -37,6 +37,8 @@ export interface QrChannelView {
   last_error: string | null;
   /** Calentamiento: día en que va y cuántos mensajes puede enviar hoy. */
   warmup: { day: number; daily_limit: number };
+  /** Volumen de lo que la plataforma envió por esta sesión en las últimas 24 h (sin lo escrito desde el teléfono): `ok`, `near` (80 % del límite) u `over` (más que el límite). Es un aviso: no bloquea nada. */
+  volume: { sent_24h: number; limit: number; level: 'ok' | 'near' | 'over' };
   /** La última «puesta al día» (v19 B3), o null si nunca corrió. Solo cifras y el motivo del fallo: nada de clientes. */
   catch_up: { at: string; found: number; recovered: number; truncated: boolean; error: string | null } | null;
   created_at: string;
@@ -101,7 +103,8 @@ export class QrConnectionsService {
   async list(): Promise<QrList> {
     const rows = await this.db.withTenant((tx) => this.rows(tx));
     const now = new Date();
-    return { items: rows.map((r) => this.view(r, now)), available: (await this.credentials()) !== null, limits: { max_channels: MAX_QR_CHANNELS } };
+    const sent = await this.db.withTenant((tx) => this.sentLast24h(tx, rows.map((r) => r.a.id)));
+    return { items: rows.map((r) => this.view(r, now, sent.get(r.a.id) ?? 0)), available: (await this.credentials()) !== null, limits: { max_channels: MAX_QR_CHANNELS } };
   }
 
   async create(input: { name: string; queue_id?: string | null }): Promise<QrChannelView> {
@@ -136,7 +139,8 @@ export class QrConnectionsService {
 
   async get(id: string): Promise<QrChannelView> {
     const r = await this.db.withTenant((tx) => this.mustGet(tx, id));
-    return this.view(r, new Date());
+    const sent = await this.db.withTenant((tx) => this.sentLast24h(tx, [id]));
+    return this.view(r, new Date(), sent.get(id) ?? 0);
   }
 
   /** El estado de la sesión AHORA, consultado a Evolution (la pantalla lo pide cada pocos segundos mientras se escanea el QR). */
@@ -292,7 +296,22 @@ export class QrConnectionsService {
     if (!(await this.queueRules.queueExists(tx, id))) throw new NotFoundError();
   }
 
-  private view(r: Row, now: Date): QrChannelView {
+  /** Mensajes que la plataforma envió por cada conexión en las últimas 24 h (lo escrito desde el teléfono no cuenta: no pasó por la plataforma). */
+  private async sentLast24h(tx: TenantTx, channelIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (channelIds.length === 0) return out;
+    const since = new Date(Date.now() - 24 * 60 * 60_000);
+    const rows = await tx
+      .select({ channel: messages.channelAccountId, n: sql<number>`count(*)::int` })
+      .from(messages)
+      .where(and(inArray(messages.channelAccountId, channelIds), eq(messages.direction, 'out'), inArray(messages.status, ['sent', 'delivered', 'read']), gt(messages.sentAt, since), sql`coalesce(${messages.meta}->>'origin', '') <> 'device'`))
+      .groupBy(messages.channelAccountId);
+    for (const r of rows) out.set(r.channel, r.n);
+    return out;
+  }
+
+  private view(r: Row, now: Date, sent24h = 0): QrChannelView {
+    const limit = dailyLimit(r.q.firstConnectedAt, now);
     return {
       id: r.a.id,
       provider: 'evolution',
@@ -306,7 +325,8 @@ export class QrConnectionsService {
       last_event_at: iso(r.q.lastEventAt),
       down_since: iso(r.q.downSince),
       last_error: r.q.lastError,
-      warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: dailyLimit(r.q.firstConnectedAt, now) },
+      warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: limit },
+      volume: { sent_24h: sent24h, limit, level: sent24h > limit ? 'over' : sent24h >= Math.ceil(limit * 0.8) ? 'near' : 'ok' },
       catch_up: r.q.lastCatchUpAt ? { at: r.q.lastCatchUpAt.toISOString(), found: r.q.lastCatchUpFound ?? 0, recovered: r.q.lastCatchUpRecovered ?? 0, truncated: r.q.lastCatchUpTruncated ?? false, error: r.q.lastCatchUpError } : null,
       created_at: r.a.createdAt.toISOString(),
     };
