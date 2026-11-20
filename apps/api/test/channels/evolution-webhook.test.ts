@@ -255,3 +255,44 @@ describe('motivo de lo ignorado (v19 B1)', () => {
     expect(R(body('connection.update', { state: 'open' }))).toBeNull();
   });
 });
+
+describe('anuncio de Meta que trae el mensaje (externalAdReply, v20 · ADR-55)', () => {
+  const ad = (over: Record<string, unknown> = {}) => ({ title: 'Cupos abiertos', body: 'Escríbenos hoy', ctwaClid: 'AfcLICK-DE-PRUEBA-0001', sourceId: '120210000000000001', sourceUrl: 'https://fb.me/ejemplo', sourceApp: 'instagram', mediaType: 1, thumbnail: { '0': 255, '1': 216 }, ...over });
+  const msg = (id: string, referral: Record<string, unknown> | null, fromMe = false, where: 'top' | 'inside' = 'top') =>
+    parseEvolutionWebhook(
+      where === 'top'
+        ? upsert(id, { conversation: 'Hola, vengo del anuncio' }, referral ? { contextInfo: { externalAdReply: referral } } : {}, { fromMe })
+        : upsert(id, { extendedTextMessage: { text: 'Hola', contextInfo: { externalAdReply: referral } } }, {}, { fromMe }),
+      NOW,
+    ).events[0]?.event.messages[0];
+
+  it('lee click id, id del anuncio, titular, texto, dirección y la red; la miniatura NO entra al mensaje', () => {
+    const m = msg('AD-0000000000001', ad());
+    expect(m?.referral).toEqual({ sourceId: '120210000000000001', sourceType: 'ad', sourceUrl: 'https://fb.me/ejemplo', headline: 'Cupos abiertos', body: 'Escríbenos hoy', thumbnailUrl: null, ctwaClid: 'AfcLICK-DE-PRUEBA-0001', platform: 'instagram' });
+    expect(JSON.stringify(m)).not.toMatch(/thumbnail"?:\{/);
+  });
+
+  it('también lo lee cuando va dentro del contenido del mensaje (texto extendido)', () => {
+    expect(msg('AD-0000000000002', ad({ sourceApp: 'facebook' }), false, 'inside')?.referral).toMatchObject({ ctwaClid: 'AfcLICK-DE-PRUEBA-0001', platform: 'facebook' });
+  });
+
+  it('la red solo es facebook o instagram: «whatsapp» u otra cosa queda sin red; sin click id pero con id de anuncio sigue habiendo referencia (faltó en 4 de 203 avisos reales)', () => {
+    expect(msg('AD-0000000000003', ad({ sourceApp: 'whatsapp' }))?.referral?.platform).toBeNull();
+    const sinClid = msg('AD-0000000000004', ad({ ctwaClid: undefined }))?.referral;
+    expect(sinClid).toMatchObject({ ctwaClid: null, sourceId: '120210000000000001' });
+  });
+
+  it('sin click id ni id de anuncio no hay referencia; un aviso sin anuncio no la trae; lo escrito desde el teléfono tampoco', () => {
+    expect(msg('AD-0000000000005', ad({ ctwaClid: undefined, sourceId: undefined }))).not.toHaveProperty('referral');
+    expect(msg('AD-0000000000006', null)).not.toHaveProperty('referral');
+    expect(msg('AD-0000000000007', ad(), true)).not.toHaveProperty('referral');
+  });
+
+  it('los textos se acotan y se limpian de caracteres de control; nada de esto cambia teléfono, texto ni hora del mensaje', () => {
+    const m = msg('AD-0000000000008', ad({ title: `T\u0000í\u0007tulo ${'x'.repeat(400)}`, ctwaClid: ` ${'c'.repeat(600)} ` }));
+    expect(m?.referral?.headline?.length).toBeLessThanOrEqual(300);
+    expect(m?.referral?.headline).not.toMatch(/[\u0000\u0007]/);
+    expect(m?.referral?.ctwaClid?.length).toBeLessThanOrEqual(500);
+    expect(m).toMatchObject({ from: `+${CLIENT}`, kind: 'text', text: 'Hola, vengo del anuncio' });
+  });
+});

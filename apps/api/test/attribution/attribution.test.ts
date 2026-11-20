@@ -115,6 +115,12 @@ beforeEach(async () => {
   T = { alice: await login('alice@a.test'), carol: await login('carol@a.test'), bob: await login('bob@b.test'), root: await login('root@plat.test') };
 });
 
+/** Fechas relativas a hoy: un clic de más de 7 días ya no genera evento hacia Meta (v20), así que estas pruebas no pueden usar fechas fijas del pasado. */
+const hoursAgo = (h: number): Date => new Date(Math.floor((Date.now() - h * 3_600_000) / 1000) * 1000);
+const T10 = hoursAgo(72);
+const T12 = hoursAgo(24);
+const T01 = hoursAgo(120);
+
 describe('punto de entrada de la empresa', () => {
   it('sin sesión 401 y la plataforma 403; el asesor no lo administra pero sí lee las etiquetas', async () => {
     for (const [m, p] of [['GET', '/attribution/endpoint'], ['POST', '/attribution/endpoint'], ['GET', '/tags']] as const) {
@@ -202,13 +208,13 @@ describe('webhook de atribución', () => {
 
   it('un clic de un teléfono nuevo crea el contacto (origen meta_ctwa, sin consentimiento), graba primer y último toque, pone la etiqueta Lead y encola el evento sin guardar el teléfono en claro', async () => {
     const ep = await setup(T.alice);
-    const r = await hook(ep.id, ep.secret, click({ occurred_at: '2026-10-10T15:00:00Z' }));
+    const r = await hook(ep.id, ep.secret, click({ occurred_at: T10.toISOString() }));
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ ok: true });
     const row = (await contactByPhone(ORG_A, P1))!;
     expect(row).toMatchObject({ source: 'meta_ctwa', consent: 'unknown', owner_id: null, created_by: null, ctwa_cl_id: 'CLID-1', first_touch_source: 'meta_ctwa', first_touch_campaign: 'Cursos octubre', last_touch_adset: 'Conjunto A', last_touch_ad: 'Anuncio 1' });
-    expect((row['first_touch_at'] as Date).toISOString()).toBe('2026-10-10T15:00:00.000Z');
-    expect((row['last_touch_at'] as Date).toISOString()).toBe('2026-10-10T15:00:00.000Z');
+    expect((row['first_touch_at'] as Date).toISOString()).toBe(T10.toISOString());
+    expect((row['last_touch_at'] as Date).toISOString()).toBe(T10.toISOString());
 
     const v = await viewOf(T.alice, row['id'] as string);
     expect(v).toMatchObject({ source: 'meta_ctwa', consent: 'unknown' });
@@ -252,15 +258,15 @@ describe('webhook de atribución', () => {
 
   it('el primer toque es inmutable y el último se sobrescribe; un clic más antiguo no pisa al último; cada clic distinto deja su propio evento Lead', async () => {
     const ep = await setup(T.alice);
-    await hook(ep.id, ep.secret, click({ occurred_at: '2026-10-10T15:00:00Z' }));
-    await hook(ep.id, ep.secret, click({ ctwa_cl_id: 'CLID-2', campaign_name: 'Barbería', adset_name: 'B', ad_name: 'Anuncio 2', occurred_at: '2026-10-12T09:00:00Z' }));
+    await hook(ep.id, ep.secret, click({ occurred_at: T10.toISOString() }));
+    await hook(ep.id, ep.secret, click({ ctwa_cl_id: 'CLID-2', campaign_name: 'Barbería', adset_name: 'B', ad_name: 'Anuncio 2', occurred_at: T12.toISOString() }));
     let row = (await contactByPhone(ORG_A, P1))!;
     expect(row).toMatchObject({ ctwa_cl_id: 'CLID-2', first_touch_campaign: 'Cursos octubre', first_touch_ad: 'Anuncio 1', last_touch_campaign: 'Barbería', last_touch_ad: 'Anuncio 2' });
-    expect((row['first_touch_at'] as Date).toISOString()).toBe('2026-10-10T15:00:00.000Z');
-    expect((row['last_touch_at'] as Date).toISOString()).toBe('2026-10-12T09:00:00.000Z');
+    expect((row['first_touch_at'] as Date).toISOString()).toBe(T10.toISOString());
+    expect((row['last_touch_at'] as Date).toISOString()).toBe(T12.toISOString());
 
     // llega tarde un clic ANTERIOR al último: queda como evento, pero no cambia los toques
-    await hook(ep.id, ep.secret, click({ ctwa_cl_id: 'CLID-0', campaign_name: 'Vieja', occurred_at: '2026-10-01T00:00:00Z' }));
+    await hook(ep.id, ep.secret, click({ ctwa_cl_id: 'CLID-0', campaign_name: 'Vieja', occurred_at: T01.toISOString() }));
     row = (await contactByPhone(ORG_A, P1))!;
     expect(row).toMatchObject({ ctwa_cl_id: 'CLID-2', first_touch_campaign: 'Cursos octubre', last_touch_campaign: 'Barbería' });
     expect(await events(ORG_A, 'Lead')).toHaveLength(3);

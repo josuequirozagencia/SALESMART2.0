@@ -28,6 +28,8 @@ export interface NormalizedReferral {
   readonly body: string | null;
   readonly thumbnailUrl: string | null;
   readonly ctwaClid: string | null;
+  /** Red donde se vio el anuncio, si el canal la informa (WhatsApp por QR: `externalAdReply.sourceApp`). Define el canal del contacto nuevo. */
+  readonly platform?: 'facebook' | 'instagram' | null;
 }
 
 /** Mensaje que ENTRA: lo escribió un contacto. Un mismo `externalId` por canal identifica un mensaje (idempotencia). */
