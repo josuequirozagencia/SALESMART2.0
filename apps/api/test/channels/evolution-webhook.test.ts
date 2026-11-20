@@ -291,7 +291,7 @@ describe('anuncio de Meta que trae el mensaje (externalAdReply, v20 · ADR-55)',
   it('los textos se acotan y se limpian de caracteres de control; nada de esto cambia teléfono, texto ni hora del mensaje', () => {
     const m = msg('AD-0000000000008', ad({ title: `T\u0000í\u0007tulo ${'x'.repeat(400)}`, ctwaClid: ` ${'c'.repeat(600)} ` }));
     expect(m?.referral?.headline?.length).toBeLessThanOrEqual(300);
-    expect(m?.referral?.headline).not.toMatch(/[\u0000\u0007]/);
+    expect(/\p{Cc}/u.test(m?.referral?.headline ?? '')).toBe(false);
     expect(m?.referral?.ctwaClid?.length).toBeLessThanOrEqual(500);
     expect(m).toMatchObject({ from: `+${CLIENT}`, kind: 'text', text: 'Hola, vengo del anuncio' });
   });
