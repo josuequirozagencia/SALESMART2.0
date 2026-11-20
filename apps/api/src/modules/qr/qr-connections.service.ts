@@ -36,7 +36,7 @@ export interface QrChannelView {
   down_since: string | null;
   last_error: string | null;
   /** Calentamiento: día en que va y cuántos mensajes puede enviar hoy. */
-  warmup: { day: number; daily_limit: number };
+  warmup: { day: number; daily_limit: number; waived: boolean; waived_at: string | null };
   /** Volumen de lo que la plataforma envió por esta sesión en las últimas 24 h (sin lo escrito desde el teléfono): `ok`, `near` (80 % del límite) u `over` (más que el límite). Es un aviso: no bloquea nada. */
   volume: { sent_24h: number; limit: number; level: 'ok' | 'near' | 'over' };
   /** La última «puesta al día» (v19 B3), o null si nunca corrió. Solo cifras y el motivo del fallo: nada de clientes. */
@@ -107,7 +107,7 @@ export class QrConnectionsService {
     return { items: rows.map((r) => this.view(r, now, sent.get(r.a.id) ?? 0)), available: (await this.credentials()) !== null, limits: { max_channels: MAX_QR_CHANNELS } };
   }
 
-  async create(input: { name: string; queue_id?: string | null }): Promise<QrChannelView> {
+  async create(input: { name: string; queue_id?: string | null; prior_use_risk_accepted?: boolean }): Promise<QrChannelView> {
     const creds = await this.mustCredentials();
     await this.db.withTenant(async (tx) => {
       const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(channelAccounts).where(and(isNull(channelAccounts.deletedAt), eq(channelAccounts.provider, 'evolution')));
@@ -124,11 +124,18 @@ export class QrConnectionsService {
       throw this.translate(e);
     }
     try {
+      const riskAccepted = input.prior_use_risk_accepted === true;
+      const now = new Date();
       return await this.db.withTenant(async (tx) => {
         const [a] = await tx.insert(channelAccounts).values({ id, provider: 'evolution', isOfficial: false, name: input.name, queueId: input.queue_id ?? null }).returning();
-        const [q] = await tx.insert(qrAccounts).values({ channelAccountId: id, instanceName: instance, state: 'connecting' }).returning();
+        const [q] = await tx
+          .insert(qrAccounts)
+          .values({ channelAccountId: id, instanceName: instance, state: 'connecting', warmupWaived: riskAccepted, warmupWaivedAt: riskAccepted ? now : null })
+          .returning();
         await writeAudit(tx, { entityType: AUDIT, entityId: id, newValue: { name: a!.name, provider: 'evolution', official: false, queue_id: a!.queueId }, source: 'manual' });
-        return this.view({ a: a!, q: q! }, new Date());
+        // Deja rastro de que el cliente declaró uso previo del chip y aceptó el riesgo de bloqueo (curva de calentamiento propia, más rápida y con techo más alto)
+        if (riskAccepted) await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'qr_warmup_waived', oldValue: false, newValue: true, source: 'manual' });
+        return this.view({ a: a!, q: q! }, now);
       });
     } catch (e) {
       await this.provider.deleteInstance(creds, instance).catch(() => undefined); // no quedan instancias huérfanas
@@ -311,7 +318,7 @@ export class QrConnectionsService {
   }
 
   private view(r: Row, now: Date, sent24h = 0): QrChannelView {
-    const limit = dailyLimit(r.q.firstConnectedAt, now);
+    const limit = dailyLimit(r.q.firstConnectedAt, now, r.q.warmupWaived);
     return {
       id: r.a.id,
       provider: 'evolution',
@@ -325,7 +332,7 @@ export class QrConnectionsService {
       last_event_at: iso(r.q.lastEventAt),
       down_since: iso(r.q.downSince),
       last_error: r.q.lastError,
-      warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: limit },
+      warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: limit, waived: r.q.warmupWaived, waived_at: iso(r.q.warmupWaivedAt) },
       volume: { sent_24h: sent24h, limit, level: sent24h > limit ? 'over' : sent24h >= Math.ceil(limit * 0.8) ? 'near' : 'ok' },
       catch_up: r.q.lastCatchUpAt ? { at: r.q.lastCatchUpAt.toISOString(), found: r.q.lastCatchUpFound ?? 0, recovered: r.q.lastCatchUpRecovered ?? 0, truncated: r.q.lastCatchUpTruncated ?? false, error: r.q.lastCatchUpError } : null,
       created_at: r.a.createdAt.toISOString(),

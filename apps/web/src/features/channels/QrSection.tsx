@@ -102,13 +102,17 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
   const [name, setName] = useState('');
   const [queue, setQueue] = useState('');
   const [ack, setAck] = useState(false);
+  const [priorUse, setPriorUse] = useState(false);
   const [error, setError] = useState<string>();
   const submit = (e: FormEvent): void => {
     e.preventDefault();
     if (name.trim() === '') return setError('Escribe un nombre para la conexión.');
     if (!ack) return setError('Confirma que entiendes el riesgo de un canal no oficial.');
     setError(undefined);
-    m.create.mutate({ name: name.trim(), queue_id: queue === '' ? null : queue }, { onSuccess: onCreated, onError: (e2) => setError(friendlyError(e2, 'No pudimos crear la conexión.')) });
+    m.create.mutate(
+      { name: name.trim(), queue_id: queue === '' ? null : queue, prior_use_risk_accepted: priorUse },
+      { onSuccess: onCreated, onError: (e2) => setError(friendlyError(e2, 'No pudimos crear la conexión.')) },
+    );
   };
   return (
     <Modal title="Conectar WhatsApp por QR" onClose={onClose}>
@@ -124,6 +128,10 @@ function CreateDialog({ onClose, onCreated }: { onClose: () => void; onCreated: 
           )}
         </Field>
         <label className="inline-flex items-start gap-2 text-[13.5px] font-semibold"><input type="checkbox" className="mt-1" checked={ack} onChange={(e) => setAck(e.target.checked)} />Entiendo que es un canal no oficial y que WhatsApp podría bloquear el número.</label>
+        <label className="inline-flex items-start gap-2 text-[13.5px] font-semibold">
+          <input type="checkbox" className="mt-1" checked={priorUse} onChange={(e) => setPriorUse(e.target.checked)} />
+          Este chip ya tiene tiempo de uso previo (no es un número nuevo). Empezar en 200 mensajes al día en vez de 20, y crecer más rápido — acepto que esto aumenta el riesgo de bloqueo del número.
+        </label>
         {error ? <Alert>{error}</Alert> : null}
         <div className="flex justify-end gap-2"><Button type="button" onClick={onClose}>Cancelar</Button><Button type="submit" variant="primary" loading={m.create.isPending}>Crear y mostrar el QR</Button></div>
       </form>
@@ -191,7 +199,7 @@ function QrCard({ c, queueName, queues, onPair, onError }: { c: QrChannel; queue
         <div className="flex gap-1.5"><dt className="text-muted">Departamento</dt><dd>{queueName ?? 'sin departamento'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Último aviso</dt><dd>{c.last_event_at ? shortDateTime(c.last_event_at) : 'ninguno todavía'}</dd></div>
         <div className="flex gap-1.5"><dt className="text-muted">Volumen 24 h</dt><dd className="font-mono">{c.volume.sent_24h} de {c.volume.limit}</dd></div>
-        <div className="flex gap-1.5"><dt className="text-muted">Calentamiento</dt><dd>Día {c.warmup.day}: hasta {c.warmup.daily_limit} mensajes al día</dd></div>
+        <div className="flex gap-1.5"><dt className="text-muted">Calentamiento</dt><dd>{c.warmup.waived ? `Día ${c.warmup.day} (chip con uso previo): hasta ${c.warmup.daily_limit} mensajes al día` : `Día ${c.warmup.day}: hasta ${c.warmup.daily_limit} mensajes al día`}</dd></div>
         {c.catch_up ? <div className="flex gap-1.5"><dt className="text-muted">Última revisión de mensajes</dt><dd>{shortDateTime(c.catch_up.at)}{c.catch_up.error ? ' · con error' : c.catch_up.recovered > 0 ? ` · recuperó ${c.catch_up.recovered}` : ' · al día'}</dd></div> : null}
       </dl>
       {catching ? <CatchUpPanel c={c} onClose={() => setCatching(false)} onError={onError} /> : null}

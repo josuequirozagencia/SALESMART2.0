@@ -9,7 +9,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const AT = '2026-10-27T15:00:00.000Z';
 const chan = (over: Partial<QrChannel> = {}): QrChannel => ({
   id: 'qc1', provider: 'evolution', is_official: false, name: 'Chip de ventas', state: 'open', phone: '+593990000001', profile_name: 'Negocio', queue_id: null, connected_at: AT, last_event_at: AT,
-  down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, volume: { sent_24h: 0, limit: 20, level: 'ok' }, catch_up: null, created_at: AT, ...over,
+  down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20, waived: false, waived_at: null }, volume: { sent_24h: 0, limit: 20, level: 'ok' }, catch_up: null, created_at: AT, ...over,
 });
 
 interface World { items: QrChannel[]; available: boolean; calls: Record<string, Call[]>; qr: string | null; stateAfterQr: QrState | null }
@@ -96,7 +96,7 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
   }, 15000);
 
   it('una conexión abierta muestra su estado, teléfono, perfil y calentamiento; una caída lo explica y ofrece volver a vincular', async () => {
-    mockApi(server(world({ items: [chan(), chan({ id: 'qc2', name: 'Chip caído', state: 'logged_out', phone: null, profile_name: null, down_since: AT, last_error: 'El teléfono cerró la sesión: escanea un QR nuevo para volver a conectar', warmup: { day: 3, daily_limit: 50 } })] })));
+    mockApi(server(world({ items: [chan(), chan({ id: 'qc2', name: 'Chip caído', state: 'logged_out', phone: null, profile_name: null, down_since: AT, last_error: 'El teléfono cerró la sesión: escanea un QR nuevo para volver a conectar', warmup: { day: 3, daily_limit: 50, waived: false, waived_at: null } })] })));
     renderApp('/settings/connections');
     const s = await section();
     const ok = within(await s.findByRole('listitem', { name: 'Chip de ventas' }));
