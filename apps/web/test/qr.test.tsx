@@ -82,10 +82,10 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
     await userEvent.click(dlg.getByRole('button', { name: 'Crear y mostrar el QR' }));
     expect(await dlg.findByText('Confirma que entiendes el riesgo de un canal no oficial.')).toBeInTheDocument();
     expect(w.calls['create']).toBeUndefined();
-    await userEvent.click(dlg.getByRole('checkbox'));
+    await userEvent.click(dlg.getByRole('checkbox', { name: /canal no oficial/ }));
     await userEvent.click(dlg.getByRole('button', { name: 'Crear y mostrar el QR' }));
     await waitFor(() => expect(w.calls['create']).toHaveLength(1));
-    expect(w.calls['create']![0]!.body).toEqual({ name: 'Chip de ventas', queue_id: null });
+    expect(w.calls['create']![0]!.body).toEqual({ name: 'Chip de ventas', queue_id: null, prior_use_risk_accepted: false });
     const pair = within(await screen.findByRole('dialog', { name: 'Vincular «Chip de ventas»' }));
     const img = await pair.findByAltText('Código QR para vincular WhatsApp');
     expect(img).toHaveAttribute('src', 'data:image/png;base64,QRQR');
