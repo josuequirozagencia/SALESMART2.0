@@ -78,8 +78,9 @@ export class ConversationsService {
     if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
     // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial) y el Lead hacia Meta; un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
     const clid = m.referral?.ctwaClid ?? null;
-    if (clid && m.from) {
-      await this.attribution.recordIn(tx, { phone: m.from, ctwa_cl_id: clid, source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() }, m.sentAt, contact);
+    // WhatsApp por QR puede traer el clic de un contacto que WhatsApp identifica solo con su código `@lid` (sin teléfono): el clic se guarda igual (v20, ADR-55)
+    if (clid) {
+      await this.attribution.recordIn(tx, { phone: m.from, ctwa_cl_id: clid, ...(m.referral?.platform ? { placement: m.referral.platform } : {}), source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() }, m.sentAt, contact);
     } else if (contact.created) {
       await this.touches.record(tx, contact.id, { kind: 'message_in', at: m.sentAt, source: 'whatsapp', originRef: m.externalId });
     }

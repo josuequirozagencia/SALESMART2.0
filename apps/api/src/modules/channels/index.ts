@@ -10,4 +10,4 @@ export { WebhookEventsService, errorLabel, EVENT_BATCH, EVENT_MAX_ATTEMPTS, LATE
 export { MetaWebhookService, WHATSAPP_SERVICE, type ReceiveResult } from './meta-webhook.service';
 export { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
 export type { ChannelView } from './connections.service';
-export { parseEvolutionWebhook, parseStoredEvolution, phoneFromJid, lidFromJid, redactEvolutionPayload, verifyEvolutionToken, type EvolutionConnection, type EvolutionConnectionState, type IgnoredReason, type ParsedEvolution } from './evolution-webhook';
+export { parseEvolutionWebhook, parseStoredEvolution, phoneFromJid, lidFromJid, adReferralOf, redactEvolutionPayload, verifyEvolutionToken, type EvolutionConnection, type EvolutionConnectionState, type IgnoredReason, type ParsedEvolution } from './evolution-webhook';

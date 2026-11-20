@@ -1,6 +1,6 @@
 import { readLocation } from './location';
 import { timingSafeEqual } from 'node:crypto';
-import type { DeliveryState, InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedStatus } from '../conversations';
+import type { DeliveryState, InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedReferral, NormalizedStatus } from '../conversations';
 import { stripNul } from './meta-webhook';
 
 /**
@@ -177,6 +177,24 @@ function quotedIdOf(message: Record<string, unknown>): string | null {
   return null;
 }
 
+/**
+ * El anuncio de Meta de donde vino el cliente (v20, ADR-55): Evolution lo trae en `contextInfo.externalAdReply` del aviso (o dentro del contenido del mensaje) con `ctwaClid` (el identificador que Meta pide para
+ * atribuir), `sourceId` (el id del ANUNCIO; no trae campaña ni conjunto), `title`, `body`, `sourceUrl` y `sourceApp` (facebook o instagram). Visto en Evolution v2.3.7 contra una empresa real: 199 de 203 avisos
+ * con anuncio traían `ctwaClid` y todos `sourceId`. La miniatura NO se lee aquí. Sin `ctwaClid` ni `sourceId` no hay referencia. Función pura.
+ */
+export function adReferralOf(data: Record<string, unknown>, message: Record<string, unknown>): NormalizedReferral | null {
+  const holders: unknown[] = [data['contextInfo'], ...Object.values(message).map((v) => (isObj(v) ? v['contextInfo'] : null))];
+  const ad = holders.map((h) => (isObj(h) && isObj(h['externalAdReply']) ? h['externalAdReply'] : null)).find((x) => x !== null);
+  if (!ad) return null;
+  const s = (k: string, n: number): string | null => {
+    const v = ad[k];
+    return typeof v === 'string' && v !== '' ? stripNul(v).replace(/\p{Cc}/gu, ' ').trim().slice(0, n) || null : null;
+  };
+  const app = s('sourceApp', 20)?.toLowerCase() ?? null;
+  const ref: NormalizedReferral = { sourceId: s('sourceId', 100), sourceType: 'ad', sourceUrl: s('sourceUrl', 1000), headline: s('title', 300), body: s('body', 500), thumbnailUrl: null, ctwaClid: s('ctwaClid', 500), platform: app === 'facebook' || app === 'instagram' ? app : null };
+  return ref.ctwaClid !== null || ref.sourceId !== null ? ref : null;
+}
+
 function upsert(instance: string, data: Record<string, unknown>, now: Date): Omit<ParsedEvolution, 'instance'> {
   const key = isObj(data['key']) ? data['key'] : null;
   const message = isObj(data['message']) ? data['message'] : null;
@@ -217,6 +235,7 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
     extra: content.extra,
     sentAt: toDate(data['messageTimestamp'], now),
     ...(fromMe ? { origin: 'device' as const } : {}),
+    ...(!fromMe && adReferralOf(data, message) ? { referral: adReferralOf(data, message) } : {}),
     ...(quotedId ? { replyToExternalId: quotedId } : {}),
   };
   const inline = new Map<string, string>();

@@ -1002,3 +1002,128 @@ describe('aviso de volumen por conexión QR (v19, sin bloquear)', () => {
     expect((await call('GET', `/qr-channels/${v.id}`, T.bob)).status).toBe(404);
   });
 });
+
+describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
+  const adMsg = (instance: string, id: string, o: { clid?: string | null; ad?: string; title?: string; app?: string; who?: string; lid?: string; ageH?: number } = {}) =>
+    evt(instance, 'messages.upsert', {
+      key: { remoteJid: o.lid ?? `${o.who ?? '593990000002'}@s.whatsapp.net`, ...(o.lid ? {} : { remoteJidAlt: `${o.who ?? '593990000002'}@s.whatsapp.net` }), fromMe: false, id, participant: '' },
+      pushName: 'Cliente Anuncio',
+      status: 'DELIVERY_ACK',
+      message: { conversation: 'Hola, vengo del anuncio' },
+      messageType: 'conversation',
+      messageTimestamp: Math.floor(Date.now() / 1000 - (o.ageH ?? 0) * 3600),
+      instanceId: 'i-1',
+      source: 'android',
+      contextInfo: { externalAdReply: { title: o.title ?? 'Cupos abiertos', body: 'Escríbenos', ...(o.clid === null ? {} : { ctwaClid: o.clid ?? 'CLID-PRUEBA-0001' }), sourceId: o.ad ?? '120210000000000001', sourceUrl: 'https://fb.me/ejemplo', sourceApp: o.app ?? 'instagram', mediaType: 1, thumbnail: { '0': 255, '1': 216 } } },
+    });
+  const setup = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    return { v, inst: await instanceOf(v.id) };
+  };
+  const contact = async (org = ORG_A) => (await admin.query(`SELECT id, channel, ctwa_cl_id, first_touch_ad_id, last_touch_ad_id, first_touch_ad, last_touch_ad, first_touch_source FROM contacts WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at`, [org])).rows as Array<Record<string, string | null>>;
+  const metaEvents = async (org = ORG_A) => (await admin.query(`SELECT type, status, payload FROM meta_events WHERE organization_id = $1 ORDER BY created_at`, [org])).rows as Array<{ type: string; status: string; payload: { event_id: string; user_data: Record<string, unknown>; custom_data: Record<string, unknown> } }>;
+
+  it('un mensaje con anuncio deja en el contacto el click id, el id del anuncio y el titular (primer y último toque), el canal de la red, el historial y el Lead hacia Meta con teléfono con huella y click id', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000001'));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ channel: 'instagram', ctwa_cl_id: 'CLID-PRUEBA-0001', first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000001', first_touch_source: 'meta_ctwa' });
+    expect(c!['first_touch_ad']).toBe('Cupos abiertos'); // por ahora el titular hace de nombre (se corrige en la siguiente entrega de V20)
+    const touches = (await admin.query(`SELECT kind, ad_id, ctwa_clid, headline, source_url FROM contact_touch_events WHERE contact_id = $1`, [c!['id']])).rows;
+    expect(touches).toEqual([{ kind: 'ad_click', ad_id: '120210000000000001', ctwa_clid: 'CLID-PRUEBA-0001', headline: 'Cupos abiertos', source_url: 'https://fb.me/ejemplo' }]);
+    const evs = await metaEvents();
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({ type: 'Lead', status: 'pending' });
+    expect(evs[0]!.payload.user_data['ctwa_clid']).toBe('CLID-PRUEBA-0001');
+    expect(JSON.stringify(evs[0]!.payload)).not.toContain('593990000002'); // el teléfono nunca va en claro
+    expect(Array.isArray(evs[0]!.payload.user_data['ph'])).toBe(true);
+    expect(await countOf('contact_tags', `contact_id = '${c!['id']}'`)).toBe(1); // Lead
+  });
+
+  it('Facebook como red: el contacto nuevo queda con canal «facebook»; sin red reconocible, también facebook (regla de siempre)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000002', { app: 'facebook', who: '593990000011' }));
+    await post(v.id, adMsg(inst, 'ADI-0000000000003', { app: 'whatsapp', who: '593990000012', clid: 'CLID-PRUEBA-0002' }));
+    await runEvents();
+    const rows = await contact();
+    expect(rows.map((r) => r['channel']).sort()).toEqual(['facebook', 'facebook']);
+  });
+
+  it('el mismo clic repetido no duplica (ni contacto, ni toque, ni evento); un clic de OTRO anuncio cambia el último toque y conserva el primero, con un Lead nuevo', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000004'));
+    await runEvents();
+    await post(v.id, adMsg(inst, 'ADI-0000000000005')); // otro mensaje con el MISMO clic
+    await runEvents();
+    expect(await contact()).toHaveLength(1);
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
+    expect(await metaEvents()).toHaveLength(1);
+    await post(v.id, adMsg(inst, 'ADI-0000000000006', { clid: 'CLID-PRUEBA-0003', ad: '120210000000000002', title: 'Otro anuncio' }));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000002', ctwa_cl_id: 'CLID-PRUEBA-0003' });
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(2);
+    expect(await metaEvents()).toHaveLength(2);
+  });
+
+  it('sin click id no se registra atribución (el contacto entra normal, con su toque de primer mensaje y sin evento)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000007', { clid: null }));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ channel: 'whatsapp', ctwa_cl_id: null, first_touch_ad_id: null });
+    expect(await metaEvents()).toHaveLength(0);
+    expect(await countOf('contact_touch_events', `kind = 'message_in'`)).toBe(1);
+  });
+
+  it('un clic de hace más de 7 días se guarda en el contacto y el historial pero NO genera evento hacia Meta (Meta no lo aceptaría)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000008', { ageH: 9 * 24 }));
+    await runEvents();
+    expect((await contact())[0]).toMatchObject({ ctwa_cl_id: 'CLID-PRUEBA-0001', first_touch_ad_id: '120210000000000001' });
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
+    expect(await metaEvents()).toHaveLength(0);
+    expect(await countOf('contact_tags', `true`)).toBe(1);
+  });
+
+  it('un clic que llega de un contacto con solo su código @lid (sin teléfono) también se atribuye; el Lead sale con el click id y SIN teléfono', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000009', { lid: '257720267587799@lid' }));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ ctwa_cl_id: 'CLID-PRUEBA-0001', last_touch_ad_id: '120210000000000001' });
+    expect(await countOf('contact_phones')).toBe(0);
+    const evs = await metaEvents();
+    expect(evs).toHaveLength(1);
+    expect(evs[0]!.payload.user_data).toEqual({ ctwa_clid: 'CLID-PRUEBA-0001' });
+  });
+
+  it('lo que llega por «ponerse al día» también atribuye (histórico) y repetir la pasada no duplica', async () => {
+    const { v, inst } = await setup();
+    const rec = { key: { remoteJid: '593990000021@s.whatsapp.net', remoteJidAlt: '593990000021@s.whatsapp.net', fromMe: false, id: 'ADI-HIST-0000001' }, pushName: 'Desde historial', message: { conversation: 'hola' }, messageType: 'conversation', messageTimestamp: Math.floor(Date.now() / 1000 - 5 * 3600), contextInfo: { externalAdReply: { title: 'Cupos', ctwaClid: 'CLID-HIST-0001', sourceId: '120210000000000003', sourceApp: 'facebook', sourceUrl: 'https://fb.me/h' } } };
+    fake().stored.set(inst, [rec]);
+    expect((await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 24 })).status).toBe(200);
+    await runEvents();
+    await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 24 });
+    await runEvents();
+    expect(await contact()).toHaveLength(1);
+    expect((await contact())[0]).toMatchObject({ channel: 'facebook', ctwa_cl_id: 'CLID-HIST-0001', last_touch_ad_id: '120210000000000003' });
+    expect(await metaEvents()).toHaveLength(1); // es de hace 5 h: Meta todavía lo acepta
+  });
+
+  it('aislamiento A↔B: el clic de la empresa A nunca aparece en la B (ni contacto, ni toque, ni evento)', async () => {
+    const a = await mk(T.alice);
+    const b = await mk(T.bob, 'Chip de Luna');
+    await open(a.id);
+    fake().setState(await instanceOf(b.id), 'open');
+    await post(a.id, adMsg(await instanceOf(a.id), 'ADI-ISO-000000001'));
+    await runEvents(ORG_A);
+    await runEvents(ORG_B);
+    expect(await contact(ORG_A)).toHaveLength(1);
+    expect(await contact(ORG_B)).toHaveLength(0);
+    expect(await countOf('contact_touch_events', `organization_id = '${ORG_B}'`)).toBe(0);
+    expect(await metaEvents(ORG_B)).toHaveLength(0);
+  });
+});
