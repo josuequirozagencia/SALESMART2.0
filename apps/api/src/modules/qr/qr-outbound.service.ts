@@ -167,6 +167,7 @@ export class QrOutboundService {
           instance: qrAccounts.instanceName,
           state: qrAccounts.state,
           firstConnectedAt: qrAccounts.firstConnectedAt,
+          warmupWaived: qrAccounts.warmupWaived,
         })
         .from(conversations)
         .innerJoin(channelAccounts, and(eq(channelAccounts.organizationId, conversations.organizationId), eq(channelAccounts.id, conversations.channelAccountId)))
@@ -219,7 +220,7 @@ export class QrOutboundService {
         .where(and(eq(messages.channelAccountId, m.channelAccountId), eq(messages.direction, 'out'), inArray(messages.status, ['sent', 'delivered', 'read']), gt(messages.sentAt, since), sql`${messages.id} <> ${m.id}`, sql`coalesce(${messages.meta}->>'origin', '') <> 'device'`));
       // Lo escrito desde el TELÉFONO no se cuenta (no pasó por la plataforma ni es envío automático). Una respuesta a un cliente que escribió en las últimas 24 h no se frena con el límite del día (la campaña no cuenta como respuesta)
       const replyInWindow = m.senderType !== 'campaign' && ctx.inWindow;
-      const gate = sendGate({ sentLast24h: stat?.n ?? 0, lastSentAt: stat?.last ? new Date(stat.last) : null, firstConnectedAt: ctx.firstConnectedAt, now, replyInWindow });
+      const gate = sendGate({ sentLast24h: stat?.n ?? 0, lastSentAt: stat?.last ? new Date(stat.last) : null, firstConnectedAt: ctx.firstConnectedAt, now, replyInWindow, warmupWaived: ctx.warmupWaived });
       if (!gate.ok) return waitLocal(gate.reason === 'daily' ? 'rate_limited' : 'rate_limited', Math.max(gate.retryAt.getTime() - now.getTime(), 1_000));
       return { kind: 'plan' as const, plan: { messageId: m.id, attempts: m.attempts, instance: ctx.instance, to, text: m.body ?? '', sentAt: m.sentAt, attachment, replyTo } };
     });

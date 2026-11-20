@@ -7,7 +7,7 @@ import { QrConnectionsService } from './qr-connections.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
 const name = z.string().trim().min(1).max(60);
-const createSchema = z.strictObject({ name, queue_id: z.uuid().nullable().optional() });
+const createSchema = z.strictObject({ name, queue_id: z.uuid().nullable().optional(), prior_use_risk_accepted: z.boolean().optional() });
 const updateSchema = z
   .strictObject({ name: name.optional(), queue_id: z.uuid().nullable().optional() })
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');

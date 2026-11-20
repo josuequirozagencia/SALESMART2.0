@@ -138,9 +138,10 @@ export class CampaignSenderService {
 
     // La conexión (y la plantilla, por WhatsApp oficial), una vez por pasada: si no están, se pausa con el motivo (no se descartan destinatarios por un problema que no es suyo)
     let qrFirstConnectedAt: Date | null = null;
+    let qrWarmupWaived = false;
     if (isText) {
       const [q] = await tx
-        .select({ state: qrAccounts.state, first: qrAccounts.firstConnectedAt })
+        .select({ state: qrAccounts.state, first: qrAccounts.firstConnectedAt, waived: qrAccounts.warmupWaived })
         .from(channelAccounts)
         .innerJoin(qrAccounts, and(eq(qrAccounts.organizationId, channelAccounts.organizationId), eq(qrAccounts.channelAccountId, channelAccounts.id)))
         .where(and(eq(channelAccounts.id, c.channelAccountId), isNull(channelAccounts.deletedAt), eq(channelAccounts.status, 'active'), eq(channelAccounts.provider, 'evolution')))
@@ -149,6 +150,7 @@ export class CampaignSenderService {
       // Sesión caída: la campaña espera con aviso; el mensaje NUNCA se reenvía por otra vía ni gasta intentos
       if (q.state !== 'open') return this.pauseNow(tx, c, QR_SESSION_DOWN, now);
       qrFirstConnectedAt = q.first;
+      qrWarmupWaived = q.waived;
     } else {
       const [ch] = await tx
         .select({ id: channelAccounts.id })
@@ -178,7 +180,7 @@ export class CampaignSenderService {
       (await sent24(eq(campaigns.id, c.id))) >= c.dailyCap ||
       (advisor !== undefined && (await sent24(eq(campaigns.createdBy, c.createdBy))) >= advisor.cap) ||
       // El tope de la conexión: por WhatsApp oficial, el de la empresa; por QR, el 70 % del cupo del calentamiento de HOY (el resto queda para las conversaciones normales, que comparten el cupo)
-      (await sent24(eq(campaigns.channelAccountId, c.channelAccountId))) >= (isText ? qrChannelCap(dailyLimit(qrFirstConnectedAt, now)) : await this.officialCap(tx));
+      (await sent24(eq(campaigns.channelAccountId, c.channelAccountId))) >= (isText ? qrChannelCap(dailyLimit(qrFirstConnectedAt, now, qrWarmupWaived)) : await this.officialCap(tx));
     if (capped) {
       await tx.update(campaigns).set({ nextSendAt: new Date(now.getTime() + CAP_RECHECK_MS), updatedAt: now }).where(eq(campaigns.id, c.id));
       return 0;

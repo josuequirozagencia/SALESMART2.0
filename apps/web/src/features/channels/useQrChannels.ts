@@ -18,8 +18,8 @@ export interface QrChannel {
   /** Desde cuándo está caída la sesión (null si está bien). */
   down_since: string | null;
   last_error: string | null;
-  /** Calentamiento del número: día en que va y cuántos mensajes puede enviar hoy. */
-  warmup: { day: number; daily_limit: number };
+  /** Calentamiento del número: día en que va, cuántos mensajes puede enviar hoy, y si el cliente declaró uso previo del chip y aceptó el riesgo de bloqueo (sube más rápido y a un techo más alto). */
+  warmup: { day: number; daily_limit: number; waived: boolean; waived_at: string | null };
   /** Volumen enviado por la plataforma en 24 h frente al límite del día (es un aviso; no bloquea). */
   volume: { sent_24h: number; limit: number; level: 'ok' | 'near' | 'over' };
   /** La última «puesta al día» con Evolution (v19 B3), o null si nunca corrió. */
@@ -61,7 +61,7 @@ export function useQrMutations() {
   const qc = useQueryClient();
   const done = (): Promise<unknown> => Promise.all([qc.invalidateQueries({ queryKey: ['qr-channels'] }), qc.invalidateQueries({ queryKey: ['queues'] })]);
   return {
-    create: useMutation({ mutationFn: (b: { name: string; queue_id?: string | null }) => api<QrChannel>('/qr-channels', { method: 'POST', body: b }), onSettled: done }),
+    create: useMutation({ mutationFn: (b: { name: string; queue_id?: string | null; prior_use_risk_accepted?: boolean }) => api<QrChannel>('/qr-channels', { method: 'POST', body: b }), onSettled: done }),
     code: useMutation({ mutationFn: (id: string) => api<QrCode>(`/qr-channels/${id}/qr`, { method: 'POST' }), onSettled: done }),
     disconnect: useMutation({ mutationFn: (id: string) => api<QrChannel>(`/qr-channels/${id}/disconnect`, { method: 'POST' }), onSettled: done }),
     update: useMutation({ mutationFn: ({ id, patch }: { id: string; patch: { name?: string; queue_id?: string | null } }) => api<QrChannel>(`/qr-channels/${id}`, { method: 'PATCH', body: patch }), onSettled: done }),

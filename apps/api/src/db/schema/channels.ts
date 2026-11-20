@@ -116,6 +116,10 @@ export const qrAccounts = tenantTable(
     profileName: text('profile_name'),
     /** Primera vez que la sesión quedó abierta: de ahí corre el calentamiento de los límites de envío. */
     firstConnectedAt: ts('first_connected_at'),
+    /** El cliente declaró, al conectar, que el chip ya tenía uso previo y aceptó el riesgo de bloqueo: usa la curva de calentamiento «waiver» (arranca en {@link WARMUP_WAIVED_DAILY_LIMIT}, sube más rápido y a un techo más alto) en vez de la normal. */
+    warmupWaived: boolean('warmup_waived').notNull().default(false),
+    /** Cuándo se hizo esa declaración (para dejar rastro de cuándo se aceptó el riesgo). */
+    warmupWaivedAt: ts('warmup_waived_at'),
     connectedAt: ts('connected_at'),
     /** Última vez que Evolution avisó de algo de esta sesión. */
     lastEventAt: ts('last_event_at'),

@@ -697,8 +697,8 @@ export class CampaignsService {
 
   /** El cupo diario del calentamiento de la sesión QR (ADR-72 #4); una conexión sin sesión todavía cuenta como recién conectada. */
   private async qrWarmupLimit(tx: TenantTx, channelId: string): Promise<number> {
-    const [q] = await tx.select({ first: qrAccounts.firstConnectedAt }).from(qrAccounts).where(eq(qrAccounts.channelAccountId, channelId)).limit(1);
-    return dailyLimit(q?.first ?? null, new Date());
+    const [q] = await tx.select({ first: qrAccounts.firstConnectedAt, waived: qrAccounts.warmupWaived }).from(qrAccounts).where(eq(qrAccounts.channelAccountId, channelId)).limit(1);
+    return dailyLimit(q?.first ?? null, new Date(), q?.waived ?? false);
   }
 
   private async assertDraftRoom(tx: TenantTx, a: CampaignAccess): Promise<void> {
