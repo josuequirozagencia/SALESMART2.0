@@ -160,7 +160,7 @@ export class WebhookEventsService {
    * Los eventos normalizados de un aviso guardado. Un aviso de WhatsApp por QR (M9.6) lleva la marca `__qr`: se lee con el lector de Evolution, y el archivo que traía (ya guardado aparte en una clave
    * temporal) reemplaza al identificador del proveedor, que en este canal no existe. Los demás son de Meta.
    */
-  private parsedEvents(ev: EventRow): ReadonlyArray<{ event: NormalizedInboundEvent }> {
+  parsedEvents(ev: EventRow): ReadonlyArray<{ event: NormalizedInboundEvent }> {
     const p = ev.payload as Record<string, unknown>;
     if (p['__qr'] !== 1) return this.provider.parseStored(p, ev.receivedAt).events;
     const keys = (typeof p['media_keys'] === 'object' && p['media_keys'] !== null ? p['media_keys'] : {}) as Record<string, unknown>;

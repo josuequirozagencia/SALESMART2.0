@@ -1058,6 +1058,13 @@
       "when": 1796600000000,
       "tag": "0150_m107_qr_warmup_waiver",
       "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1796700000000,
+      "tag": "0151_v20_anuncios",
+      "breakpoints": true
     }
   ]
 }

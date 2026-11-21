@@ -5,7 +5,7 @@ export { users, organizations, organizationMembers, accessResets, sessions, auth
 export { auditLogs, platformAudit } from './audit';
 export { providerCredentials, providerSelection } from './providers';
 export { platformBranding, platformBrandingAssets } from './branding';
-export { contacts, contactPhones, contactIdentities, tags, contactTags, contactTouchEvents, metaEvents, contactLists, contactListMembers, contactImports, contactImportRows, companies, contactCompanies, notes, tasks, taskRecurrences } from './crm';
+export { contacts, contactPhones, contactIdentities, adCreatives, tags, contactTags, contactTouchEvents, metaEvents, contactLists, contactListMembers, contactImports, contactImportRows, companies, contactCompanies, notes, tasks, taskRecurrences } from './crm';
 export { customFieldDefinitions, customFieldValues } from './custom-fields';
 export { pipelines, pipelineStages, opportunities, stageHistory } from './pipelines';
 export { channelAccounts, whatsappAccounts, qrAccounts, channelRoutes } from './channels';

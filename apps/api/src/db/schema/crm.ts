@@ -111,6 +111,32 @@ export const contactIdentities = tenantTable(
 );
 
 /**
+ * El anuncio de Meta de donde llegan los clientes (v20, ADR-55): UNA fila por anuncio y empresa, con lo que el mensaje trae (titular, texto, dirección, red) y la miniatura guardada UNA vez en el almacenamiento
+ * (la miniatura viaja en cada aviso; aquí se guarda una sola copia). No trae campaña ni conjunto: solo el id del anuncio. Sin DELETE para `app_rw`.
+ */
+export const adCreatives = tenantTable(
+  'ad_creatives',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    sourceId: text('source_id').notNull(),
+    headline: text('headline'),
+    body: text('body'),
+    sourceUrl: text('source_url'),
+    platform: text('platform'),
+    thumbnailKey: text('thumbnail_key'),
+    thumbnailMime: text('thumbnail_mime'),
+    firstSeenAt: ts('first_seen_at').notNull().defaultNow(),
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ad_creatives_org_source_uq').on(t['organizationId']!, t['sourceId']!),
+    check('ad_creatives_source_shape', sql`length(${t['sourceId']!}) BETWEEN 1 AND 100`),
+    check('ad_creatives_platform_valid', sql`${t['platform']!} IS NULL OR ${t['platform']!} IN ('facebook', 'instagram')`),
+    check('ad_creatives_mime_valid', sql`${t['thumbnailMime']!} IS NULL OR ${t['thumbnailMime']!} IN ('image/jpeg', 'image/png', 'image/webp')`),
+  ],
+);
+
+/**
  * Etiquetas (M3.3, ADR-45). Las del SISTEMA (`lead`, `appointment`, `sale`) las crea el servicio al primer uso en cada empresa, no se borran ni se renombran
  * y solo las pone el sistema. Las personalizadas llegan en M3.4. `app_rw` no tiene DELETE (borrado lógico).
  */

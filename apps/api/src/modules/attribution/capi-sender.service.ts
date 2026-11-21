@@ -45,7 +45,9 @@ export class CapiSenderService {
         .for('update', { skipLocked: true });
       for (const ev of due) {
         const attempts = ev.attempts + 1;
-        if (now.getTime() - ev.createdAt.getTime() > CAPI_MAX_AGE_MS) {
+        // Meta cuenta la antigüedad desde la hora del HECHO (`event_time`), no desde que lo encolamos (v20: los clics recuperados llevan su hora real)
+        const happenedAt = Number(ev.payload['event_time'] ?? 0) * 1000;
+        if (now.getTime() - ev.createdAt.getTime() > CAPI_MAX_AGE_MS || (happenedAt > 0 && now.getTime() - happenedAt > CAPI_MAX_AGE_MS)) {
           await tx.update(metaEvents).set({ status: 'expired', lastError: 'El evento tiene más de 7 días: Meta ya no lo acepta', updatedAt: now }).where(eq(metaEvents.id, ev.id));
           continue;
         }
