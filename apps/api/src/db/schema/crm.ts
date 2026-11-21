@@ -125,6 +125,15 @@ export const adCreatives = tenantTable(
     platform: text('platform'),
     thumbnailKey: text('thumbnail_key'),
     thumbnailMime: text('thumbnail_mime'),
+    /** Nombres reales de la Marketing API (v20): anuncio, conjunto y campaña. Se rellenan con la tarea `ad-names` si la empresa conectó Meta; null = aún no consultado o Meta no lo devolvió. */
+    adName: text('ad_name'),
+    adsetId: text('adset_id'),
+    adsetName: text('adset_name'),
+    campaignId: text('campaign_id'),
+    campaignName: text('campaign_name'),
+    /** Última consulta a Meta y su resultado: `ok`, `not_found` (Meta no lo devuelve), `no_access` (el token no puede leer anuncios) o `error` (pasajero). null = nunca consultado. */
+    namesCheckedAt: ts('names_checked_at'),
+    namesStatus: text('names_status'),
     firstSeenAt: ts('first_seen_at').notNull().defaultNow(),
     lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
   },
@@ -132,6 +141,7 @@ export const adCreatives = tenantTable(
     uniqueIndex('ad_creatives_org_source_uq').on(t['organizationId']!, t['sourceId']!),
     check('ad_creatives_source_shape', sql`length(${t['sourceId']!}) BETWEEN 1 AND 100`),
     check('ad_creatives_platform_valid', sql`${t['platform']!} IS NULL OR ${t['platform']!} IN ('facebook', 'instagram')`),
+    check('ad_creatives_names_status_valid', sql`${t['namesStatus']!} IS NULL OR ${t['namesStatus']!} IN ('ok', 'not_found', 'no_access', 'error')`),
     check('ad_creatives_mime_valid', sql`${t['thumbnailMime']!} IS NULL OR ${t['thumbnailMime']!} IN ('image/jpeg', 'image/png', 'image/webp')`),
   ],
 );

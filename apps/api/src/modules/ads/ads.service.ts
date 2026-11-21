@@ -12,6 +12,12 @@ export interface AdCreativeView {
   body: string | null;
   source_url: string | null;
   platform: 'facebook' | 'instagram' | null;
+  /** Nombres reales de Meta (v20): solo si la empresa conectó Meta y el token puede leer anuncios; si no, null. */
+  ad_name: string | null;
+  adset_name: string | null;
+  campaign_name: string | null;
+  /** Estado de la consulta de nombres: ok, not_found, no_access (el token no puede leer anuncios), error o null (aún no consultado). */
+  names_status: 'ok' | 'not_found' | 'no_access' | 'error' | null;
   /** Dirección firmada de la miniatura, o null si el anuncio no la trajo o el almacenamiento no responde (la pantalla muestra el anuncio sin imagen). */
   thumbnail_url: string | null;
 }
@@ -40,7 +46,7 @@ export class AdsService {
           url = null;
         }
       }
-      out[r.sourceId] = { source_id: r.sourceId, headline: r.headline, body: r.body, source_url: r.sourceUrl, platform: r.platform === 'facebook' || r.platform === 'instagram' ? r.platform : null, thumbnail_url: url };
+      out[r.sourceId] = { source_id: r.sourceId, headline: r.headline, body: r.body, source_url: r.sourceUrl, platform: r.platform === 'facebook' || r.platform === 'instagram' ? r.platform : null, ad_name: r.adName, adset_name: r.adsetName, campaign_name: r.campaignName, names_status: r.namesStatus as AdCreativeView['names_status'], thumbnail_url: url };
     }
     return out;
   }

@@ -4,6 +4,8 @@ import { APP_CONFIG } from '../../tokens';
 import { ContactsModule } from '../contacts';
 import { OrganizationsModule } from '../organizations';
 import { TagsModule } from '../tags';
+import { AdNamesJob } from './ad-names.job';
+import { AdNamesService } from './ad-names.service';
 import { AdPerformanceService } from './ad-performance.service';
 import { AdPerformanceController, AttributionEndpointController, AttributionWebhookController } from './attribution.controller';
 import { AttributionService } from './attribution.service';
@@ -35,12 +37,14 @@ export class AttributionModule {
         AdPerformanceService,
         CapiSenderService,
         CapiSenderJob,
+        AdNamesService,
+        AdNamesJob,
         MetaSettingsService,
         opts.capi
           ? { provide: CAPI_PROVIDER, useValue: opts.capi }
           : { provide: CAPI_PROVIDER, useFactory: (cfg: AppConfig): CapiProvider => (cfg.channels.capiProvider === 'meta' ? new MetaCapiProvider() : cfg.channels.capiProvider === 'fake' ? new FakeCapiProvider() : new NoCapiProvider()), inject: [APP_CONFIG] },
       ],
-      exports: [AttributionService, CapiSenderService, CapiSenderJob, MetaSettingsService],
+      exports: [AttributionService, CapiSenderService, CapiSenderJob, AdNamesJob, AdNamesService, MetaSettingsService],
     };
     if (!opts.capi) AttributionModule.standard = mod;
     return mod;

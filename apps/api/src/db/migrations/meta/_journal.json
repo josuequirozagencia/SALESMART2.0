@@ -1065,6 +1065,13 @@
       "when": 1796700000000,
       "tag": "0151_v20_anuncios",
       "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1796800000000,
+      "tag": "0152_v20_nombres_anuncio",
+      "breakpoints": true
     }
   ]
 }
