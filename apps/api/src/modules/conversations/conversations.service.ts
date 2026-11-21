@@ -140,7 +140,7 @@ export class ConversationsService {
 
   /** El clic de anuncio que trae un mensaje, como lo registra la atribución (el mismo para el mensaje que llega y para la recuperación de avisos guardados, v20). */
   private clickOf(m: NormalizedMessage, clid: string): ClickInput {
-    return { phone: m.from, ctwa_cl_id: clid, ...(m.referral?.platform ? { placement: m.referral.platform } : {}), source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() };
+    return { phone: m.from, ctwa_cl_id: clid, ...(m.referral?.platform ? { placement: m.referral.platform } : {}), source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() };
   }
 
   /**
