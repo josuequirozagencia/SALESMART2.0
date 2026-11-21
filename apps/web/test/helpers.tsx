@@ -107,6 +107,7 @@ export const authed = (me: Me, t: Trial | null = trial()): Record<string, Handle
   'GET /me/photo': () => ({ body: { photo_url: null } }),
   // Campañas masivas (v17): el menú pregunta qué puede hacer la persona; sin acceso por omisión (no aparece la sección)
   'GET /campaigns/access': () => ({ body: { plan_enabled: true, read: false, send: false, view_all: false, manage_limits: false } }),
+  'GET /ads/creatives': () => ({ body: { items: {} } }),
   'GET /connection-health': () => ({ body: { generated_at: '2026-11-17T00:00:00.000Z', connections: [] } }),
 });
 
