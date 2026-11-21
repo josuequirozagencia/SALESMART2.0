@@ -3,7 +3,7 @@ import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit, type AuditSource } from '../audit';
 import { DomainEventBus } from '../events';
-import { AttributionService } from '../attribution';
+import { AttributionService, type ClickInput } from '../attribution';
 import { ContactsService, ContactTouchesService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { RealtimeService } from '../realtime';
@@ -80,7 +80,7 @@ export class ConversationsService {
     const clid = m.referral?.ctwaClid ?? null;
     // WhatsApp por QR puede traer el clic de un contacto que WhatsApp identifica solo con su código `@lid` (sin teléfono): el clic se guarda igual (v20, ADR-55)
     if (clid) {
-      await this.attribution.recordIn(tx, { phone: m.from, ctwa_cl_id: clid, ...(m.referral?.platform ? { placement: m.referral.platform } : {}), source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() }, m.sentAt, contact);
+      await this.attribution.recordIn(tx, this.clickOf(m, clid), m.sentAt, contact);
     } else if (contact.created) {
       await this.touches.record(tx, contact.id, { kind: 'message_in', at: m.sentAt, source: 'whatsapp', originRef: m.externalId });
     }
@@ -136,6 +136,29 @@ export class ConversationsService {
     // Saludo o aviso de fuera de horario de la cola (M5.5c): salen al cliente como mensaje automático, que no es una respuesta humana
     await this.autoMessages.afterInbound(tx, { conversationId: conv.id, channelAccountId, queueId: a.queueId, created: conv.created, receivedAt: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, inboundAt: m.sentAt, now: assign.now, timeZone: assign.timeZone });
     return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
+  }
+
+  /** El clic de anuncio que trae un mensaje, como lo registra la atribución (el mismo para el mensaje que llega y para la recuperación de avisos guardados, v20). */
+  private clickOf(m: NormalizedMessage, clid: string): ClickInput {
+    return { phone: m.from, ctwa_cl_id: clid, ...(m.referral?.platform ? { placement: m.referral.platform } : {}), source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() };
+  }
+
+  /**
+   * Recuperación de anuncios (v20): un aviso YA guardado trae el clic de un mensaje que ya existe. Busca el contacto de ese mensaje (por `(canal, id del mensaje)`) y le aplica el clic con su hora real: primer y último toque,
+   * historial y, solo si es de hace menos de 7 días, el Lead hacia Meta. Idempotente (el mismo clic no cambia nada). `no_message`: el mensaje nunca se guardó (no hay a quién atribuir).
+   */
+  async applyBackfillClick(tx: TenantTx, channelAccountId: string, m: NormalizedMessage): Promise<'applied' | 'no_click' | 'no_message'> {
+    const clid = m.referral?.ctwaClid ?? null;
+    if (!clid) return 'no_click';
+    const [row] = await tx
+      .select({ contactId: conversations.contactId })
+      .from(messages)
+      .innerJoin(conversations, and(eq(conversations.organizationId, messages.organizationId), eq(conversations.id, messages.conversationId)))
+      .where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId), eq(messages.direction, 'in')))
+      .limit(1);
+    if (!row) return 'no_message';
+    await this.attribution.recordIn(tx, this.clickOf(m, clid), m.sentAt, { id: row.contactId, created: false });
+    return 'applied';
   }
 
   /** El archivo de un mensaje que entra, aparte en `message_attachments`: la tarea `attachments` lo descarga y lo revisa. */

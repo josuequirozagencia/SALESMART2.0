@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEvolutionWebhook, phoneFromJid, redactEvolutionPayload, verifyEvolutionToken } from '../../src/modules/channels/evolution-webhook';
+import { adThumbnailOf, parseEvolutionWebhook, phoneFromJid, redactEvolutionPayload, verifyEvolutionToken } from '../../src/modules/channels/evolution-webhook';
 
 /**
  * Los avisos de abajo reproducen la FORMA de los eventos reales que capturó el spike del 2026-10-27 (Evolution v2.3.7, `spikes/whatsapp-qr/INFORME.md`), con teléfonos, nombres,
@@ -294,5 +294,41 @@ describe('anuncio de Meta que trae el mensaje (externalAdReply, v20 · ADR-55)',
     expect(/\p{Cc}/u.test(m?.referral?.headline ?? '')).toBe(false);
     expect(m?.referral?.ctwaClid?.length).toBeLessThanOrEqual(500);
     expect(m).toMatchObject({ from: `+${CLIENT}`, kind: 'text', text: 'Hola, vengo del anuncio' });
+  });
+});
+
+describe('miniatura del anuncio (adThumbnailOf) y redacción del aviso (v20 · ADR-55)', () => {
+  const withAd = (thumbnail: unknown, over: Record<string, unknown> = {}) => ({ message: { conversation: 'Hola' }, contextInfo: { externalAdReply: { sourceId: '120210000000000001', title: 'Cupos', ...(thumbnail === undefined ? {} : { thumbnail }), ...over } } });
+  const jpeg = [255, 216, 255, 224, 0, 16, 74, 70];
+
+  it('lee los bytes cuando Evolution manda una lista de números (objeto con índices, como llega) o un arreglo, y detecta el tipo por su contenido', () => {
+    const obj = Object.fromEntries(jpeg.map((n, i) => [String(i), n]));
+    expect(adThumbnailOf(withAd(obj))).toMatchObject({ sourceId: '120210000000000001', mime: 'image/jpeg' });
+    expect(adThumbnailOf(withAd(jpeg))?.bytes.equals(Buffer.from(jpeg))).toBe(true);
+    expect(adThumbnailOf(withAd([0x89, 0x50, 0x4e, 0x47, 1, 2]))?.mime).toBe('image/png');
+    expect(adThumbnailOf(withAd([...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WEBP')]))?.mime).toBe('image/webp');
+  });
+
+  it('también acepta base64; y lo busca dentro del contenido del mensaje', () => {
+    expect(adThumbnailOf(withAd(Buffer.from(jpeg).toString('base64')))?.mime).toBe('image/jpeg');
+    expect(adThumbnailOf({ message: { extendedTextMessage: { text: 'x', contextInfo: { externalAdReply: { sourceId: '9', thumbnail: jpeg } } } } })?.sourceId).toBe('9');
+  });
+
+  it('rechaza lo que no es una imagen, lo muy grande, lo que no son bytes y lo que no trae id de anuncio', () => {
+    expect(adThumbnailOf(withAd([1, 2, 3, 4, 5]))).toBeNull(); // bytes que no son una imagen
+    expect(adThumbnailOf(withAd(['a', 'b']))).toBeNull();
+    expect(adThumbnailOf(withAd([300, 216, 255, 224]))).toBeNull(); // un valor que no es un byte
+    expect(adThumbnailOf(withAd(Array.from({ length: 100_001 }, () => 255)))).toBeNull();
+    expect(adThumbnailOf(withAd(jpeg, { sourceId: undefined }))).toBeNull();
+    expect(adThumbnailOf(withAd(undefined))).toBeNull();
+    expect(adThumbnailOf({ message: { conversation: 'sin anuncio' } })).toBeNull();
+    expect(adThumbnailOf(withAd('no es base64 válido ¡!'))).toBeNull();
+  });
+
+  it('el aviso que se guarda no lleva los bytes de la miniatura (ni la del anuncio ni la de un medio), pero conserva el resto', () => {
+    const out = redactEvolutionPayload({ data: { contextInfo: { externalAdReply: { sourceId: '1', thumbnail: { '0': 255 }, ctwaClid: 'C' } }, message: { imageMessage: { jpegThumbnail: 'AAAA', caption: 'foto' } } }, apikey: 'SECRETA' });
+    expect(JSON.stringify(out)).not.toContain('SECRETA');
+    expect(out.data.contextInfo.externalAdReply).toEqual({ sourceId: '1', thumbnail: '[miniatura]', ctwaClid: 'C' });
+    expect(out.data.message.imageMessage).toEqual({ jpegThumbnail: '[miniatura]', caption: 'foto' });
   });
 });

@@ -44,7 +44,8 @@ const TOKEN_A = 'EAAGm0PX4ZCpsBAalicia0123456789abcdef';
 const TOKEN_B = 'EAAGm0PX4ZCpsBAbeto0123456789abcdefgh';
 const DATASET_A = '111122223333444';
 const DATASET_B = '555566667777888';
-const NOW = new Date('2026-10-24T12:00:00.000Z');
+// Relativo a hoy: Meta no acepta eventos de más de 7 días y el sender también caduca por la hora del hecho (v20)
+const NOW = new Date(Math.floor((Date.now() - 3_600_000) / 1000) * 1000);
 const DAY = 24 * 60 * 60_000;
 
 let admin: Client;

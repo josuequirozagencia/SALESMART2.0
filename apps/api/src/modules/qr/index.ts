@@ -10,3 +10,6 @@ export { QR_SESSION, QrSessionError, isRetryableQr, type QrSessionProvider, type
 export { FakeQrSession, FAKE_QR_KEY } from './qr-session.fake';
 export { EvolutionProvider } from './evolution.provider';
 export { dailyLimit, sendGate, warmupDay, MIN_GAP_MS } from './qr-limits';
+export { AdBackfillJob } from './ad-backfill.job';
+export { AdBackfillService, AD_BACKFILL_BATCH, type AdBackfillResult } from './ad-backfill.service';
+export { AdCreativesService, adInfoOf, type AdInfo } from './ad-creatives.service';

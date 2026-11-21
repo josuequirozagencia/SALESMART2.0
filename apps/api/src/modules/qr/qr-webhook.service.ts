@@ -6,8 +6,9 @@ import { InvalidContextError, TenantContext } from '../../tenant';
 import { AttachmentsService } from '../attachments';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
-import { errorLabel, parseEvolutionWebhook, WebhookEventsJob, WebhookEventsService } from '../channels';
+import { adThumbnailOf, errorLabel, parseEvolutionWebhook, WebhookEventsJob, WebhookEventsService } from '../channels';
 import { QrRoutesService } from '../organizations';
+import { AdCreativesService, adInfoOf } from './ad-creatives.service';
 import { QrConnectionsService } from './qr-connections.service';
 
 /**
@@ -25,6 +26,7 @@ export class QrWebhookService {
     @Inject(QrConnectionsService) private readonly connections: QrConnectionsService,
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
     @Inject(WebhookEventsJob) private readonly drainer: WebhookEventsJob,
+    @Inject(AdCreativesService) private readonly ads: AdCreativesService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -69,6 +71,13 @@ export class QrWebhookService {
       const mime = parsed.events.flatMap((e) => e.event.messages).find((m) => m.externalId === messageId)?.media?.mimeType ?? 'application/octet-stream';
       const key = await this.files.putInbound(organizationId, Buffer.from(b64, 'base64'), mime.split(';')[0] ?? 'application/octet-stream');
       if (key) media_keys[messageId] = key;
+    }
+    // El anuncio de Meta que trae el mensaje (v20): se recuerda con su miniatura UNA vez; el aviso se guarda sin los bytes de la miniatura (la redacción los quita)
+    const data = typeof (body as Record<string, unknown>)['data'] === 'object' && (body as Record<string, unknown>)['data'] !== null ? ((body as Record<string, unknown>)['data'] as Record<string, unknown>) : null;
+    const thumb = data ? adThumbnailOf(data) : null;
+    for (const m of parsed.events.flatMap((e) => e.event.messages)) {
+      const ad = adInfoOf(m.referral);
+      if (ad) await this.ads.remember(ad, thumb && thumb.sourceId === ad.sourceId ? { bytes: thumb.bytes, mime: thumb.mime } : null, organizationId).catch(() => undefined);
     }
     for (const { raw } of parsed.events) await this.events.store(channelAccountId, parsed.instance, { __qr: 1, instance: parsed.instance, event, data: raw, media_keys }, now);
     return true;

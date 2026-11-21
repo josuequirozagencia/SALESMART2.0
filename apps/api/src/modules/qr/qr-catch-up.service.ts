@@ -3,8 +3,10 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { channelAccounts, Database, messages, qrAccounts } from '../../db';
 import { NotFoundError } from '../../errors';
 import type { AppLogger } from '../../logger';
+import { TenantContext } from '../../tenant';
 import { APP_LOGGER } from '../../tokens';
-import { errorLabel, lidFromJid, parseEvolutionWebhook, phoneFromJid, WebhookEventsService } from '../channels';
+import { adThumbnailOf, errorLabel, lidFromJid, parseEvolutionWebhook, phoneFromJid, WebhookEventsService } from '../channels';
+import { AdCreativesService, adInfoOf } from './ad-creatives.service';
 import { QrConnectionsService } from './qr-connections.service';
 import { QR_SESSION, QrSessionError, type QrSessionProvider } from './qr-session.port';
 
@@ -74,6 +76,7 @@ export class QrCatchUpService {
     @Inject(QR_SESSION) private readonly provider: QrSessionProvider,
     @Inject(QrConnectionsService) private readonly connections: QrConnectionsService,
     @Inject(WebhookEventsService) private readonly events: WebhookEventsService,
+    @Inject(AdCreativesService) private readonly ads: AdCreativesService,
     @Inject(APP_LOGGER) private readonly log: AppLogger,
   ) {}
 
@@ -104,6 +107,7 @@ export class QrCatchUpService {
         .where(and(eq(qrAccounts.channelAccountId, channelAccountId), isNull(channelAccounts.deletedAt))),
     );
     if (!row) throw new NotFoundError();
+    const organizationId = TenantContext.current().organizationId;
     const creds = await this.connections.mustCredentials();
     let recent;
     try {
@@ -121,6 +125,12 @@ export class QrCatchUpService {
       for (const e of parsed.events) {
         const m = e.event.messages[0];
         if (m) candidates.push({ raw: e.raw, externalId: m.externalId, at: m.sentAt.getTime() });
+        // El anuncio y su miniatura (v20): una sola copia por anuncio; los bytes no pasan al aviso que se guarda (la redacción los quita)
+        const ad = adInfoOf(m?.referral);
+        if (ad) {
+          const th = adThumbnailOf(rec);
+          await this.ads.remember(ad, th && th.sourceId === ad.sourceId ? { bytes: th.bytes, mime: th.mime } : null, organizationId).catch(() => undefined);
+        }
       }
     }
     const known = new Set<string>();

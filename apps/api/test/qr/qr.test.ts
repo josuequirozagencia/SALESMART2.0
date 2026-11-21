@@ -17,14 +17,14 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
-import { AttachmentsModule, InboundMediaService } from '../../src/modules/attachments';
+import { AttachmentsModule, AttachmentsService, InboundMediaService } from '../../src/modules/attachments';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { ChannelsModule, WebhookEventsService } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule, OutboundDispatcher } from '../../src/modules/inbox';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { PlatformCredentialsReader } from '../../src/modules/platform';
-import { QrCatchUpJob, QrCatchUpService, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart, withKnownPhones } from '../../src/modules/qr';
+import { AdBackfillJob, AdBackfillService, QrCatchUpJob, QrCatchUpService, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart, withKnownPhones } from '../../src/modules/qr';
 import { DomainEventBus } from '../../src/modules/events';
 import { QueuesModule } from '../../src/modules/queues';
 import { Argon2idHasher } from '../../src/security';
@@ -51,7 +51,7 @@ const saved = { ...process.env };
 const fake = (): FakeQrSession => app.get(QR_SESSION, { strict: false }) as FakeQrSession;
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE webhook_events, message_attachments, messages, conversations, contact_phones, contacts, qr_accounts, whatsapp_accounts, channel_routes, channel_accounts, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE ad_creatives, webhook_events, message_attachments, messages, conversations, contact_phones, contacts, qr_accounts, whatsapp_accounts, channel_routes, channel_accounts, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
   await admin.query('TRUNCATE qr_routes');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
@@ -1125,5 +1125,118 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     expect(await contact(ORG_B)).toHaveLength(0);
     expect(await countOf('contact_touch_events', `organization_id = '${ORG_B}'`)).toBe(0);
     expect(await metaEvents(ORG_B)).toHaveLength(0);
+  });
+});
+
+describe('recuperación de anuncios de avisos guardados (v20 · ADR-55)', () => {
+  const JPEG = { '0': 255, '1': 216, '2': 255, '3': 224, '4': 1, '5': 2, '6': 3, '7': 4 };
+  const dataOf = (id: string, o: { clid?: string; ad?: string; title?: string; who?: string; ageH?: number; thumb?: boolean } = {}) => ({
+    key: { remoteJid: `${o.who ?? '593990000002'}@s.whatsapp.net`, remoteJidAlt: `${o.who ?? '593990000002'}@s.whatsapp.net`, fromMe: false, id, participant: '' },
+    pushName: 'Cliente Anuncio',
+    message: { conversation: 'Hola, vengo del anuncio' },
+    messageType: 'conversation',
+    messageTimestamp: Math.floor(Date.now() / 1000 - (o.ageH ?? 2) * 3600),
+    contextInfo: { externalAdReply: { title: o.title ?? 'Cupos abiertos', body: 'Escríbenos', ctwaClid: o.clid ?? 'CLID-BF-0001', sourceId: o.ad ?? '120210000000000001', sourceUrl: 'https://fb.me/ejemplo', sourceApp: 'instagram', ...(o.thumb === false ? {} : { thumbnail: JPEG }) } },
+  });
+  /** Un aviso ya guardado (como los de antes de leer los anuncios), con el mensaje ya ingerido SIN atribución. */
+  const stored = async (v: View, inst: string, id: string, o: Parameters<typeof dataOf>[1] = {}, withMessage = true): Promise<void> => {
+    if (withMessage) {
+      await post(v.id, upsert(inst, id, { conversation: 'Hola, vengo del anuncio' }, o.who ?? '593990000002'));
+      await runEvents();
+    }
+    const payload = { __qr: 1, instance: inst, event: 'messages.upsert', data: dataOf(id, o), media_keys: {} };
+    await admin.query(`INSERT INTO webhook_events(id, organization_id, channel_account_id, phone_number_id, payload, payload_hash, status, received_at, processed_at) VALUES (gen_random_uuid(), $1, $2, $3, $4::jsonb, $5, 'done', now() - interval '2 days', now() - interval '2 days')`, [ORG_A, v.id, inst, JSON.stringify(payload), randomBytes(32).toString('hex')]);
+  };
+  const run = (org = ORG_A) => inOrg(org, () => app.get(AdBackfillService).run(new Date()));
+  const contactAds = async (org = ORG_A) => (await admin.query(`SELECT ctwa_cl_id, first_touch_ad_id, last_touch_ad_id, first_touch_ad FROM contacts WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at`, [org])).rows as Array<Record<string, string | null>>;
+  const creatives = async (org = ORG_A) => (await admin.query(`SELECT source_id, headline, body, source_url, platform, thumbnail_key, thumbnail_mime FROM ad_creatives WHERE organization_id = $1 ORDER BY source_id`, [org])).rows as Array<Record<string, string | null>>;
+  const events = async () => (await admin.query(`SELECT payload, ad_scanned_at FROM webhook_events WHERE payload @> '{"__qr":1}'::jsonb AND payload->'data'->'contextInfo' IS NOT NULL`)).rows as Array<{ payload: Record<string, unknown>; ad_scanned_at: Date | null }>;
+  const setup = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    return { v, inst: await instanceOf(v.id) };
+  };
+
+  it('aplica el clic al contacto del mensaje con su hora real, recuerda el anuncio con su miniatura UNA vez (los bytes quedan en el almacenamiento) y quita los bytes del aviso; repetir no cambia nada', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000001');
+    const r = await run();
+    expect(r).toMatchObject({ scanned: 1, applied: 1, withoutMessage: 0, ads: 1 });
+    expect((await contactAds())[0]).toMatchObject({ ctwa_cl_id: 'CLID-BF-0001', first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000001' });
+    const [ad] = await creatives();
+    expect(ad).toMatchObject({ source_id: '120210000000000001', headline: 'Cupos abiertos', body: 'Escríbenos', source_url: 'https://fb.me/ejemplo', platform: 'instagram', thumbnail_mime: 'image/jpeg' });
+    expect((await app.get(AttachmentsService).read(ad!['thumbnail_key']!)).equals(Buffer.from([255, 216, 255, 224, 1, 2, 3, 4]))).toBe(true);
+    const [ev] = await events();
+    expect(ev!.ad_scanned_at).not.toBeNull();
+    expect(JSON.stringify(ev!.payload)).toContain('[miniatura]');
+    expect(JSON.stringify(ev!.payload)).not.toContain('"thumbnail":{');
+    // repetir: nada que revisar, nada que cambiar
+    expect(await run()).toMatchObject({ scanned: 0, applied: 0 });
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
+    expect(await creatives()).toHaveLength(1);
+  });
+
+  it('dos avisos del MISMO anuncio: una sola fila de anuncio y una sola miniatura guardada; cada clic distinto queda en el historial', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000002', { clid: 'CLID-BF-A', who: '593990000031' });
+    await stored(v, inst, 'BF-0000000000003', { clid: 'CLID-BF-B', who: '593990000032' });
+    expect(await run()).toMatchObject({ scanned: 2, applied: 2, ads: 1 });
+    expect(await creatives()).toHaveLength(1);
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(2);
+    expect((await creatives())[0]!['thumbnail_key']).not.toBeNull();
+  });
+
+  it('un aviso cuyo mensaje nunca se guardó se marca como revisado y no atribuye a nadie; el anuncio sí se recuerda', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000004', {}, false);
+    expect(await run()).toMatchObject({ scanned: 1, applied: 0, withoutMessage: 1, ads: 1 });
+    expect(await contactAds()).toHaveLength(0);
+    expect((await events())[0]!.ad_scanned_at).not.toBeNull();
+  });
+
+  it('un clic de hace más de 7 días se atribuye al contacto pero NO genera evento hacia Meta; uno reciente sí', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000005', { ageH: 9 * 24, clid: 'CLID-BF-VIEJO', who: '593990000041' });
+    await stored(v, inst, 'BF-0000000000006', { ageH: 3, clid: 'CLID-BF-NUEVO', who: '593990000042' });
+    await run();
+    expect(await contactAds()).toHaveLength(2);
+    const evs = (await admin.query(`SELECT payload FROM meta_events WHERE organization_id = $1`, [ORG_A])).rows as Array<{ payload: { user_data: { ctwa_clid: string } } }>;
+    expect(evs.map((e) => e.payload.user_data.ctwa_clid)).toEqual(['CLID-BF-NUEVO']);
+  });
+
+  it('camino en vivo: un mensaje con anuncio recuerda el anuncio con su miniatura y el aviso se guarda SIN los bytes', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, evt(inst, 'messages.upsert', { ...dataOf('BF-LIVE-000000001', { clid: 'CLID-LIVE-1' }), status: 'DELIVERY_ACK', instanceId: 'i-1', source: 'android' }));
+    await runEvents();
+    const [ad] = await creatives();
+    expect(ad).toMatchObject({ source_id: '120210000000000001', thumbnail_mime: 'image/jpeg' });
+    expect(ad!['thumbnail_key']).not.toBeNull();
+    expect(JSON.stringify((await events())[0]!.payload)).not.toContain('"thumbnail":{');
+    expect((await contactAds())[0]).toMatchObject({ ctwa_cl_id: 'CLID-LIVE-1' });
+    // el mismo anuncio en otro mensaje no sube otra miniatura
+    const key = ad!['thumbnail_key'];
+    await post(v.id, evt(inst, 'messages.upsert', { ...dataOf('BF-LIVE-000000002', { clid: 'CLID-LIVE-2', who: '593990000051' }), status: 'DELIVERY_ACK', instanceId: 'i-1', source: 'android' }));
+    await runEvents();
+    expect((await creatives())).toHaveLength(1);
+    expect((await creatives())[0]!['thumbnail_key']).toBe(key);
+  });
+
+  it('aislamiento A↔B: la tarea de una empresa no ve los avisos de otra, y un anuncio con el mismo id en otra empresa es otra fila', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-ISO-000000001');
+    expect(await run(ORG_B)).toMatchObject({ scanned: 0, applied: 0 });
+    expect((await events())[0]!.ad_scanned_at).toBeNull();
+    expect(await creatives(ORG_B)).toHaveLength(0);
+    await run(ORG_A);
+    expect(await creatives(ORG_A)).toHaveLength(1);
+    expect(await creatives(ORG_B)).toHaveLength(0);
+    expect(await contactAds(ORG_B)).toHaveLength(0);
+  });
+
+  it('la tarea recorre las empresas con WhatsApp por QR', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-JOB-000000001');
+    expect(await app.get(AdBackfillJob).run(new Date())).toBe(1);
+    expect(await app.get(AdBackfillJob).run(new Date())).toBe(0);
   });
 });

@@ -28,6 +28,8 @@ const E164_RE = /^\+[1-9]\d{7,14}$/;
 const SECRET_KEYS = new Set(['apikey', 'destination', 'token', 'jwt', 'secret']);
 /** El archivo en base64 que viaja dentro del aviso. */
 const INLINE_KEYS = new Set(['base64']);
+/** Miniaturas (la del anuncio de Meta y la de los medios): bytes que no se guardan en cada aviso. La del anuncio se guarda UNA vez por anuncio (v20). */
+const THUMB_KEYS = new Set(['thumbnail', 'jpegThumbnail']);
 
 /** Copia del aviso apta para guardarse: sin claves secretas y sin los archivos en base64 (que se guardan aparte). */
 export function redactEvolutionPayload<T>(value: T): T {
@@ -36,11 +38,39 @@ export function redactEvolutionPayload<T>(value: T): T {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
       if (SECRET_KEYS.has(k.toLowerCase())) continue;
-      out[k] = INLINE_KEYS.has(k) && typeof v === 'string' ? `[archivo: ${v.length} caracteres]` : redactEvolutionPayload(v);
+      out[k] = INLINE_KEYS.has(k) && typeof v === 'string' ? `[archivo: ${v.length} caracteres]` : THUMB_KEYS.has(k) && v !== null && typeof v === 'object' ? '[miniatura]' : THUMB_KEYS.has(k) && typeof v === 'string' ? '[miniatura]' : redactEvolutionPayload(v);
     }
     return out as T;
   }
   return value;
+}
+
+/** Tamaño máximo de la miniatura de un anuncio que se guarda (las de Evolution pesan 1 a 3 KB). */
+export const MAX_AD_THUMBNAIL_BYTES = 100_000;
+
+/**
+ * La miniatura del anuncio de Meta que trae el aviso (v20): `externalAdReply.thumbnail`, que Evolution manda como lista de números (los bytes de un JPEG) o como texto en base64. Devuelve el id del anuncio
+ * y los bytes, solo si hay `sourceId` y los bytes son realmente una imagen (JPEG, PNG o WebP, por su contenido) de hasta 100 KB. Pura.
+ */
+export function adThumbnailOf(data: Record<string, unknown>): { sourceId: string; bytes: Buffer; mime: string } | null {
+  const holders: unknown[] = [data['contextInfo']];
+  const message = isObj(data['message']) ? data['message'] : {};
+  for (const v of Object.values(message)) holders.push(isObj(v) ? v['contextInfo'] : null);
+  const ad = holders.map((h) => (isObj(h) && isObj(h['externalAdReply']) ? h['externalAdReply'] : null)).find((x) => x !== null);
+  if (!ad) return null;
+  const sourceId = str(ad['sourceId']);
+  const raw = ad['thumbnail'];
+  if (!sourceId || sourceId.length > 100 || raw === null || raw === undefined) return null;
+  let bytes: Buffer | null = null;
+  if (typeof raw === 'string') {
+    if (/^[A-Za-z0-9+/=\s]+$/.test(raw) && raw.length <= MAX_AD_THUMBNAIL_BYTES * 2) bytes = Buffer.from(raw, 'base64');
+  } else if (Array.isArray(raw) || isObj(raw)) {
+    const values = Array.isArray(raw) ? raw : Object.keys(raw).sort((a, b) => Number(a) - Number(b)).map((k) => (raw)[k]);
+    if (values.length > 0 && values.length <= MAX_AD_THUMBNAIL_BYTES && values.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 255)) bytes = Buffer.from(values as number[]);
+  }
+  if (!bytes || bytes.length < 4 || bytes.length > MAX_AD_THUMBNAIL_BYTES) return null;
+  const mime = bytes[0] === 0xff && bytes[1] === 0xd8 ? 'image/jpeg' : bytes.subarray(0, 4).toString('latin1') === '\x89PNG' ? 'image/png' : bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP' ? 'image/webp' : null;
+  return mime ? { sourceId, bytes, mime } : null;
 }
 
 /** Token del webhook (`?token=`) comparado en tiempo constante. Un token vacío nunca autentica. */
