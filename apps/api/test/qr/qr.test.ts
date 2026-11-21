@@ -7,6 +7,7 @@
 //   PATCH /v1/qr-channels/:id
 //   DELETE /v1/qr-channels/:id
 //   POST /v1/qr-channels/:id/catch-up
+//   GET /v1/ads/creatives
 //   POST /v1/integrations/qr/webhook/:routeId
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
@@ -17,7 +18,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
-import { AttachmentsModule, AttachmentsService, InboundMediaService } from '../../src/modules/attachments';
+import { AdsModule } from '../../src/modules/ads';
+import { AttachmentsModule, AttachmentsService, InboundMediaService, StorageGateway } from '../../src/modules/attachments';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { ChannelsModule, WebhookEventsService } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
@@ -33,7 +35,7 @@ import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
 @Module({
-  imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, QueuesModule, ChannelsModule, AttachmentsModule, InboxModule, QrModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })],
+  imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, QueuesModule, ChannelsModule, AttachmentsModule, InboxModule, QrModule, AdsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })],
 })
 class TestAppModule {}
 
@@ -1030,7 +1032,7 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     await runEvents();
     const [c] = await contact();
     expect(c).toMatchObject({ channel: 'instagram', ctwa_cl_id: 'CLID-PRUEBA-0001', first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000001', first_touch_source: 'meta_ctwa' });
-    expect(c!['first_touch_ad']).toBe('Cupos abiertos'); // por ahora el titular hace de nombre (se corrige en la siguiente entrega de V20)
+    expect(c!['first_touch_ad']).toBeNull(); // el titular NO es el nombre del anuncio (v20): vive en el historial y en el anuncio, no en el nombre
     const touches = (await admin.query(`SELECT kind, ad_id, ctwa_clid, headline, source_url FROM contact_touch_events WHERE contact_id = $1`, [c!['id']])).rows;
     expect(touches).toEqual([{ kind: 'ad_click', ad_id: '120210000000000001', ctwa_clid: 'CLID-PRUEBA-0001', headline: 'Cupos abiertos', source_url: 'https://fb.me/ejemplo' }]);
     const evs = await metaEvents();
@@ -1238,5 +1240,73 @@ describe('recuperación de anuncios de avisos guardados (v20 · ADR-55)', () => 
     await stored(v, inst, 'BF-JOB-000000001');
     expect(await app.get(AdBackfillJob).run(new Date())).toBe(1);
     expect(await app.get(AdBackfillJob).run(new Date())).toBe(0);
+  });
+});
+
+describe('anuncios de la empresa: GET /v1/ads/creatives (v20 · ADR-55)', () => {
+  const JPEG = { '0': 255, '1': 216, '2': 255, '3': 224, '4': 1, '5': 2, '6': 3, '7': 4 };
+  const adEvent = (instance: string, id: string, ad: string, title: string, app: string) =>
+    evt(instance, 'messages.upsert', {
+      key: { remoteJid: '593990000002@s.whatsapp.net', remoteJidAlt: '593990000002@s.whatsapp.net', fromMe: false, id, participant: '' },
+      pushName: 'Cliente Anuncio',
+      status: 'DELIVERY_ACK',
+      message: { conversation: 'Hola' },
+      messageType: 'conversation',
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      instanceId: 'i-1',
+      source: 'android',
+      contextInfo: { externalAdReply: { title, body: 'Escríbenos', ctwaClid: `CLID-${id}`, sourceId: ad, sourceUrl: 'https://fb.me/ejemplo', sourceApp: app, thumbnail: JPEG } },
+    });
+  const get = (token: string | undefined, query: string) => call('GET', `/ads/creatives${query}`, token);
+  const seedAds = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    const inst = await instanceOf(v.id);
+    await post(v.id, adEvent(inst, 'ADS-0000000000001', '120210000000000011', 'Define Tu Abdomen', 'instagram'));
+    await post(v.id, adEvent(inst, 'ADS-0000000000002', '120210000000000012', 'Spaencasa.Ec', 'facebook'));
+    await runEvents();
+  };
+
+  it('da el titular, el texto, la dirección, la red y la dirección firmada de la miniatura de cada anuncio pedido; un id que no existe no sale', async () => {
+    await seedAds();
+    const r = await get(T.alice, '?ids=120210000000000011,120210000000000012,999');
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    const { items } = await json<{ items: Record<string, { headline: string; body: string; source_url: string; platform: string; thumbnail_url: string | null }> }>(r);
+    expect(Object.keys(items).sort()).toEqual(['120210000000000011', '120210000000000012']);
+    expect(items['120210000000000011']).toMatchObject({ headline: 'Define Tu Abdomen', body: 'Escríbenos', source_url: 'https://fb.me/ejemplo', platform: 'instagram' });
+    expect(items['120210000000000012']).toMatchObject({ headline: 'Spaencasa.Ec', platform: 'facebook' });
+    expect(items['120210000000000011']!.thumbnail_url).toMatch(/^https?:\/\//);
+  });
+
+  it('también lo ve el asesor (puede ver contactos); sin sesión 401', async () => {
+    await seedAds();
+    expect((await get(T.carol, '?ids=120210000000000011')).status).toBe(200);
+    expect((await get(undefined, '?ids=120210000000000011')).status).toBe(401);
+  });
+
+  it('aislamiento A↔B: otra empresa pidiendo el mismo id no obtiene nada del anuncio de la primera', async () => {
+    await seedAds();
+    const r = await get(T.bob, '?ids=120210000000000011,120210000000000012');
+    expect(r.status).toBe(200);
+    expect(await json<{ items: Record<string, unknown> }>(r)).toEqual({ items: {} });
+  });
+
+  it('valida lo que se pide: sin ids, demasiados (más de 50), caracteres que no son de un id y parámetros de más son 400', async () => {
+    expect((await get(T.alice, '')).status).toBe(400);
+    expect((await get(T.alice, '?ids=')).status).toBe(400);
+    expect((await get(T.alice, `?ids=${Array.from({ length: 51 }, (_x, i) => `a${i}`).join(',')}`)).status).toBe(400);
+    expect((await get(T.alice, '?ids=a%27%3B--')).status).toBe(400);
+    expect((await get(T.alice, '?ids=abc&otro=1')).status).toBe(400);
+    expect((await get(T.alice, `?ids=${'a,'.repeat(10)}b`)).status).toBe(200); // los repetidos se juntan
+  });
+
+  it('con el almacenamiento caído el anuncio se responde sin imagen (no rompe la pantalla)', async () => {
+    await seedAds();
+    const storage = app.get(StorageGateway);
+    const spy = vi.spyOn(storage, 'signedUrl').mockRejectedValue(new Error('almacenamiento caído'));
+    const r = await json<{ items: Record<string, { headline: string; thumbnail_url: string | null }> }>(await get(T.alice, '?ids=120210000000000011'));
+    spy.mockRestore();
+    expect(r.items['120210000000000011']).toMatchObject({ headline: 'Define Tu Abdomen', thumbnail_url: null });
   });
 });

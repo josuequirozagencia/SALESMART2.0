@@ -413,6 +413,8 @@ export interface ContactTouch {
   campaign: string | null;
   adset: string | null;
   ad: string | null;
+  /** Id del anuncio de Meta (v20). */
+  ad_id?: string | null;
 }
 /** Canal de entrada del contacto (M3.3 §11). */
 export type ContactChannel = 'facebook' | 'instagram' | 'whatsapp' | 'manual' | 'other';
