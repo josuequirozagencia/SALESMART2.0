@@ -108,6 +108,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/tags', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'GET /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  // El Lead a mano (2026-11-23): el asesor coloca o quita la etiqueta del sistema «Lead» y al colocarla sale el Lead a Meta. Mismas pruebas.
+  { route: 'PUT /v1/contacts/:id/lead', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  { route: 'DELETE /v1/contacts/:id/lead', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/ctwa/:endpointId', kind: 'public' },
   // Importar y exportar contactos (M3.5, ADR-47). Pruebas: test/imports/imports.test.ts
   { route: 'POST /v1/contacts/export', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },

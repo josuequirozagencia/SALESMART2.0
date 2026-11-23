@@ -42,8 +42,9 @@ interface World {
   reactions: Array<{ path: string; body: unknown }>;
   appointments: unknown[];
   sales: unknown[];
+  leads: string[];
 }
-const world = (over: Partial<World> = {}): World => ({ conv: conv(), messages: [msg()], tags: [SYSTEM, VIP, FRIO], manage: true, patches: [], creates: [], reactions: [], appointments: [], sales: [], ...over });
+const world = (over: Partial<World> = {}): World => ({ conv: conv(), messages: [msg()], tags: [SYSTEM, VIP, FRIO], manage: true, patches: [], creates: [], reactions: [], appointments: [], sales: [], leads: [], ...over });
 
 function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
   return {
@@ -68,6 +69,16 @@ function server(w: World, me = ME_ADVISOR): Record<string, Handler> {
       w.conv = { ...w.conv, tags: [...w.conv.tags.filter((t) => t.is_system), ...w.tags.filter((t) => ids.includes(t.id))] };
       return { body: CONTACT };
     },
+    'PUT /contacts/k1/lead': () => {
+      w.leads.push('PUT');
+      if (!w.conv.tags.some((t) => t.system_key === 'lead')) w.conv = { ...w.conv, tags: [SYSTEM, ...w.conv.tags] };
+      return { body: { lead: true, event: 'queued' } };
+    },
+    'DELETE /contacts/k1/lead': () => {
+      w.leads.push('DELETE');
+      w.conv = { ...w.conv, tags: w.conv.tags.filter((t) => t.system_key !== 'lead') };
+      return { body: { lead: false, event: 'none' } };
+    },
     'PUT /conversations/c1/messages/m1/reaction': (call) => {
       w.reactions.push({ path: '/conversations/c1/messages/m1/reaction', body: call.body });
       const emoji = (call.body as { emoji: string | null }).emoji;
@@ -89,33 +100,44 @@ const open = async (w: World, me = ME_ADVISOR) => {
 };
 
 describe('Inbox · etiquetas del contacto', () => {
-  it('cada etiqueta personalizada lleva un × para quitarla; las del sistema no lo llevan; quitar manda solo las personalizadas que quedan', async () => {
+  it('cada etiqueta lleva un × para quitarla (también «Lead», que se maneja a mano); quitar una personalizada manda solo las que quedan y quitar «Lead» pide quitarlo del contacto', async () => {
     const w = world();
     await open(w);
     await screen.findAllByText('VIP');
     const quitar = (await screen.findAllByRole('button', { name: 'Quitar la etiqueta «VIP»' }))[0]!;
-    expect(screen.queryByRole('button', { name: /Quitar la etiqueta «Lead»/ })).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Quitar la etiqueta «Lead»' }).length).toBeGreaterThan(0);
     await userEvent.click(quitar);
     await waitFor(() => expect(w.patches.at(-1)).toEqual({ path: '/contacts/k1', body: { tag_ids: [] } }));
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Quitar la etiqueta «VIP»' })).toBeNull());
-    // Lead (del sistema) sigue ahí
+    // Lead (del sistema) sigue ahí hasta que se quita a propósito, y entonces se llama a su ruta propia
     expect((await screen.findAllByText('Lead')).length).toBeGreaterThan(0);
+    await userEvent.click((await screen.findAllByRole('button', { name: 'Quitar la etiqueta «Lead»' }))[0]!);
+    await waitFor(() => expect(w.leads).toEqual(['DELETE']));
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Quitar la etiqueta «Lead»' })).toBeNull());
   });
 
-  it('la cabecera muestra las etiquetas y «Etiquetas» abre el diálogo: las del sistema solo se ven; las personalizadas se marcan y desmarcan', async () => {
+  it('la cabecera muestra las etiquetas y «Etiquetas» abre el diálogo: «Lead» (del sistema) se marca a mano y avisa a Meta; las personalizadas se marcan y desmarcan', async () => {
     const w = world();
     await open(w);
     expect((await screen.findAllByText('VIP')).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: 'Etiquetas del contacto' }));
     const d = within(await screen.findByRole('dialog', { name: 'Etiquetas de Ana Torres' }));
-    expect(await d.findByText('Lead')).toBeInTheDocument(); // del sistema: sin casilla
-    expect(d.queryByRole('checkbox', { name: /Lead/ })).toBeNull();
+    const lead = await d.findByRole('checkbox', { name: /Lead/ }); // del sistema, pero se marca a mano
+    expect(lead).toBeChecked();
     expect(await d.findByRole('checkbox', { name: /VIP/ })).toBeChecked();
     expect(d.getByRole('checkbox', { name: /Frío/ })).not.toBeChecked();
     await userEvent.click(d.getByRole('checkbox', { name: /Frío/ }));
     await waitFor(() => expect(w.patches.at(-1)).toEqual({ path: '/contacts/k1', body: { tag_ids: ['t-vip', 't-frio'] } }));
     await userEvent.click(d.getByRole('checkbox', { name: /VIP/ }));
     await waitFor(() => expect(w.patches.at(-1)!.body).toEqual({ tag_ids: ['t-frio'] }));
+    // Lead: quitarlo y volver a ponerlo usa su ruta; al ponerlo se explica que se avisa a Meta
+    await userEvent.click(d.getByRole('checkbox', { name: /Lead/ }));
+    await waitFor(() => expect(w.leads).toEqual(['DELETE']));
+    expect(await d.findByText('Lead quitado.')).toBeInTheDocument();
+    await userEvent.click(d.getByRole('checkbox', { name: /Lead/ }));
+    await waitFor(() => expect(w.leads).toEqual(['DELETE', 'PUT']));
+    expect(await d.findByText(/Lead marcado: se avisa a Meta/)).toBeInTheDocument();
+    expect(w.patches.every((x) => !JSON.stringify(x.body).includes('t-lead'))).toBe(true); // Lead nunca viaja en tag_ids
   });
 
   it('quien puede administrar etiquetas crea una nueva sin salir del chat y se la agrega al contacto', async () => {

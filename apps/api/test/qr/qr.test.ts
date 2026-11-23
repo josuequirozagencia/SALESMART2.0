@@ -839,7 +839,7 @@ describe('contactos por su código @lid cuando WhatsApp no entrega el teléfono 
     expect(await idsOf()).toEqual([{ contact_id: c!.id, kind: 'wa_lid', value: LID }]);
     expect((await convOf(v.id))?.['peer_id']).toBe(LID);
     expect(await countOf('messages')).toBe(1);
-    expect(await countOf('contact_tags', `contact_id = '${c!.id}'`)).toBe(1); // la etiqueta Lead del que escribe por primera vez
+    expect(await countOf('contact_tags', `contact_id = '${c!.id}'`)).toBe(0); // la etiqueta Lead ya no se pone sola: la coloca el asesor
     await post(v.id, lidMsg(inst, 'LID1-0000000000002', 'Sigo aquí'));
     await runEvents();
     expect(await contactsOf()).toHaveLength(1);
@@ -1026,7 +1026,7 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
   const contact = async (org = ORG_A) => (await admin.query(`SELECT id, channel, ctwa_cl_id, first_touch_ad_id, last_touch_ad_id, first_touch_ad, last_touch_ad, first_touch_source FROM contacts WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at`, [org])).rows as Array<Record<string, string | null>>;
   const metaEvents = async (org = ORG_A) => (await admin.query(`SELECT type, status, payload FROM meta_events WHERE organization_id = $1 ORDER BY created_at`, [org])).rows as Array<{ type: string; status: string; payload: { event_id: string; user_data: Record<string, unknown>; custom_data: Record<string, unknown> } }>;
 
-  it('un mensaje con anuncio deja en el contacto el click id, el id del anuncio y el titular (primer y último toque), el canal de la red, el historial y el Lead hacia Meta con teléfono con huella y click id', async () => {
+  it('un mensaje con anuncio deja en el contacto el click id, el id del anuncio y el titular (primer y último toque), el canal de la red y el historial, y NO deja ningún evento hacia Meta (el Lead de los chats se quitó el 2026-11-23)', async () => {
     const { v, inst } = await setup();
     await post(v.id, adMsg(inst, 'ADI-0000000000001'));
     await runEvents();
@@ -1035,13 +1035,8 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     expect(c!['first_touch_ad']).toBeNull(); // el titular NO es el nombre del anuncio (v20): vive en el historial y en el anuncio, no en el nombre
     const touches = (await admin.query(`SELECT kind, ad_id, ctwa_clid, headline, source_url FROM contact_touch_events WHERE contact_id = $1`, [c!['id']])).rows;
     expect(touches).toEqual([{ kind: 'ad_click', ad_id: '120210000000000001', ctwa_clid: 'CLID-PRUEBA-0001', headline: 'Cupos abiertos', source_url: 'https://fb.me/ejemplo' }]);
-    const evs = await metaEvents();
-    expect(evs).toHaveLength(1);
-    expect(evs[0]).toMatchObject({ type: 'Lead', status: 'pending' });
-    expect(evs[0]!.payload.user_data['ctwa_clid']).toBe('CLID-PRUEBA-0001');
-    expect(JSON.stringify(evs[0]!.payload)).not.toContain('593990000002'); // el teléfono nunca va en claro
-    expect(Array.isArray(evs[0]!.payload.user_data['ph'])).toBe(true);
-    expect(await countOf('contact_tags', `contact_id = '${c!['id']}'`)).toBe(1); // Lead
+    expect(await metaEvents()).toHaveLength(0);
+    expect(await countOf('contact_tags', `contact_id = '${c!['id']}'`)).toBe(0); // la etiqueta Lead no se pone sola: la coloca el asesor
   });
 
   it('Facebook como red: el contacto nuevo queda con canal «facebook»; sin red reconocible, también facebook (regla de siempre)', async () => {
@@ -1053,7 +1048,7 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     expect(rows.map((r) => r['channel']).sort()).toEqual(['facebook', 'facebook']);
   });
 
-  it('el mismo clic repetido no duplica (ni contacto, ni toque, ni evento); un clic de OTRO anuncio cambia el último toque y conserva el primero, con un Lead nuevo', async () => {
+  it('el mismo clic repetido no duplica (ni contacto, ni toque, ni evento); un clic de OTRO anuncio cambia el último toque y conserva el primero', async () => {
     const { v, inst } = await setup();
     await post(v.id, adMsg(inst, 'ADI-0000000000004'));
     await runEvents();
@@ -1061,13 +1056,13 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     await runEvents();
     expect(await contact()).toHaveLength(1);
     expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
-    expect(await metaEvents()).toHaveLength(1);
+    expect(await metaEvents()).toHaveLength(0);
     await post(v.id, adMsg(inst, 'ADI-0000000000006', { clid: 'CLID-PRUEBA-0003', ad: '120210000000000002', title: 'Otro anuncio' }));
     await runEvents();
     const [c] = await contact();
     expect(c).toMatchObject({ first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000002', ctwa_cl_id: 'CLID-PRUEBA-0003' });
     expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(2);
-    expect(await metaEvents()).toHaveLength(2);
+    expect(await metaEvents()).toHaveLength(0);
   });
 
   it('sin click id no se registra atribución (el contacto entra normal, con su toque de primer mensaje y sin evento)', async () => {
@@ -1087,19 +1082,17 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     expect((await contact())[0]).toMatchObject({ ctwa_cl_id: 'CLID-PRUEBA-0001', first_touch_ad_id: '120210000000000001' });
     expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
     expect(await metaEvents()).toHaveLength(0);
-    expect(await countOf('contact_tags', `true`)).toBe(1);
+    expect(await countOf('contact_tags', `true`)).toBe(0);
   });
 
-  it('un clic que llega de un contacto con solo su código @lid (sin teléfono) también se atribuye; el Lead sale con el click id y SIN teléfono', async () => {
+  it('un clic que llega de un contacto con solo su código @lid (sin teléfono) también se atribuye (sin teléfono) y no deja evento hacia Meta', async () => {
     const { v, inst } = await setup();
     await post(v.id, adMsg(inst, 'ADI-0000000000009', { lid: '257720267587799@lid' }));
     await runEvents();
     const [c] = await contact();
     expect(c).toMatchObject({ ctwa_cl_id: 'CLID-PRUEBA-0001', last_touch_ad_id: '120210000000000001' });
     expect(await countOf('contact_phones')).toBe(0);
-    const evs = await metaEvents();
-    expect(evs).toHaveLength(1);
-    expect(evs[0]!.payload.user_data).toEqual({ ctwa_clid: 'CLID-PRUEBA-0001' });
+    expect(await metaEvents()).toHaveLength(0);
   });
 
   it('lo que llega por «ponerse al día» también atribuye (histórico) y repetir la pasada no duplica', async () => {
@@ -1112,7 +1105,7 @@ describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
     await runEvents();
     expect(await contact()).toHaveLength(1);
     expect((await contact())[0]).toMatchObject({ channel: 'facebook', ctwa_cl_id: 'CLID-HIST-0001', last_touch_ad_id: '120210000000000003' });
-    expect(await metaEvents()).toHaveLength(1); // es de hace 5 h: Meta todavía lo acepta
+    expect(await metaEvents()).toHaveLength(0);
   });
 
   it('aislamiento A↔B: el clic de la empresa A nunca aparece en la B (ni contacto, ni toque, ni evento)', async () => {
@@ -1196,14 +1189,13 @@ describe('recuperación de anuncios de avisos guardados (v20 · ADR-55)', () => 
     expect((await events())[0]!.ad_scanned_at).not.toBeNull();
   });
 
-  it('un clic de hace más de 7 días se atribuye al contacto pero NO genera evento hacia Meta; uno reciente sí', async () => {
+  it('ningún clic recuperado genera evento hacia Meta (el Lead de los chats se quitó), ni el viejo ni el reciente', async () => {
     const { v, inst } = await setup();
     await stored(v, inst, 'BF-0000000000005', { ageH: 9 * 24, clid: 'CLID-BF-VIEJO', who: '593990000041' });
     await stored(v, inst, 'BF-0000000000006', { ageH: 3, clid: 'CLID-BF-NUEVO', who: '593990000042' });
     await run();
     expect(await contactAds()).toHaveLength(2);
-    const evs = (await admin.query(`SELECT payload FROM meta_events WHERE organization_id = $1`, [ORG_A])).rows as Array<{ payload: { user_data: { ctwa_clid: string } } }>;
-    expect(evs.map((e) => e.payload.user_data.ctwa_clid)).toEqual(['CLID-BF-NUEVO']);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM meta_events WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(0);
   });
 
   it('camino en vivo: un mensaje con anuncio recuerda el anuncio con su miniatura y el aviso se guarda SIN los bytes', async () => {

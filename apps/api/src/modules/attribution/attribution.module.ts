@@ -12,6 +12,8 @@ import { AttributionService } from './attribution.service';
 import { CapiSenderJob } from './capi-sender.job';
 import { CapiSenderService } from './capi-sender.service';
 import { FakeCapiProvider } from './capi.fake';
+import { LeadMarkController } from './lead-mark.controller';
+import { LeadMarkService } from './lead-mark.service';
 import { CAPI_PROVIDER, NoCapiProvider, type CapiProvider } from './capi.ports';
 import { MetaCapiProvider } from './meta-capi.provider';
 import { MetaSettingsController } from './meta-settings.controller';
@@ -31,9 +33,10 @@ export class AttributionModule {
     const mod: DynamicModule = {
       module: AttributionModule,
       imports: [ContactsModule, OrganizationsModule, TagsModule],
-      controllers: [AttributionWebhookController, AttributionEndpointController, AdPerformanceController, MetaSettingsController],
+      controllers: [AttributionWebhookController, AttributionEndpointController, AdPerformanceController, MetaSettingsController, LeadMarkController],
       providers: [
         AttributionService,
+        LeadMarkService,
         AdPerformanceService,
         CapiSenderService,
         CapiSenderJob,

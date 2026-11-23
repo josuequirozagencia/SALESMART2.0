@@ -331,8 +331,9 @@ describe('S1.2 · icono de etiquetas en la cabecera del chat', () => {
     const dlg = within(await screen.findByRole('dialog', { name: 'Etiquetas de la conversación' }));
     const search = await dlg.findByRole('searchbox', { name: 'Buscar etiquetas' });
     await userEvent.type(search, 'matri');
-    expect(dlg.getAllByRole('checkbox')).toHaveLength(1);
+    expect(dlg.getAllByRole('checkbox')).toHaveLength(2); // «Lead» (del sistema, siempre visible) y la etiqueta que coincide con la búsqueda
     expect(dlg.getByRole('checkbox', { name: 'Matriculado' })).toBeInTheDocument();
+    expect(dlg.queryByRole('checkbox', { name: 'Etiqueta 1' })).not.toBeInTheDocument();
     await userEvent.clear(search);
     await userEvent.type(search, 'zzz');
     expect(dlg.getByRole('status')).toHaveTextContent('Ninguna etiqueta se llama «zzz»');
