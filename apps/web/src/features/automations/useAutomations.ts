@@ -31,6 +31,8 @@ export interface Action {
   /** `owner` (el responsable del contacto) o el id de una persona. */
   assignee?: string;
   text?: string;
+  /** Enviar un mensaje: un archivo de la biblioteca que lo acompaña (solo su id). */
+  attachment?: { asset_id: string };
   channel_id?: string;
   template_id?: string;
   params?: Record<string, string>;
@@ -116,7 +118,7 @@ export function cleanAction(a: Action): Action {
     case 'create_task':
       return { type: a.type, title: a.title ?? '', ...(a.due_in_hours !== undefined && Number.isFinite(a.due_in_hours) ? { due_in_hours: a.due_in_hours } : {}), assignee: a.assignee || 'owner' };
     case 'send_text':
-      return { type: a.type, text: a.text ?? '' };
+      return { type: a.type, ...((a.text ?? '').trim() !== '' || !a.attachment ? { text: a.text ?? '' } : {}), ...(a.attachment ? { attachment: { asset_id: a.attachment.asset_id } } : {}) };
     case 'send_template':
       return { type: a.type, channel_id: a.channel_id ?? '', template_id: a.template_id ?? '', params: a.params ?? {} };
     case 'wait':

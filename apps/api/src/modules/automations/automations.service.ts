@@ -6,6 +6,7 @@ import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { CustomValuesService } from '../custom-fields';
 import { OrgMembersService } from '../organizations';
+import { LibraryService } from '../library';
 import { TemplatesService } from '../templates';
 import { hostAllowed, parseDestination } from './address-guard';
 import { ACTION_LABEL, definitionSchema, renderParam, MAX_AUTOMATIONS, MAX_HTTP_ACTIONS, type ActionDef, type ConditionDef, type TriggerDef } from './automation-model';
@@ -62,6 +63,7 @@ export class AutomationsService {
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(TemplatesService) private readonly templates: TemplatesService,
+    @Inject(LibraryService) private readonly library: LibraryService,
   ) {}
 
   // ------------------------------------------------------------------ lectura
@@ -304,6 +306,11 @@ export class AutomationsService {
           if (a.assignee !== 'owner' && !people.has(a.assignee)) add(`${p}.assignee`, 'Esa persona no puede recibir trabajo en la empresa');
           break;
         case 'send_text':
+          if (a.attachment) {
+            const asset = await this.library.forAutomation(tx, a.attachment.asset_id);
+            if (!asset.ok) add(`${p}.attachment.asset_id`, asset.reason === 'unscanned' ? 'El archivo no pasó por el antivirus y la empresa lo exige' : 'El archivo de la biblioteca no existe o está archivado', asset.reason);
+          }
+          break;
         case 'start_agent':
           break;
         case 'http_request': {

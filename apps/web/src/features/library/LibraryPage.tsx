@@ -4,7 +4,7 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { PageHeader } from '../../ui/PageHeader';
 import { Pill } from '../../ui/Pill';
-import { assetUrl, KIND_LABEL, sizeLabel, useAssetThumb, useLibrary, useLibraryAccess, useLibraryMutations, useUploadAsset, type AssetChanges, type LibraryAsset, type LibraryFilter, type LibraryFolder, type LibraryUsage } from './useLibrary';
+import { assetUrl, KIND_LABEL, sizeLabel, useAssetThumb, useAssetUsage, useLibrary, useLibraryAccess, useLibraryMutations, useUploadAsset, type AssetChanges, type LibraryAsset, type LibraryFilter, type LibraryFolder, type LibraryUsage } from './useLibrary';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
 const SMALL = '!px-3 !py-1.5 !text-[12.5px]';
@@ -107,10 +107,18 @@ function EditDialog({ asset, folders, onClose }: { asset: LibraryAsset; folders:
 
 function ConfirmArchive({ asset, onClose }: { asset: LibraryAsset; onClose: () => void }) {
   const { archive } = useLibraryMutations();
+  const usage = useAssetUsage(asset.id);
+  const rules = usage.data?.automations ?? [];
   const [error, setError] = useState<string>();
   return (
     <Modal title="Archivar archivo" onClose={onClose}>
       <p className="text-[13.5px]">¿Archivar «{asset.name}»? Deja de verse y de poder enviarse, y libera su espacio. Lo que ya se envió a clientes no cambia.</p>
+      {rules.length > 0 ? (
+        <Alert kind="info">
+          <p>Este archivo lo usan {rules.length === 1 ? 'esta automatización' : 'estas automatizaciones'}: al archivarlo, ese paso fallará hasta que le pongas otro archivo.</p>
+          <ul className="mt-1 list-disc pl-5">{rules.map((r) => <li key={r.id}>{r.name}{r.status === 'active' ? '' : r.status === 'paused' ? ' (en pausa)' : ' (borrador)'}</li>)}</ul>
+        </Alert>
+      ) : null}
       {error ? <Alert>{error}</Alert> : null}
       <div className="flex justify-end gap-2">
         <Button onClick={onClose}>Cancelar</Button>

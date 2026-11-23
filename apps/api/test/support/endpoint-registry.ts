@@ -220,6 +220,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PATCH /v1/library/assets/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'POST /v1/library/assets/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'GET /v1/library/assets/:id/url', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'GET /v1/library/assets/:id/usage', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'POST /v1/library/folders', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'PATCH /v1/library/folders/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'POST /v1/library/folders/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },

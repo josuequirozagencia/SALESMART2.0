@@ -5,6 +5,7 @@
 //   PATCH /v1/library/assets/:id
 //   POST /v1/library/assets/:id/archive
 //   GET /v1/library/assets/:id/url
+//   GET /v1/library/assets/:id/usage
 //   POST /v1/library/folders
 //   PATCH /v1/library/folders/:id
 //   POST /v1/library/folders/:id/archive
@@ -113,7 +114,7 @@ describe('permisos', () => {
     const a = await upOk(T.alice, JPEG(), 'image/jpeg', 'foto.jpg');
     const f = (await json<Folder>(await call('POST', '/library/folders', T.alice, { name: 'Catálogos' })));
     const routes: Array<[string, string, unknown?]> = [
-      ['GET', '/library'], ['GET', '/library/usage'], ['PATCH', `/library/assets/${a.id}`, { name: 'x' }], ['POST', `/library/assets/${a.id}/archive`], ['GET', `/library/assets/${a.id}/url`],
+      ['GET', '/library'], ['GET', '/library/usage'], ['PATCH', `/library/assets/${a.id}`, { name: 'x' }], ['POST', `/library/assets/${a.id}/archive`], ['GET', `/library/assets/${a.id}/url`], ['GET', `/library/assets/${a.id}/usage`],
       ['POST', '/library/folders', { name: 'Y' }], ['PATCH', `/library/folders/${f.id}`, { name: 'Z' }], ['POST', `/library/folders/${f.id}/archive`],
     ];
     for (const [m, p, b] of routes) expect((await call(m, p, undefined, b)).status, `${m} ${p}`).toBe(401);

@@ -328,6 +328,27 @@ describe('Automatizaciones · esperar, ejecutar otra regla y activar al agente',
     expect((w.calls['patch']![0]!.body as { actions: Array<Record<string, unknown>> }).actions[2]).toEqual({ type: 'run_rule', automation_id: 'a9' });
   });
 
+  it('un mensaje puede llevar un archivo de la biblioteca: se elige, se ve su nombre y se guarda solo su id (con el texto opcional)', async () => {
+    const w = world();
+    const library = {
+      'GET /library': () => ({ body: { folders: [], items: [{ id: 'x1', name: 'Catálogo 2026.pdf', description: null, kind: 'document', mime_type: 'application/pdf', size_bytes: 2048, folder_id: null, usable_by_advisors: true, usable_by_ai: false, state: 'ready', scan_status: 'clean', created_at: AT, archived_at: null }], next_cursor: null, usage: null, access: { manage: true }, storage_available: true } }),
+      'GET /library/assets/x1/url': () => ({ body: { url: 'https://storage.test/x1', expires_at: AT, kind: 'document', mime_type: 'application/pdf', name: 'Catálogo 2026.pdf' } }),
+    };
+    mockApi({ ...server(w), ...library });
+    renderApp('/automations/a1');
+    await userEvent.click(await screen.findByRole('button', { name: 'Agregar acción' }));
+    await userEvent.selectOptions(screen.getByLabelText('Acción 3: qué hacer'), 'Enviar un mensaje de texto');
+    await userEvent.click(screen.getByRole('button', { name: 'Acción 3: archivo: adjuntar un archivo de la biblioteca' }));
+    const d = within(await screen.findByRole('dialog', { name: 'Archivo de la biblioteca' }));
+    await userEvent.click(await d.findByRole('button', { name: 'Elegir Catálogo 2026.pdf' }));
+    await userEvent.click(d.getByRole('button', { name: 'Usar este archivo' }));
+    expect(await screen.findByText('Catálogo 2026.pdf')).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('Acción 3: texto del mensaje'), 'Aquí va');
+    await userEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
+    await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
+    expect((w.calls['patch']![0]!.body as { actions: Array<Record<string, unknown>> }).actions[2]).toEqual({ type: 'send_text', text: 'Aquí va', attachment: { asset_id: 'x1' } });
+  });
+
   it('activar al agente de IA no pide datos y se guarda solo con su tipo', async () => {
     const w = world();
     mockApi(server(w));

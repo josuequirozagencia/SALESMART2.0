@@ -12,8 +12,8 @@ const MB = 1024 * 1024;
 const asset = (over: Partial<LibraryAsset> = {}): LibraryAsset => ({ id: 'a1', name: 'Catálogo 2026.pdf', description: 'Precios vigentes', kind: 'document', mime_type: 'application/pdf', size_bytes: 2 * MB, folder_id: null, usable_by_advisors: true, usable_by_ai: false, state: 'ready', scan_status: 'clean', created_at: AT, archived_at: null, ...over });
 const folder = (over: Partial<LibraryFolder> = {}): LibraryFolder => ({ id: 'f1', name: 'Servicios', asset_count: 1, ...over });
 
-interface World { assets: LibraryAsset[]; folders: LibraryFolder[]; used: number; quota: number; manage: boolean; denied: boolean; calls: Record<string, Call[]>; uploadFails?: () => ReturnType<Handler> }
-const world = (over: Partial<World> = {}): World => ({ assets: [asset(), asset({ id: 'a2', name: 'Corte clásico.jpg', kind: 'image', mime_type: 'image/jpeg', size_bytes: 300 * 1024, folder_id: 'f1', description: null, usable_by_advisors: false })], folders: [folder()], used: 2 * MB + 300 * 1024, quota: 1024 * MB, manage: true, denied: false, calls: {}, ...over });
+interface World { usedBy: Array<{ id: string; name: string; status: string }>; assets: LibraryAsset[]; folders: LibraryFolder[]; used: number; quota: number; manage: boolean; denied: boolean; calls: Record<string, Call[]>; uploadFails?: () => ReturnType<Handler> }
+const world = (over: Partial<World> = {}): World => ({ usedBy: [], assets: [asset(), asset({ id: 'a2', name: 'Corte clásico.jpg', kind: 'image', mime_type: 'image/jpeg', size_bytes: 300 * 1024, folder_id: 'f1', description: null, usable_by_advisors: false })], folders: [folder()], used: 2 * MB + 300 * 1024, quota: 1024 * MB, manage: true, denied: false, calls: {}, ...over });
 const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
 
 function server(w: World, me = ME_ADMIN): Record<string, Handler> {
@@ -34,6 +34,7 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
       const limit = Number(c.query.get('limit') ?? 30);
       return { body: { folders: w.folders, items: items.slice(0, limit), next_cursor: null, usage: w.manage ? { used_bytes: w.used, quota_bytes: w.quota, available_bytes: Math.max(0, w.quota - w.used), assets: w.assets.length } : null, access: { manage: w.manage }, storage_available: true } satisfies LibraryPage };
     },
+    'GET /library/assets/a1/usage': (c) => { rec(w, 'usage', c); return { body: { automations: w.usedBy } }; },
     'GET /library/assets/a1/url': (c) => { rec(w, 'url', c); return { body: { url: 'https://storage.test/a1?sig=1', expires_at: AT, kind: 'document', mime_type: 'application/pdf', name: 'Catálogo 2026.pdf' } }; },
     'GET /library/assets/a2/url': () => ({ body: { url: 'https://storage.test/a2?sig=2', expires_at: AT, kind: 'image', mime_type: 'image/jpeg', name: 'Corte clásico.jpg' } }),
     'POST /library/assets': (c) => {
@@ -121,6 +122,19 @@ describe('Biblioteca · administrador', () => {
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
     expect(w.calls['patch']![0]!.body).toEqual({ name: 'Lista de precios', usable_by_advisors: false });
+  });
+
+  it('al archivar un archivo que usan automatizaciones, el aviso las nombra', async () => {
+    const w = world({ usedBy: [{ id: 'r1', name: 'Enviar catálogo', status: 'active' }, { id: 'r2', name: 'Seguimiento', status: 'paused' }] });
+    mockApi(server(w));
+    renderApp('/library');
+    await userEvent.click(await screen.findByRole('button', { name: 'Archivar Catálogo 2026.pdf' }));
+    const d = within(await screen.findByRole('dialog', { name: 'Archivar archivo' }));
+    expect(await d.findByText(/estas automatizaciones/)).toBeInTheDocument();
+    expect(d.getByText('Enviar catálogo')).toBeInTheDocument();
+    expect(d.getByText('Seguimiento (en pausa)')).toBeInTheDocument();
+    await userEvent.click(d.getByRole('button', { name: 'Archivar' }));
+    await waitFor(() => expect(w.calls['archive']).toHaveLength(1));
   });
 
   it('archivar pide confirmación y llama a la ruta; archivar una carpeta con archivos muestra el motivo', async () => {

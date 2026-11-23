@@ -40,7 +40,7 @@ export const ACTION_HINT: Record<ActionType, string> = {
   add_tag: 'Solo etiquetas personalizadas: las del sistema las pone el sistema.',
   remove_tag: 'Solo etiquetas personalizadas.',
   create_task: 'Usa {{nombre}} o {{primer_nombre}} en el título.',
-  send_text: 'Solo a una conversación abierta y dentro de las 24 horas desde el último mensaje del cliente. Nunca abre una conversación.',
+  send_text: 'Solo a una conversación abierta y dentro de las 24 horas desde el último mensaje del cliente. Nunca abre una conversación. Puede llevar un archivo de la biblioteca (por GoHighLevel solo texto).',
   send_template: 'Puede abrir la conversación. Necesita una plantilla aprobada por Meta.',
   wait: 'La ejecución se pausa y sigue con las acciones de abajo cuando pase el tiempo (de 1 minuto a 30 días). Si pausas o borras la regla, o borras al contacto, no continúa; si editas la regla, lo que ya empezó sigue como estaba.',
   run_rule: 'Corre otra automatización activa con este contacto, en su propia ejecución y solo si el contacto cumple sus condiciones. Si se llaman en círculo, se corta.',

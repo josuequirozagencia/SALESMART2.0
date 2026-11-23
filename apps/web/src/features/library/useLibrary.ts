@@ -63,6 +63,11 @@ export function useLibraryAccess() {
   return useQuery({ queryKey: ['library-access'], retry: false, staleTime: 5 * 60_000, queryFn: () => api<LibraryPage>('/library?limit=1').then((p) => p.access) });
 }
 
+/** Qué automatizaciones adjuntan un archivo (para avisar antes de archivarlo). */
+export function useAssetUsage(id: string) {
+  return useQuery({ queryKey: ['library-usage', id], retry: false, staleTime: 0, queryFn: () => api<{ automations: Array<{ id: string; name: string; status: string }> }>(`/library/assets/${id}/usage`) });
+}
+
 /** Una dirección firmada de pocos minutos para ver o descargar el archivo. */
 export const assetUrl = (id: string): Promise<{ url: string; expires_at: string; kind: string; mime_type: string; name: string }> => api(`/library/assets/${id}/url`);
 
