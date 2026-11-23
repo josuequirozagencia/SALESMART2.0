@@ -707,7 +707,7 @@ test('campos personalizados: el administrador define campos, el formulario de co
   expect((await request.post(`${apiBase}/v1/custom-fields/${id}/archive`, { headers: other })).status()).toBe(404);
 });
 
-test('atribución: el administrador genera el punto de entrada, GoHighLevel avisa de un clic y el contacto queda con Lead y su origen; repetir no duplica; regenerar invalida el secreto', async ({ page, request }) => {
+test('atribución: el administrador genera el punto de entrada, GoHighLevel avisa de un clic y el contacto queda con su origen (sin Lead automático: el asesor lo marca a mano); repetir no duplica; regenerar invalida el secreto', async ({ page, request }) => {
   const { apiBase } = state();
   const email = await createAccount(request, uniqueEmail('atrib'));
   await uiLogin(page, email);
@@ -735,7 +735,13 @@ test('atribución: el administrador genera el punto de entrada, GoHighLevel avis
   await expect(page.getByText('1 contacto', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Abrir el contacto +593984217730' }).click();
   const dlg = page.getByRole('dialog', { name: 'Contacto' });
-  await expect(dlg.getByRole('list', { name: 'Etiquetas' })).toContainText('Lead');
+  // El clic ya no pone la etiqueta Lead: la marca el asesor a mano y entonces se avisa a Meta
+  await expect(dlg.getByRole('list', { name: 'Etiquetas' })).toHaveCount(0);
+  const lead = dlg.getByRole('checkbox', { name: 'Lead' });
+  await expect(lead).not.toBeChecked();
+  await lead.check();
+  await expect(dlg.getByText(/Lead marcado: se avisa a Meta/)).toBeVisible();
+  await expect(lead).toBeChecked();
   const origin = dlg.getByRole('region', { name: 'Origen del lead' });
   await expect(origin).toContainText('Click to WhatsApp');
   await expect(origin).toContainText('Cursos octubre');
@@ -1422,7 +1428,7 @@ test('colas y reparto: el administrador crea una cola con tres asesores, la enla
     expect(new Set(rows.map((r) => r.email)).size).toBe(3); // uno a cada asesor
     expect(rows.every((r) => r.status === 'pending')).toBe(true);
     expect((await db.query(`SELECT count(*)::int AS n FROM contacts WHERE organization_id = $1 AND owner_id IS NOT NULL`, [orgId])).rows[0].n).toBe(3); // y cada contacto queda en la cartera de su asesor
-    expect((await db.query(`SELECT count(*)::int AS n FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id AND t.organization_id = ct.organization_id WHERE ct.organization_id = $1 AND t.system_key = 'lead'`, [orgId])).rows[0].n).toBe(3); // y son leads
+    expect((await db.query(`SELECT count(*)::int AS n FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id AND t.organization_id = ct.organization_id WHERE ct.organization_id = $1 AND t.system_key = 'lead'`, [orgId])).rows[0].n).toBe(0); // y NO se les pone «Lead» solo: la marca el asesor a mano
 
     // 5) La pantalla muestra la carga de cada asesor y ya no hay «sin asignar»
     await page.getByRole('link', { name: 'Departamentos' }).click();
