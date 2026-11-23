@@ -34,6 +34,10 @@ export type ReactionDto = z.infer<typeof reactionSchema>;
 export const sendMediaSchema = z.object({ attachment_id: z.uuid(), caption: z.string().trim().max(1024).optional() }).strict();
 export type SendMediaDto = z.infer<typeof sendMediaSchema>;
 
+/** Enviar un archivo de la biblioteca de la empresa a esta conversación (V21): solo el pie es opcional. */
+export const sendLibrarySchema = z.object({ caption: z.string().trim().max(1024).optional() }).strict();
+export type SendLibraryDto = z.infer<typeof sendLibrarySchema>;
+
 /** Enviar una plantilla: cuál y el valor de cada variable (clave = la `id` de la variable que informa la plantilla, p. ej. `body:1`). El servidor exige justo las que pide. */
 export const sendTemplateSchema = z
   .object({

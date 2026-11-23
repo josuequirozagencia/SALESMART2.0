@@ -220,6 +220,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/library/folders', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'PATCH /v1/library/folders/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   { route: 'POST /v1/library/folders/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/conversations/:id/library/:assetId/send', kind: 'tenant', isolationTest: '../../library/library-send.test.ts' },
   // Tablero y analítica (M6.5, ADR-51). Pruebas: test/analytics/analytics.test.ts (A↔B, alcance propio, cifras, CSV auditado)
   { route: 'GET /v1/analytics/summary', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/reports/:name', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },

@@ -115,6 +115,20 @@ export class LibraryService {
     return { url: signed.url, expires_at: signed.expiresAt.toISOString(), kind: row.kind, mime_type: row.mimeType, name: row.name };
   }
 
+  /**
+   * El contenido de un archivo para ENVIARLO por una conversación (el chat copia el objeto a un adjunto propio: ADR-75 #3). Mismas reglas de visibilidad que ver: el asesor solo de lo marcado para
+   * asesores; 404 si no existe, está archivado o es de otra empresa. Deja el envío en la auditoría (sin el contenido ni la clave).
+   */
+  async readForSend(access: LibraryAccess, id: string, conversationId: string): Promise<{ bytes: Buffer; contentType: string; filename: string }> {
+    const row = await this.db.withTenant(async (tx) => {
+      const [r] = await tx.select().from(mediaAssets).where(and(eq(mediaAssets.id, id), eq(mediaAssets.state, 'ready'), ...(access.manage ? [] : [eq(mediaAssets.usableByAdvisors, true)]))).limit(1);
+      if (!r) throw new NotFoundError();
+      await writeAudit(tx, { entityType: 'media_asset', entityId: id, field: 'sent', oldValue: null, newValue: { conversation_id: conversationId, kind: r.kind }, source: 'manual' });
+      return r;
+    });
+    return { bytes: await this.files.read(row.storageKey), contentType: row.mimeType, filename: row.name };
+  }
+
   // ------------------------------------------------------------------ archivos
 
   /**
