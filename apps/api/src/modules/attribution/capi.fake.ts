@@ -40,6 +40,22 @@ export class FakeCapiProvider implements CapiProvider {
     return Promise.resolve(Object.fromEntries(adIds.map((id) => [id, this.ads.get(id) ?? null])));
   }
 
+  /** Dataset de mensajes que «devuelve Meta» por cuenta de WhatsApp (las pruebas lo cargan; si no, uno fijo). */
+  readonly messagingDatasets = new Map<string, string>();
+  readonly ensured: Array<{ wabaId: string; credentials: CapiCredentials }> = [];
+  private ensureFailures: CapiSendError[] = [];
+
+  failNextEnsure(error: CapiSendError): void {
+    this.ensureFailures.push(error);
+  }
+
+  ensureMessagingDataset(wabaId: string, credentials: CapiCredentials): Promise<{ datasetId: string }> {
+    const fail = this.ensureFailures.shift();
+    if (fail) return Promise.reject(fail);
+    this.ensured.push({ wabaId, credentials });
+    return Promise.resolve({ datasetId: this.messagingDatasets.get(wabaId) ?? '1030123066792188' });
+  }
+
   last(): CapiEvent | undefined {
     return this.sent[this.sent.length - 1];
   }

@@ -24,6 +24,10 @@ export const metaSettings = tenantTable(
     graceMinutes: integer('grace_minutes').notNull().default(30),
     /** Código de «Eventos de prueba» de Events Manager: con él, Meta muestra los eventos en esa pestaña y no los cuenta. */
     testEventCode: text('test_event_code'),
+    /** Cuenta de WhatsApp Business de la empresa: Meta la exige en los eventos de mensajería (V20). Para quien conecta por QR no hay otra forma de saberla. */
+    wabaId: text('waba_id'),
+    /** Dataset vinculado a esa cuenta, donde Meta recibe los eventos de mensajería. Si falta, se usa `datasetId`. */
+    messagingDatasetId: text('messaging_dataset_id'),
     enabled: boolean('enabled').notNull().default(true),
     /** Resultado de la última comprobación o envío: null = bien. Texto seguro (nunca el token). */
     lastError: text('last_error'),
@@ -34,6 +38,8 @@ export const metaSettings = tenantTable(
   },
   (t) => [
     check('meta_settings_dataset_shape', sql`${t['datasetId']!} ~ '^[0-9]{5,30}$'`),
+    check('meta_settings_waba_shape', sql`${t['wabaId']!} IS NULL OR ${t['wabaId']!} ~ '^[0-9]{5,30}$'`),
+    check('meta_settings_messaging_dataset_shape', sql`${t['messagingDatasetId']!} IS NULL OR ${t['messagingDatasetId']!} ~ '^[0-9]{5,30}$'`),
     check('meta_settings_grace_valid', sql`${t['graceMinutes']!} BETWEEN 0 AND 1440`),
     check('meta_settings_test_code_shape', sql`${t['testEventCode']!} IS NULL OR ${t['testEventCode']!} ~ '^[A-Za-z0-9_-]{1,40}$'`),
     check('meta_settings_last4_shape', sql`length(${t['tokenLast4']!}) BETWEEN 1 AND 4`),

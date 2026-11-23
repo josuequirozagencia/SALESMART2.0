@@ -18,6 +18,9 @@ export interface MetaSettingsView {
   /** ¿Hay con qué hablar con Meta? (adaptador activo y cifrado disponible en el servidor). Si no, no se puede guardar. */
   available: boolean;
   dataset_id: string | null;
+  /** Cuenta de WhatsApp Business y dataset donde Meta recibe los eventos de mensajería (V20). */
+  waba_id: string | null;
+  messaging_dataset_id: string | null;
   /** Últimos 4 del token: lo único que se devuelve de él. */
   token_last4: string | null;
   grace_minutes: number;
@@ -78,6 +81,8 @@ export class MetaSettingsService {
         configured: !!s,
         available: this.available,
         dataset_id: s?.datasetId ?? null,
+        waba_id: s?.wabaId ?? null,
+        messaging_dataset_id: s?.messagingDatasetId ?? null,
         token_last4: s?.tokenLast4 ?? null,
         grace_minutes: s?.graceMinutes ?? DEFAULT_GRACE_MINUTES,
         test_event_code: s?.testEventCode ?? null,
@@ -96,13 +101,13 @@ export class MetaSettingsService {
   }
 
   /** Para el envío: las credenciales abiertas de la empresa del contexto (null si no hay, está apagada o no se pueden abrir). Nunca se registran. */
-  async credentials(tx: TenantTx): Promise<(CapiCredentials & { id: string }) | null> {
+  async credentials(tx: TenantTx): Promise<(CapiCredentials & { id: string; wabaId: string | null; messagingDatasetId: string | null }) | null> {
     const [s] = await tx.select().from(metaSettings).limit(1);
     if (!s || !s.enabled || !this.vault) return null;
     try {
       const secrets = this.vault.open(s.credentialsSealed, aadOf(s.organizationId));
       const accessToken = secrets['access_token'];
-      return accessToken ? { id: s.id, datasetId: s.datasetId, accessToken, testEventCode: s.testEventCode } : null;
+      return accessToken ? { id: s.id, datasetId: s.datasetId, accessToken, testEventCode: s.testEventCode, wabaId: s.wabaId, messagingDatasetId: s.messagingDatasetId } : null;
     } catch (e) {
       if (e instanceof VaultOpenError) return null;
       throw e;
@@ -136,8 +141,12 @@ export class MetaSettingsService {
     const now = new Date();
     await this.db.withTenant(async (tx) => {
       const [cur] = await tx.select().from(metaSettings).for('update').limit(1);
+      const nextWaba = input.waba_id === undefined ? (cur?.wabaId ?? null) : input.waba_id;
+      const nextMessaging = input.messaging_dataset_id === undefined ? (cur?.messagingDatasetId ?? null) : input.messaging_dataset_id;
       const values = {
         datasetId: input.dataset_id,
+        wabaId: nextWaba,
+        messagingDatasetId: nextMessaging,
         graceMinutes: input.grace_minutes,
         testEventCode: input.test_event_code ?? null,
         enabled: input.enabled,
@@ -148,6 +157,8 @@ export class MetaSettingsService {
         await tx.update(metaSettings).set(values).where(eq(metaSettings.id, cur.id));
         const changes: Array<[string, unknown, unknown]> = [
           ['dataset_id', cur.datasetId, input.dataset_id],
+          ['waba_id', cur.wabaId, nextWaba],
+          ['messaging_dataset_id', cur.messagingDatasetId, nextMessaging],
           ['grace_minutes', cur.graceMinutes, input.grace_minutes],
           ['test_event_code', cur.testEventCode, input.test_event_code ?? null],
           ['enabled', cur.enabled, input.enabled],
@@ -159,14 +170,14 @@ export class MetaSettingsService {
           .insert(metaSettings)
           .values({ ...values, credentialsSealed: sealed!.sealed, keyVersion: sealed!.keyVersion, tokenLast4: token!.slice(-4), createdBy: userId, lastCheckAt: now })
           .returning({ id: metaSettings.id });
-        await writeAudit(tx, { entityType: 'meta_settings', entityId: row!.id, newValue: { dataset_id: input.dataset_id, grace_minutes: input.grace_minutes, enabled: input.enabled, dataset_name: verifiedName }, source: 'manual' });
+        await writeAudit(tx, { entityType: 'meta_settings', entityId: row!.id, newValue: { dataset_id: input.dataset_id, waba_id: nextWaba, messaging_dataset_id: nextMessaging, grace_minutes: input.grace_minutes, enabled: input.enabled, dataset_name: verifiedName }, source: 'manual' });
       }
     });
     return this.get();
   }
 
   /** «Probar conexión»: vuelve a comprobar con Meta el dataset y el token guardados y anota el resultado. */
-  async test(): Promise<{ ok: true; dataset_name: string | null }> {
+  async test(): Promise<{ ok: true; dataset_name: string | null; messaging_dataset_name: string | null }> {
     if (!this.available) throw new ServiceUnavailableError('META_UNAVAILABLE', 'Por ahora no se puede conectar con Meta: el servidor no tiene configurado el cifrado de credenciales o el envío a Meta. Avisa a soporte');
     const creds = await this.db.withTenant(async (tx) => {
       const [s] = await tx.select({ id: metaSettings.id }).from(metaSettings).limit(1);
@@ -177,14 +188,47 @@ export class MetaSettingsService {
     const now = new Date();
     try {
       const { name } = await this.provider.verify(creds);
+      // El dataset de mensajes también se comprueba: es por donde salen los eventos de los chats
+      const messaging = creds.messagingDatasetId ? await this.provider.verify({ ...creds, datasetId: creds.messagingDatasetId }) : null;
       await this.db.withTenant((tx) => tx.update(metaSettings).set({ lastError: null, lastCheckAt: now, updatedAt: now }).where(eq(metaSettings.id, creds.id)));
-      return { ok: true, dataset_name: name };
+      return { ok: true, dataset_name: name, messaging_dataset_name: messaging?.name ?? null };
     } catch (e) {
       // Lo que se anota en la conexión es el motivo de Meta (seguro por contrato), no el mensaje genérico de validación
       const text = e instanceof CapiSendError ? e.message : 'No se pudo comprobar la conexión con Meta';
       await this.db.withTenant((tx) => tx.update(metaSettings).set({ lastError: text.slice(0, 300), lastCheckAt: now, updatedAt: now }).where(eq(metaSettings.id, creds.id)));
       throw this.asUserError(e);
     }
+  }
+
+  /**
+   * «Crear o recuperar el dataset de mensajes»: le pide a Meta el dataset vinculado a la cuenta de WhatsApp Business (si ya existía, devuelve ese) y lo guarda junto con la cuenta. Usa
+   * el token guardado, que debe traer los permisos de WhatsApp. Si Meta no lo da, no se guarda nada y el motivo llega a la persona.
+   */
+  async ensureMessagingDataset(wabaInput?: string): Promise<MetaSettingsView> {
+    if (!this.available) throw new ServiceUnavailableError('META_UNAVAILABLE', 'Por ahora no se puede conectar con Meta: el servidor no tiene configurado el cifrado de credenciales o el envío a Meta. Avisa a soporte');
+    const creds = await this.db.withTenant(async (tx) => {
+      const [s] = await tx.select({ id: metaSettings.id }).from(metaSettings).limit(1);
+      if (!s) throw new NotFoundError();
+      return this.credentials(tx);
+    });
+    if (!creds) throw new ConflictError('META_DISABLED', 'La conexión con Meta está apagada o sus credenciales no se pueden leer: guárdalas de nuevo');
+    const waba = wabaInput ?? creds.wabaId;
+    if (!waba) throw new ValidationError([{ path: 'waba_id', code: 'required', message: 'Escribe el identificador de la cuenta de WhatsApp Business' }]);
+    let datasetId: string;
+    try {
+      datasetId = (await this.provider.ensureMessagingDataset(waba, creds)).datasetId;
+    } catch (e) {
+      throw this.asUserError(e, 'waba_id');
+    }
+    const now = new Date();
+    await this.db.withTenant(async (tx) => {
+      const [cur] = await tx.select().from(metaSettings).for('update').limit(1);
+      if (!cur) throw new NotFoundError();
+      await tx.update(metaSettings).set({ wabaId: waba, messagingDatasetId: datasetId, updatedAt: now }).where(eq(metaSettings.id, cur.id));
+      if (cur.wabaId !== waba) await writeAudit(tx, { entityType: 'meta_settings', entityId: cur.id, field: 'waba_id', oldValue: cur.wabaId, newValue: waba, source: 'manual' });
+      if (cur.messagingDatasetId !== datasetId) await writeAudit(tx, { entityType: 'meta_settings', entityId: cur.id, field: 'messaging_dataset_id', oldValue: cur.messagingDatasetId, newValue: datasetId, source: 'manual' });
+    });
+    return this.get();
   }
 
   /** Anota en la conexión que un envío falló por las credenciales (lo ve el administrador en el panel). */
@@ -257,12 +301,38 @@ export class MetaSettingsService {
     });
   }
 
+  /**
+   * «Reintentar todos»: los fallidos y bloqueados de los últimos 7 días vuelven a la cola; los más viejos pasan a «vencido» (Meta ya no los acepta, y así dejan de contar como fallidos).
+   * Una sola transacción, con una línea de auditoría del conjunto.
+   */
+  async retryAll(): Promise<{ requeued: number; expired: number }> {
+    return this.db.withTenant(async (tx) => {
+      const now = new Date();
+      const limit = new Date(now.getTime() - MAX_AGE_MS);
+      const requeued = await tx
+        .update(metaEvents)
+        .set({ status: 'pending', attempts: 0, sendAfter: now, lastError: null, updatedAt: now })
+        .where(and(inArray(metaEvents.status, ['failed', 'blocked']), sql`${metaEvents.createdAt} > ${limit}`))
+        .returning({ id: metaEvents.id });
+      const expired = await tx
+        .update(metaEvents)
+        .set({ status: 'expired', lastError: 'El evento tiene más de 7 días: Meta ya no lo acepta', updatedAt: now })
+        .where(and(inArray(metaEvents.status, ['failed', 'blocked']), sql`${metaEvents.createdAt} <= ${limit}`))
+        .returning({ id: metaEvents.id });
+      if (requeued.length + expired.length > 0) {
+        const [s] = await tx.select({ id: metaSettings.id }).from(metaSettings).limit(1);
+        if (s) await writeAudit(tx, { entityType: 'meta_settings', entityId: s.id, field: 'meta_events_retry_all', newValue: { requeued: requeued.length, expired: expired.length }, source: 'manual' });
+      }
+      return { requeued: requeued.length, expired: expired.length };
+    });
+  }
+
   // ------------------------------------------------------------------ internos
 
   /** Un fallo del adaptador convertido en algo que se le puede mostrar a la persona (400 si son las credenciales o los datos; 503 si Meta no responde). */
-  private asUserError(e: unknown): Error {
+  private asUserError(e: unknown, path = 'access_token'): Error {
     if (e instanceof CapiSendError) {
-      if (e.credentials || !e.retryable) return new ValidationError([{ path: 'access_token', code: 'rejected', message: e.message }]);
+      if (e.credentials || !e.retryable) return new ValidationError([{ path, code: 'rejected', message: e.message }]);
       return new ServiceUnavailableError('META_UNREACHABLE', 'No se pudo contactar a Meta en este momento. Inténtalo de nuevo en unos minutos');
     }
     return new ServiceUnavailableError('META_UNREACHABLE', 'No se pudo comprobar la conexión con Meta');

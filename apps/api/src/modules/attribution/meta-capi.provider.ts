@@ -9,6 +9,8 @@ interface GraphError {
   message?: unknown;
   code?: unknown;
   error_subcode?: unknown;
+  error_user_title?: unknown;
+  error_user_msg?: unknown;
 }
 
 /** Códigos de Graph API que significan «credenciales»: token inválido o vencido (190), permiso o acceso denegado (10, 200-299) y recurso inexistente o sin acceso (100/33). */
@@ -100,6 +102,20 @@ export class MetaCapiProvider implements CapiProvider {
     return out;
   }
 
+  async ensureMessagingDataset(wabaId: string, credentials: CapiCredentials): Promise<{ datasetId: string }> {
+    if (!DATASET_ID.test(wabaId)) throw new CapiSendError('El identificador de la cuenta de WhatsApp Business no es válido (solo dígitos)', false, true);
+    const res = await this.call(`${this.baseUrl}/${GRAPH_VERSION}/${wabaId}/dataset`, credentials.accessToken, { method: 'POST' });
+    if (!res.ok) throw await this.failure(res);
+    let id: unknown;
+    try {
+      id = ((await res.json()) as { id?: unknown }).id;
+    } catch {
+      throw new CapiSendError('Meta respondió algo que no se entiende', true);
+    }
+    if (typeof id !== 'string' || !DATASET_ID.test(id)) throw new CapiSendError('Meta no devolvió el dataset de mensajes', false);
+    return { datasetId: id };
+  }
+
   private urlFor(datasetId: string, suffix: string): string {
     if (!DATASET_ID.test(datasetId)) throw new CapiSendError('El identificador del dataset no es válido (solo dígitos)', false, true);
     return `${this.baseUrl}/${GRAPH_VERSION}/${datasetId}${suffix}`;
@@ -116,7 +132,11 @@ export class MetaCapiProvider implements CapiProvider {
 
   private async failure(res: Response): Promise<CapiSendError> {
     const g = await readError(res);
-    const text = safeText(g.message);
+    // «Invalid parameter» no dice nada: Meta explica el motivo en el título y el mensaje para el usuario, y en el subcódigo
+    const title = safeText(g.error_user_title);
+    const detail = safeText(g.error_user_msg);
+    const sub = typeof g.error_subcode === 'number' ? ` (${g.error_subcode})` : '';
+    const text = [safeText(g.message), [title, detail].filter(Boolean).join('. ') + sub].filter((x) => x !== '' && x !== sub).join(' — ').slice(0, 290);
     if (isCredentialError(res.status, g)) return new CapiSendError(`Meta rechazó las credenciales${text ? `: ${text}` : ''}`, false, true);
     if (res.status === 429 || res.status >= 500 || isRateLimit(g)) return new CapiSendError(`Meta no pudo atender el envío ahora${text ? `: ${text}` : ''}`, true);
     return new CapiSendError(`Meta rechazó el evento${text ? `: ${text}` : ''}`, false);
