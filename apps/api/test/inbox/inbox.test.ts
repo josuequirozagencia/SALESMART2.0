@@ -963,7 +963,7 @@ describe('de punta a punta con la entrada real de mensajes', () => {
     await carolQueue();
     await ingest(phone(1), 'wamid.IN1');
     const [conv] = (await list(T.carol, '?tab=pending')).items;
-    expect(conv).toMatchObject({ status: 'pending', unread_count: 1, owner: { id: IDS.carol }, contact: { phone: phone(1) }, tags: [{ system_key: 'lead' }], last_message: { direction: 'in', preview: 'Hola' }, window: { open: true }, can: { accept: true, reply: true } });
+    expect(conv).toMatchObject({ status: 'pending', unread_count: 1, owner: { id: IDS.carol }, contact: { phone: phone(1) }, tags: [], last_message: { direction: 'in', preview: 'Hola' }, window: { open: true }, can: { accept: true, reply: true } });
     expect((await convRow(conv!.id)).peer_id).toBe(phone(1).slice(1));
     await ok(await call('POST', `/conversations/${conv!.id}/accept`, T.carol));
     const m = await ok<Msg>(await reply(T.carol, conv!.id, 'Hola, ¿en qué te ayudo?'), 201);

@@ -184,7 +184,7 @@ describe('historial de toques', () => {
     expect(tb).toHaveLength(1);
     expect(tb[0]).toMatchObject({ kind: 'ad_click', ad_id: '120009', headline: 'Promo de octubre' });
     expect((await admin.query(`SELECT first_touch_ad_id FROM contacts WHERE id = $1`, [b])).rows[0].first_touch_ad_id).toBe('120009');
-    expect(Number((await admin.query(`SELECT count(*) FROM meta_events WHERE contact_id = $1 AND type = 'Lead'`, [b])).rows[0].count)).toBe(1); // el clic de anuncio deja su Lead hacia Meta
+    expect(Number((await admin.query(`SELECT count(*) FROM meta_events WHERE contact_id = $1 AND type = 'Lead'`, [b])).rows[0].count)).toBe(0); // el clic de anuncio ya no deja un Lead hacia Meta (se quitó el 2026-11-23)
     expect(Number((await admin.query(`SELECT count(*) FROM meta_events WHERE contact_id = $1`, [a])).rows[0].count)).toBe(0); // un mensaje común no
   });
 
