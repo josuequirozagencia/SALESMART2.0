@@ -739,7 +739,7 @@ test('atribución: el administrador genera el punto de entrada, GoHighLevel avis
   await expect(dlg.getByRole('list', { name: 'Etiquetas' })).toHaveCount(0);
   const lead = dlg.getByRole('checkbox', { name: 'Lead' });
   await expect(lead).not.toBeChecked();
-  await lead.check();
+  await lead.click(); // se aplica al responder el servidor: `check()` exige el cambio al instante
   await expect(dlg.getByText(/Lead marcado: se avisa a Meta/)).toBeVisible();
   await expect(lead).toBeChecked();
   const origin = dlg.getByRole('region', { name: 'Origen del lead' });
