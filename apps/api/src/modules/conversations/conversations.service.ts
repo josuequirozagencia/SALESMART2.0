@@ -8,7 +8,6 @@ import { ContactsService, ContactTouchesService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
-import { SystemTagsService } from '../tags';
 import { AutoMessagesService } from './auto-messages.service';
 import type { NormalizedMessage, NormalizedReaction, NormalizedStatus } from './normalized';
 
@@ -57,7 +56,6 @@ export class ConversationsService {
     @Inject(ContactTouchesService) private readonly touches: ContactTouchesService,
     @Inject(AttributionService) private readonly attribution: AttributionService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
-    @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(AutoMessagesService) private readonly autoMessages: AutoMessagesService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
@@ -74,9 +72,8 @@ export class ConversationsService {
     if (seen) return { duplicate: true, conversationId: null, contactCreated: false, conversationCreated: false };
 
     const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.resolveWhatsapp(tx, { phone: m.from, lid: m.lid ?? null, name: m.profileName });
-    // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
-    if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
-    // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial) y el Lead hacia Meta; un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
+    // La etiqueta `Lead` ya no se pone sola al llegar alguien nuevo (2026-11-23): la coloca el asesor (`LeadMarkService`) y entonces sale el evento a Meta
+    // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial); un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
     const clid = m.referral?.ctwaClid ?? null;
     // WhatsApp por QR puede traer el clic de un contacto que WhatsApp identifica solo con su código `@lid` (sin teléfono): el clic se guarda igual (v20, ADR-55)
     if (clid) {

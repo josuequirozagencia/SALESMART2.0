@@ -209,7 +209,7 @@ describe('entrada: el mensaje del cliente llega al Inbox', () => {
     expect(m!['meta']).toMatchObject({ ghl_type: 'SMS' });
     const contact = (await admin.query(`SELECT c.name, c.source, p.e164 FROM contacts c JOIN contact_phones p ON p.contact_id = c.id WHERE c.organization_id = $1`, [ORG_A])).rows[0];
     expect(contact).toMatchObject({ name: 'Ana Torres', source: 'ghl', e164: PHONE });
-    expect((await admin.query(`SELECT t.name FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.organization_id = $1`, [ORG_A])).rows.map((r) => r.name)).toEqual(['Lead']);
+    expect((await admin.query(`SELECT t.name FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.organization_id = $1`, [ORG_A])).rows.map((r) => r.name)).toEqual([]);
     expect((await admin.query(`SELECT count(*)::int n FROM ghl_contact_links WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(1);
     const audit = (await admin.query(`SELECT source FROM audit_logs WHERE entity_type = 'conversation' AND entity_id = $1`, [c!['id']])).rows;
     expect(audit).toEqual([{ source: 'ghl' }]);
@@ -222,7 +222,7 @@ describe('entrada: el mensaje del cliente llega al Inbox', () => {
     expect(cs).toHaveLength(1);
     expect(cs[0]).toMatchObject({ unread_count: 2 });
     expect((await messagesOf(cs[0]!['id'] as string)).map((m) => m['body'])).toEqual(['Hola, quiero una cita', 'Y tienen lugar mañana?']);
-    expect((await admin.query(`SELECT count(*)::int n FROM contact_tags WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(1);
+    expect((await admin.query(`SELECT count(*)::int n FROM contact_tags WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(0);
   });
 
   it('el mismo mensaje en dos avisos distintos se registra una sola vez (idempotente por el id de GHL)', async () => {

@@ -7,6 +7,27 @@ export function useTags() {
   return useQuery({ queryKey: ['tags'], staleTime: 30_000, queryFn: () => api<TagList>('/tags') });
 }
 
+export interface LeadMarkResult { lead: boolean; event: 'queued' | 'skipped' | 'none' }
+
+/** El texto que se le dice a la persona tras colocar o quitar «Lead»: si salió a Meta, o por qué no. */
+export const leadNotice = (r: LeadMarkResult): string => {
+  if (!r.lead) return 'Lead quitado.';
+  if (r.event === 'queued') return 'Lead marcado: se avisa a Meta (una sola vez por contacto).';
+  if (r.event === 'skipped') return 'Lead marcado. No llegó por un anuncio de Meta, así que no se envía el evento.';
+  return 'Lead marcado.';
+};
+
+/**
+ * Coloca o quita la etiqueta del sistema «Lead» de un contacto (la única que se maneja a mano). Al colocarla sale el Lead a Meta una vez por contacto. Refresca la conversación, el contacto y los listados.
+ */
+export function useSetLead(contactId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (on: boolean) => api<LeadMarkResult>(`/contacts/${contactId}/lead`, { method: on ? 'PUT' : 'DELETE' }),
+    onSettled: () => Promise.all([qc.invalidateQueries({ queryKey: ['conversation'] }), qc.invalidateQueries({ queryKey: ['conversations'] }), qc.invalidateQueries({ queryKey: ['contacts'] }), qc.invalidateQueries({ queryKey: ['contact', contactId] })]),
+  });
+}
+
 function useDone() {
   const qc = useQueryClient();
   // Renombrar o borrar una etiqueta cambia lo que muestran los contactos

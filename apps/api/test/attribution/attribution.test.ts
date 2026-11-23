@@ -1,5 +1,6 @@
 // M3.3 — Etiquetas del sistema, atribución de Meta Ads y salida de eventos CAPI (ADR-45). Rutas cubiertas (el registro de endpoints exige que este archivo las mencione):
 //   GET /v1/tags · GET /v1/attribution/endpoint · POST /v1/attribution/endpoint · POST /v1/attribution/ctwa/:endpointId (pública)
+//   PUT /v1/contacts/:id/lead · DELETE /v1/contacts/:id/lead (el Lead a mano, 2026-11-23)
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -206,7 +207,7 @@ describe('webhook de atribución', () => {
     expect(await contactByPhone(ORG_A, P1)).toBeUndefined();
   });
 
-  it('un clic de un teléfono nuevo crea el contacto (origen meta_ctwa, sin consentimiento), graba primer y último toque, pone la etiqueta Lead y encola el evento sin guardar el teléfono en claro', async () => {
+  it('un clic de un teléfono nuevo crea el contacto (origen meta_ctwa, sin consentimiento), graba primer y último toque y NO pone la etiqueta Lead ni encola ningún evento hacia Meta', async () => {
     const ep = await setup(T.alice);
     const r = await hook(ep.id, ep.secret, click({ occurred_at: T10.toISOString() }));
     expect(r.status).toBe(200);
@@ -218,17 +219,12 @@ describe('webhook de atribución', () => {
 
     const v = await viewOf(T.alice, row['id'] as string);
     expect(v).toMatchObject({ source: 'meta_ctwa', consent: 'unknown' });
-    expect(v.tags).toEqual([expect.objectContaining({ name: 'Lead', system_key: 'lead' })]);
+    expect(v.tags).toEqual([]); // la etiqueta Lead ya no se pone sola: la coloca el asesor
     expect(v.attribution).toMatchObject({ ctwa_cl_id: 'CLID-1', first_touch: { campaign: 'Cursos octubre', adset: 'Conjunto A', ad: 'Anuncio 1', source: 'meta_ctwa' }, last_touch: { campaign: 'Cursos octubre' }, capi: null });
 
-    const evs = await events(ORG_A, 'Lead');
-    expect(evs).toHaveLength(1);
-    expect(evs[0]).toMatchObject({ status: 'pending', attempts: 0, contact_id: row['id'] });
-    const payload = evs[0]!['payload'] as { user_data: { ph: string[]; ctwa_clid: string }; action_source: string };
-    expect(payload).toMatchObject({ event_name: 'Lead', action_source: 'business_messaging', user_data: { ph: [phoneHash(P1)], ctwa_clid: 'CLID-1' } });
-    expect(JSON.stringify(evs[0]!['payload'])).not.toContain('984217730'); // el teléfono nunca va en claro
+    expect(await events(ORG_A)).toEqual([]); // el Lead de los chats ya no se envía a Meta: el clic solo deja el contacto, los toques y la etiqueta
     const audit = (await admin.query(`SELECT field, source FROM audit_logs WHERE entity_type = 'contact' AND entity_id = $1 ORDER BY at, id`, [row['id']])).rows;
-    expect(audit.map((a) => a.field).sort((x, y) => String(x).localeCompare(String(y)))).toEqual(['attribution', null, 'tag']);
+    expect(audit.map((a) => a.field).sort((x, y) => String(x).localeCompare(String(y)))).toEqual(['attribution', null]);
     expect(audit.every((a) => a.source !== 'manual')).toBe(true);
   });
 
@@ -244,19 +240,19 @@ describe('webhook de atribución', () => {
     await admin.query(`UPDATE organizations SET status = 'active', deleted_at = NULL WHERE id = $1`, [ORG_A]);
     expect((await hook(ep.id, ep.secret, click())).status).toBe(200);
     expect(await contactByPhone(ORG_A, P1)).toBeDefined();
-    expect(await events(ORG_A, 'Lead')).toHaveLength(1);
+    expect(await events(ORG_A)).toEqual([]);
   });
 
   it('es idempotente: repetir el mismo clic no cambia nada ni duplica contacto, evento, etiqueta ni auditoría', async () => {
     const ep = await setup(T.alice);
     for (let i = 0; i < 3; i++) expect((await hook(ep.id, ep.secret, click())).status).toBe(200);
     expect((await admin.query('SELECT count(*)::int AS n FROM contacts')).rows[0].n).toBe(1);
-    expect(await events(ORG_A)).toHaveLength(1);
-    expect((await admin.query('SELECT count(*)::int AS n FROM contact_tags')).rows[0].n).toBe(1);
+    expect((await admin.query('SELECT count(*)::int AS n FROM contact_touch_events')).rows[0].n).toBe(1);
+    expect((await admin.query('SELECT count(*)::int AS n FROM contact_tags')).rows[0].n).toBe(0);
     expect((await admin.query(`SELECT count(*)::int AS n FROM audit_logs WHERE field = 'attribution'`)).rows[0].n).toBe(1);
   });
 
-  it('el primer toque es inmutable y el último se sobrescribe; un clic más antiguo no pisa al último; cada clic distinto deja su propio evento Lead', async () => {
+  it('el primer toque es inmutable y el último se sobrescribe; un clic más antiguo no pisa al último; cada clic distinto queda en el historial', async () => {
     const ep = await setup(T.alice);
     await hook(ep.id, ep.secret, click({ occurred_at: T10.toISOString() }));
     await hook(ep.id, ep.secret, click({ ctwa_cl_id: 'CLID-2', campaign_name: 'Barbería', adset_name: 'B', ad_name: 'Anuncio 2', occurred_at: T12.toISOString() }));
@@ -265,12 +261,13 @@ describe('webhook de atribución', () => {
     expect((row['first_touch_at'] as Date).toISOString()).toBe(T10.toISOString());
     expect((row['last_touch_at'] as Date).toISOString()).toBe(T12.toISOString());
 
-    // llega tarde un clic ANTERIOR al último: queda como evento, pero no cambia los toques
+    // llega tarde un clic ANTERIOR al último: queda en el historial, pero no cambia los toques
     await hook(ep.id, ep.secret, click({ ctwa_cl_id: 'CLID-0', campaign_name: 'Vieja', occurred_at: T01.toISOString() }));
     row = (await contactByPhone(ORG_A, P1))!;
     expect(row).toMatchObject({ ctwa_cl_id: 'CLID-2', first_touch_campaign: 'Cursos octubre', last_touch_campaign: 'Barbería' });
-    expect(await events(ORG_A, 'Lead')).toHaveLength(3);
-    expect((await admin.query('SELECT count(*)::int AS n FROM contact_tags')).rows[0].n).toBe(1); // la etiqueta Lead se pone una vez
+    expect((await admin.query('SELECT count(*)::int AS n FROM contact_touch_events')).rows[0].n).toBe(3);
+    expect(await events(ORG_A)).toEqual([]);
+    expect((await admin.query('SELECT count(*)::int AS n FROM contact_tags')).rows[0].n).toBe(0); // el clic ya no pone la etiqueta Lead
     expect((await admin.query('SELECT count(*)::int AS n FROM contacts')).rows[0].n).toBe(1);
   });
 
@@ -282,7 +279,7 @@ describe('webhook de atribución', () => {
     const v = await viewOf(T.alice, made.id);
     expect(v).toMatchObject({ name: 'Ana Torres', consent: 'granted', source: 'manual' });
     expect(v.attribution).toMatchObject({ ctwa_cl_id: 'CLID-1' });
-    expect(v.tags.map((t) => t.system_key)).toEqual(['lead']);
+    expect(v.tags.map((t) => t.system_key)).toEqual([]);
     // el asesor dueño del contacto también ve su origen; un contacto de otro asesor no
     expect((await viewOf(T.carol, made.id)).attribution?.ctwa_cl_id).toBe('CLID-1');
   });
@@ -299,8 +296,8 @@ describe('webhook de atribución', () => {
     expect((await viewOf(T.bob, theirs.id)).attribution).toBeNull();
     await hook(b.id, b.secret, click({ ctwa_cl_id: 'CLID-B' }));
     expect((await viewOf(T.bob, theirs.id)).attribution?.ctwa_cl_id).toBe('CLID-B');
-    expect((await events(ORG_A, 'Lead')).length).toBe(1);
-    expect((await events(ORG_B, 'Lead')).length).toBe(1);
+    expect(await events(ORG_A)).toEqual([]);
+    expect(await events(ORG_B)).toEqual([]);
     const tagsA = (await json<{ items: Array<{ id: string }> }>(await call('GET', '/tags', T.alice))).items.map((t) => t.id);
     const tagsB = (await json<{ items: Array<{ id: string }> }>(await call('GET', '/tags', T.bob))).items.map((t) => t.id);
     expect(tagsA.filter((i) => tagsB.includes(i))).toEqual([]);
@@ -349,8 +346,6 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
   async function attributed(): Promise<string> {
     const ep = await setup(T.alice);
     await hook(ep.id, ep.secret, click());
-    // El Lead sale «hace un minuto» respecto del reloj fijo de estas pruebas (así no dependen de la hora real)
-    await admin.query(`UPDATE meta_events SET send_after = $1 WHERE type = 'Lead'`, [new Date(NOW.getTime() - 60_000)]);
     return (await contactByPhone(ORG_A, P1))!['id'] as string;
   }
   const sale = (contactId: string, saleId: string, extra: Record<string, unknown> = {}) =>
@@ -365,14 +360,14 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
     expect(ev).toMatchObject({ status: 'pending', attempts: 0, contact_id: contactId });
     expect((ev['send_after'] as Date).getTime() - NOW.getTime()).toBe(30 * 60_000);
     expect(ev['payload']).toMatchObject({ event_name: 'Purchase', event_id: 'purchase:venta-1', user_data: { ph: [phoneHash(P1)], ctwa_clid: 'CLID-1' }, custom_data: { value: 250.5, currency: 'USD' } });
-    expect((await viewOf(T.alice, contactId)).tags.map((t) => t.system_key).sort()).toEqual(['lead', 'sale']);
+    expect((await viewOf(T.alice, contactId)).tags.map((t) => t.system_key).sort()).toEqual(['sale']);
     expect((await viewOf(T.alice, contactId)).attribution?.capi).toEqual({ status: 'pending', sent_at: null });
 
-    // los Lead pendientes del clic salen enseguida; el Purchase espera su ventana
-    expect(await run(ORG_A, new Date(NOW.getTime() + 29 * 60_000))).toBe(1); // solo el Lead
-    expect(fake.sent.map((e) => e.type)).toEqual(['Lead']);
+    // el clic ya no deja ningún Lead hacia Meta; el Purchase espera su ventana: antes de la hora no sale y después sí
+    expect(await run(ORG_A, new Date(NOW.getTime() + 29 * 60_000))).toBe(0);
+    expect(fake.sent).toEqual([]);
     expect(await run(ORG_A, new Date(NOW.getTime() + 31 * 60_000))).toBe(1);
-    expect(fake.sent.map((e) => e.type)).toEqual(['Lead', 'Purchase']);
+    expect(fake.sent.map((e) => e.type)).toEqual(['Purchase']);
     expect(fake.last()).toMatchObject({ eventId: 'purchase:venta-1', type: 'Purchase', payload: { custom_data: { value: 250.5, currency: 'USD' } } });
     const done = (await events(ORG_A, 'Purchase'))[0]!;
     expect(done).toMatchObject({ status: 'sent', attempts: 1, last_error: null });
@@ -427,8 +422,8 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
   });
 
   it('fallos de envío: los reintentables se reprograman con espera creciente, los definitivos y el quinto intento quedan en failed, y los muy viejos caducan', async () => {
-    await attributed();
-    const ev = async () => (await events(ORG_A, 'Lead'))[0]!;
+    await sale(await attributed(), 'fallos', { graceMs: 0 });
+    const ev = async () => (await events(ORG_A, 'Purchase'))[0]!;
     let now = new Date(NOW.getTime());
     fake.failNext(new CapiSendError('límite de peticiones de Meta', true));
     expect(await run(ORG_A, now)).toBe(1);
@@ -467,11 +462,11 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
   });
 
   it('sin proveedor configurado no se envía nada y los eventos siguen pendientes', async () => {
-    await attributed();
+    await sale(await attributed(), 'sin-proveedor', { graceMs: 0 });
     const sender = new CapiSenderService(app.get(Database), new NoCapiProvider(), app.get(MetaSettingsService));
     expect(sender.enabled).toBe(false);
     expect(await inOrg(ORG_A, () => sender.runDue(new Date(NOW.getTime() + DAY)))).toBe(0);
-    expect((await events(ORG_A, 'Lead'))[0]).toMatchObject({ status: 'pending', attempts: 0 });
+    expect((await events(ORG_A, 'Purchase'))[0]).toMatchObject({ status: 'pending', attempts: 0 });
   });
 
   it('el envío es por empresa (RLS): runDue de A no toca eventos de B; la tarea periódica recorre cada empresa bajo su contexto', async () => {
@@ -479,13 +474,16 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
     const b = await setup(T.bob);
     await hook(a.id, a.secret, click());
     await hook(b.id, b.secret, click({ phone: P2, ctwa_cl_id: 'CLID-B' }));
-    await admin.query(`UPDATE meta_events SET send_after = $1 WHERE type = 'Lead'`, [new Date(NOW.getTime() - 60_000)]);
+    const contactA = (await contactByPhone(ORG_A, P1))!['id'] as string;
+    const contactB = (await contactByPhone(ORG_B, P2))!['id'] as string;
+    await sale(contactA, 'rls-a', { graceMs: 0 });
+    await inOrg(ORG_B, () => app.get(Database).withTenant((tx) => app.get(AttributionService).onSaleTagSet(tx, { contactId: contactB, saleId: 'rls-b', amount: 10, currency: 'USD', graceMs: 0 }, NOW)));
     expect(await run(ORG_A, NOW)).toBe(1);
     expect(fake.sent).toHaveLength(1);
-    expect((await events(ORG_B, 'Lead'))[0]).toMatchObject({ status: 'pending' });
+    expect((await events(ORG_B, 'Purchase'))[0]).toMatchObject({ status: 'pending' });
     expect(await app.get(CapiSenderJob).run(NOW)).toBe(1); // queda el de B
     expect(fake.sent.map((e) => (e.payload['user_data'] as { ctwa_clid: string }).ctwa_clid).sort()).toEqual(['CLID-1', 'CLID-B']);
-    expect((await events(ORG_B, 'Lead'))[0]).toMatchObject({ status: 'sent' });
+    expect((await events(ORG_B, 'Purchase'))[0]).toMatchObject({ status: 'sent' });
   });
 
   it('dos envíos a la vez no mandan el mismo evento dos veces (SKIP LOCKED)', async () => {
@@ -493,7 +491,7 @@ describe('Purchase: ventana de gracia, cancelación y envío', () => {
     for (let i = 0; i < 6; i++) await sale(contactId, `par-${i}`, { graceMs: 0 });
     const later = new Date(NOW.getTime() + 1000);
     const [x, y] = await Promise.all([run(ORG_A, later), run(ORG_A, later)]);
-    expect(x + y).toBe(7); // 1 Lead + 6 Purchase
+    expect(x + y).toBe(6); // los 6 Purchase
     const ids = fake.sent.map((e) => e.eventId);
     expect(new Set(ids).size).toBe(ids.length);
   });
@@ -537,6 +535,7 @@ describe('base de datos: roles y restricciones', () => {
     const ep = await setup(T.alice);
     await hook(ep.id, ep.secret, click());
     const contactId = (await contactByPhone(ORG_A, P1))!['id'] as string;
+    await call('GET', '/tags', T.alice); // crea las etiquetas del sistema de la empresa (ya no las crea el clic)
     const tagId = (await admin.query('SELECT id FROM tags WHERE organization_id = $1 LIMIT 1', [ORG_A])).rows[0].id as string;
     const bad = (sql: string) => admin.query(sql);
     await expect(bad(`INSERT INTO tags(organization_id, id, name, is_system, system_key) VALUES ('${ORG_A}', gen_random_uuid(), 'Otra', true, 'lead')`)).rejects.toThrow(/tags_org_system_key_uq/); // una sola por empresa
@@ -553,7 +552,8 @@ describe('base de datos: roles y restricciones', () => {
     await expect(bad(`${ev} VALUES ('${ORG_A}', gen_random_uuid(), 'x1', 'Otro', '${contactId}', 'pending', now(), '{}')`)).rejects.toThrow(/meta_events_type_valid/);
     await expect(bad(`${ev} VALUES ('${ORG_A}', gen_random_uuid(), 'x1', 'Lead', '${contactId}', 'enviado', now(), '{}')`)).rejects.toThrow(/meta_events_status_valid/);
     await expect(bad(`${ev} VALUES ('${ORG_B}', gen_random_uuid(), 'x1', 'Lead', '${contactId}', 'pending', now(), '{}')`)).rejects.toThrow(/meta_events_contact_fk/);
-    await expect(bad(`${ev} VALUES ('${ORG_A}', gen_random_uuid(), '${String((await events(ORG_A))[0]!['event_id'])}', 'Lead', '${contactId}', 'pending', now(), '{}')`)).rejects.toThrow(/meta_events_org_event_id_uq/);
+    await admin.query(`${ev} VALUES ('${ORG_A}', gen_random_uuid(), 'dup-1', 'Lead', '${contactId}', 'pending', now(), '{}')`);
+    await expect(bad(`${ev} VALUES ('${ORG_A}', gen_random_uuid(), 'dup-1', 'Lead', '${contactId}', 'pending', now(), '{}')`)).rejects.toThrow(/meta_events_org_event_id_uq/);
     await expect(bad(`INSERT INTO attribution_endpoints(id, organization_id, secret_hash) VALUES (gen_random_uuid(), '${ORG_A}', repeat('a', 64))`)).rejects.toThrow(/attribution_endpoints_org_uq|secret_hash_hex/);
   });
 
@@ -562,6 +562,8 @@ describe('base de datos: roles y restricciones', () => {
     const b = await setup(T.bob);
     await hook(a.id, a.secret, click());
     await hook(b.id, b.secret, click({ phone: P2, ctwa_cl_id: 'CLID-B' }));
+    // El Lead a mano deja, en cada empresa, su etiqueta de contacto, las etiquetas del sistema y un evento
+    for (const [t, org, phone] of [[T.alice, ORG_A, P1], [T.bob, ORG_B, P2]] as const) expect((await call('PUT', `/contacts/${String((await contactByPhone(org, phone))!['id'])}/lead`, t)).status).toBe(200);
     const c = new Client({ connectionString: info.rwUrl });
     await c.connect();
     try {
@@ -576,5 +578,88 @@ describe('base de datos: roles y restricciones', () => {
     } finally {
       await c.end();
     }
+  });
+});
+
+describe('Lead a mano: la etiqueta del sistema que coloca una persona y el evento que sale (2026-11-23)', () => {
+  const lead = (t: string | undefined, id: string, method: 'PUT' | 'DELETE' = 'PUT') => call(method, `/contacts/${id}/lead`, t);
+  /** Un contacto de A que llegó por un anuncio (con click id y teléfono). */
+  async function clicked(phone = P1, clid = 'CLID-1'): Promise<string> {
+    const ep = await setup(T.alice);
+    await hook(ep.id, ep.secret, click({ phone, ctwa_cl_id: clid }));
+    return (await contactByPhone(ORG_A, phone))!['id'] as string;
+  }
+  const send = () => inOrg(ORG_A, () => app.get(CapiSenderService).runDue(new Date(Date.now() + 60_000)));
+
+  beforeEach(() => { fake.sent.length = 0; });
+
+  it('un clic de anuncio NO pone la etiqueta ni encola nada; al colocar «Lead» el asesor queda la etiqueta (puesta por una persona, auditada como manual) y sale UN Lead con el click id y el teléfono con huella', async () => {
+    const id = await clicked();
+    expect((await viewOf(T.alice, id)).tags).toEqual([]);
+    expect(await events(ORG_A)).toEqual([]);
+
+    const r = await lead(T.alice, id);
+    expect(r.status).toBe(200);
+    expect(await json(r)).toEqual({ lead: true, event: 'queued' });
+    expect((await viewOf(T.alice, id)).tags).toEqual([expect.objectContaining({ name: 'Lead', system_key: 'lead' })]);
+    expect((await admin.query(`SELECT set_by FROM contact_tags WHERE contact_id = $1`, [id])).rows).toEqual([{ set_by: 'user' }]);
+    const audit = (await admin.query(`SELECT field, old_value, new_value, source FROM audit_logs WHERE entity_type = 'contact' AND entity_id = $1 AND field = 'tag'`, [id])).rows;
+    expect(audit).toEqual([{ field: 'tag', old_value: null, new_value: 'lead', source: 'manual' }]);
+
+    const [ev] = await events(ORG_A, 'Lead');
+    expect(ev).toMatchObject({ event_id: `lead-tag:${id}`, status: 'pending', contact_id: id });
+    expect(ev!['payload']).toMatchObject({ event_name: 'Lead', action_source: 'business_messaging', messaging_channel: 'whatsapp', user_data: { ph: [phoneHash(P1)], ctwa_clid: 'CLID-1' } });
+    expect(JSON.stringify(ev!['payload'])).not.toContain('984217730'); // el teléfono nunca va en claro
+    expect(await send()).toBe(1);
+    expect((fake.sent[0]!.payload as { event_name: string }).event_name).toBe('LeadSubmitted'); // en mensajería el Lead se llama LeadSubmitted
+    expect(await events(ORG_A, 'Lead')).toEqual([expect.objectContaining({ status: 'sent' })]);
+  });
+
+  it('es una sola vez por contacto: repetir no duplica; quitarla y volver a ponerla no manda otro Lead; quitarla mientras el evento sigue en cola lo cancela y volver a ponerla lo reactiva', async () => {
+    const id = await clicked();
+    expect(await json(await lead(T.alice, id))).toEqual({ lead: true, event: 'queued' });
+    expect(await json(await lead(T.alice, id))).toEqual({ lead: true, event: 'none' }); // ya estaba
+    expect(await events(ORG_A, 'Lead')).toHaveLength(1);
+
+    expect(await json(await lead(T.alice, id, 'DELETE'))).toEqual({ lead: false, event: 'none' });
+    expect((await viewOf(T.alice, id)).tags).toEqual([]);
+    expect(await events(ORG_A, 'Lead')).toEqual([expect.objectContaining({ status: 'cancelled' })]);
+    expect(await send()).toBe(0); // lo cancelado no sale
+    expect(await json(await lead(T.alice, id, 'DELETE'))).toEqual({ lead: false, event: 'none' }); // idempotente
+
+    expect(await json(await lead(T.alice, id))).toEqual({ lead: true, event: 'queued' }); // se reactiva: todavía no había llegado a Meta
+    expect(await events(ORG_A, 'Lead')).toEqual([expect.objectContaining({ status: 'pending' })]);
+    expect(await send()).toBe(1);
+
+    await lead(T.alice, id, 'DELETE');
+    expect(await json(await lead(T.alice, id))).toEqual({ lead: true, event: 'none' }); // ya salió: no se manda otro
+    expect(await events(ORG_A, 'Lead')).toHaveLength(1);
+    expect(fake.sent).toHaveLength(1);
+  });
+
+  it('un contacto que no llegó por un anuncio recibe la etiqueta pero no hay a quién atribuir el Lead: el evento queda omitido con su motivo y nunca se envía', async () => {
+    const made = await json<{ id: string }>(await call('POST', '/contacts', T.alice, { name: 'Manual', phones: [P2] }));
+    expect(await json(await lead(T.alice, made.id))).toEqual({ lead: true, event: 'skipped' });
+    expect((await viewOf(T.alice, made.id)).tags.map((t) => t.system_key)).toEqual(['lead']);
+    const [ev] = await events(ORG_A, 'Lead');
+    expect(ev).toMatchObject({ status: 'skipped', last_error: expect.stringContaining('no llegó por un anuncio de Meta') });
+    expect(JSON.stringify(ev!['payload'])).not.toContain('ctwa');
+    expect(await send()).toBe(0);
+    expect(fake.sent).toEqual([]);
+  });
+
+  it('alcance y aislamiento: sin sesión 401; el asesor solo marca SUS contactos (404 uniforme en los demás); la otra empresa nunca; un id inexistente 404', async () => {
+    const theirs = await clicked(); // contacto de A sin dueño: el asesor no lo ve
+    const mine = await json<{ id: string }>(await call('POST', '/contacts', T.carol, { name: 'De Carolina', phones: [P2] }));
+    expect((await lead(undefined, mine.id)).status).toBe(401);
+    expect((await lead(T.carol, theirs)).status).toBe(404);
+    expect((await lead(T.carol, theirs, 'DELETE')).status).toBe(404);
+    expect((await lead(T.carol, mine.id)).status).toBe(200);
+    expect((await lead(T.bob, theirs)).status).toBe(404); // otra empresa
+    expect((await lead(T.bob, mine.id)).status).toBe(404);
+    expect((await lead(T.alice, '00000000-0000-4000-8000-000000000999')).status).toBe(404);
+    expect((await admin.query(`SELECT count(*)::int n FROM contact_tags WHERE contact_id = $1`, [theirs])).rows[0].n).toBe(0);
+    expect(await events(ORG_B)).toEqual([]);
+    expect((await events(ORG_A, 'Lead')).map((e) => e['contact_id'])).toEqual([mine.id]);
   });
 });

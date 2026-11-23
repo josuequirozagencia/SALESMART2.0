@@ -1,5 +1,6 @@
 export { AttributionModule } from './attribution.module';
-export { AttributionService, DEFAULT_GRACE_MS, MAX_GRACE_MS, META_EVENT_MAX_AGE_MS, phoneHash, type ClickInput, type RecordResult } from './attribution.service';
+export { AttributionService, DEFAULT_GRACE_MS, MAX_GRACE_MS, phoneHash, type ClickInput, type RecordResult } from './attribution.service';
+export { LeadMarkService, type LeadMarkResult } from './lead-mark.service';
 export { CapiSenderService, CAPI_BATCH, CAPI_MAX_ATTEMPTS, CAPI_MAX_AGE_MS } from './capi-sender.service';
 export { CapiSenderJob } from './capi-sender.job';
 export { AdNamesJob } from './ad-names.job';

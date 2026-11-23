@@ -8,7 +8,7 @@ import { Icon } from '../../ui/Icon';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { TagBadge } from '../../ui/TagBadge';
-import { useCreateTag, useTags } from '../tags/useTags';
+import { leadNotice, useCreateTag, useSetLead, useTags } from '../tags/useTags';
 
 const DEFAULT_COLOR = '#4f46e5';
 
@@ -30,7 +30,7 @@ function useSetContactTags(c: Conversation) {
 const SEARCH_FROM = 8;
 
 /**
- * El editor de etiquetas: las del sistema solo se ven; las personalizadas se marcan y desmarcan. `compact` (popover del chat móvil, v13 S1.2): con buscador si hay más de 8 y la creación
+ * El editor de etiquetas: «Lead» (del sistema) se marca y desmarca a mano y al marcarla sale el Lead a Meta; las otras del sistema solo se ven; las personalizadas se marcan y desmarcan. `compact` (popover del chat móvil, v13 S1.2): con buscador si hay más de 8 y la creación
  * escondida tras «Crear etiqueta». Crear exige `tags.manage` (el servidor lo informa en `access.manage`); asignar sigue las reglas de edición de contactos, así que si la persona no puede,
  * el servidor responde y se le dice.
  */
@@ -38,10 +38,18 @@ function TagsEditor({ c, compact = false }: { c: Conversation; compact?: boolean
   const tags = useTags();
   const setTags = useSetContactTags(c);
   const create = useCreateTag();
+  const lead = useSetLead(c.contact.id);
   const [name, setName] = useState('');
   const [color, setColor] = useState(DEFAULT_COLOR);
   const [error, setError] = useState<string>();
+  const [leadMsg, setLeadMsg] = useState<string>();
   const [query, setQuery] = useState('');
+  const hasLead = c.tags.some((t) => t.system_key === 'lead');
+  const toggleLead = (): void => {
+    setError(undefined);
+    setLeadMsg(undefined);
+    lead.mutate(!hasLead, { onSuccess: (r) => setLeadMsg(leadNotice(r)), onError: (e) => setError(friendlyError(e, 'No pudimos cambiar el Lead.')) });
+  };
   const [creating, setCreating] = useState(!compact);
   const mine = new Set(c.tags.filter((t) => !t.is_system).map((t) => t.id));
   const custom = (tags.data?.items ?? []).filter((t) => !t.is_system);
@@ -72,12 +80,18 @@ function TagsEditor({ c, compact = false }: { c: Conversation; compact?: boolean
       {tags.isPending ? <div className="grid place-items-center py-6 text-muted"><Spinner label="Cargando etiquetas" /></div> : null}
       {tags.isError ? <Alert>{friendlyError(tags.error, 'No pudimos cargar las etiquetas.')}</Alert> : null}
       {error ? <Alert>{error}</Alert> : null}
-      {c.tags.some((t) => t.is_system) ? (
-        <div className="grid gap-1">
-          <span className="text-[12.5px] font-semibold text-muted">Del sistema (solo lectura: las pone el sistema)</span>
-          <div className="flex flex-wrap gap-1.5">{c.tags.filter((t) => t.is_system).map((t) => <Pill key={t.id} kind="muted">{t.name}</Pill>)}</div>
-        </div>
-      ) : null}
+      <div className="grid gap-1">
+        <span className="text-[12.5px] font-semibold text-muted">Del sistema</span>
+        <label className="flex min-h-11 cursor-pointer items-center gap-2.5 rounded-lg px-2 hover:bg-surface2">
+          <input type="checkbox" checked={hasLead} disabled={lead.isPending} onChange={toggleLead} className="size-4" />
+          <span className="text-[14px] font-semibold">Lead</span>
+          <span className="text-[12px] text-muted">Al marcarlo se avisa a Meta (una vez por contacto)</span>
+        </label>
+        {leadMsg ? <p role="status" className="px-2 text-[12.5px] text-muted">{leadMsg}</p> : null}
+        {c.tags.some((t) => t.is_system && t.system_key !== 'lead') ? (
+          <div className="flex flex-wrap gap-1.5 px-2">{c.tags.filter((t) => t.is_system && t.system_key !== 'lead').map((t) => <Pill key={t.id} kind="muted">{t.name}</Pill>)}</div>
+        ) : null}
+      </div>
       {tags.isSuccess ? (
         <fieldset className="grid gap-1.5">
           <legend className="mb-1 text-[12.5px] font-semibold text-muted">Personalizadas</legend>
@@ -187,25 +201,27 @@ export function TagsPopoverButton({ c }: { c: Conversation }) {
 
 /**
  * Las etiquetas del contacto como chips. Cada etiqueta PERSONALIZADA lleva un × para quitarla (no borra al contacto ni la conversación; se audita y, si estaba enviada a GoHighLevel, se
- * quita allá por el mismo flujo de siempre). Las del sistema (Lead, Cita agendada, Venta) no lo llevan: solo las pone el sistema.
+ * quita allá por el mismo flujo de siempre). «Lead» también lleva × (se maneja a mano); Cita agendada y Venta no: solo las pone el sistema.
  */
 export function RemovableTags({ c }: { c: Conversation }) {
   const setTags = useSetContactTags(c);
+  const lead = useSetLead(c.contact.id);
   const [error, setError] = useState<string>();
   const remove = (t: ContactTag): void => {
     setError(undefined);
+    if (t.system_key === 'lead') return lead.mutate(false, { onError: (e) => setError(friendlyError(e, 'No pudimos quitar el Lead.')) });
     const next = c.tags.filter((x) => !x.is_system && x.id !== t.id).map((x) => x.id);
     setTags.mutate(next, { onError: (e) => setError(friendlyError(e, 'No pudimos quitar la etiqueta.')) });
   };
   return (
     <>
       {c.tags.map((t) =>
-        t.is_system ? (
+        t.is_system && t.system_key !== 'lead' ? (
           <TagChip key={t.id} t={t} />
         ) : (
           <span key={t.id} className="inline-flex items-center gap-0.5">
             <TagChip t={t} />
-            <button type="button" aria-label={`Quitar la etiqueta «${t.name}»`} title="Quitar la etiqueta" disabled={setTags.isPending} onClick={() => remove(t)} className="grid size-5 place-items-center rounded-full text-[13px] leading-none text-muted hover:bg-surface2 hover:text-fg disabled:opacity-50 max-md:size-8">×</button>
+            <button type="button" aria-label={`Quitar la etiqueta «${t.name}»`} title="Quitar la etiqueta" disabled={setTags.isPending || lead.isPending} onClick={() => remove(t)} className="grid size-5 place-items-center rounded-full text-[13px] leading-none text-muted hover:bg-surface2 hover:text-fg disabled:opacity-50 max-md:size-8">×</button>
           </span>
         ),
       )}

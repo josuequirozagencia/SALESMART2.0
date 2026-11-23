@@ -22,9 +22,6 @@ export const phoneHash = (e164: string): string => sha256(e164.replace(/\D/g, ''
 /** Un clic a registrar: lo mismo que el punto de entrada, pero el teléfono puede faltar (WhatsApp por QR con un contacto que solo trae su código `@lid`). */
 export type ClickInput = Omit<CtwaWebhookDto, 'phone'> & { phone: string | null };
 
-/** Meta solo acepta eventos de hasta 7 días de antigüedad: un clic más viejo (p. ej. de «ponerse al día» o de una recuperación) se registra en el contacto pero NO genera evento. */
-export const META_EVENT_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
-
 export interface RecordResult {
   contactCreated: boolean;
   /** El mismo clic ya estaba registrado: no se cambió nada. */
@@ -67,7 +64,8 @@ export class AttributionService {
 
   /**
    * Registra un clic de anuncio DENTRO de la transacción de quien llama: el punto de entrada externo (`record`) o el aviso de Meta del primer mensaje (`referral`, M6.6). Graba el primer
-   * y el último toque del contacto, el historial (`contact_touch_events`) y deja el Lead hacia Meta. `contactId` evita buscar de nuevo al contacto cuando ya se tiene.
+   * y el último toque del contacto y el historial (`contact_touch_events`); NO encola ningún evento hacia Meta ni pone la etiqueta `Lead` (desde el 2026-11-23 el Lead lo marca una persona: Meta ya cuenta las
+   * conversaciones iniciadas y Pasiel manda sus Lead por GoHighLevel). `contactId` evita buscar de nuevo al contacto cuando ya se tiene.
    */
   async recordIn(tx: TenantTx, input: ClickInput, now = new Date(), known?: { id: string; created: boolean }): Promise<RecordResult> {
     const at = input.occurred_at ? new Date(input.occurred_at) : now;
@@ -88,32 +86,7 @@ export class AttributionService {
       // El historial lleva TODOS los clics (aunque uno viejo no cambie el último toque); es idempotente por el clic
       await this.touches.record(tx, id, { kind: 'ad_click', at, source: input.source, campaign: input.campaign_name, adset: input.adset_name, ad: input.ad_name, adId: input.ad_id, ctwaClid: input.ctwa_cl_id, headline: input.headline, thumbnailUrl: input.thumbnail_url, sourceUrl: input.source_url, originRef: input.ctwa_cl_id });
       if (touch.duplicate) return { contactCreated: created, duplicate: true };
-      // Un clic de hace más de 7 días ya no lo acepta Meta: queda en el contacto y el historial, sin evento
-      if (Date.now() - at.getTime() > META_EVENT_MAX_AGE_MS) {
-        await this.tags.apply(tx, id, 'lead');
-        return { contactCreated: created, duplicate: false };
-      }
-      // Una fila por clic (el id incluye la huella del clic): repetir la llamada no duplica nada aunque el último toque ya sea otro
-      const eventId = `lead:${id}:${sha256(input.ctwa_cl_id).slice(0, 24)}`;
-      await tx
-        .insert(metaEvents)
-        .values({
-          eventId,
-          type: 'Lead',
-          contactId: id,
-          sendAfter: now, // el Lead se envía sin ventana de gracia
-          payload: {
-            event_name: 'Lead',
-            event_time: Math.floor(at.getTime() / 1000),
-            event_id: eventId,
-            action_source: 'business_messaging',
-            messaging_channel: 'whatsapp',
-            user_data: { ...(input.phone ? { ph: [phoneHash(input.phone)] } : {}), ctwa_clid: input.ctwa_cl_id },
-            custom_data: { campaign: input.campaign_name ?? null, adset: input.adset_name ?? null, ad: input.ad_name ?? null },
-          },
-        })
-        .onConflictDoNothing();
-      await this.tags.apply(tx, id, 'lead');
+      // Ni el Lead hacia Meta ni la etiqueta `Lead` salen solos (decisión del responsable, 2026-11-23): el clic queda en el contacto y el historial; el asesor coloca `Lead` a mano (`LeadMarkService`)
       return { contactCreated: created, duplicate: false };
     }
   }
