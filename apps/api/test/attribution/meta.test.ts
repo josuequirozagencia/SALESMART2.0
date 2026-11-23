@@ -4,6 +4,8 @@
 //   POST /v1/meta/settings/test
 //   GET /v1/meta/events
 //   POST /v1/meta/events/:id/retry
+//   POST /v1/meta/events/retry-all
+//   POST /v1/meta/messaging-dataset
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
@@ -124,7 +126,7 @@ beforeEach(async () => {
 
 describe('conexión con Meta · permisos y aislamiento', () => {
   it('sin sesión 401; un asesor no ve ni cambia nada (403); solo el administrador', async () => {
-    for (const [m, p, b] of [['GET', '/meta/settings'], ['PUT', '/meta/settings', good()], ['POST', '/meta/settings/test'], ['GET', '/meta/events'], ['POST', `/meta/events/${randomUUID()}/retry`]] as Array<[string, string, unknown?]>) {
+    for (const [m, p, b] of [['GET', '/meta/settings'], ['PUT', '/meta/settings', good()], ['POST', '/meta/settings/test'], ['GET', '/meta/events'], ['POST', `/meta/events/${randomUUID()}/retry`], ['POST', '/meta/events/retry-all'], ['POST', '/meta/messaging-dataset', {}]] as Array<[string, string, unknown?]>) {
       expect((await call(m, p, undefined, b)).status, `${m} ${p}`).toBe(401);
       expect((await call(m, p, T.carol, b)).status, `${m} ${p} asesor`).toBe(403);
     }

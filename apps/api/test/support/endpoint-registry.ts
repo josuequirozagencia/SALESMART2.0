@@ -207,6 +207,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/meta/settings/test', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   { route: 'GET /v1/meta/events', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   { route: 'POST /v1/meta/events/:id/retry', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'POST /v1/meta/events/retry-all', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'POST /v1/meta/messaging-dataset', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   // Tablero y analítica (M6.5, ADR-51). Pruebas: test/analytics/analytics.test.ts (A↔B, alcance propio, cifras, CSV auditado)
   { route: 'GET /v1/analytics/summary', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/reports/:name', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
