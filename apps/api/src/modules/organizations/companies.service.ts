@@ -194,6 +194,19 @@ export class CompaniesService {
     return { id: out.orgId, state: await this.stateOf(out.orgId), plan: out.plan };
   }
 
+  /** Cambia el tope de espacio de la biblioteca de archivos de la empresa (V21, ADR-75). No borra nada: si el uso queda por encima, solo se rechazan las subidas nuevas. Auditado en la plataforma. */
+  async setStorageQuota(orgId: string, bytes: number): Promise<{ id: string; storage_quota_bytes: number }> {
+    const out = await this.db.withIdentity(async (tx) => {
+      const [org] = await tx.select({ id: organizations.id, kind: organizations.kind, status: organizations.status, quota: organizations.storageQuotaBytes }).from(organizations).where(eq(organizations.id, orgId)).for('update').limit(1);
+      if (!org || org.kind === 'platform') throw new NotFoundError();
+      if (org.status === 'deleted') throw new ConflictError('COMPANY_DELETED', 'La empresa está eliminada: recupérala antes de cambiarle el espacio');
+      await tx.update(organizations).set({ storageQuotaBytes: bytes, updatedAt: new Date() }).where(eq(organizations.id, org.id));
+      return { orgId: org.id, from: org.quota };
+    });
+    await this.safely(() => this.audit.record({ action: 'company.storage_quota_changed', entityType: 'organization', entityId: out.orgId, targetOrgId: out.orgId, details: { from_bytes: out.from, to_bytes: bytes } }));
+    return { id: out.orgId, storage_quota_bytes: bytes };
+  }
+
   private async stateOf(orgId: string): Promise<CompanyState> {
     const res = await this.db.withIdentity((tx) =>
       tx.execute<{ state: CompanyState }>(sql`
