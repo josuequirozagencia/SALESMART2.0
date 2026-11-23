@@ -153,3 +153,45 @@ describe('MetaCapiProvider · nombres de anuncios (lookupAds)', () => {
     expect(await fail(provider().lookupAds([AD], creds))).toMatchObject({ retryable: true });
   });
 });
+
+describe('MetaCapiProvider · el motivo real del rechazo (v20)', () => {
+  it('«Invalid parameter» llega con el título, el mensaje para el usuario y el subcódigo que da Meta, sin pasar de 300 caracteres ni filtrar el token', async () => {
+    reply = (_q, res) => ok(res, 400, { error: { message: 'Invalid parameter', type: 'OAuthException', code: 100, error_subcode: 2804132, error_user_title: 'No hay ninguna cuenta de WhatsApp Business vinculada con este conjunto de datos', error_user_msg: `Enviaste "whatsapp_business_account_id" en user_data, pero el conjunto de datos no tiene ninguna cuenta vinculada. ${TOKEN}` } });
+    const e = await fail(provider().send(sampleEvent(), creds));
+    expect(e).toMatchObject({ retryable: false, credentials: false });
+    expect(e.message).toContain('Invalid parameter');
+    expect(e.message).toContain('No hay ninguna cuenta de WhatsApp Business vinculada');
+    expect(e.message).toContain('(2804132)');
+    expect(e.message).not.toContain(TOKEN);
+    expect(e.message.length).toBeLessThanOrEqual(300);
+  });
+
+  it('sin título ni mensaje del usuario el texto no cambia', async () => {
+    reply = (_q, res) => ok(res, 400, { error: { code: 100, message: 'Invalid parameter' } });
+    expect((await fail(provider().send(sampleEvent(), creds))).message).toBe('Meta rechazó el evento: Invalid parameter');
+  });
+});
+
+describe('MetaCapiProvider · dataset de mensajes (ensureMessagingDataset)', () => {
+  const WABA = '935383352872554';
+  it('pide POST /{cuenta}/dataset con el token en la cabecera y devuelve el dataset', async () => {
+    reply = (_q, res) => ok(res, 200, { id: '1030123066792188' });
+    await expect(provider().ensureMessagingDataset(WABA, creds)).resolves.toEqual({ datasetId: '1030123066792188' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'POST', url: `/${GRAPH_VERSION}/${WABA}/dataset`, auth: `Bearer ${TOKEN}` });
+    expect(seen[0]!.url).not.toContain(TOKEN);
+  });
+
+  it('una cuenta con forma inválida no sale a la red; una respuesta sin id o con un id raro es un fallo definitivo; un permiso que falta, un fallo de credenciales', async () => {
+    for (const waba of ['../../me', '12', 'abc', '1 2 3 4 5']) expect(await fail(provider().ensureMessagingDataset(waba, creds))).toMatchObject({ credentials: true, retryable: false });
+    expect(seen).toEqual([]);
+    reply = (_q, res) => ok(res, 200, {});
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ retryable: false });
+    reply = (_q, res) => ok(res, 200, { id: '../x' });
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ retryable: false });
+    reply = (_q, res) => ok(res, 403, { error: { code: 200, message: 'Requires whatsapp_business_manage_events permission' } });
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ credentials: true, retryable: false });
+    reply = (_q, res) => { res.writeHead(200); res.end('<html>'); };
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ retryable: true });
+  });
+});

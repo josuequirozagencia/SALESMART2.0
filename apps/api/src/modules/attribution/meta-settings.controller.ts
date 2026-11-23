@@ -2,7 +2,7 @@ import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Put, Quer
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
-import { eventsQuerySchema, saveSettingsSchema, type EventsQuery, type SaveSettingsDto } from './meta-settings.dto';
+import { eventsQuerySchema, messagingDatasetSchema, saveSettingsSchema, type EventsQuery, type MessagingDatasetDto, type SaveSettingsDto } from './meta-settings.dto';
 import { MetaSettingsService } from './meta-settings.service';
 
 /** Conexión de la empresa con la API de Conversiones de Meta y panel de eventos (M6.4, ADR-45/51). Solo quien administra integraciones; `no-store`: son credenciales y datos de clientes. */
@@ -31,6 +31,24 @@ export class MetaSettingsController {
   @Header('Cache-Control', 'no-store')
   test() {
     return this.meta.test();
+  }
+
+  /** «Crear o recuperar el dataset de mensajes» de la cuenta de WhatsApp Business (V20): lo pide a Meta con el token guardado y lo guarda. */
+  @RequirePermission('integrations.manage')
+  @Post('messaging-dataset')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  messagingDataset(@Body(new ZodValidationPipe(messagingDatasetSchema)) b: MessagingDatasetDto) {
+    return this.meta.ensureMessagingDataset(b.waba_id);
+  }
+
+  /** Vuelve a poner en cola los fallidos y bloqueados que aún acepta Meta; los de más de 7 días pasan a «vencido». */
+  @RequirePermission('integrations.manage')
+  @Post('events/retry-all')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  retryAll() {
+    return this.meta.retryAll();
   }
 
   @RequirePermission('integrations.manage')

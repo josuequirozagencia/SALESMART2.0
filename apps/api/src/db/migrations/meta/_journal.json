@@ -1072,6 +1072,13 @@
       "when": 1796800000000,
       "tag": "0152_v20_nombres_anuncio",
       "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1796900000000,
+      "tag": "0153_v20_mensajeria_meta",
+      "breakpoints": true
     }
   ]
 }

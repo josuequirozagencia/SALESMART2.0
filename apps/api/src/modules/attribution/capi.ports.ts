@@ -55,6 +55,11 @@ export interface CapiProvider {
    * Lanza `CapiSendError` si el token no puede leer anuncios (`credentials = true`) o Meta no responde.
    */
   lookupAds(adIds: readonly string[], credentials: CapiCredentials): Promise<Record<string, AdNames | null>>;
+  /**
+   * Crea o recupera el dataset vinculado a una cuenta de WhatsApp Business (`POST /{cuenta}/dataset`): es donde Meta recibe los eventos de mensajería. Si la cuenta ya tenía uno, devuelve ese.
+   * El token necesita los permisos de WhatsApp (`whatsapp_business_management` y `whatsapp_business_manage_events`). Lanza `CapiSendError`.
+   */
+  ensureMessagingDataset(wabaId: string, credentials: CapiCredentials): Promise<{ datasetId: string }>;
 }
 
 export const CAPI_PROVIDER = Symbol('CAPI_PROVIDER');
@@ -70,6 +75,9 @@ export class NoCapiProvider implements CapiProvider {
     return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
   }
   lookupAds(): Promise<Record<string, AdNames | null>> {
+    return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
+  }
+  ensureMessagingDataset(): Promise<{ datasetId: string }> {
     return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
   }
 }

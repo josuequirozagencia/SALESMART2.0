@@ -4,6 +4,8 @@
 //   POST /v1/meta/settings/test
 //   GET /v1/meta/events
 //   POST /v1/meta/events/:id/retry
+//   POST /v1/meta/events/retry-all
+//   POST /v1/meta/messaging-dataset
 import 'reflect-metadata';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { Module, type INestApplication } from '@nestjs/common';
@@ -124,7 +126,7 @@ beforeEach(async () => {
 
 describe('conexión con Meta · permisos y aislamiento', () => {
   it('sin sesión 401; un asesor no ve ni cambia nada (403); solo el administrador', async () => {
-    for (const [m, p, b] of [['GET', '/meta/settings'], ['PUT', '/meta/settings', good()], ['POST', '/meta/settings/test'], ['GET', '/meta/events'], ['POST', `/meta/events/${randomUUID()}/retry`]] as Array<[string, string, unknown?]>) {
+    for (const [m, p, b] of [['GET', '/meta/settings'], ['PUT', '/meta/settings', good()], ['POST', '/meta/settings/test'], ['GET', '/meta/events'], ['POST', `/meta/events/${randomUUID()}/retry`], ['POST', '/meta/events/retry-all'], ['POST', '/meta/messaging-dataset', {}]] as Array<[string, string, unknown?]>) {
       expect((await call(m, p, undefined, b)).status, `${m} ${p}`).toBe(401);
       expect((await call(m, p, T.carol, b)).status, `${m} ${p} asesor`).toBe(403);
     }
@@ -207,7 +209,7 @@ describe('conexión con Meta · guardar', () => {
     await save(T.alice, good());
     const ok = await call('POST', '/meta/settings/test', T.alice);
     expect(ok.status).toBe(200);
-    expect(await json(ok)).toEqual({ ok: true, dataset_name: 'Pixel de la barbería' });
+    expect(await json(ok)).toEqual({ ok: true, dataset_name: 'Pixel de la barbería', messaging_dataset_name: null });
     expect(fake.verified.at(-1)).toMatchObject({ accessToken: TOKEN_A }); // usó el token guardado
     fake.failNextVerify(new CapiSendError('Meta rechazó las credenciales: token vencido', false, true));
     const bad = await call('POST', '/meta/settings/test', T.alice);
@@ -430,5 +432,142 @@ describe('nombres de anuncio, conjunto y campaña (v20 · ADR-55)', () => {
     expect(await lookup(ORG_A, new Date(t0.getTime() + 7 * 3_600_000 + 30 * 60_000))).toBe(0);
     expect(await lookup(ORG_A, new Date(t0.getTime() + 9 * 3_600_000))).toBe(1);
     expect(await row(ORG_A, AD1)).toMatchObject({ names_status: 'ok', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026' });
+  });
+});
+
+describe('mensajería por WhatsApp: cuenta, dataset de mensajes y envío (v20 · ADR-55)', () => {
+  const WABA = '935383352872554';
+  const MSG_DATASET = '1030123066792188';
+  const msg = (over: Record<string, unknown> = {}) => good({ waba_id: WABA, messaging_dataset_id: MSG_DATASET, ...over });
+  /** Un Lead de mensajería en cola, como lo arma la atribución al llegar un clic de anuncio. */
+  async function lead(org: string, contactId: string): Promise<string> {
+    const eventId = `lead:${contactId}:test`;
+    await admin.query(
+      `INSERT INTO meta_events(organization_id, id, event_id, type, contact_id, status, send_after, payload) VALUES ($1, gen_random_uuid(), $2, 'Lead', $3, 'pending', $4, $5::jsonb)`,
+      [org, eventId, contactId, NOW, JSON.stringify({ event_name: 'Lead', event_time: Math.floor(NOW.getTime() / 1000), event_id: eventId, action_source: 'business_messaging', messaging_channel: 'whatsapp', user_data: { ctwa_clid: 'ctwa-lead-1' } })],
+    );
+    return eventId;
+  }
+
+  beforeEach(() => {
+    fake.messagingDatasets.clear();
+    fake.ensured.length = 0;
+  });
+
+  it('guarda la cuenta de WhatsApp Business y el dataset de mensajes; los valida, los conserva si se omiten y los borra con null; todo auditado', async () => {
+    expect(await json<Settings & { waba_id: string | null; messaging_dataset_id: string | null }>(await call('GET', '/meta/settings', T.alice))).toMatchObject({ waba_id: null, messaging_dataset_id: null });
+    for (const body of [msg({ waba_id: '12ab' }), msg({ messaging_dataset_id: '../x' }), msg({ waba_id: 935383352872554 })]) expect((await save(T.alice, body)).status, JSON.stringify(body).slice(0, 80)).toBe(400);
+    const r = await save(T.alice, msg());
+    expect(r.status).toBe(200);
+    expect(await json(r)).toMatchObject({ waba_id: WABA, messaging_dataset_id: MSG_DATASET });
+    const keep = await save(T.alice, { dataset_id: DATASET_A, grace_minutes: 30, test_event_code: null, enabled: true });
+    expect(await json(keep)).toMatchObject({ waba_id: WABA, messaging_dataset_id: MSG_DATASET });
+    const cleared = await save(T.alice, { dataset_id: DATASET_A, grace_minutes: 30, test_event_code: null, enabled: true, waba_id: null, messaging_dataset_id: null });
+    expect(await json(cleared)).toMatchObject({ waba_id: null, messaging_dataset_id: null });
+    const fields = (await admin.query(`SELECT field FROM audit_logs WHERE entity_type = 'meta_settings' AND field IS NOT NULL`)).rows.map((x) => x.field);
+    expect(fields).toEqual(expect.arrayContaining(['waba_id', 'messaging_dataset_id']));
+    await expect(admin.query(`UPDATE meta_settings SET waba_id = 'abc'`)).rejects.toThrow(/meta_settings_waba_shape/);
+    await expect(admin.query(`UPDATE meta_settings SET messaging_dataset_id = 'abc'`)).rejects.toThrow(/meta_settings_messaging_dataset_shape/);
+  });
+
+  it('con dataset de mensajes: la compra y el Lead salen a ESE dataset con la cuenta guardada (sin conexiones oficiales, como en QR) y el Lead se llama LeadSubmitted', async () => {
+    await save(T.alice, msg({ test_event_code: 'TESTM' }));
+    const p = await purchase(ORG_A);
+    const l = await lead(ORG_A, p.contactId);
+    await admin.query(`UPDATE meta_events SET send_after = $1`, [NOW]);
+    expect(await run(ORG_A, due())).toBe(2);
+    expect(fake.credentials.map((c) => c.datasetId)).toEqual([MSG_DATASET, MSG_DATASET]);
+    expect(fake.credentials[0]).toMatchObject({ accessToken: TOKEN_A, testEventCode: 'TESTM' });
+    const sentLead = fake.sent.find((e) => e.eventId === l)!.payload as { event_name: string; user_data: Record<string, unknown> };
+    expect(sentLead.event_name).toBe('LeadSubmitted');
+    expect(sentLead.user_data).toMatchObject({ whatsapp_business_account_id: WABA, ctwa_clid: 'ctwa-lead-1' });
+    expect((fake.sent.find((e) => e.eventId === p.eventId)!.payload as { user_data: Record<string, unknown> }).user_data['whatsapp_business_account_id']).toBe(WABA);
+    expect(await status(l)).toBe('sent');
+    // lo guardado sigue siendo `Lead`: el cambio de nombre es solo al enviar
+    expect((await admin.query(`SELECT payload->>'event_name' n FROM meta_events WHERE event_id = $1`, [l])).rows[0].n).toBe('Lead');
+  });
+
+  it('sin dataset de mensajes los eventos siguen al dataset de siempre, y la cuenta guardada se usa si no hay conexión oficial', async () => {
+    await save(T.alice, good({ waba_id: WABA }));
+    const p = await purchase(ORG_A);
+    await admin.query(`UPDATE meta_events SET send_after = $1`, [NOW]);
+    expect(await run(ORG_A, due())).toBe(1);
+    expect(fake.credentials[0]!.datasetId).toBe(DATASET_A);
+    expect((fake.sent[0]!.payload as { user_data: Record<string, unknown> }).user_data['whatsapp_business_account_id']).toBe(WABA);
+    expect(await status(p.eventId)).toBe('sent');
+  });
+
+  it('con dataset de mensajes manda la cuenta guardada aunque haya una conexión oficial distinta: el dataset está vinculado a esa cuenta y Meta rechaza otra', async () => {
+    const ch = (await admin.query(`INSERT INTO channel_accounts(organization_id, id, provider, name) VALUES ($1, gen_random_uuid(), 'meta_cloud', 'Ventas') RETURNING id`, [ORG_A])).rows[0].id as string;
+    await admin.query(`INSERT INTO whatsapp_accounts(organization_id, channel_account_id, waba_id, phone_number_id) VALUES ($1, $2, '777888999000111', '1090123456789')`, [ORG_A, ch]);
+    await save(T.alice, msg());
+    await purchase(ORG_A);
+    await admin.query(`UPDATE meta_events SET send_after = $1`, [NOW]);
+    await run(ORG_A, due());
+    expect((fake.sent[0]!.payload as { user_data: Record<string, unknown> }).user_data['whatsapp_business_account_id']).toBe(WABA);
+  });
+
+  it('las citas por mensajería no se envían a Meta (no están en su lista): quedan omitidas con su motivo', async () => {
+    await save(T.alice, msg());
+    const p = await purchase(ORG_A);
+    const appt = await inOrg(ORG_A, () => app.get(Database).withTenant((tx) => app.get(AttributionService).onAppointmentCreated(tx, { contactId: p.contactId, appointmentId: randomUUID(), startsAt: new Date(NOW.getTime() + DAY) }, NOW)));
+    await admin.query(`UPDATE meta_events SET send_after = $1`, [NOW]);
+    await run(ORG_A, due());
+    expect(await status(appt.eventId)).toBe('skipped');
+    expect(fake.sent.map((e) => e.eventId)).toEqual([p.eventId]);
+    expect((await admin.query(`SELECT last_error FROM meta_events WHERE event_id = $1`, [appt.eventId])).rows[0].last_error).toContain('pendiente de validar');
+  });
+
+  it('«Crear o recuperar el dataset de mensajes»: pide a Meta el de la cuenta con el token guardado y lo guarda; permisos, aislamiento, errores y cuenta obligatoria', async () => {
+    expect((await call('POST', '/meta/messaging-dataset', undefined, { waba_id: WABA })).status).toBe(401);
+    expect((await call('POST', '/meta/messaging-dataset', T.carol, { waba_id: WABA })).status).toBe(403);
+    expect((await call('POST', '/meta/messaging-dataset', T.alice, { waba_id: WABA })).status).toBe(404); // sin conexión guardada
+    await save(T.alice, good());
+    await save(T.bob, good({ dataset_id: DATASET_B, access_token: TOKEN_B }));
+    expect((await call('POST', '/meta/messaging-dataset', T.alice, {})).status).toBe(400); // sin cuenta ni guardada
+    expect((await call('POST', '/meta/messaging-dataset', T.alice, { waba_id: 'abc' })).status).toBe(400);
+    fake.messagingDatasets.set(WABA, MSG_DATASET);
+    const ok = await call('POST', '/meta/messaging-dataset', T.alice, { waba_id: WABA });
+    expect(ok.status).toBe(200);
+    expect(await json(ok)).toMatchObject({ waba_id: WABA, messaging_dataset_id: MSG_DATASET, dataset_id: DATASET_A });
+    expect(fake.ensured).toEqual([{ wabaId: WABA, credentials: expect.objectContaining({ accessToken: TOKEN_A, datasetId: DATASET_A }) }]);
+    expect(JSON.stringify(await (await call('GET', '/meta/settings', T.alice)).json())).not.toContain(TOKEN_A);
+    // la cuenta guardada se reutiliza si no se manda
+    expect((await call('POST', '/meta/messaging-dataset', T.alice, {})).status).toBe(200);
+    // B no vio nada de A
+    expect(await json(await call('GET', '/meta/settings', T.bob))).toMatchObject({ waba_id: null, messaging_dataset_id: null });
+    // si Meta no lo da, no se guarda nada y el motivo llega a la persona
+    fake.failNextEnsure(new CapiSendError('Meta rechazó el evento: Permisos insuficientes (200)', false));
+    const bad = await call('POST', '/meta/messaging-dataset', T.alice, { waba_id: '111122223333444' });
+    expect(bad.status).toBe(400);
+    const body = await json<{ error: { details: Array<{ path: string; message: string }> } }>(bad);
+    expect(body.error.details[0]).toMatchObject({ path: 'waba_id' });
+    expect(JSON.stringify(body)).toContain('Permisos insuficientes');
+    expect(await json(await call('GET', '/meta/settings', T.alice))).toMatchObject({ waba_id: WABA, messaging_dataset_id: MSG_DATASET });
+  });
+
+  it('«Probar conexión» comprueba también el dataset de mensajes', async () => {
+    await save(T.alice, msg());
+    fake.verified.length = 0;
+    const r = await call('POST', '/meta/settings/test', T.alice);
+    expect(r.status).toBe(200);
+    expect(await json(r)).toMatchObject({ ok: true, dataset_name: 'Pixel de la barbería', messaging_dataset_name: 'Pixel de la barbería' });
+    expect(fake.verified.map((c) => c.datasetId)).toEqual([DATASET_A, MSG_DATASET]);
+  });
+
+  it('«Reintentar todos»: vuelve a la cola lo fallido o bloqueado de los últimos 7 días y vence lo más viejo; solo de SU empresa', async () => {
+    await save(T.alice, good());
+    await save(T.bob, good({ dataset_id: DATASET_B, access_token: TOKEN_B }));
+    const [a1, a2, old, b1] = [await purchase(ORG_A), await purchase(ORG_A), await purchase(ORG_A), await purchase(ORG_B)];
+    await admin.query(`UPDATE meta_events SET status = 'failed', attempts = 5, last_error = 'Invalid parameter' WHERE event_id IN ($1, $2, $3)`, [a1.eventId, a2.eventId, b1.eventId]);
+    await admin.query(`UPDATE meta_events SET status = 'blocked' WHERE event_id = $1`, [a2.eventId]);
+    await admin.query(`UPDATE meta_events SET status = 'failed', created_at = now() - interval '9 days' WHERE event_id = $1`, [old.eventId]);
+    expect((await call('POST', '/meta/events/retry-all', T.carol)).status).toBe(403);
+    const r = await call('POST', '/meta/events/retry-all', T.alice);
+    expect(r.status).toBe(200);
+    expect(await json(r)).toEqual({ requeued: 2, expired: 1 });
+    expect([await status(a1.eventId), await status(a2.eventId), await status(old.eventId), await status(b1.eventId)]).toEqual(['pending', 'pending', 'expired', 'failed']);
+    expect((await admin.query(`SELECT attempts, last_error FROM meta_events WHERE event_id = $1`, [a1.eventId])).rows[0]).toEqual({ attempts: 0, last_error: null });
+    expect(await json(await call('POST', '/meta/events/retry-all', T.alice))).toEqual({ requeued: 0, expired: 0 });
   });
 });
