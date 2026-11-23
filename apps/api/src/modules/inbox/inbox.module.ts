@@ -21,6 +21,7 @@ import { MentionsService } from './mentions.service';
 import { MessageQuotesService } from './message-quotes.service';
 import { OutboundDispatcher } from './outbound-dispatcher.service';
 import { OutboundJob } from './outbound.job';
+import { LibraryModule } from '../library';
 import { OutboundService } from './outbound.service';
 import { OwnerReleaseService } from './owner-release.service';
 import { ReactionsService } from './reactions.service';
@@ -35,7 +36,7 @@ import { SlaSweepJob } from './sla-sweep.job';
  * entra por los canales) porque envía por el proveedor de `channels`, que a su vez usa `conversations`: así no hay dependencias en círculo.
  */
 @Module({
-  imports: [AttachmentsModule, QrModule, ChannelsModule, ContactsModule, NotificationsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
+  imports: [AttachmentsModule, LibraryModule, QrModule, ChannelsModule, ContactsModule, NotificationsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, ContactConversationController, MessagesController, ScheduledController, ConversationAttachmentsController, AttachmentsController],
   providers: [MessageQuotesService, ConversationAttachmentsService, OwnerReleaseService, ReactionsService, MentionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OwnerReleaseService, OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],

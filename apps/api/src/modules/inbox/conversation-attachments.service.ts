@@ -33,6 +33,22 @@ export class ConversationAttachmentsService {
 
   async upload(access: InboxAccess, conversationId: string, file: { bytes: Buffer; contentType: string | undefined; filename: string | null }): Promise<AttachmentInfo> {
     const scope = scopeOf(access);
+    await this.assertWritable(scope, conversationId);
+    return this.store(scope.userId, conversationId, file);
+  }
+
+  /**
+   * Un archivo de la biblioteca de la empresa (V21, ADR-75 #3) como adjunto de ESTA conversación: se COPIA a un adjunto propio (se vuelve a revisar y a guardar bajo `attachments/`), así que archivar o
+   * quitar el original no rompe lo ya enviado y el vencimiento de los adjuntos nunca alcanza a la biblioteca. Primero se comprueba que la persona puede escribir aquí; solo entonces se lee el original.
+   * Queda `ready` sin mensaje: se envía con `POST …/messages { attachment_id }` (o lo hace `POST …/library/:assetId/send`).
+   */
+  async fromLibrary(access: InboxAccess, conversationId: string, load: () => Promise<{ bytes: Buffer; contentType: string; filename: string }>): Promise<AttachmentInfo> {
+    const scope = scopeOf(access);
+    await this.assertWritable(scope, conversationId);
+    return this.store(scope.userId, conversationId, await load());
+  }
+
+  private async assertWritable(scope: ReturnType<typeof scopeOf>, conversationId: string): Promise<void> {
     if (!scope.canReply) throw new ForbiddenError();
     // Primero se comprueba que la persona puede escribir en la conversación: no se gasta almacenamiento ni antivirus en algo que no podrá enviar
     await this.db.withTenant(async (tx) => {
@@ -40,6 +56,9 @@ export class ConversationAttachmentsService {
       assertCanReply(scope, c, channel.state, collab, channel.provider);
       if (channel.provider === 'ghl') throw new ConflictError('GHL_TEXT_ONLY', 'Por ahora, por GoHighLevel solo se pueden enviar mensajes de texto');
     });
+  }
+
+  private async store(userId: string | null, conversationId: string, file: { bytes: Buffer; contentType: string | undefined; filename: string | null }): Promise<AttachmentInfo> {
     const prepared = await this.files.prepareUpload(file.bytes, file.contentType, file.filename);
     const id = uuidv7();
     const organizationId = TenantContext.current().organizationId;
@@ -60,7 +79,7 @@ export class ConversationAttachmentsService {
             checksum: prepared.checksum,
             state: 'ready',
             scanStatus: stored.scanStatus,
-            createdBy: scope.userId,
+            createdBy: userId,
           })
           .returning(),
       );
