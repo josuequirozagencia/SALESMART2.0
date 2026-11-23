@@ -20,7 +20,18 @@ export interface LibraryAsset {
   archived_at: string | null;
 }
 export interface LibraryFolder { id: string; name: string; asset_count: number }
-export interface LibraryUsage { used_bytes: number; quota_bytes: number; available_bytes: number; assets: number }
+export interface LibraryUsage {
+  used_bytes: number;
+  /** El cupo efectivo: incluido + espacio extra vigente. */
+  quota_bytes: number;
+  available_bytes: number;
+  assets: number;
+  included_bytes: number;
+  extra_bytes: number;
+  next_expiry_at: string | null;
+  /** La solicitud de más espacio que sigue abierta. */
+  request: { id: string; plan_name: string | null; created_at: string } | null;
+}
 export interface LibraryPage {
   folders: LibraryFolder[];
   items: LibraryAsset[];

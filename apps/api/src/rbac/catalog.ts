@@ -98,6 +98,8 @@ export const PERMISSIONS = {
   'platform.ai.manage': 'platform',
   // v11 S3: el favicon de la plataforma. Solo el Súper Admin.
   'platform.branding.manage': 'platform',
+  // V21b (ADR-75): planes de espacio extra de la biblioteca, solicitudes y concesiones por empresa. Solo el Súper Admin.
+  'platform.storage.manage': 'platform',
 } as const satisfies Record<string, PermissionScope>;
 
 export type PermissionKey = keyof typeof PERMISSIONS;

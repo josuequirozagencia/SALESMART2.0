@@ -9,6 +9,7 @@ import { APP_CONFIG } from '../../tokens';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
 import { OrgDirectoryService } from '../organizations';
+import { openRequestIn, StorageQuotaService } from '../storage';
 import type { AssetView, FolderDto, FolderView, ListLibraryQuery, UpdateAssetDto, UploadAssetQuery, UsageView } from './library.dto';
 
 /** Quién consulta: `manage` = el administrador (sube, ordena, ve archivados y el uso); si no, un asesor, que solo ve lo marcado para asesores. */
@@ -54,6 +55,7 @@ export class LibraryService {
     @Inject(Database) private readonly db: Database,
     @Inject(AttachmentsService) private readonly files: AttachmentsService,
     @Inject(OrgDirectoryService) private readonly directory: OrgDirectoryService,
+    @Inject(StorageQuotaService) private readonly quotas: StorageQuotaService,
     @Inject(APP_CONFIG) private readonly cfg: AppConfig,
   ) {}
 
@@ -85,7 +87,7 @@ export class LibraryService {
         .groupBy(mediaAssets.folderId);
       const byFolder = new Map(counts.map((c) => [c.folderId, c.n]));
       const folders = (await tx.select().from(mediaFolders).where(isNull(mediaFolders.archivedAt)).orderBy(asc(mediaFolders.name))).map((f) => ({ id: f.id, name: f.name, asset_count: byFolder.get(f.id) ?? 0 }));
-      const usage = access.manage ? await this.usageIn(tx, quota!) : null;
+      const usage = access.manage ? await this.usageIn(tx, quota!, true) : null;
       return { folders, items: page.map(view), next_cursor: rows.length > limit && last ? Buffer.from(`${last.createdAt.toISOString()}|${last.id}`).toString('base64url') : null, usage };
     });
     return { ...out, storage_available: storageOk };
@@ -94,7 +96,7 @@ export class LibraryService {
   /** Cuánto espacio usa la empresa frente a su tope. */
   async usage(): Promise<UsageView> {
     const quota = await this.directory.storageQuotaBytes();
-    return this.db.withTenant((tx) => this.usageIn(tx, quota));
+    return this.db.withTenant((tx) => this.usageIn(tx, quota, true));
   }
 
   /** Una URL firmada de pocos minutos para ver o descargar el archivo. El asesor solo de lo marcado para asesores. 404 si no existe, está archivado o es de otra empresa. */
@@ -294,16 +296,18 @@ export class LibraryService {
   // ------------------------------------------------------------------ internos
 
   /** Uso derivado: la suma de los archivos vigentes. Nunca es un campo editable. */
-  private async usageIn(tx: TenantTx, quota: number): Promise<UsageView> {
+  private async usageIn(tx: TenantTx, included: number, withRequest = false): Promise<UsageView> {
+    const q = await this.quotas.quotaIn(tx, included);
     const [r] = await tx.select({ used: sql<string>`coalesce(sum(${mediaAssets.sizeBytes}), 0)::bigint`, n: sql<number>`count(*)::int` }).from(mediaAssets).where(eq(mediaAssets.state, 'ready'));
     const used = Number(r?.used ?? 0);
-    return { used_bytes: used, quota_bytes: quota, available_bytes: Math.max(0, quota - used), assets: r?.n ?? 0 };
+    const request = withRequest ? await openRequestIn(tx) : null;
+    return { used_bytes: used, quota_bytes: q.effective_bytes, available_bytes: Math.max(0, q.effective_bytes - used), assets: r?.n ?? 0, included_bytes: q.included_bytes, extra_bytes: q.extra_bytes, next_expiry_at: q.next_expiry_at, request: request ? { id: request.id, plan_name: request.plan_name, created_at: request.created_at } : null };
   }
 
   private async assertFits(tx: TenantTx, quota: number, size: number): Promise<void> {
     const u = await this.usageIn(tx, quota);
-    if (u.used_bytes + size > quota) {
-      throw new AppError(409, 'QUOTA_EXCEEDED', `No hay espacio: la biblioteca usa ${mb(u.used_bytes)} MB de ${mb(quota)} MB y este archivo pesa ${mb(size)} MB. Archiva algo o pide más espacio`);
+    if (u.used_bytes + size > u.quota_bytes) {
+      throw new AppError(409, 'QUOTA_EXCEEDED', `No hay espacio: la biblioteca usa ${mb(u.used_bytes)} MB de ${mb(u.quota_bytes)} MB y este archivo pesa ${mb(size)} MB. Archiva algo o pide más espacio`);
     }
   }
 
