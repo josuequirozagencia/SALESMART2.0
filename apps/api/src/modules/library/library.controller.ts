@@ -51,6 +51,14 @@ export class LibraryController {
     return this.library.update(id, b);
   }
 
+  /** Qué automatizaciones adjuntan este archivo (para avisar antes de archivarlo). */
+  @RequirePermission('library.manage')
+  @Get('assets/:id/usage')
+  @Header('Cache-Control', 'no-store')
+  async assetUsage(@Param('id', idParam) id: string) {
+    return { automations: await this.library.usedByAutomations(id) };
+  }
+
   @RequirePermission('library.manage')
   @Post('assets/:id/archive')
   @HttpCode(200)

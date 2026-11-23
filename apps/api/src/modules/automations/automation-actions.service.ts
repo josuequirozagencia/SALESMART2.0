@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
+import { uuidv7 } from '@sales-smart/shared';
 import { automations, automationSettings, contactPhones, contacts, conversations, tags, tasks, type TenantTx } from '../../db';
 import { AppError } from '../../errors';
 import { writeAudit } from '../audit';
@@ -7,6 +9,7 @@ import { AgentRuntimeService } from '../ai';
 import { ContactsService } from '../contacts';
 import { CustomValuesService } from '../custom-fields';
 import { currentAutomationOrigin } from '../events';
+import { LibraryService } from '../library';
 import { OpportunitiesService } from '../opportunities';
 import type { OrgDirectory } from '../organizations';
 import { OutreachService } from '../outreach';
@@ -40,6 +43,20 @@ export class ActionFailed extends Error {}
 
 const done = (detail: string): StepOutcome => ({ outcome: 'done', detail });
 
+/** Por qué no se le puede escribir al contacto ahora (compartido con la prueba en seco). */
+export const NO_TARGET = {
+  revoked: 'El contacto revocó su consentimiento',
+  no_conversation: 'No hay una conversación abierta con el contacto',
+  window_closed: 'Pasaron más de 24 h desde su último mensaje: solo se puede enviar una plantilla',
+  channel_unavailable: 'La conexión no está activa',
+} as const;
+
+/** Un UUID estable a partir de un texto (ejecución + paso): la misma clave de almacenamiento en cada reintento. */
+function deterministicId(seed: string): string {
+  const h = createHash('sha256').update(seed).digest('hex');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
 /**
  * Las acciones que una automatización puede hacer (M9.3, ADR-54; F20). Cada una corre DENTRO de la transacción de la ejecución (en su `SAVEPOINT`) y reutiliza el servicio dueño de esa parte del
  * negocio —ninguna escribe tablas ajenas—, así que respeta sus reglas y su auditoría (origen `automation`). Todo lo que el editor guardó se vuelve a comprobar aquí: la regla puede haber
@@ -57,6 +74,7 @@ export class AutomationActionsService {
     @Inject(TaskNoticesService) private readonly taskNotices: TaskNoticesService,
     @Inject(AutomationEnqueueService) private readonly enqueue: AutomationEnqueueService,
     @Inject(AgentRuntimeService) private readonly agents: AgentRuntimeService,
+    @Inject(LibraryService) private readonly library: LibraryService,
     @Inject(OUTBOUND_HTTP) private readonly outbound: OutboundHttp,
   ) {}
 
@@ -77,7 +95,7 @@ export class AutomationActionsService {
         case 'create_task':
           return await this.createTask(tx, a, ctx);
         case 'send_text':
-          return await this.sendText(tx, a.text, ctx);
+          return a.attachment ? await this.sendAttachment(tx, a.attachment.asset_id, a.text ?? '', ctx) : await this.sendText(tx, a.text ?? '', ctx);
         case 'send_template':
           return await this.sendTemplate(tx, a, ctx);
         case 'run_rule':
@@ -166,6 +184,25 @@ export class AutomationActionsService {
     throw new ActionSkipped(
       { revoked: 'El contacto revocó su consentimiento', no_conversation: 'No hay una conversación abierta con el contacto', window_closed: 'Pasaron más de 24 h desde su último mensaje: solo se puede enviar una plantilla', channel_unavailable: 'La conexión no está activa' }[r.reason],
     );
+  }
+
+  /**
+   * «Escribir mensaje» con un archivo de la biblioteca (V21 · 21.3, ADR-75 #6). Mismas reglas que el texto (conversación abierta, ventana de 24 h, consentimiento) más las del archivo: si se archivó o ya
+   * no se puede usar, el paso FALLA a la vista (no se manda a medias). El objeto se COPIA a un adjunto propio con una clave que sale de la ejecución y el paso: reintentar no duplica.
+   */
+  private async sendAttachment(tx: TenantTx, assetId: string, text: string, ctx: ActionContext): Promise<StepOutcome> {
+    const [c] = await tx.select({ name: contacts.name }).from(contacts).where(and(eq(contacts.id, ctx.contactId), isNull(contacts.deletedAt))).limit(1);
+    if (!c) throw new ActionFailed('El contacto ya no existe');
+    const asset = await this.library.forAutomation(tx, assetId);
+    if (!asset.ok) throw new ActionFailed(asset.reason === 'unscanned' ? 'El archivo de la biblioteca no pasó por el antivirus y la empresa lo exige' : 'El archivo de la biblioteca ya no está disponible (se archivó o se quitó)');
+    const t = await this.outreach.textTarget(tx, { contactId: ctx.contactId, now: ctx.now }, true);
+    if (!t.ok) throw new ActionSkipped(NO_TARGET[t.reason]);
+    if (t.provider === 'ghl') throw new ActionSkipped('Por GoHighLevel solo se pueden enviar mensajes de texto');
+    const origin = currentAutomationOrigin();
+    const attachmentId = origin ? deterministicId(`${origin.runId}:${ctx.step}`) : uuidv7();
+    const bytes = await this.library.readObject(asset.row);
+    const r = await this.outreach.sendAttachment(tx, t, { attachmentId, file: { bytes, contentType: asset.row.mimeType, filename: asset.row.name }, caption: renderText(text, c) });
+    return done(r.messages === 2 ? 'Archivo y mensaje en cola' : 'Archivo en cola');
   }
 
   private async sendTemplate(tx: TenantTx, a: Extract<ActionDef, { type: 'send_template' }>, ctx: ActionContext): Promise<StepOutcome> {

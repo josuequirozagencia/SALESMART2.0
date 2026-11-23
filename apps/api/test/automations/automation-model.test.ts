@@ -126,6 +126,12 @@ describe('acciones y definición', () => {
     expect(actionSchema.safeParse({ type: 'create_task', title: 'x', assignee: 'cualquiera' }).success).toBe(false);
     expect(actionSchema.safeParse({ type: 'send_text', text: '' }).success).toBe(false);
     expect(actionSchema.safeParse({ type: 'send_text', text: 'x'.repeat(1001) }).success).toBe(false);
+    // V21 · 21.3: un archivo de la biblioteca, con o sin texto; sin ninguno de los dos no hay mensaje
+    expect(actionSchema.safeParse({ type: 'send_text' }).success).toBe(false);
+    expect(actionSchema.safeParse({ type: 'send_text', attachment: { asset_id: U1 } }).success).toBe(true);
+    expect(actionSchema.safeParse({ type: 'send_text', text: 'Hola', attachment: { asset_id: U1 } }).success).toBe(true);
+    expect(actionSchema.safeParse({ type: 'send_text', attachment: { asset_id: 'no-es-uuid' } }).success).toBe(false);
+    expect(actionSchema.safeParse({ type: 'send_text', attachment: { asset_id: U1, otro: 1 } }).success).toBe(false);
     expect(actionSchema.safeParse({ type: 'send_template', channel_id: U1, template_id: U2, params: { 'body:1': 'x', 'button:0:1': 'y' } }).success).toBe(true);
     expect(actionSchema.safeParse({ type: 'send_template', channel_id: U1, template_id: U2, params: { 'con espacio': 'x' } }).success).toBe(false);
     expect(actionSchema.safeParse({ type: 'http_request', url: 'https://x.test' }).success).toBe(false); // aún no existe (M9.5)

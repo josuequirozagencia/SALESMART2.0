@@ -232,7 +232,9 @@ export const actionSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('add_tag'), tag_id: uuid }),
   z.strictObject({ type: z.literal('remove_tag'), tag_id: uuid }),
   z.strictObject({ type: z.literal('create_task'), title: z.string().trim().min(1).max(120), due_in_hours: z.number().int().min(0).max(720).optional(), assignee: z.union([z.literal('owner'), uuid]).default('owner') }),
-  z.strictObject({ type: z.literal('send_text'), text: z.string().trim().min(1).max(1000) }),
+  z
+    .strictObject({ type: z.literal('send_text'), text: z.string().trim().max(1000).optional(), attachment: z.strictObject({ asset_id: uuid }).optional() })
+    .refine((a) => (a.text ?? '') !== '' || a.attachment !== undefined, { message: 'Escribe el mensaje o adjunta un archivo de la biblioteca', path: ['text'] }),
   z
     .strictObject({ type: z.literal('wait'), amount: z.number().int().min(1).max(43_200), unit: z.enum(['minutes', 'hours', 'days']) })
     .refine((a) => waitMs(a) >= MIN_WAIT_MS && waitMs(a) <= MAX_WAIT_MS, { message: 'La espera va de 1 minuto a 30 días', path: ['amount'] }),

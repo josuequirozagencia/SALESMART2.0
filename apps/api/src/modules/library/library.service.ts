@@ -2,7 +2,7 @@ import { uuidv7 } from '@sales-smart/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, ilike, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { Database, mediaAssets, mediaFolders, type TenantTx } from '../../db';
+import { automations, Database, mediaAssets, mediaFolders, type TenantTx } from '../../db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { APP_CONFIG } from '../../tokens';
@@ -127,6 +127,35 @@ export class LibraryService {
       return r;
     });
     return { bytes: await this.files.read(row.storageKey), contentType: row.mimeType, filename: row.name };
+  }
+
+  /**
+   * Un archivo para que una AUTOMATIZACIÓN lo adjunte (V21 · 21.3), dentro de la transacción de quien llama. Solo uno vigente; con `REQUIRE_VIRUS_SCAN` y sin revisar, no (misma regla que compartirlo con
+   * los asesores). No mira `usable_by_advisors`: la regla la escribió el administrador.
+   */
+  async forAutomation(tx: TenantTx, id: string): Promise<{ ok: true; row: AssetRow } | { ok: false; reason: 'missing' | 'unscanned' }> {
+    const [r] = await tx.select().from(mediaAssets).where(and(eq(mediaAssets.id, id), eq(mediaAssets.state, 'ready'))).limit(1);
+    if (!r) return { ok: false, reason: 'missing' };
+    if (this.cfg.attachments.requireVirusScan && r.scanStatus === 'skipped') return { ok: false, reason: 'unscanned' };
+    return { ok: true, row: r };
+  }
+
+  /** El contenido del objeto de un archivo de la biblioteca (para copiarlo a un adjunto propio). */
+  readObject(row: Pick<AssetRow, 'storageKey'>): Promise<Buffer> {
+    return this.files.read(row.storageKey);
+  }
+
+  /** Las automatizaciones (no borradas) que adjuntan este archivo: archivarlo hará que esos pasos fallen. */
+  async usedByAutomations(id: string): Promise<Array<{ id: string; name: string; status: string }>> {
+    return this.db.withTenant(async (tx) => {
+      const [a] = await tx.select({ id: mediaAssets.id }).from(mediaAssets).where(eq(mediaAssets.id, id)).limit(1);
+      if (!a) throw new NotFoundError();
+      return tx
+        .select({ id: automations.id, name: automations.name, status: automations.status })
+        .from(automations)
+        .where(and(isNull(automations.deletedAt), sql`${automations.actions} @> ${JSON.stringify([{ attachment: { asset_id: id } }])}::jsonb`))
+        .orderBy(asc(automations.name));
+    });
   }
 
   // ------------------------------------------------------------------ archivos

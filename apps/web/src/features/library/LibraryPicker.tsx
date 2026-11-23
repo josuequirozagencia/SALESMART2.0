@@ -84,3 +84,44 @@ export function LibraryPicker({ c, onClose }: { c: Conversation; onClose: () => 
     </Modal>
   );
 }
+
+/**
+ * Elegir un archivo de la biblioteca para otra cosa que no sea enviarlo ahora (por ejemplo, adjuntarlo a una automatización). Devuelve el archivo elegido; no envía nada.
+ */
+export function LibraryAssetPicker({ title = 'Elegir un archivo', onPick, onClose }: { title?: string; onPick: (a: LibraryAsset) => void; onClose: () => void }) {
+  const [filter, setFilter] = useState<LibraryFilter>({ folder: 'all', q: '', kind: '' });
+  const [search, setSearch] = useState('');
+  const [picked, setPicked] = useState<LibraryAsset | null>(null);
+  const q = useLibrary(filter);
+  useEffect(() => {
+    const t = setTimeout(() => setFilter((f) => (f.q === search ? f : { ...f, q: search })), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+  const items = q.data?.pages.flatMap((p) => p.items) ?? [];
+  const folders = q.data?.pages[0]?.folders ?? [];
+  return (
+    <Modal title={title} onClose={onClose} wide>
+      <div className="flex flex-wrap items-center gap-2">
+        <label className="sr-only" htmlFor="library-asset-search">Buscar en la biblioteca</label>
+        <input id="library-asset-search" type="search" placeholder="Buscar por nombre" value={search} onChange={(e) => setSearch(e.target.value)} className={`${selectCls} min-w-[160px] flex-1`} />
+        <label className="sr-only" htmlFor="library-asset-folder">Carpeta</label>
+        <select id="library-asset-folder" value={filter.folder} onChange={(e) => setFilter({ ...filter, folder: e.target.value })} className={selectCls}>
+          <option value="all">Todas las carpetas</option>
+          <option value="root">Sin carpeta</option>
+          {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+        </select>
+      </div>
+      <div className="max-h-[46vh] overflow-y-auto">
+        {q.isPending ? <div className="grid place-items-center py-8 text-muted"><Spinner label="Cargando la biblioteca" /></div> : null}
+        {q.isError ? <Alert>{friendlyError(q.error, 'No se pudo cargar la biblioteca')}</Alert> : null}
+        {q.isSuccess && items.length === 0 ? <p className="py-8 text-center text-[13.5px] text-muted">{filter.q || filter.folder !== 'all' ? 'No hay archivos con esos filtros.' : 'La biblioteca todavía no tiene archivos: súbelos en la sección «Biblioteca».'}</p> : null}
+        {items.length > 0 ? <ul aria-label="Archivos de la biblioteca" className="grid gap-2 [grid-template-columns:repeat(auto-fill,minmax(130px,1fr))]">{items.map((a) => <PickCard key={a.id} asset={a} selected={picked?.id === a.id} onPick={setPicked} />)}</ul> : null}
+        {q.hasNextPage ? <div className="mt-2 grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Ver más</Button></div> : null}
+      </div>
+      <div className="flex justify-end gap-2">
+        <Button onClick={onClose}>Cancelar</Button>
+        <Button variant="primary" disabled={!picked} onClick={() => picked && onPick(picked)}>Usar este archivo</Button>
+      </div>
+    </Modal>
+  );
+}

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { Button, Field, Input } from '../../ui/controls';
 import { useChannels } from '../channels/useChannels';
+import { AttachmentField } from './AttachmentField';
 import { useOwners } from '../contacts/useContacts';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { useFollowUpTemplates } from '../forms/useForms';
@@ -263,7 +264,10 @@ export function ActionCard({ a, index, count, selfId, onChange, onRemove, onMove
         </div>
       ) : null}
       {a.type === 'send_text' ? (
-        <textarea aria-label={aria('texto del mensaje')} className="min-h-[84px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] text-fg" maxLength={1000} value={a.text ?? ''} placeholder="Hola {{primer_nombre}}, ¿en qué te ayudamos?" onChange={(e) => set({ text: e.target.value })} />
+        <div className="grid gap-2">
+          <textarea aria-label={aria('texto del mensaje')} className="min-h-[84px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] text-fg" maxLength={1000} value={a.text ?? ''} placeholder={a.attachment ? 'Texto que acompaña al archivo (opcional)' : 'Hola {{primer_nombre}}, ¿en qué te ayudamos?'} onChange={(e) => set({ text: e.target.value })} />
+          <AttachmentField label={aria('archivo')} assetId={a.attachment?.asset_id} onChange={(id) => { const x = { ...a }; if (id) x.attachment = { asset_id: id }; else delete x.attachment; onChange(x); }} />
+        </div>
       ) : null}
       {a.type === 'wait' ? (
         <div className="grid gap-2 min-[560px]:grid-cols-2">

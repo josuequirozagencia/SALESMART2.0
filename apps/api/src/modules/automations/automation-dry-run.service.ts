@@ -5,7 +5,9 @@ import { NotFoundError } from '../../errors';
 import { AgentRuntimeService } from '../ai';
 import { hostAllowed, parseDestination } from './address-guard';
 import { OrgMembersService } from '../organizations';
+import { LibraryService } from '../library';
 import { OutreachService } from '../outreach';
+import { NO_TARGET } from './automation-actions.service';
 import { AutomationEnqueueService } from './automation-enqueue.service';
 import { ACTION_LABEL, actionSchema, meetsConditions, renderParam, renderText, waitText, type ActionDef, type ConditionDef, type ContactFacts } from './automation-model';
 
@@ -41,6 +43,7 @@ export class AutomationDryRunService {
     @Inject(OutreachService) private readonly outreach: OutreachService,
     @Inject(OrgMembersService) private readonly members: OrgMembersService,
     @Inject(AgentRuntimeService) private readonly agents: AgentRuntimeService,
+    @Inject(LibraryService) private readonly library: LibraryService,
   ) {}
 
   async test(automationId: string, contactId: string): Promise<DryRunView> {
@@ -153,8 +156,15 @@ export class AutomationDryRunService {
       }
       case 'send_text': {
         const t = await this.outreach.textTarget(tx, { contactId: k.contactId, now: k.now }, false);
-        if (t.ok) return doIt(`Enviaría: «${renderText(a.text, { name: k.name }).slice(0, 120)}»`);
-        return skip({ revoked: 'El contacto revocó su consentimiento', no_conversation: 'No hay una conversación abierta con el contacto', window_closed: 'Pasaron más de 24 h desde su último mensaje: solo se puede enviar una plantilla', channel_unavailable: 'La conexión no está activa' }[t.reason]);
+        if (!t.ok) return skip(NO_TARGET[t.reason]);
+        if (a.attachment) {
+          const asset = await this.library.forAutomation(tx, a.attachment.asset_id);
+          if (!asset.ok) return fail(asset.reason === 'unscanned' ? 'El archivo de la biblioteca no pasó por el antivirus y la empresa lo exige' : 'El archivo de la biblioteca ya no está disponible (se archivó o se quitó)');
+          if (t.provider === 'ghl') return skip('Por GoHighLevel solo se pueden enviar mensajes de texto');
+          const caption = renderText(a.text ?? '', { name: k.name }).slice(0, 120);
+          return doIt(`Enviaría el archivo «${asset.row.name}»${caption ? ` con el texto: «${caption}»` : ''}`);
+        }
+        return doIt(`Enviaría: «${renderText(a.text ?? '', { name: k.name }).slice(0, 120)}»`);
       }
       case 'send_template': {
         const [p] = await tx.select({ e164: contactPhones.e164 }).from(contactPhones).where(and(eq(contactPhones.contactId, k.contactId), isNull(contactPhones.deletedAt))).limit(1);

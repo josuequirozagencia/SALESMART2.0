@@ -1,7 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull, sql } from 'drizzle-orm';
-import { channelAccounts, contacts, conversations, messages, type TenantTx } from '../../db';
+import { channelAccounts, contacts, conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ValidationError } from '../../errors';
+import { TenantContext } from '../../tenant';
+import { AttachmentsService } from '../attachments';
 import { writeAudit } from '../audit';
 import { ConversationsService } from '../conversations';
 import { RealtimeService } from '../realtime';
@@ -53,6 +55,7 @@ export class OutreachService {
     @Inject(TemplatesService) private readonly templates: TemplatesService,
     @Inject(ConversationsService) private readonly conversationsSvc: ConversationsService,
     @Inject(RealtimeService) private readonly realtime: RealtimeService,
+    @Inject(AttachmentsService) private readonly files: AttachmentsService,
   ) {}
 
   /**
@@ -126,7 +129,7 @@ export class OutreachService {
    * A qué conversación iría un texto libre automático: la ABIERTA más reciente del contacto, solo dentro de la ventana de 24 h de WhatsApp (en un canal sin ventana, como GoHighLevel, siempre). Nunca abre
    * una conversación: sin conversación abierta o con la ventana cerrada no hay a quién ni cómo escribirle. Con `lock` bloquea la fila (para escribir); sin él solo lee (prueba en seco).
    */
-  async textTarget(tx: TenantTx, i: { contactId: string; now: Date }, lock: boolean): Promise<{ ok: true; conversationId: string; channelId: string } | { ok: false; reason: 'revoked' | 'no_conversation' | 'window_closed' | 'channel_unavailable' }> {
+  async textTarget(tx: TenantTx, i: { contactId: string; now: Date }, lock: boolean): Promise<{ ok: true; conversationId: string; channelId: string; provider: string } | { ok: false; reason: 'revoked' | 'no_conversation' | 'window_closed' | 'channel_unavailable' }> {
     const [c] = await tx.select({ consent: contacts.consent }).from(contacts).where(and(eq(contacts.id, i.contactId), isNull(contacts.deletedAt))).limit(1);
     if (!c || c.consent === 'revoked') return { ok: false, reason: 'revoked' };
     const q = tx
@@ -140,7 +143,54 @@ export class OutreachService {
     if (!conv) return { ok: false, reason: 'no_conversation' };
     if (conv.state !== 'active') return { ok: false, reason: 'channel_unavailable' };
     if (conv.provider !== 'ghl' && conv.provider !== 'evolution' && (!conv.lastInboundAt || i.now.getTime() - conv.lastInboundAt.getTime() >= WINDOW_MS)) return { ok: false, reason: 'window_closed' };
-    return { ok: true, conversationId: conv.id, channelId: conv.channelId };
+    return { ok: true, conversationId: conv.id, channelId: conv.channelId, provider: conv.provider };
+  }
+
+  /**
+   * Un archivo (de la biblioteca, ya leído) en la conversación que `textTarget` eligió (V21 · 21.3). El contenido se revisa otra vez (tipo por contenido, tamaño, antivirus) y se guarda como adjunto
+   * PROPIO del mensaje bajo una clave que decide quien llama (así reintentar no deja copias de más). Con pie para imagen, video y documento; un audio no lleva pie: el audio sale primero y el
+   * texto, si lo hay, va como otro mensaje justo después. Mensajes de la regla (`automation`): no cuentan como respuesta humana.
+   */
+  async sendAttachment(
+    tx: TenantTx,
+    target: { conversationId: string; channelId: string },
+    i: { attachmentId: string; file: { bytes: Buffer; contentType: string; filename: string }; caption: string; now?: Date },
+  ): Promise<{ messages: 1 | 2 }> {
+    const now = i.now ?? new Date();
+    const prepared = await this.files.prepareUpload(i.file.bytes, i.file.contentType, i.file.filename);
+    if (prepared.kind === 'sticker') throw new ConflictError('ATTACHMENT_UNSUPPORTED_TYPE', 'Un sticker no se puede adjuntar a un mensaje automático');
+    const organizationId = TenantContext.current().organizationId;
+    const stored = await this.files.scanAndStore(organizationId, i.attachmentId, prepared);
+    try {
+      const caption = i.caption.trim().slice(0, 1024);
+      const captionable = prepared.kind === 'image' || prepared.kind === 'video' || prepared.kind === 'document';
+      const first = await this.queue(tx, target.conversationId, target.channelId, prepared.kind, captionable && caption !== '' ? caption : null, {}, now);
+      await tx.insert(messageAttachments).values({
+        id: i.attachmentId,
+        conversationId: target.conversationId,
+        messageId: first,
+        direction: 'out',
+        kind: prepared.kind,
+        mimeType: prepared.mime,
+        filename: prepared.filename,
+        sizeBytes: prepared.bytes.length,
+        storageKey: stored.key,
+        checksum: prepared.checksum,
+        state: 'ready',
+        scanStatus: stored.scanStatus,
+        createdBy: null,
+      });
+      let n: 1 | 2 = 1;
+      if (!captionable && caption !== '') {
+        await this.queue(tx, target.conversationId, target.channelId, 'text', caption, {}, new Date(now.getTime() + 1));
+        n = 2;
+      }
+      this.realtime.touchHere(target.conversationId, { message: { id: first, kind: 'created' } });
+      return { messages: n };
+    } catch (e) {
+      await this.files.remove(stored.key);
+      throw e;
+    }
   }
 
   /** Un texto libre automático en la conversación que `textTarget` elige; devuelve el motivo si no se puede. */
@@ -153,7 +203,7 @@ export class OutreachService {
   }
 
   /** El mensaje de salida automático, en cola; no cambia el estado ni el responsable de la conversación. */
-  private async queue(tx: TenantTx, conversationId: string, channelId: string, kind: 'text' | 'template', body: string, meta: Record<string, unknown>, now: Date, senderType: 'automation' | 'campaign' = 'automation'): Promise<string> {
+  private async queue(tx: TenantTx, conversationId: string, channelId: string, kind: 'text' | 'template' | 'image' | 'video' | 'audio' | 'document', body: string | null, meta: Record<string, unknown>, now: Date, senderType: 'automation' | 'campaign' = 'automation'): Promise<string> {
     const [m] = await tx
       .insert(messages)
       .values({ conversationId, channelAccountId: channelId, direction: 'out', senderType, kind, body, meta, status: 'queued', sentAt: now, attempts: 0, nextAttemptAt: now })
