@@ -409,7 +409,7 @@ describe('Contactos · selección', () => {
 });
 
 describe('Contacto · etiquetas personalizadas', () => {
-  it('ofrece solo las personalizadas (no las del sistema), las muestra marcadas al editar y envía tag_ids solo si cambian', async () => {
+  it('ofrece las personalizadas y «Lead» (la única del sistema que se marca a mano, sin pasar por tag_ids), las muestra marcadas al editar y envía tag_ids solo si cambian', async () => {
     const w = world();
     const patches: Call[] = [];
     w.routes['PATCH /contacts/c1'] = (call) => { patches.push(call); return { body: ANA }; };
@@ -418,7 +418,7 @@ describe('Contacto · etiquetas personalizadas', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Abrir el contacto Ana Torres' }));
     const d = within(await screen.findByRole('dialog', { name: 'Contacto' }));
     const set = within(await d.findByRole('group', { name: 'Etiquetas' }));
-    expect(set.queryByLabelText('Lead')).not.toBeInTheDocument(); // la del sistema no se elige
+    expect(set.getByLabelText('Lead')).toBeChecked(); // la del sistema se marca a mano, pero se aplica al instante: no viaja en tag_ids
     expect(set.getByLabelText('VIP')).toBeChecked();
     expect(set.getByLabelText('Frío')).not.toBeChecked();
     expect(within(d.getByRole('list', { name: 'Etiquetas' })).getByText('Lead')).toBeInTheDocument(); // sí se ve como insignia
