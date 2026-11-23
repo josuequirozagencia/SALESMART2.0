@@ -25,6 +25,8 @@ export interface CompanyItem {
   timezone: string;
   country: string | null;
   created_at: string;
+  /** Tope de espacio de la biblioteca de archivos (V21, ADR-75), en bytes. */
+  storage_quota_bytes: number;
   /** Fin de la prueba mientras la empresa siga en prueba (sin plan). */
   trial_ends_at: string | null;
   /** Invitación pendiente del dueño (solo en estado `invited`, ADR-39). */
@@ -45,6 +47,7 @@ type Row = {
   state: CompanyState;
   plan_id: string | null;
   plan_name: string | null;
+  storage_quota_bytes: string | number;
   agency_id: string | null;
   agency_name: string | null;
   agency_access_level: 'read' | 'advisor' | 'admin';
@@ -111,7 +114,7 @@ export class CompaniesService {
     const rows = await this.db.withIdentity(async (tx) => {
       const res = await tx.execute<Row>(sql`
         SELECT * FROM (
-          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.plan_id, p.name AS plan_name, o.parent_agency_id AS agency_id, ag.name AS agency_name, o.agency_access_level,
+          SELECT o.id, o.name, o.kind, o.timezone, o.country, o.created_at, o.storage_quota_bytes::bigint AS storage_quota_bytes, o.plan_id, p.name AS plan_name, o.parent_agency_id AS agency_id, ag.name AS agency_name, o.agency_access_level,
                  (SELECT count(*)::int FROM organization_members m WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND (o.kind = 'agency' OR m.role <> 'agency')) AS users,
                  (SELECT u.email FROM organization_members m JOIN users u ON u.id = m.user_id
                    WHERE m.organization_id = o.id AND m.revoked_at IS NULL AND m.role IN ('client_admin', 'agency') AND (o.kind = 'agency' OR m.role = 'client_admin') ORDER BY m.created_at, m.id LIMIT 1) AS owner_email,
@@ -150,6 +153,7 @@ export class CompaniesService {
         name: r.name,
         kind: r.kind,
         state: r.state,
+        storage_quota_bytes: Number(r.storage_quota_bytes),
         plan: r.plan_id && r.plan_name ? { id: r.plan_id, name: r.plan_name } : null,
         agency: r.agency_id && r.agency_name ? { id: r.agency_id, name: r.agency_name } : null,
         agency_access_level: r.agency_id ? r.agency_access_level : null,

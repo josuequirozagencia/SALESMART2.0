@@ -268,6 +268,9 @@ describe('cuota (el uso se deriva, el tope lo fija el Súper Admin)', () => {
     expect(await json(r)).toEqual({ id: ORG_A, storage_quota_bytes: 500 });
     expect((await rows(`SELECT storage_quota_bytes::text q FROM organizations WHERE id = '${ORG_A}'`))[0]).toEqual({ q: '500' });
     expect((await rows(`SELECT storage_quota_bytes::text q FROM organizations WHERE id = '${ORG_B}'`))[0]).toEqual({ q: String(GB) });
+    const listed = await json<{ items: Array<{ id: string; storage_quota_bytes: number }> }>(await call('GET', '/platform/companies', T.root));
+    expect(listed.items.find((c) => c.id === ORG_A)?.storage_quota_bytes).toBe(500); // la lista de la Consola muestra el tope
+    expect(listed.items.find((c) => c.id === ORG_B)?.storage_quota_bytes).toBe(GB);
     const audit = await rows(`SELECT details FROM platform_audit WHERE action = 'company.storage_quota_changed'`);
     expect(audit).toHaveLength(1);
     expect(audit[0]!['details']).toEqual({ from_bytes: GB, to_bytes: 500 });

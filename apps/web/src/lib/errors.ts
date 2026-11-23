@@ -96,6 +96,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'EXTENSION_ALREADY_USED': return 'Tu cuenta ya usó su extensión.';
     case 'VALIDATION_ERROR': return 'Revisa los datos ingresados.';
     case 'UNAUTHORIZED': return 'Correo o contraseña incorrectos.';
+    // Biblioteca de archivos (V21, ADR-75): el servidor ya redacta el motivo (sin claves ni direcciones del almacenamiento)
+    case 'QUOTA_EXCEEDED': case 'FOLDER_EXISTS': case 'FOLDER_NOT_EMPTY': case 'VIRUS_SCAN_REQUIRED': return e.message;
     default: return e.status >= 500 ? 'Tuvimos un problema de nuestro lado. Inténtalo en unos minutos.' : fallback;
   }
 }

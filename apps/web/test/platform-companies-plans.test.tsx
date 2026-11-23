@@ -8,7 +8,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
 const CATALOG = [{ key: 'kanban', label: 'Kanban' }, { key: 'agenda', label: 'Agenda' }, { key: 'campaigns', label: 'Campañas' }, { key: 'ai_agents', label: 'Agentes IA' }];
 const plan = (over: Partial<Plan> & { id: string; name: string }): Plan => ({ description: null, max_users: null, max_connections: null, max_queues: null, features: {}, archived: false, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), companies: 0, ...over });
-const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'trial', plan: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', agency: null, agency_access_level: null, invitation: null, deletion: null, created_at: new Date().toISOString(), trial_ends_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), ...over });
+const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'trial', plan: null, users: 1, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', storage_quota_bytes: 1073741824, agency: null, agency_access_level: null, invitation: null, deletion: null, created_at: new Date().toISOString(), trial_ends_at: new Date(Date.now() + 3 * 86_400_000).toISOString(), ...over });
 
 const PRO = plan({ id: 'pro', name: 'Pro', description: 'Para equipos', max_users: 10, max_connections: 5, features: { kanban: true, agenda: true, ai_agents: true }, companies: 2 });
 const BASICO = plan({ id: 'basico', name: 'Básico', max_users: 3, features: { kanban: true } });
@@ -106,6 +106,43 @@ describe('Empresas', () => {
     mockApi(server({ companies: () => ({ body: clist([]) }) }));
     renderApp('/platform/companies');
     expect(await screen.findByText('Todavía no hay empresas.')).toBeInTheDocument();
+  });
+});
+
+describe('Espacio de la biblioteca de una empresa (V21)', () => {
+  const open = async (name: string) => {
+    const u = userEvent.setup();
+    await u.click(await screen.findByRole('button', { name: `Cambiar el espacio de ${name}` }));
+    return { u, dlg: await screen.findByRole('dialog', { name: `Espacio de ${name}` }) };
+  };
+
+  it('muestra el tope actual en GB, valida el número, no envía sin cambios y manda los bytes al guardar', async () => {
+    const api = mockApi(server({ extra: { 'PUT /platform/companies/luna/storage-quota': () => ({ body: { id: 'luna', storage_quota_bytes: 5 * 1073741824 } }) } }));
+    renderApp('/platform/companies');
+    const { u, dlg } = await open('Estudio Luna');
+    const d = within(dlg);
+    expect(d.getByText('Ahora: 1 GB.')).toBeInTheDocument();
+    expect(d.getByLabelText('Tope de la biblioteca (GB)')).toHaveValue('1');
+    expect(d.getByRole('button', { name: 'Guardar' })).toBeDisabled(); // sin cambios no se envía nada
+    await u.clear(d.getByLabelText('Tope de la biblioteca (GB)'));
+    await u.type(d.getByLabelText('Tope de la biblioteca (GB)'), 'mucho');
+    expect(d.getByText('Escribe un número de 0 a 10 240')).toBeInTheDocument();
+    expect(d.getByRole('button', { name: 'Guardar' })).toBeDisabled();
+    await u.clear(d.getByLabelText('Tope de la biblioteca (GB)'));
+    await u.type(d.getByLabelText('Tope de la biblioteca (GB)'), '5');
+    await u.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(api.last('PUT /platform/companies/luna/storage-quota')?.body).toEqual({ storage_quota_bytes: 5 * 1073741824 });
+  });
+
+  it('un error del servidor se muestra en el diálogo', async () => {
+    mockApi(server({ extra: { 'PUT /platform/companies/luna/storage-quota': () => ({ status: 409, body: { error: { code: 'COMPANY_DELETED', message: 'La empresa está eliminada: recupérala antes de cambiarle el espacio', request_id: 'r' } } }) } }));
+    renderApp('/platform/companies');
+    const { u, dlg } = await open('Estudio Luna');
+    await u.clear(within(dlg).getByLabelText('Tope de la biblioteca (GB)'));
+    await u.type(within(dlg).getByLabelText('Tope de la biblioteca (GB)'), '2,5');
+    await u.click(within(dlg).getByRole('button', { name: 'Guardar' }));
+    expect(await within(dlg).findByText(/La empresa está eliminada/)).toBeInTheDocument();
   });
 });
 

@@ -15,7 +15,12 @@ export function isChatPath(pathname: string): boolean {
  * contradecirse. Las secciones nuevas de cada hito se añaden aquí. «Agentes IA», «Configuración» y el resto de lo administrativo solo para quien puede administrar
  * los campos (el servidor lo dice; no se replica la matriz de permisos).
  */
-export function buildNavGroups({ admin, unread, campaigns = 'hidden' }: { admin: boolean; unread: number; campaigns?: 'hidden' | 'ok' | 'locked' }): NavGroup[] {
+export function buildNavGroups({ admin, unread, campaigns = 'hidden', library = false }: { admin: boolean; unread: number; campaigns?: 'hidden' | 'ok' | 'locked'; library?: boolean }): NavGroup[] {
+  // «Comunicación»: campañas masivas (v17) y la biblioteca de archivos (V21); el grupo aparece si hay algo que mostrar
+  const comunicacion = [
+    ...(campaigns !== 'hidden' ? [{ to: '/campaigns', label: 'Campañas masivas', icon: 'send' as const, badge: campaigns === 'locked' ? { text: '🔒', label: 'No incluida en tu plan' } : null }] : []),
+    ...(library ? [{ to: '/library', label: 'Biblioteca', icon: 'image' as const }] : []),
+  ];
   return [
     {
       title: 'Trabajo',
@@ -30,7 +35,7 @@ export function buildNavGroups({ admin, unread, campaigns = 'hidden' }: { admin:
       ],
     },
     // Campañas masivas (v17, ADR-72): para quien puede verlas o enviarlas; con un plan que no las incluye aparece BLOQUEADA, no escondida
-    ...(campaigns !== 'hidden' ? [{ title: 'Comunicación', items: [{ to: '/campaigns', label: 'Campañas masivas', icon: 'send' as const, badge: campaigns === 'locked' ? { text: '🔒', label: 'No incluida en tu plan' } : null }] }] : []),
+    ...(comunicacion.length > 0 ? [{ title: 'Comunicación', items: comunicacion }] : []),
     ...(admin ? [{ title: 'Captación', items: [{ to: '/forms', label: 'Formularios', icon: 'form' as const }] }] : []),
     ...(admin ? [{ title: 'IA y automatización', items: [{ to: '/agents', label: 'Agentes IA', icon: 'bot' as const }, { to: '/automations', label: 'Automatizaciones', icon: 'bolt' as const }] }] : []),
     ...(admin ? [{ title: 'Equipo', items: [{ to: '/users', label: 'Usuarios', icon: 'shield' as const }, { to: '/departments', label: 'Departamentos', icon: 'team' as const }] }] : []),

@@ -20,6 +20,7 @@ import { CalendarPage } from './features/calendar/CalendarPage';
 import { GhlPage } from './features/ghl/GhlPage';
 import { SalesPage } from './features/sales/SalesPage';
 import { CampaignsPage } from './features/campaigns/CampaignsPage';
+import { LibraryPage } from './features/library/LibraryPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
 import { UsersPage } from './features/team/UsersPage';
@@ -130,6 +131,7 @@ export function App() {
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/campaigns" element={<CampaignsPage />} />
+        <Route path="/library" element={<LibraryPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/companies" element={<ClientCompaniesPage />} />

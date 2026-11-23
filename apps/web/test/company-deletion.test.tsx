@@ -8,7 +8,7 @@ import { authed, err, ME_ROOT, mockApi, renderApp, resetWorld, type Handler } fr
 beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 
 const DAY = 86_400_000;
-const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, users: 2, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', agency: null, agency_access_level: null, invitation: null, deletion: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
+const company = (over: Partial<Company> & { id: string; name: string }): Company => ({ kind: 'client', state: 'active', plan: null, users: 2, owner_email: `${over.id}@empresa.test`, timezone: 'UTC', country: 'EC', storage_quota_bytes: 1073741824, agency: null, agency_access_level: null, invitation: null, deletion: null, created_at: new Date().toISOString(), trial_ends_at: null, ...over });
 const clist = (items: Company[]): CompanyList => ({ items, next_cursor: null });
 
 const CAFE = company({ id: 'cafe', name: 'Café Origen', plan: { id: 'pro', name: 'Pro' } });

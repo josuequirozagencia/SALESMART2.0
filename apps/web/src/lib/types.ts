@@ -107,6 +107,8 @@ export interface Company {
   owner_email: string | null;
   timezone: string;
   country: string | null;
+  /** Tope de espacio de la biblioteca de archivos (V21), en bytes. */
+  storage_quota_bytes: number;
   created_at: string;
   trial_ends_at: string | null;
   /** Invitación pendiente del dueño (solo en estado `invited`). */
