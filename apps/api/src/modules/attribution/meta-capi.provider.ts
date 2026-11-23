@@ -1,4 +1,4 @@
-import { CapiSendError, type CapiCredentials, type CapiEvent, type CapiProvider } from './capi.ports';
+import { CapiSendError, type AdNames, type CapiCredentials, type CapiEvent, type CapiProvider } from './capi.ports';
 
 export const GRAPH_VERSION = 'v21.0';
 const DEFAULT_BASE = 'https://graph.facebook.com';
@@ -75,6 +75,29 @@ export class MetaCapiProvider implements CapiProvider {
       if (e instanceof CapiSendError) throw e;
       throw new CapiSendError('Meta respondió algo que no se entiende', true);
     }
+  }
+
+  async lookupAds(adIds: readonly string[], credentials: CapiCredentials): Promise<Record<string, AdNames | null>> {
+    const out: Record<string, AdNames | null> = Object.fromEntries(adIds.map((x) => [x, null]));
+    const ids = [...new Set(adIds)].filter((x) => /^\d{5,30}$/.test(x)).slice(0, 50);
+    if (ids.length === 0) return out;
+    const url = `${this.baseUrl}/${GRAPH_VERSION}/?ids=${ids.join(',')}&fields=name,adset{id,name},campaign{id,name}`;
+    const res = await this.call(url, credentials.accessToken, { method: 'GET' });
+    if (!res.ok) throw await this.failure(res);
+    type Node = { name?: unknown; adset?: { id?: unknown; name?: unknown }; campaign?: { id?: unknown; name?: unknown } };
+    let body: Record<string, Node | undefined>;
+    try {
+      body = (await res.json()) as Record<string, Node | undefined>;
+    } catch {
+      throw new CapiSendError('Meta respondió algo que no se entiende', true);
+    }
+    const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? safeText(v) : null);
+    for (const id of ids) {
+      const a = body[id];
+      if (!a || typeof a !== 'object') continue;
+      out[id] = { adName: str(a.name), adsetId: str(a.adset?.id), adsetName: str(a.adset?.name), campaignId: str(a.campaign?.id), campaignName: str(a.campaign?.name) };
+    }
+    return out;
   }
 
   private urlFor(datasetId: string, suffix: string): string {

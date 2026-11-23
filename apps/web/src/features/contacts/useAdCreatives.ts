@@ -8,6 +8,12 @@ export interface AdCreative {
   body: string | null;
   source_url: string | null;
   platform: 'facebook' | 'instagram' | null;
+  /** Nombres reales de Meta (solo si la empresa conectó Meta y el token puede leer anuncios). */
+  ad_name?: string | null;
+  adset_name?: string | null;
+  campaign_name?: string | null;
+  /** `no_access`: el token de Meta no puede leer anuncios (falta el permiso ads_read). */
+  names_status?: 'ok' | 'not_found' | 'no_access' | 'error' | null;
   thumbnail_url: string | null;
 }
 

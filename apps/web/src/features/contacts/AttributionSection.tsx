@@ -47,7 +47,7 @@ const NETWORK: Record<string, string> = { facebook: 'Facebook', instagram: 'Inst
  * Sin miniatura (el anuncio no la trajo o el almacenamiento no responde) se muestra igual, sin imagen.
  */
 export function AdCard({ adId, ad, fallbackTitle }: { adId: string; ad: AdCreative | undefined; fallbackTitle: string | null }) {
-  const title = ad?.headline ?? fallbackTitle ?? 'Anuncio sin título';
+  const title = ad?.ad_name ?? ad?.headline ?? fallbackTitle ?? 'Anuncio sin título';
   return (
     <div className="flex gap-3 rounded-xl border border-line bg-surface2 p-2.5 min-[520px]:col-span-2" aria-label="Anuncio de origen">
       {ad?.thumbnail_url ? (
@@ -60,6 +60,15 @@ export function AdCard({ adId, ad, fallbackTitle }: { adId: string; ad: AdCreati
           <span className="break-words text-[13px] font-semibold">{title}</span>
           {ad?.platform ? <Pill kind="info">{NETWORK[ad.platform]}</Pill> : null}
         </div>
+        {ad?.campaign_name || ad?.adset_name ? (
+          <dl className="grid gap-0.5 text-[12.5px]">
+            {ad.campaign_name ? <div className="flex flex-wrap gap-x-1.5"><dt className="text-muted">Campaña:</dt><dd className="break-words font-medium">{ad.campaign_name}</dd></div> : null}
+            {ad.adset_name ? <div className="flex flex-wrap gap-x-1.5"><dt className="text-muted">Conjunto:</dt><dd className="break-words font-medium">{ad.adset_name}</dd></div> : null}
+          </dl>
+        ) : ad?.names_status === 'no_access' ? (
+          <p className="text-[12px] text-muted">Para ver la campaña y el conjunto, el token de Meta necesita el permiso «ads_read».</p>
+        ) : null}
+        {ad?.ad_name && ad.headline && ad.headline !== ad.ad_name ? <p className="break-words text-[12.5px] text-muted">Titular: {ad.headline}</p> : null}
         {ad?.body ? <p className="line-clamp-2 break-words text-[12.5px] text-muted">{ad.body}</p> : null}
         <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted">
           <span>ID del anuncio: <code className="rounded bg-surface px-1 py-0.5" title={adId}>{short(adId)}</code></span>
@@ -121,7 +130,7 @@ export function AttributionSection({ contact }: { contact: Contact }) {
           </div>
           {adId ? <AdCard adId={adId} ad={ad} fallbackTitle={last?.ad ?? null} /> : null}
           {/* Un nombre real del anuncio (si llegó por el punto de entrada) solo se muestra si no es el mismo texto del titular */}
-          {!adId || (last?.ad && last.ad !== (ad?.headline ?? null)) ? (
+          {!adId || (last?.ad && last.ad !== (ad?.headline ?? null) && last.ad !== (ad?.ad_name ?? null)) ? (
             <div>
               <dt className="text-[12px] text-muted">{adId ? 'Nombre del anuncio' : 'Anuncio'}</dt>
               <dd className="break-words text-[13px]">{last?.ad ?? '—'}</dd>

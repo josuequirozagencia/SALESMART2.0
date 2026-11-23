@@ -288,3 +288,19 @@ describe('Anuncio ganador · miniatura y titular (v20)', () => {
     expect(calls).toEqual(['120210000000000011']); // solo pide los anuncios con id
   });
 });
+
+describe('Anuncio ganador · campaña y conjunto (v20)', () => {
+  it('la celda del anuncio muestra su nombre real y debajo la campaña y el conjunto', async () => {
+    const w = world();
+    mockApi({
+      ...server(w),
+      'GET /analytics/reports/winning_ads': () => ({ body: { ...WINNING(false), rows: [{ ad: 'Define Tu Abdomen', ad_id: '120210000000000011', chats: 33, sales: 4, revenue: '400.00', close_rate: '12.1 %' }] } }),
+      'GET /ads/creatives': () => ({ body: { items: { '120210000000000011': { source_id: '120210000000000011', headline: 'Define Tu Abdomen', body: null, source_url: null, platform: 'instagram', thumbnail_url: null, ad_name: 'Prefiero sufrir así', adset_name: 'RMKT', campaign_name: 'SERVICIOS PASIEL', names_status: 'ok' } } } }),
+    });
+    renderApp('/analytics');
+    await userEvent.click(await screen.findByRole('tab', { name: 'Anuncio ganador' }));
+    const table = within(await screen.findByRole('table', { name: /fecha de llegada/ }));
+    expect(await table.findByText('Prefiero sufrir así')).toBeInTheDocument();
+    expect(table.getByText('SERVICIOS PASIEL · RMKT')).toBeInTheDocument();
+  });
+});

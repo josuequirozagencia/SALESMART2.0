@@ -124,3 +124,32 @@ describe('MetaCapiProvider · verificar', () => {
     await expect(provider().verify(creds)).resolves.toEqual({ name: null });
   });
 });
+
+describe('MetaCapiProvider · nombres de anuncios (lookupAds)', () => {
+  const AD = '120250251830440318';
+  it('pide a GET /?ids=…&fields=name,adset{id,name},campaign{id,name} con el token en la cabecera y devuelve los tres nombres; lo que Meta no trae queda null', async () => {
+    reply = (_q, res) => ok(res, 200, { [AD]: { name: 'Prefiero sufrir así', adset: { id: '1202', name: 'SERVICIOS PASIEL RMKT' }, campaign: { id: '1201', name: 'SERVICIOS PASIEL - RMKT NOV 2026' } } });
+    const out = await provider().lookupAds([AD, '999999'], creds);
+    expect(out).toEqual({ [AD]: { adName: 'Prefiero sufrir así', adsetId: '1202', adsetName: 'SERVICIOS PASIEL RMKT', campaignId: '1201', campaignName: 'SERVICIOS PASIEL - RMKT NOV 2026' }, '999999': null });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'GET', auth: `Bearer ${TOKEN}` });
+    expect(seen[0]!.url).toContain(`ids=${AD},999999`);
+    expect(seen[0]!.url).toContain('fields=name,adset{id,name},campaign{id,name}');
+    expect(seen[0]!.url).not.toContain(TOKEN);
+  });
+
+  it('ignora lo que no parece un id de anuncio (solo dígitos) y sin ids válidos ni siquiera llama a Meta', async () => {
+    const out = await provider().lookupAds(['abc', '../x'], creds);
+    expect(out).toEqual({ abc: null, '../x': null });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('un token sin permiso para leer anuncios es un error de credenciales (definitivo); un límite de uso, reintentable; el mensaje no lleva el token', async () => {
+    reply = (_q, res) => ok(res, 403, { error: { message: `(#200) Requires ads_read ${TOKEN}`, code: 200 } });
+    const denied = await fail(provider().lookupAds([AD], creds));
+    expect(denied).toMatchObject({ credentials: true, retryable: false });
+    expect(denied.message).not.toContain(TOKEN);
+    reply = (_q, res) => ok(res, 429, { error: { message: 'límite', code: 4 } });
+    expect(await fail(provider().lookupAds([AD], creds))).toMatchObject({ retryable: true });
+  });
+});

@@ -1279,6 +1279,14 @@ describe('anuncios de la empresa: GET /v1/ads/creatives (v20 · ADR-55)', () => 
     expect(items['120210000000000011']!.thumbnail_url).toMatch(/^https?:\/\//);
   });
 
+  it('incluye los nombres reales de anuncio, conjunto y campaña cuando ya se consultaron, y null mientras no', async () => {
+    await seedAds();
+    await admin.query(`UPDATE ad_creatives SET ad_name = 'Prefiero sufrir así', adset_name = 'SERVICIOS PASIEL RMKT', campaign_name = 'SERVICIOS PASIEL - RMKT NOV 2026', names_status = 'ok' WHERE source_id = '120210000000000011'`);
+    const { items } = await json<{ items: Record<string, { ad_name: string | null; adset_name: string | null; campaign_name: string | null; names_status: string | null }> }>(await get(T.alice, '?ids=120210000000000011,120210000000000012'));
+    expect(items['120210000000000011']).toMatchObject({ ad_name: 'Prefiero sufrir así', adset_name: 'SERVICIOS PASIEL RMKT', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026', names_status: 'ok' });
+    expect(items['120210000000000012']).toMatchObject({ ad_name: null, adset_name: null, campaign_name: null, names_status: null });
+  });
+
   it('también lo ve el asesor (puede ver contactos); sin sesión 401', async () => {
     await seedAds();
     expect((await get(T.carol, '?ids=120210000000000011')).status).toBe(200);

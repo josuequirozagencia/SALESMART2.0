@@ -13,7 +13,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { CoreModule } from '../../src/core.module';
 import { Database, DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
-import { AttributionModule, AttributionService, CapiSendError, CapiSenderService, DEFAULT_GRACE_MINUTES, FakeCapiProvider } from '../../src/modules/attribution';
+import { AdNamesService, AttributionModule, AttributionService, CapiSendError, CapiSenderService, DEFAULT_GRACE_MINUTES, FakeCapiProvider } from '../../src/modules/attribution';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { ContactsModule } from '../../src/modules/contacts';
 import { OrganizationsModule } from '../../src/modules/organizations';
@@ -56,7 +56,7 @@ let T: Record<'alice' | 'carol' | 'bob', string>;
 const saved = { ...process.env };
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE meta_settings, meta_events, conversations, whatsapp_accounts, channel_accounts, contact_tags, tags, contact_phones, contacts, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE meta_settings, meta_events, ad_creatives, conversations, whatsapp_accounts, channel_accounts, contact_tags, tags, contact_phones, contacts, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
   }
@@ -367,5 +367,68 @@ describe('ventana de gracia del Purchase', () => {
     await save(T.alice, good({ grace_minutes: 1440 }));
     expect(await wait(ORG_A)).toBe(1440 * 60_000);
     expect(await wait(ORG_B)).toBe(DEFAULT_GRACE_MINUTES * 60_000); // B no configuró nada
+  });
+});
+
+describe('nombres de anuncio, conjunto y campaña (v20 · ADR-55)', () => {
+  const AD1 = '120250251830440318';
+  const AD2 = '120250251830440319';
+  const names = { adName: 'Prefiero sufrir así', adsetId: '1202', adsetName: 'SERVICIOS PASIEL RMKT', campaignId: '1201', campaignName: 'SERVICIOS PASIEL - RMKT NOV 2026' };
+  const creative = (org: string, sourceId: string) => admin.query(`INSERT INTO ad_creatives(id, organization_id, source_id, headline) VALUES (gen_random_uuid(), $1, $2, 'Titular')`, [org, sourceId]);
+  const row = async (org: string, sourceId: string) => (await admin.query(`SELECT ad_name, adset_name, campaign_name, names_status, names_checked_at FROM ad_creatives WHERE organization_id = $1 AND source_id = $2`, [org, sourceId])).rows[0] as { ad_name: string | null; adset_name: string | null; campaign_name: string | null; names_status: string | null; names_checked_at: Date | null };
+  const lookup = (org: string, now = new Date()) => inOrg(org, () => app.get(AdNamesService).run(now));
+
+  beforeEach(() => {
+    fake.lookups.length = 0;
+    fake.ads.clear();
+  });
+
+  it('sin conexión con Meta no consulta nada y el anuncio sigue sin consultar', async () => {
+    await creative(ORG_A, AD1);
+    expect(await lookup(ORG_A)).toBe(0);
+    expect(fake.lookups).toEqual([]);
+    expect((await row(ORG_A, AD1)).names_status).toBeNull();
+  });
+
+  it('con la conexión de la empresa guarda el nombre del anuncio, del conjunto y de la campaña; lo que Meta no devuelve queda «no encontrado»', async () => {
+    await save(T.alice, good());
+    await creative(ORG_A, AD1);
+    await creative(ORG_A, AD2);
+    fake.ads.set(AD1, names);
+    expect(await lookup(ORG_A)).toBe(2);
+    expect(fake.lookups).toHaveLength(1);
+    expect([...fake.lookups[0]!].sort()).toEqual([AD1, AD2]);
+    expect(await row(ORG_A, AD1)).toMatchObject({ ad_name: 'Prefiero sufrir así', adset_name: 'SERVICIOS PASIEL RMKT', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026', names_status: 'ok' });
+    expect(await row(ORG_A, AD2)).toMatchObject({ ad_name: null, campaign_name: null, names_status: 'not_found' });
+    // ya consultados: no se vuelven a pedir hasta que toque
+    expect(await lookup(ORG_A)).toBe(0);
+  });
+
+  it('aislamiento A↔B: la tarea de A solo toca los anuncios de A (con el token de A) y B sin conexión no se consulta', async () => {
+    await save(T.alice, good());
+    await creative(ORG_A, AD1);
+    await creative(ORG_B, AD1);
+    fake.ads.set(AD1, names);
+    await lookup(ORG_A);
+    expect((await row(ORG_A, AD1)).names_status).toBe('ok');
+    expect((await row(ORG_B, AD1)).names_status).toBeNull();
+    expect(await lookup(ORG_B)).toBe(0);
+  });
+
+  it('si el token no puede leer anuncios los marca «sin acceso» y reintenta pasadas 6 horas, no antes; un fallo pasajero reintenta a la hora', async () => {
+    await save(T.alice, good());
+    await creative(ORG_A, AD1);
+    const t0 = new Date();
+    fake.failNextLookup(new CapiSendError('Meta rechazó las credenciales', false, true));
+    expect(await lookup(ORG_A, t0)).toBe(1);
+    expect((await row(ORG_A, AD1)).names_status).toBe('no_access');
+    expect(await lookup(ORG_A, new Date(t0.getTime() + 3_600_000))).toBe(0);
+    fake.ads.set(AD1, names);
+    fake.failNextLookup(new CapiSendError('límite', true));
+    expect(await lookup(ORG_A, new Date(t0.getTime() + 7 * 3_600_000))).toBe(1);
+    expect((await row(ORG_A, AD1)).names_status).toBe('error');
+    expect(await lookup(ORG_A, new Date(t0.getTime() + 7 * 3_600_000 + 30 * 60_000))).toBe(0);
+    expect(await lookup(ORG_A, new Date(t0.getTime() + 9 * 3_600_000))).toBe(1);
+    expect(await row(ORG_A, AD1)).toMatchObject({ names_status: 'ok', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026' });
   });
 });

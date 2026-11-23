@@ -280,3 +280,29 @@ describe('Ficha del contacto · anuncio de origen (v20)', () => {
     expect(d.queryByLabelText('Anuncio de origen')).not.toBeInTheDocument();
   });
 });
+
+describe('Ficha del contacto · campaña y conjunto del anuncio (v20)', () => {
+  const AD = { source_id: '120250251830440318', headline: 'Define Tu Abdomen', body: null, source_url: null, platform: 'facebook' as const, thumbnail_url: null };
+  const touch = { at: '2026-10-10T15:00:00.000Z', source: 'meta_ctwa', campaign: null, adset: null, ad: null, ad_id: AD.source_id };
+  const open = async (creative: Record<string, unknown>) => {
+    mockApi({ ...contactsServer(contact({ attribution: attribution({ first_touch: touch, last_touch: touch }) })).routes, 'GET /ads/creatives': () => ({ body: { items: { [AD.source_id]: { ...AD, ...creative } } } }) });
+    renderApp('/contacts');
+    return openContact();
+  };
+
+  it('muestra el nombre real del anuncio, la campaña y el conjunto; el titular queda aparte', async () => {
+    const d = await open({ ad_name: 'Prefiero sufrir así', adset_name: 'SERVICIOS PASIEL RMKT', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026', names_status: 'ok' });
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(await card.findByText('Prefiero sufrir así')).toBeInTheDocument();
+    expect(card.getByText('SERVICIOS PASIEL - RMKT NOV 2026')).toBeInTheDocument();
+    expect(card.getByText('SERVICIOS PASIEL RMKT')).toBeInTheDocument();
+    expect(card.getByText('Titular: Define Tu Abdomen')).toBeInTheDocument();
+  });
+
+  it('si el token de Meta no puede leer anuncios avisa qué permiso falta, sin inventar nombres', async () => {
+    const d = await open({ names_status: 'no_access' });
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(await card.findByText(/necesita el permiso «ads_read»/)).toBeInTheDocument();
+    expect(card.queryByText(/Campaña:/)).not.toBeInTheDocument();
+  });
+});
