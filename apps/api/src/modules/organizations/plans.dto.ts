@@ -40,3 +40,7 @@ export type ListCompaniesQuery = z.infer<typeof listCompaniesQuerySchema>;
 
 export const assignPlanSchema = z.object({ plan_id: z.uuid().nullable() }).strict();
 export type AssignPlanDto = z.infer<typeof assignPlanSchema>;
+
+/** El tope de espacio de la biblioteca de una empresa (V21, ADR-75): de 0 a 10 TB. Solo el Súper Admin. */
+export const setStorageQuotaSchema = z.object({ storage_quota_bytes: z.number().int().min(0).max(10_995_116_277_760) }).strict();
+export type SetStorageQuotaDto = z.infer<typeof setStorageQuotaSchema>;

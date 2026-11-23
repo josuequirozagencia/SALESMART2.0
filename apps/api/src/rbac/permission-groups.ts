@@ -87,6 +87,8 @@ export const PERMISSION_META: Readonly<Record<ManageableKey, PermissionMeta>> = 
   'ai.credits.view': own('ai', 'Ver los créditos de IA', 'Ver el saldo y los movimientos de créditos.'),
   'notifications.read': own('conversations', 'Ver sus avisos', 'Ver los avisos propios, como cuando alguien lo menciona en una nota.'),
   'notifications.write': own('conversations', 'Marcar sus avisos como leídos', 'Marcar como leídos los avisos propios.'),
+  'library.read': own('conversations', 'Ver la biblioteca de archivos', 'Ver y enviar desde el chat los archivos de la biblioteca marcados para asesores.'),
+  'library.manage': cfg('setup', 'Biblioteca de archivos', 'Subir, ordenar, marcar usos y archivar los archivos de la biblioteca.', false),
   'ghl.enroll': own('channels', 'Inscribir en flujos de GoHighLevel', 'Inscribir un contacto en un flujo.'),
   'channels.manage': cfg('channels', 'Conectar canales', 'Conectar, cambiar y desconectar los números de WhatsApp.'),
   'integrations.manage': cfg('channels', 'Integraciones', 'GoHighLevel y la API de Conversiones de Meta.'),

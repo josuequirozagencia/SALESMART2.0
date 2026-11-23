@@ -67,6 +67,9 @@ export const PERMISSIONS = {
   'campaigns.send': 'tenant',
   'campaigns.view_all': 'tenant',
   'campaigns.cancel': 'tenant',
+  // V21 (ADR-75): biblioteca de archivos. `library.read` ve y envía lo marcado para asesores (entra en el techo de solo lectura); `library.manage` sube, ordena, marca usos y archiva (solo el administrador).
+  'library.read': 'tenant',
+  'library.manage': 'tenant',
   // F1 (ADR-57): ver los avisos PROPIOS (menciones; entra en el techo de solo lectura) y marcarlos como leídos (escritura).
   'notifications.read': 'tenant',
   'notifications.write': 'tenant',
@@ -131,7 +134,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
   client_admin: tenantKeys,
   // `contacts.write` del asesor es de alcance PROPIO (ADR-32 #3 / ADR-43): crea contactos asignados a sí mismo y edita los suyos.
   // M4.2 (ADR-49): `opportunities.write` del asesor es de alcance PROPIO (sus oportunidades), igual que sus contactos.
-  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write', 'sales.read', 'sales.create', 'sales.register_payment', 'appointments.read', 'appointments.write', 'analytics.view', 'analytics.export', 'ghl.enroll', 'notifications.read', 'notifications.write'],
+  advisor: ['inbox.read', 'inbox.reply', 'inbox.transfer', 'inbox.share', 'contacts.read', 'contacts.write', 'opportunities.read', 'opportunities.write', 'sales.read', 'sales.create', 'sales.register_payment', 'appointments.read', 'appointments.write', 'analytics.view', 'analytics.export', 'ghl.enroll', 'notifications.read', 'notifications.write', 'library.read'],
 };
 
 /**
@@ -139,7 +142,7 @@ export const ROLE_PERMISSIONS: Readonly<Record<RoleKey, readonly PermissionKey[]
  * y cualquier acceso de agencia o de soporte a una empresa con la prueba vencida (ADR-41). Todo permiso que no está aquí es de escritura.
  * PROVISIONAL: cada módulo nuevo añade aquí sus permisos de lectura.
  */
-export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'ai.credits.view', 'notifications.read', 'campaigns.read', 'campaigns.view_all']);
+export const READ_ONLY_PERMISSIONS: ReadonlySet<PermissionKey> = new Set<PermissionKey>(['inbox.read', 'inbox.view_all', 'contacts.read', 'contacts.view_all', 'opportunities.read', 'sales.read', 'sales.view_all', 'appointments.read', 'appointments.view_all', 'commissions.view', 'analytics.view', 'analytics.view_all', 'ai.credits.view', 'notifications.read', 'campaigns.read', 'campaigns.view_all', 'library.read']);
 
 export type AccessLevel = 'read' | 'advisor' | 'admin';
 export const isAccessLevel = (v: unknown): v is AccessLevel => v === 'read' || v === 'advisor' || v === 'admin';

@@ -73,6 +73,8 @@ export const envSchema = z.object({
   STORAGE_PROVIDER: z.enum(['s3', 'fake']).default('s3'),
   /** Antivirus: 'clamav' = clamd por TCP (CLAMAV_HOST/CLAMAV_PORT); 'none' = sin revisión (los archivos quedan «sin revisar»: solo para pruebas del piloto); 'fake' solo desarrollo y pruebas. */
   VIRUS_SCANNER: z.enum(['none', 'clamav', 'fake']).default('none'),
+  /** Biblioteca de archivos (V21, ADR-75): con 'true' no se puede marcar un archivo como disponible para asesores ni para la IA mientras no haya antivirus (`VIRUS_SCANNER=none`). Obligatorio antes de usarla con varios clientes. */
+  REQUIRE_VIRUS_SCAN: z.enum(['true', 'false']).default('false'),
   CLAMAV_HOST: z.string().regex(/^[A-Za-z0-9.-]{1,253}$/, 'host inválido').optional(),
   CLAMAV_PORT: z.coerce.number().int().min(1).max(65535).default(3310),
   /** Conversión de audio a OGG/Opus (notas de voz de WhatsApp): 'ffmpeg' = el ejecutable FFMPEG_PATH; 'none' = no se aceptan grabaciones que no vengan ya en un formato de WhatsApp. */

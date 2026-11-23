@@ -57,6 +57,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/platform/plans/:id/restore', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
   { route: 'GET /v1/platform/companies', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
   { route: 'PUT /v1/platform/companies/:id/plan', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'PUT /v1/platform/companies/:id/storage-quota', kind: 'platform', test: '../../library/library.test.ts' },
   // «Nueva empresa» con invitación (M2.3, ADR-39). Pruebas: test/platform/invitations.test.ts (acceso, A↔B, un solo uso, caducidad, concurrencia, límites)
   { route: 'POST /v1/platform/companies', kind: 'platform', test: '../../platform/invitations.test.ts' },
   { route: 'POST /v1/platform/companies/:id/invitation/resend', kind: 'platform', test: '../../platform/invitations.test.ts' },
@@ -212,6 +213,16 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/meta/events/:id/retry', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   { route: 'POST /v1/meta/events/retry-all', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   { route: 'POST /v1/meta/messaging-dataset', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  // Biblioteca de archivos (V21, ADR-75). Pruebas: test/library/library.test.ts (A↔B, permisos, cuota, antivirus, carpetas)
+  { route: 'GET /v1/library', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'GET /v1/library/usage', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/assets', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'PATCH /v1/library/assets/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/assets/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'GET /v1/library/assets/:id/url', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/folders', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'PATCH /v1/library/folders/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/folders/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
   // Tablero y analítica (M6.5, ADR-51). Pruebas: test/analytics/analytics.test.ts (A↔B, alcance propio, cifras, CSV auditado)
   { route: 'GET /v1/analytics/summary', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/reports/:name', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
