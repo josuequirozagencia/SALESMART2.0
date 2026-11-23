@@ -2,7 +2,7 @@ import { Body, Controller, Get, HttpCode, Inject, Param, Patch, Post, Put, Query
 import { PlatformOnly, ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
 import { CompaniesService } from './companies.service';
-import { assignPlanSchema, createPlanSchema, listCompaniesQuerySchema, listPlansQuerySchema, updatePlanSchema, uuidParam, type AssignPlanDto, type CreatePlanDto, type ListCompaniesQuery, type ListPlansQuery, type UpdatePlanDto } from './plans.dto';
+import { assignPlanSchema, createPlanSchema, setStorageQuotaSchema, listCompaniesQuerySchema, listPlansQuerySchema, updatePlanSchema, uuidParam, type AssignPlanDto, type SetStorageQuotaDto, type CreatePlanDto, type ListCompaniesQuery, type ListPlansQuery, type UpdatePlanDto } from './plans.dto';
 import { PlansService } from './plans.service';
 
 /** Catálogo de planes de la plataforma (solo Súper Admin). */
@@ -57,5 +57,11 @@ export class PlatformCompaniesController {
   @Put(':id/plan')
   assign(@Param('id', new ZodValidationPipe(uuidParam)) id: string, @Body(new ZodValidationPipe(assignPlanSchema)) b: AssignPlanDto) {
     return this.companies.assignPlan(id, b.plan_id);
+  }
+
+  /** El tope de espacio de la biblioteca de archivos de la empresa (V21, ADR-75). Es un tope, no un espacio reservado; bajarlo no borra nada. */
+  @Put(':id/storage-quota')
+  setStorageQuota(@Param('id', new ZodValidationPipe(uuidParam)) id: string, @Body(new ZodValidationPipe(setStorageQuotaSchema)) b: SetStorageQuotaDto) {
+    return this.companies.setStorageQuota(id, b.storage_quota_bytes);
   }
 }
