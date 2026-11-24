@@ -11,6 +11,7 @@ import { AiModule } from './modules/ai';
 import { BrandingModule } from './modules/branding';
 import { FollowUpsModule } from './modules/follow-ups';
 import { LibraryModule } from './modules/library';
+import { StorageModule } from './modules/storage';
 import { FormsModule } from './modules/forms';
 import { AutomationsModule } from './modules/automations';
 import { AdsModule } from './modules/ads';
@@ -40,5 +41,5 @@ import { ConnectionHealthModule } from './modules/connection-health';
 import { QuickRepliesModule } from './modules/quick-replies';
 import { TemplatesModule } from './modules/templates';
 
-@Module({ imports: [CoreModule, DbModule, BrandingModule, FollowUpsModule, LibraryModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SampleDataModule, SlaModule, ChannelsModule, ConnectionHealthModule, TemplatesModule, QuickRepliesModule, CampaignsModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, NotificationsModule, PushModule, PhotosModule, AdsModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), CalendarModule.register(), AiModule, CompanyExportModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
+@Module({ imports: [CoreModule, DbModule, BrandingModule, FollowUpsModule, LibraryModule, StorageModule, AuthModule, OrganizationsModule, ContactsModule, CustomFieldsModule, PipelinesModule, OpportunitiesModule, QueuesModule, TeamModule, SampleDataModule, SlaModule, ChannelsModule, ConnectionHealthModule, TemplatesModule, QuickRepliesModule, CampaignsModule, RealtimeModule, SalesModule, AppointmentsModule, AnalyticsModule, InboxModule, NotificationsModule, PushModule, PhotosModule, AdsModule, AttributionModule.register(), FormsModule, AutomationsModule, QrModule, GhlModule.register(), CalendarModule.register(), AiModule, CompanyExportModule, JobsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })], controllers: [HealthController] })
 export class AppModule {}

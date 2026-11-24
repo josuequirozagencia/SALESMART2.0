@@ -12,8 +12,8 @@ const MB = 1024 * 1024;
 const asset = (over: Partial<LibraryAsset> = {}): LibraryAsset => ({ id: 'a1', name: 'Catálogo 2026.pdf', description: 'Precios vigentes', kind: 'document', mime_type: 'application/pdf', size_bytes: 2 * MB, folder_id: null, usable_by_advisors: true, usable_by_ai: false, state: 'ready', scan_status: 'clean', created_at: AT, archived_at: null, ...over });
 const folder = (over: Partial<LibraryFolder> = {}): LibraryFolder => ({ id: 'f1', name: 'Servicios', asset_count: 1, ...over });
 
-interface World { usedBy: Array<{ id: string; name: string; status: string }>; assets: LibraryAsset[]; folders: LibraryFolder[]; used: number; quota: number; manage: boolean; denied: boolean; calls: Record<string, Call[]>; uploadFails?: () => ReturnType<Handler> }
-const world = (over: Partial<World> = {}): World => ({ usedBy: [], assets: [asset(), asset({ id: 'a2', name: 'Corte clásico.jpg', kind: 'image', mime_type: 'image/jpeg', size_bytes: 300 * 1024, folder_id: 'f1', description: null, usable_by_advisors: false })], folders: [folder()], used: 2 * MB + 300 * 1024, quota: 1024 * MB, manage: true, denied: false, calls: {}, ...over });
+interface World { extra: number; request: { id: string; plan_name: string | null; created_at: string } | null; plans: Array<{ id: string; name: string; extra_bytes: number; price_amount: string; currency: string; period: 'monthly' }>; usedBy: Array<{ id: string; name: string; status: string }>; assets: LibraryAsset[]; folders: LibraryFolder[]; used: number; quota: number; manage: boolean; denied: boolean; calls: Record<string, Call[]>; uploadFails?: () => ReturnType<Handler> }
+const world = (over: Partial<World> = {}): World => ({ extra: 0, request: null, plans: [{ id: 'pl1', name: 'Extra S', extra_bytes: 5 * 1024 * MB, price_amount: '3.00', currency: 'USD', period: 'monthly' }], usedBy: [], assets: [asset(), asset({ id: 'a2', name: 'Corte clásico.jpg', kind: 'image', mime_type: 'image/jpeg', size_bytes: 300 * 1024, folder_id: 'f1', description: null, usable_by_advisors: false })], folders: [folder()], used: 2 * MB + 300 * 1024, quota: 1024 * MB, manage: true, denied: false, calls: {}, ...over });
 const rec = (w: World, k: string, c: Call): void => { (w.calls[k] ??= []).push(c); };
 
 function server(w: World, me = ME_ADMIN): Record<string, Handler> {
@@ -32,8 +32,10 @@ function server(w: World, me = ME_ADMIN): Record<string, Handler> {
       if (q) items = items.filter((a) => a.name.toLowerCase().includes(q));
       if (kind) items = items.filter((a) => a.kind === kind);
       const limit = Number(c.query.get('limit') ?? 30);
-      return { body: { folders: w.folders, items: items.slice(0, limit), next_cursor: null, usage: w.manage ? { used_bytes: w.used, quota_bytes: w.quota, available_bytes: Math.max(0, w.quota - w.used), assets: w.assets.length } : null, access: { manage: w.manage }, storage_available: true } satisfies LibraryPage };
+      return { body: { folders: w.folders, items: items.slice(0, limit), next_cursor: null, usage: w.manage ? { used_bytes: w.used, quota_bytes: w.quota, available_bytes: Math.max(0, w.quota - w.used), assets: w.assets.length, included_bytes: w.quota - w.extra, extra_bytes: w.extra, next_expiry_at: null, request: w.request } : null, access: { manage: w.manage }, storage_available: true } satisfies LibraryPage };
     },
+    'GET /library/storage-plans': () => ({ body: { plans: w.plans, request: w.request } }),
+    'POST /library/storage-requests': (c) => { rec(w, 'request', c); w.request = { id: 'rq1', plan_name: w.plans.find((p) => p.id === (c.body as { plan_id?: string }).plan_id)?.name ?? null, created_at: AT }; return { status: 201, body: { ...w.request, plan_id: null, status: 'open', note: null } }; },
     'GET /library/assets/a1/usage': (c) => { rec(w, 'usage', c); return { body: { automations: w.usedBy } }; },
     'GET /library/assets/a1/url': (c) => { rec(w, 'url', c); return { body: { url: 'https://storage.test/a1?sig=1', expires_at: AT, kind: 'document', mime_type: 'application/pdf', name: 'Catálogo 2026.pdf' } }; },
     'GET /library/assets/a2/url': () => ({ body: { url: 'https://storage.test/a2?sig=2', expires_at: AT, kind: 'image', mime_type: 'image/jpeg', name: 'Corte clásico.jpg' } }),
@@ -87,7 +89,7 @@ describe('Biblioteca · administrador', () => {
     resetWorld();
     mockApi(server(world({ used: 1000 * MB, quota: 1000 * MB })));
     renderApp('/library');
-    expect(await screen.findByText(/Llegaste al límite de espacio/)).toBeInTheDocument();
+    expect(await screen.findByText(/llegó a su límite de espacio/)).toBeInTheDocument();
   });
 
   it('subir: manda cada archivo tal cual con su nombre y, con una carpeta elegida, a esa carpeta; un rechazo (sin espacio) se muestra con su motivo', async () => {
@@ -122,6 +124,29 @@ describe('Biblioteca · administrador', () => {
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(w.calls['patch']).toHaveLength(1));
     expect(w.calls['patch']![0]!.body).toEqual({ name: 'Lista de precios', usable_by_advisors: false });
+  });
+
+  it('al llegar al 100 % muestra el límite y deja solicitar más espacio con un plan; luego dice «Solicitud enviada»', async () => {
+    const w = world({ used: 1024 * MB, quota: 1024 * MB });
+    mockApi(server(w));
+    renderApp('/library');
+    expect(await screen.findByText(/llegó a su límite de espacio/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Solicitar más espacio' }));
+    const d = within(await screen.findByRole('dialog', { name: 'Solicitar más espacio' }));
+    await userEvent.click(await d.findByRole('radio', { name: /Extra S/ }));
+    await userEvent.click(d.getByRole('button', { name: 'Enviar solicitud' }));
+    await waitFor(() => expect(w.calls['request']).toHaveLength(1));
+    expect(w.calls['request']![0]!.body).toEqual({ plan_id: 'pl1' });
+    expect(await screen.findByText(/Solicitud enviada \(Extra S\)/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Solicitar más espacio' })).not.toBeInTheDocument();
+  });
+
+  it('con espacio extra vigente explica de dónde sale el cupo', async () => {
+    const w = world({ extra: 5 * 1024 * MB, quota: 6 * 1024 * MB });
+    mockApi(server(w));
+    renderApp('/library');
+    expect(await screen.findByText(/de espacio extra/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Solicitar más espacio' })).not.toBeInTheDocument();
   });
 
   it('al archivar un archivo que usan automatizaciones, el aviso las nombra', async () => {

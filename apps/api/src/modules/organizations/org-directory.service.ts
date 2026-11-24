@@ -77,6 +77,12 @@ export class OrgDirectoryService {
     return row?.quota ?? 1_073_741_824;
   }
 
+  /** El cupo incluido de una empresa concreta (para el Súper Admin, que lo consulta desde el contexto de plataforma). */
+  async storageQuotaBytesOf(organizationId: string): Promise<number> {
+    const [row] = await this.db.withIdentity((tx) => tx.select({ quota: organizations.storageQuotaBytes }).from(organizations).where(eq(organizations.id, organizationId)).limit(1));
+    return row?.quota ?? 1_073_741_824;
+  }
+
   /** Cambia la moneda de la empresa del contexto (la regla de cuándo se puede la aplica ventas). */
   async setCurrency(currency: string): Promise<void> {
     const org = TenantContext.current().organizationId;

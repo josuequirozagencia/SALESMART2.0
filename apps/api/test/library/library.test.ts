@@ -232,14 +232,14 @@ describe('cuota (el uso se deriva, el tope lo fija el Súper Admin)', () => {
     await setQuota(ORG_A, 1000 * 2 + 10);
     const a = await upOk(T.alice, JPEG(1000, 1), 'image/jpeg', '1.jpg');
     await upOk(T.alice, JPEG(1000, 2), 'image/jpeg', '2.jpg');
-    expect(await json(await call('GET', '/library/usage', T.alice))).toEqual({ used_bytes: 2000, quota_bytes: 2010, available_bytes: 10, assets: 2 });
+    expect(await json(await call('GET', '/library/usage', T.alice))).toMatchObject({ used_bytes: 2000, quota_bytes: 2010, available_bytes: 10, assets: 2 });
     const over = await upload(T.alice, JPEG(1000, 3), 'image/jpeg', '3.jpg');
     expect(over.status).toBe(409);
     expect((await json<{ error: { code: string } }>(over)).error.code).toBe('QUOTA_EXCEEDED');
     expect(await rows()).toHaveLength(2);
     // el objeto de lo rechazado no queda suelto (el rechazo ocurre antes de guardarlo)
     expect((await call('POST', `/library/assets/${a.id}/archive`, T.alice)).status).toBe(200);
-    expect(await json(await call('GET', '/library/usage', T.alice))).toEqual({ used_bytes: 1000, quota_bytes: 2010, available_bytes: 1010, assets: 1 });
+    expect(await json(await call('GET', '/library/usage', T.alice))).toMatchObject({ used_bytes: 1000, quota_bytes: 2010, available_bytes: 1010, assets: 1 });
     await upOk(T.alice, JPEG(1000, 3), 'image/jpeg', '3.jpg'); // ahora sí cabe
     // la cuota de A no afecta a B
     expect((await upload(T.bob, JPEG(1000, 4), 'image/jpeg', 'b.jpg')).status).toBe(201);
@@ -276,7 +276,7 @@ describe('cuota (el uso se deriva, el tope lo fija el Súper Admin)', () => {
     expect(audit).toHaveLength(1);
     expect(audit[0]!['details']).toEqual({ from_bytes: GB, to_bytes: 500 });
     // el uso (1000) quedó sobre el tope (500): lo subido se sigue viendo y bajando, y solo se rechaza lo nuevo
-    expect(await json(await call('GET', '/library/usage', T.alice))).toEqual({ used_bytes: 1000, quota_bytes: 500, available_bytes: 0, assets: 1 });
+    expect(await json(await call('GET', '/library/usage', T.alice))).toMatchObject({ used_bytes: 1000, quota_bytes: 500, available_bytes: 0, assets: 1 });
     expect((await list(T.alice)).items).toHaveLength(1);
     expect((await upload(T.alice, JPEG(404), 'image/jpeg', 'nueva.jpg')).status).toBe(409);
   });

@@ -4,6 +4,7 @@ import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { PageHeader } from '../../ui/PageHeader';
 import { Pill } from '../../ui/Pill';
+import { RequestSpaceDialog } from './RequestSpaceDialog';
 import { assetUrl, KIND_LABEL, sizeLabel, useAssetThumb, useAssetUsage, useLibrary, useLibraryAccess, useLibraryMutations, useUploadAsset, type AssetChanges, type LibraryAsset, type LibraryFilter, type LibraryFolder, type LibraryUsage } from './useLibrary';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
@@ -12,8 +13,10 @@ const KINDS = [['', 'Todos los tipos'], ['image', 'Imágenes'], ['document', 'Do
 
 /** La barra de espacio usado: ámbar desde el 80 %, roja al llenarse. Solo la ve quien administra. */
 function UsageBar({ usage }: { usage: LibraryUsage }) {
+  const [asking, setAsking] = useState(false);
   const pct = usage.quota_bytes > 0 ? Math.min(100, Math.round((usage.used_bytes / usage.quota_bytes) * 100)) : 100;
   const tone = pct >= 100 ? 'bg-crit' : pct >= 80 ? 'bg-warn' : 'bg-accent';
+  const expiry = usage.next_expiry_at ? new Date(usage.next_expiry_at).toLocaleDateString('es', { day: 'numeric', month: 'long', year: 'numeric' }) : null;
   return (
     <section aria-label="Espacio de la biblioteca" className="grid gap-1.5 rounded-2xl border border-line bg-surface p-3">
       <div className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
@@ -23,7 +26,19 @@ function UsageBar({ usage }: { usage: LibraryUsage }) {
       <div role="progressbar" aria-label="Espacio usado" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct} className="h-2 overflow-hidden rounded-full bg-surface2">
         <div className={`h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />
       </div>
-      {pct >= 100 ? <p className="text-[12.5px] font-semibold text-crit">Llegaste al límite de espacio: no se pueden subir más archivos. Archiva los que ya no uses o pide más espacio.</p> : pct >= 80 ? <p className="text-[12.5px] text-warn">Te queda poco espacio ({sizeLabel(usage.available_bytes)}).</p> : null}
+      {usage.extra_bytes > 0 ? <p className="text-[12px] text-muted">Incluye {sizeLabel(usage.included_bytes)} de tu plan y {sizeLabel(usage.extra_bytes)} de espacio extra{expiry ? `; el extra más próximo vence el ${expiry}` : ''}.</p> : null}
+      {pct >= 100 ? (
+        <div className="grid gap-2 rounded-xl bg-crit-soft p-3">
+          <p className="text-[13px] font-semibold text-crit">Tu empresa llegó a su límite de espacio: no se pueden subir más archivos. Lo que ya subiste sigue disponible.</p>
+          {usage.request ? <p className="text-[12.5px]">Solicitud enviada{usage.request.plan_name ? ` (${usage.request.plan_name})` : ''}: el equipo la está revisando.</p> : <div><Button variant="primary" className={SMALL} onClick={() => setAsking(true)}>Solicitar más espacio</Button></div>}
+        </div>
+      ) : pct >= 80 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-[12.5px] text-warn">Te queda poco espacio ({sizeLabel(usage.available_bytes)}).</p>
+          {usage.request ? <span className="text-[12.5px] text-muted">Solicitud enviada: el equipo la está revisando.</span> : <Button className={SMALL} onClick={() => setAsking(true)}>Solicitar más espacio</Button>}
+        </div>
+      ) : null}
+      {asking ? <RequestSpaceDialog onClose={() => setAsking(false)} /> : null}
     </section>
   );
 }

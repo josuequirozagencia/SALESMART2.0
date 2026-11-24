@@ -68,7 +68,14 @@ export interface FolderView {
 
 export interface UsageView {
   used_bytes: number;
+  /** El cupo efectivo: incluido + espacio extra vigente (derivado, nunca editable). */
   quota_bytes: number;
   available_bytes: number;
   assets: number;
+  included_bytes: number;
+  extra_bytes: number;
+  /** Cuándo vence el próximo espacio extra con fecha de fin. */
+  next_expiry_at: string | null;
+  /** La solicitud de más espacio que está abierta, si la hay. */
+  request: { id: string; plan_name: string | null; created_at: string } | null;
 }
