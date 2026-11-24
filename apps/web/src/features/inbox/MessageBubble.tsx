@@ -11,6 +11,7 @@ import { useSwipeReply } from './useSwipeReply';
 import type { ReplyQuote } from '../../lib/types';
 import { splitMentions } from './mentions';
 import { LocationCard } from './LocationCard';
+import { AudioPlayer, useStableUrl } from './AudioPlayer';
 import { validPlace, type Place } from '../../lib/osm';
 
 const TICK: Record<string, { text: string; label: string; cls: string }> = {
@@ -30,6 +31,12 @@ function Ticks({ status, onGrad = false }: { status: ChatMessage['status']; onGr
 }
 
 /** Una imagen del hilo. En móvil se toca para verla ampliada a pantalla completa (con botón de cerrar); en escritorio es un enlace a otra pestaña, como siempre. */
+/** El video con una dirección estable: si el hilo se vuelve a pedir y la dirección firmada cambia, el video no se recarga a media reproducción. */
+function ChatVideo({ id, url }: { id: string; url: string }) {
+  const [src, refresh] = useStableUrl(id, url);
+  return <video src={src} controls preload="metadata" onError={() => { refresh(); }} className="max-w-full rounded-lg" />;
+}
+
 function ChatImage({ url, name }: { url: string; name: string }) {
   const mobile = useBreakpoint() === 'mobile';
   const [open, setOpen] = useState(false);
@@ -83,8 +90,8 @@ function Body({ m }: { m: ChatMessage }) {
         : att.scan_status === 'pending' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo se está revisando…</span>
         : att.url ? (
           att.mime_type?.startsWith('image/') ? <ChatImage url={att.url} name="Imagen" />
-          : att.mime_type?.startsWith('video/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Video</span><video src={att.url} controls className="max-w-full rounded-lg" /></>
-          : att.mime_type?.startsWith('audio/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Audio</span><audio src={att.url} controls className="w-full max-w-full" /></>
+          : att.mime_type?.startsWith('video/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Video</span><ChatVideo id={att.id} url={att.url} /></>
+          : att.mime_type?.startsWith('audio/') ? <AudioPlayer id={att.id} url={att.url} filename={att.filename} />
           : <DocumentCard url={att.url} mime={att.mime_type} size={att.size_bytes} filename={att.filename} />
         ) : att.scan_status === 'skipped' && m.kind !== 'text' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí · sin revisar</span>
         : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null
