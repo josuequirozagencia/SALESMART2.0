@@ -1,0 +1,2 @@
+ALTER TABLE "ai_conversation_state" DROP CONSTRAINT "ai_conversation_state_reason_valid";--> statement-breakpoint
+ALTER TABLE "ai_conversation_state" ADD CONSTRAINT "ai_conversation_state_reason_valid" CHECK ("ai_conversation_state"."reason" IS NULL OR "ai_conversation_state"."reason" IN ('requested', 'turn_limit', 'unsupported_media', 'ai_error', 'no_support', 'agent_decision', 'empty_reply', 'human_message', 'human_took', 'manual', 'no_credits', 'audio_too_long', 'media_blocked', 'daily_limit', 'audio_off', 'no_transcription', 'audio_unreadable'));

@@ -284,6 +284,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
       </section>
       <section aria-label="Qué puede entender el cliente" className="grid gap-2">
         <h3 className="text-[13.5px] font-bold">Qué puede entender el agente de lo que envía el cliente</h3>
+        {!a.transcribe_audio && !a.read_images ? <Alert kind="info">Tu agente aún no escucha audios ni lee imágenes: si un cliente los envía, la conversación pasará a una persona. Puedes activarlos aquí abajo con un clic.</Alert> : null}
         <label className={`flex items-start gap-2 text-[13.5px] font-semibold ${!sees && !readImages ? 'opacity-60' : ''}`}>
           <input type="checkbox" role="switch" aria-label="Leer imágenes" checked={readImages} disabled={!sees && !readImages} onChange={(e) => setReadImages(e.target.checked)} className="mt-1" />
           <span>Leer imágenes
