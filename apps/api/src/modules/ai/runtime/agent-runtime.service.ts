@@ -204,6 +204,10 @@ export class AgentRuntimeService {
           return await this.handoff(job, settings.name, plan.blocked > 0 ? 'media_blocked' : 'unsupported_media', newest, false, now, route);
         }
       }
+      // Un audio que el agente NO puede escuchar nunca queda en silencio: sin nada más que contestar pasa a una persona diciendo EXACTAMENTE por qué; con texto en el mismo turno, el agente atiende el texto y se lo dice al cliente
+      const cannotHear = audioMessages.length > 0 && !readsAudio;
+      if (cannotHear && text.trim() === '' && images.length === 0) return await this.handoff(job, settings.name, settings.transcribeAudio ? 'no_transcription' : 'audio_off', newest, false, now, route);
+      if (cannotHear) mention += ` (El cliente envió ${audioMessages.length === 1 ? 'un audio' : `${audioMessages.length} audios`} que no puedes escuchar: pídele con amabilidad que lo escriba.)`;
       if (text.trim() === '' && images.length === 0 && !readsAudio) return await this.handoff(job, settings.name, 'unsupported_media', newest, false, now, route);
       if (job.turns >= MAX_AGENT_TURNS) return await this.handoff(job, settings.name, 'turn_limit', newest, false, now, route);
       if (settings.transferEnabled && asksForPerson(text)) return await this.handoff(job, settings.name, 'requested', newest, true, now, route);

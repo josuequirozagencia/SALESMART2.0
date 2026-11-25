@@ -8,6 +8,13 @@ import { PlatformAuditService } from './platform-audit.service';
 const SYSTEM_ACTOR = '00000000-0000-4000-8000-000000000000';
 const CACHE_MS = 30_000;
 
+/** Modelos de transcripción de OpenAI, del preferido al último: si hay uno cargado de esta lista gana a cualquier nombre que no lo sea (un nombre mal escrito no puede quedar primero por orden alfabético). */
+export const TRANSCRIPTION_PREFERENCE: readonly string[] = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'];
+export function byTranscriptionPreference(a: { model: string }, b: { model: string }): number {
+  const rank = (m: string): number => { const i = TRANSCRIPTION_PREFERENCE.indexOf(m); return i === -1 ? TRANSCRIPTION_PREFERENCE.length : i; };
+  return rank(a.model) - rank(b.model) || a.model.localeCompare(b.model);
+}
+
 /** Precio de un modelo (dólares por millón de tokens). SOLO servidor. */
 export interface ModelPrice {
   readonly model: string;
@@ -55,7 +62,7 @@ export class AiModelPricesService {
 
   /** El modelo de transcripción en uso (ADR-70): el primero por nombre entre los cargados; null si el Súper Admin aún no cargó ninguno. SOLO servidor. */
   async transcriptionModel(now = Date.now()): Promise<ModelPrice | null> {
-    return [...(await this.load(now)).values()].filter((m) => m.kind === 'transcription').sort((a, b) => a.model.localeCompare(b.model))[0] ?? null;
+    return [...(await this.load(now)).values()].filter((m) => m.kind === 'transcription').sort(byTranscriptionPreference)[0] ?? null;
   }
 
   /** Los NOMBRES de los modelos de chat que entienden imágenes (ADR-70). */
