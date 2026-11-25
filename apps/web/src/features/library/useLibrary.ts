@@ -1,3 +1,4 @@
+import { prepareImage } from '../../lib/imagePrep';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, ApiError, tokens, type ErrorDetail } from '../../lib/api';
 
@@ -96,7 +97,8 @@ function useDone() {
 export function useUploadAsset() {
   const done = useDone();
   return useMutation({
-    mutationFn: async ({ file, folderId }: { file: File; folderId?: string | undefined }): Promise<LibraryAsset> => {
+    mutationFn: async ({ file: original, folderId }: { file: File; folderId?: string | undefined }): Promise<LibraryAsset> => {
+      const file = await prepareImage(original); // V23-C: las fotos pesadas se reducen antes de subir
       const q = folderId ? `?folder_id=${encodeURIComponent(folderId)}` : '';
       const res = await fetch(`/v1/library/assets${q}`, {
         method: 'POST',

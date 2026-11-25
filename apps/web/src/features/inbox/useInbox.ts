@@ -1,3 +1,4 @@
+import { prepareImage } from '../../lib/imagePrep';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
 import { useRealtimeStatus } from '../../lib/realtime';
@@ -314,7 +315,8 @@ export function useReact(conversationId: string) {
 
 export function useUploadAttachment(conversationId: string) {
   return useMutation({
-    mutationFn: async (file: File): Promise<UploadedAttachment> => {
+    mutationFn: async (original: File): Promise<UploadedAttachment> => {
+      const file = await prepareImage(original); // V23-C: las fotos pesadas se reducen antes de subir
       const res = await fetch(`/v1/conversations/${conversationId}/attachments`, {
         method: 'POST',
         headers: { 'content-type': file.type || 'application/octet-stream', 'x-filename': encodeURIComponent(file.name), 'x-requested-by': 'sales-smart-web', ...(tokens.get() ? { authorization: `Bearer ${tokens.get()}` } : {}) },
