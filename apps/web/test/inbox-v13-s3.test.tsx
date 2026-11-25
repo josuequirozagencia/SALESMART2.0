@@ -162,11 +162,11 @@ describe('la cita dentro de la burbuja', () => {
     expect(screen.getByRole('button', { name: /Mensaje citado de Ana Torres: Imagen/ })).toBeInTheDocument();
   });
 
-  it('un mensaje sin cita no trae el bloque; una cita dentro de un mensaje de color de tema sigue siendo legible (hereda el color)', () => {
+  it('un mensaje sin cita no trae el bloque; una cita dentro de un mensaje propio sigue siendo legible (hereda el color)', () => {
     stubWidth(1440);
     show(msg({ id: 'm4', direction: 'out', sender_type: 'human', status: 'sent', text: 'ok', reply_to: quote() }));
     const q = screen.getByRole('button', { name: /Mensaje citado/ });
-    expect(q.closest('.bubble-grad')).not.toBeNull();
+    expect(q.closest('[class*="bubble-out"]')).not.toBeNull();
     expect(q.className).toContain('border-current');
   });
 });

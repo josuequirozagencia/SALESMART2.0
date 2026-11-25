@@ -39,7 +39,7 @@ export interface AudioMessage {
 
 export type AudioResult =
   | { readonly status: 'waiting' }
-  | { readonly status: 'handoff'; readonly reason: 'media_blocked' | 'daily_limit' | 'audio_too_long' | 'unsupported_media' }
+  | { readonly status: 'handoff'; readonly reason: 'media_blocked' | 'daily_limit' | 'audio_too_long' | 'unsupported_media' | 'no_transcription' | 'audio_unreadable' }
   | { readonly status: 'ready'; readonly lines: string[]; readonly extra: number };
 
 /** Lo que guarda un mensaje de audio ya transcrito, en `messages.meta.transcript`. */
@@ -101,7 +101,7 @@ export class AgentMediaService {
    * Si un audio no se puede leer pero otro sí, el agente atiende lo que sí se escuchó. Nunca se registra el audio ni el texto.
    */
   async transcribeForTurn(input: { agentName: string; agentId: string; conversationId: string; audios: readonly AudioMessage[]; now: Date }): Promise<AudioResult> {
-    type Problem = 'media_blocked' | 'daily_limit' | 'audio_too_long' | 'unsupported_media';
+    type Problem = 'media_blocked' | 'daily_limit' | 'audio_too_long' | 'unsupported_media' | 'no_transcription' | 'audio_unreadable';
     const heard: Array<{ at: number; text: string }> = [];
     const todoAll: AudioMessage[] = [];
     for (const a of [...input.audios].sort((x, y) => x.at.getTime() - y.at.getTime())) {
@@ -132,7 +132,7 @@ export class AgentMediaService {
         problems.push('media_blocked'); notHeard += 1; continue;
       }
       if (a.state !== 'ready' || !a.key || !(a.scan === 'clean' || a.scan === 'skipped')) { problems.push('media_blocked'); notHeard += 1; continue; }
-      if (a.size === null || a.size > MAX_AUDIO_BYTES) { problems.push('unsupported_media'); notHeard += 1; continue; }
+      if (a.size === null || a.size > MAX_AUDIO_BYTES) { problems.push('audio_unreadable'); notHeard += 1; continue; }
       let bytes: Buffer;
       try {
         bytes = await this.attachments.read(a.key);
@@ -141,7 +141,7 @@ export class AgentMediaService {
       }
       const sig = sniff(bytes);
       const format = sig ? AUDIO_OF[sig] : undefined;
-      if (!format || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) { problems.push('unsupported_media'); notHeard += 1; continue; }
+      if (!format || bytes.length === 0 || bytes.length > MAX_AUDIO_BYTES) { problems.push('audio_unreadable'); notHeard += 1; continue; }
       ready.push({ msg: target, bytes, mime: format.mime, ext: format.ext });
     }
 
@@ -155,7 +155,7 @@ export class AgentMediaService {
       const ref = `Agente ${input.agentName} · audio`.slice(0, 200);
       for (const r of ready) {
         if (left <= 0) { problems.push('daily_limit'); notHeard += 1; continue; }
-        if (!price) { problems.push('unsupported_media'); notHeard += 1; continue; }
+        if (!price) { problems.push('no_transcription'); notHeard += 1; continue; }
         left -= 1;
         // Reserva por el máximo de minutos permitido; se cobra la duración real
         const worstUsd = (limits.audioMaxSeconds / 60) * price.usdPerMinute;
@@ -175,7 +175,7 @@ export class AgentMediaService {
           await tx.insert(aiMediaRuns).values({ agentId: input.agentId, conversationId: input.conversationId, messageId: r.msg.id, kind: 'audio', mimeType: r.mime, bytes: r.bytes.length, model: out.model, seconds: out.seconds, outcome: 'ok' });
         });
         if (out.seconds > limits.audioMaxSeconds) { problems.push('audio_too_long'); notHeard += 1; continue; }
-        if (transcript.text === '') { problems.push('unsupported_media'); notHeard += 1; continue; } // silencio o ruido
+        if (transcript.text === '') { problems.push('audio_unreadable'); notHeard += 1; continue; } // silencio o ruido
         heard.push({ at: r.msg.at.getTime(), text: transcript.text });
       }
     }
