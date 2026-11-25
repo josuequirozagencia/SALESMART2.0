@@ -318,7 +318,7 @@ function Messages({ c, onReply }: { c: Conversation; onReply: (m: ChatMessage) =
         if (stick.current) setNewCount((n) => (n === 0 ? n : 0));
       }}
       style={chatBg.style}
-      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 md:px-4 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden ${chatBg.className}`}
+      className={`chat-thread min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-3 md:px-2.5 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden ${chatBg.className}`}
     >
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando mensajes" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los mensajes.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
@@ -328,7 +328,7 @@ function Messages({ c, onReply }: { c: Conversation; onReply: (m: ChatMessage) =
       <ul className="grid">
         {items.map((m, i) => (
           <Fragment key={m.id}>
-            {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-surface2 px-3 py-0.5 shadow-sm text-[11.5px] font-semibold text-muted">{dayLabel(m.sent_at, now)}</span></li> : null}
+            {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-[var(--date-pill-bg)] px-3 py-1 text-[12px] font-semibold text-[var(--date-pill-fg)] shadow-[0_1px_1px_rgba(0,0,0,.08)]">{dayLabel(m.sent_at, now)}</span></li> : null}
             <MessageBubble
               m={m}
               spacing={i === 0 ? '' : senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? 'mt-2.5' : 'mt-1'}
