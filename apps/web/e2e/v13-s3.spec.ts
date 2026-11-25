@@ -60,17 +60,17 @@ async function fixture(request: APIRequestContext): Promise<{ email: string; con
 test.describe('escritorio 1440 × 900', () => {
   test.use({ viewport: { width: 1440, height: 900 } });
 
-  test('lo que escribe una persona lleva el degradado del tema con texto legible; la ubicación se ve como mapa sin que la política de contenido bloquee las baldosas', async ({ page, request }) => {
+  test('lo que escribe una persona lleva el verde de WhatsApp del hilo con texto legible; la ubicación se ve como mapa sin que la política de contenido bloquee las baldosas', async ({ page, request }) => {
     const { email, convId } = await fixture(request);
     const violations: string[] = [];
     page.on('console', (m) => { if (/Content Security Policy|Refused to load/i.test(m.text()) && /openstreetmap/i.test(m.text())) violations.push(m.text()); });
     await uiLogin(page, email);
     await page.goto(`/inbox/${convId}`);
     const chat = page.getByRole('region', { name: 'Conversación con Cliente Burbujas' });
-    const mine = chat.getByText('Sí, de 9 a 18').locator('xpath=ancestor::div[contains(@class,"bubble-grad")][1]');
+    const mine = chat.getByText('Sí, de 9 a 18').locator('xpath=ancestor::div[contains(@class,"bubble-out")][1]');
     await expect(mine).toBeVisible();
-    const css = await mine.evaluate((el) => { const s = getComputedStyle(el); return { img: s.backgroundImage, color: s.color }; });
-    expect(css.img).toContain('linear-gradient');
+    const css = await mine.evaluate((el) => { const s = getComputedStyle(el); return { bg: s.backgroundColor, color: s.color }; });
+    expect(css.bg).toBe('rgb(217, 253, 211)'); // #d9fdd3 en claro
     expect(css.color).toMatch(/^rgb/);
     // la ubicación: mapa con su enlace; las baldosas cargan (o, sin red, se cae a la tarjeta con el pin) y la política de contenido no las bloquea
     const map = chat.getByRole('link', { name: /^Abrir la ubicación en el mapa: Oficina Centro/ });
