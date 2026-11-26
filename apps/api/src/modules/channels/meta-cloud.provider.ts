@@ -63,7 +63,7 @@ async function readLimited(res: Response, max: number): Promise<Buffer> {
 
 /**
  * Adaptador de WhatsApp Cloud API de Meta (ADR-02/50). Habla con la Graph API por `fetch` y traduce sus respuestas a los códigos de nuestro puerto.
- * Nunca incluye el token en un error ni en un registro. **Probado solo contra respuestas simuladas** hasta que haya credenciales reales de Meta.
+ * Nunca incluye el token en un error ni en un registro. **Probado contra respuestas simuladas** hasta que haya credenciales reales de Meta.
  */
 export class MetaCloudProvider implements WhatsAppProvider {
   readonly name = 'meta_cloud' as const;
@@ -75,7 +75,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   constructor(opts: MetaCloudOptions = {}) {
     this.base = (opts.baseUrl ?? 'https://graph.facebook.com').replace(/\/+$/, '');
-    this.version = opts.version ?? 'v21.0';
+    this.version = opts.version ?? 'v27.0';
     this.fetchFn = opts.fetchFn ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.trustMediaUrl = opts.trustMediaUrl ?? defaultTrustMediaUrl;
