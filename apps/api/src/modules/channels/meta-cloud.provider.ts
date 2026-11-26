@@ -75,7 +75,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   constructor(opts: MetaCloudOptions = {}) {
     this.base = (opts.baseUrl ?? 'https://graph.facebook.com').replace(/\/+$/, '');
-    this.version = opts.version ?? 'v27.0';
+    this.version = opts.version ?? 'v26.0';
     this.fetchFn = opts.fetchFn ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.trustMediaUrl = opts.trustMediaUrl ?? defaultTrustMediaUrl;
