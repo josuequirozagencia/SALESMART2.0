@@ -90,6 +90,8 @@ export const aiModelPrices = platformTable(
     vision: boolean('vision').notNull().default(false),
     /** Precio por MINUTO de audio de un modelo de transcripción (obligatorio solo para `transcription`; ADR-70). */
     usdPerMinute: numeric('usd_per_minute', { precision: 12, scale: 6 }),
+    /** V23-D: el modelo de transcripción elegido por el Súper Admin (a lo sumo uno). Sin ninguno, manda el orden de preferencia. */
+    preferred: boolean('preferred').notNull().default(false),
     updatedAt: ts('updated_at').notNull().defaultNow(),
     updatedBy: uuid('updated_by'),
   },
@@ -97,6 +99,8 @@ export const aiModelPrices = platformTable(
     check('ai_model_prices_model_shape', sql`${t.model} ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$'`),
     check('ai_model_prices_kind_valid', sql`${t.kind} IN ('embedding', 'chat', 'transcription')`),
     check('ai_model_prices_minute_valid', sql`(${t.kind} = 'transcription') = (${t.usdPerMinute} IS NOT NULL) AND (${t.usdPerMinute} IS NULL OR (${t.usdPerMinute} >= 0 AND ${t.usdPerMinute} <= 10000))`),
+    check('ai_model_prices_preferred_valid', sql`${t.preferred} = false OR ${t.kind} = 'transcription'`),
+    uniqueIndex('ai_model_prices_one_preferred_uq').on(t.kind).where(sql`${t.preferred}`),
     check('ai_model_prices_vision_valid', sql`${t.vision} = false OR ${t.kind} = 'chat'`),
     check('ai_model_prices_price_valid', sql`${t.usdPer1mInput} >= 0 AND ${t.usdPer1mInput} <= 10000 AND ${t.usdPer1mOutput} >= 0 AND ${t.usdPer1mOutput} <= 10000`),
   ],

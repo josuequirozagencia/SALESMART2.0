@@ -278,6 +278,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/platform/ai/limits', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'GET /v1/platform/ai/organizations', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'PUT /v1/platform/ai/organizations/:id/margin', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'POST /v1/platform/ai/models/:model/use-for-audio', kind: 'platform', test: '../../ai/knowledge.test.ts' },
   { route: 'POST /v1/platform/ai/organizations/:id/grants', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'GET /v1/platform/ai/organizations/:id/ledger', kind: 'platform', test: '../../ai/credits.test.ts' },
   // Conocimiento (M8.2, ADR-53). Pruebas: test/ai/knowledge.test.ts (A↔B, tipos de archivo, créditos, búsqueda sin respaldo)

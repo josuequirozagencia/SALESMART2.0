@@ -319,7 +319,7 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(d.getByLabelText(/Responder a toda hora/));
     await userEvent.click(conns.getByRole('checkbox', { name: 'Atender «WhatsApp Norte»' }));
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
-    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false, read_images: false, transcribe_audio: false }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toEqual({ split_enabled: true, split_blocks: 4, transfer_enabled: true, transfer_queue_id: 'q1', always_on: false, capture_fields: [], tasks_enabled: false, suggestions_enabled: false, read_images: false, transcribe_audio: false, audio_fallback_text: null }));
     await waitFor(() => expect(w.calls['channels']![0]!.body).toEqual({ channel_ids: ['c1'] }));
     expect(await d.findByText('Cambios guardados.')).toBeInTheDocument();
   });
@@ -356,6 +356,20 @@ describe('Agentes IA · Comportamiento', () => {
     await userEvent.click(sw);
     await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ transcribe_audio: true }));
+  });
+
+  it('«Avisar al cliente cuando no pueda escuchar» viene apagado; al activarlo propone un texto y lo guarda', async () => {
+    const w = world();
+    mockApi(server(w));
+    renderApp('/agents');
+    const d = await open();
+    await goTab(d, 'Comportamiento');
+    const box = await d.findByRole('checkbox', { name: 'Avisar al cliente cuando no pueda escuchar un audio' });
+    expect(box).not.toBeChecked();
+    await userEvent.click(box);
+    expect(d.getByRole('textbox', { name: 'Texto para el cliente' })).toHaveValue('Por ahora no puedo escuchar audios, ¿me lo escribes?');
+    await userEvent.click(d.getByRole('button', { name: 'Guardar' }));
+    await waitFor(() => expect(w.calls['patch']![0]!.body).toMatchObject({ audio_fallback_text: 'Por ahora no puedo escuchar audios, ¿me lo escribes?' }));
   });
 
   it('sin modelo de transcripción cargado «Escuchar audios» queda desactivado y dice qué falta', async () => {

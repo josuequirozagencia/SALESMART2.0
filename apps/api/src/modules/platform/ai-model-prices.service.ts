@@ -10,7 +10,8 @@ const CACHE_MS = 30_000;
 
 /** Modelos de transcripción de OpenAI, del preferido al último: si hay uno cargado de esta lista gana a cualquier nombre que no lo sea (un nombre mal escrito no puede quedar primero por orden alfabético). */
 export const TRANSCRIPTION_PREFERENCE: readonly string[] = ['gpt-4o-mini-transcribe', 'gpt-4o-transcribe', 'whisper-1'];
-export function byTranscriptionPreference(a: { model: string }, b: { model: string }): number {
+export function byTranscriptionPreference(a: { model: string; preferred?: boolean }, b: { model: string; preferred?: boolean }): number {
+  if ((a.preferred ?? false) !== (b.preferred ?? false)) return a.preferred ? -1 : 1; // lo que eligió el Súper Admin gana siempre
   const rank = (m: string): number => { const i = TRANSCRIPTION_PREFERENCE.indexOf(m); return i === -1 ? TRANSCRIPTION_PREFERENCE.length : i; };
   return rank(a.model) - rank(b.model) || a.model.localeCompare(b.model);
 }
@@ -25,6 +26,8 @@ export interface ModelPrice {
   readonly vision: boolean;
   /** Dólares por minuto de audio (solo transcripción). */
   readonly usdPerMinute: number | null;
+  /** ¿Es el modelo de transcripción elegido por el Súper Admin? */
+  readonly preferred: boolean;
 }
 
 export interface ModelPriceView {
@@ -34,6 +37,9 @@ export interface ModelPriceView {
   usd_per_1m_output: string;
   vision: boolean;
   usd_per_minute: string | null;
+  /** El modelo de transcripción en uso (elegido o, sin elección, el que gana por preferencia). */
+  preferred: boolean;
+  in_use: boolean;
   updated_at: string;
 }
 
@@ -74,14 +80,15 @@ export class AiModelPricesService {
     if (!this.cache || now - this.cache.at >= CACHE_MS) {
       const read = () => this.db.withPlatform((tx) => tx.select().from(aiModelPrices));
       const rows = PlatformContext.currentOrNull() ? await read() : await TenantContext.detach(() => PlatformContext.run({ actorUserId: SYSTEM_ACTOR }, read));
-      this.cache = { at: now, value: new Map(rows.map((r) => [r.model, { model: r.model, kind: r.kind as ModelPrice['kind'], usdPer1mInput: Number(r.usdPer1mInput), usdPer1mOutput: Number(r.usdPer1mOutput), vision: r.vision, usdPerMinute: r.usdPerMinute === null ? null : Number(r.usdPerMinute) }])) };
+      this.cache = { at: now, value: new Map(rows.map((r) => [r.model, { preferred: r.preferred, model: r.model, kind: r.kind as ModelPrice['kind'], usdPer1mInput: Number(r.usdPer1mInput), usdPer1mOutput: Number(r.usdPer1mOutput), vision: r.vision, usdPerMinute: r.usdPerMinute === null ? null : Number(r.usdPerMinute) }])) };
     }
     return this.cache.value;
   }
 
   async list(): Promise<ModelPriceView[]> {
     const rows = await this.db.withPlatform((tx) => tx.select().from(aiModelPrices).orderBy(aiModelPrices.kind, aiModelPrices.model));
-    return rows.map((r) => ({ model: r.model, kind: r.kind as ModelPrice['kind'], usd_per_1m_input: r.usdPer1mInput, usd_per_1m_output: r.usdPer1mOutput, vision: r.vision, usd_per_minute: r.usdPerMinute, updated_at: r.updatedAt.toISOString() }));
+    const active = rows.filter((r) => r.kind === 'transcription').sort(byTranscriptionPreference)[0]?.model;
+    return rows.map((r) => ({ model: r.model, kind: r.kind as ModelPrice['kind'], usd_per_1m_input: r.usdPer1mInput, usd_per_1m_output: r.usdPer1mOutput, vision: r.vision, usd_per_minute: r.usdPerMinute, preferred: r.preferred, in_use: r.model === active, updated_at: r.updatedAt.toISOString() }));
   }
 
   /**
@@ -103,7 +110,7 @@ export class AiModelPricesService {
     this.cache = null;
     await this.audit.record({ action: 'ai.model_price.create', entityType: 'ai_model', details: kind === 'transcription' ? { model, kind, per_minute: input.usd_per_minute } : { model, kind, input: input.usd_per_1m_input, output: input.usd_per_1m_output, vision: input.vision ?? false } });
     const [row] = await this.db.withPlatform((tx) => tx.select().from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1));
-    return { model, kind, usd_per_1m_input: row!.usdPer1mInput, usd_per_1m_output: row!.usdPer1mOutput, vision: row!.vision, usd_per_minute: row!.usdPerMinute, updated_at: row!.updatedAt.toISOString() };
+    return { preferred: row!.preferred, in_use: false, model, kind, usd_per_1m_input: row!.usdPer1mInput, usd_per_1m_output: row!.usdPer1mOutput, vision: row!.vision, usd_per_minute: row!.usdPerMinute, updated_at: row!.updatedAt.toISOString() };
   }
 
   /** Cambia el precio de un modelo que YA existe. */
@@ -118,7 +125,7 @@ export class AiModelPricesService {
       this.cache = null;
       await this.audit.record({ action: 'ai.model_price.update', entityType: 'ai_model', details: { model, before: { per_minute: before.usdPerMinute }, after: { per_minute: input.usd_per_minute } } });
       const [t] = await this.db.withPlatform((tx) => tx.select().from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1));
-      return { model, kind: 'transcription', usd_per_1m_input: t!.usdPer1mInput, usd_per_1m_output: t!.usdPer1mOutput, vision: t!.vision, usd_per_minute: t!.usdPerMinute, updated_at: t!.updatedAt.toISOString() };
+      return { preferred: t!.preferred, in_use: t!.preferred, model, kind: 'transcription', usd_per_1m_input: t!.usdPer1mInput, usd_per_1m_output: t!.usdPer1mOutput, vision: t!.vision, usd_per_minute: t!.usdPerMinute, updated_at: t!.updatedAt.toISOString() };
     }
     if (input.usd_per_1m_input === undefined || input.usd_per_1m_output === undefined || input.usd_per_minute !== undefined) throw new ValidationError([{ path: 'usd_per_1m_input', code: 'required', message: 'Este modelo lleva los precios de entrada y de salida por millón de tokens' }]);
     const next = { usd_per_1m_input: input.usd_per_1m_input, usd_per_1m_output: input.usd_per_1m_output };
@@ -127,7 +134,22 @@ export class AiModelPricesService {
     this.cache = null;
     await this.audit.record({ action: 'ai.model_price.update', entityType: 'ai_model', details: { model, before: { input: before.usdPer1mInput, output: before.usdPer1mOutput }, after: { input: next.usd_per_1m_input, output: next.usd_per_1m_output }, vision: { before: before.vision, after: input.vision ?? before.vision } } });
     const [row] = await this.db.withPlatform((tx) => tx.select().from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1));
-    return { model, kind: row!.kind as ModelPrice['kind'], usd_per_1m_input: row!.usdPer1mInput, usd_per_1m_output: row!.usdPer1mOutput, vision: row!.vision, usd_per_minute: row!.usdPerMinute, updated_at: row!.updatedAt.toISOString() };
+    return { preferred: row!.preferred, in_use: false, model, kind: row!.kind as ModelPrice['kind'], usd_per_1m_input: row!.usdPer1mInput, usd_per_1m_output: row!.usdPer1mOutput, vision: row!.vision, usd_per_minute: row!.usdPerMinute, updated_at: row!.updatedAt.toISOString() };
+  }
+
+  /** Elige el modelo de transcripción que se usa (V23-D): solo uno queda elegido. */
+  async useForAudio(model: string): Promise<{ model: string; preferred: true }> {
+    const actor = PlatformContext.current().actorUserId;
+    await this.db.withPlatform(async (tx) => {
+      const [row] = await tx.select({ kind: aiModelPrices.kind }).from(aiModelPrices).where(eq(aiModelPrices.model, model)).limit(1);
+      if (!row) throw new NotFoundError();
+      if (row.kind !== 'transcription') throw new ConflictError('NOT_TRANSCRIPTION_MODEL', 'Solo un modelo de transcripción puede usarse para los audios');
+      await tx.update(aiModelPrices).set({ preferred: false }).where(eq(aiModelPrices.preferred, true));
+      await tx.update(aiModelPrices).set({ preferred: true, updatedAt: new Date(), updatedBy: actor }).where(eq(aiModelPrices.model, model));
+    });
+    this.cache = null;
+    await this.audit.record({ action: 'ai.model.use_for_audio', entityType: 'ai_model', details: { model } });
+    return { model, preferred: true };
   }
 
   invalidate(): void {

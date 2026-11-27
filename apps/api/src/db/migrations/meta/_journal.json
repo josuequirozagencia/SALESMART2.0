@@ -1100,6 +1100,13 @@
       "when": 1797200000000,
       "tag": "0156_v23a_motivos_audio",
       "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1797300000000,
+      "tag": "0157_v23d_audio_texto_y_modelo",
+      "breakpoints": true
     }
   ]
 }

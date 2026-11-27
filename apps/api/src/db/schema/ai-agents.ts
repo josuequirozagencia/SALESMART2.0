@@ -54,6 +54,8 @@ export const agents = tenantTable(
     readImages: boolean('read_images').notNull().default(false),
     /** El agente escucha las notas de voz del cliente (transcripción; ADR-70, rebanada S5b). Por omisión apagado. */
     transcribeAudio: boolean('transcribe_audio').notNull().default(false),
+    /** V23-D: texto fijo que el agente envía (una vez por conversación) cuando no puede escuchar un audio; null = no envía nada. */
+    audioFallbackText: text('audio_fallback_text'),
     /** Dato de ejemplo (M10.6, ADR-56 B5): lo crea el sistema al abrir la empresa; se puede editar y borrar como cualquier otro. */
     isSample: boolean('is_sample').notNull().default(false),
     /** Clave estable del ejemplo (única por empresa): hace idempotente su creación. */
@@ -65,6 +67,7 @@ export const agents = tenantTable(
   },
   (t) => [
     foreignKey({ name: 'agents_transfer_queue_fk', columns: [t['organizationId']!, t['transferQueueId']!], foreignColumns: [queues.organizationId, queues.id] }),
+    check('agents_audio_fallback_len', sql`${t['audioFallbackText']!} IS NULL OR length(btrim(${t['audioFallbackText']!})) BETWEEN 1 AND 300`),
     check('agents_name_shape', sql`length(btrim(${t['name']!})) BETWEEN 1 AND 60`),
     check('agents_role_len', sql`${t['role']!} IS NULL OR length(${t['role']!}) <= 120`),
     check('agents_cover_valid', sql`${t['cover']!} IN ('violet', 'blue', 'teal', 'green', 'amber', 'orange', 'rose', 'slate')`),

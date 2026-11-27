@@ -968,6 +968,21 @@ describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
     expect(await aiMessages(c.id)).toHaveLength(1);
   });
 
+  it('con texto fijo configurado, avisa al cliente UNA sola vez por conversación y sin gastar créditos; sin texto no envía nada', async () => {
+    const ASK = 'Por ahora no puedo escuchar audios, ¿me lo escribes?';
+    await liveAgent({ docs: true, patch: { audio_fallback_text: ASK } });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect((await aiMessages(c.id)).map((x) => x['body'])).toEqual([ASK]);
+    expect(chats()).toHaveLength(0);
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'audio_off' });
+    expect((await call('POST', `/conversations/${c.id}/ai/resume`, T.alice)).status).toBe(200);
+    await inboundAudio(c.id);
+    await tick(new Date(Date.now() + 5000));
+    expect((await aiMessages(c.id)).map((x) => x['body'])).toEqual([ASK]); // no se repite
+  });
+
   it('sin modelo de transcripción cargado el audio sigue yendo a una persona', async () => {
     await audioAgent();
     await admin.query(`DELETE FROM ai_model_prices WHERE model = 'whisper-test'`);

@@ -43,3 +43,13 @@ describe('Estado de entrega con íconos', () => {
     expect(t.className).toContain(status === 'read' ? 'tick-read' : 'tick-grey');
   });
 });
+
+describe('Cola de la burbuja', () => {
+  it('solo la primera de un grupo lleva la esquina en pico', () => {
+    const first = show(msg({ kind: 'text', text: 'uno', attachment: null }));
+    expect(first.container.querySelector('.rounded-tl-sm')).not.toBeNull();
+    first.unmount();
+    const next = render(<ul><MessageBubble m={msg({ kind: 'text', text: 'dos', attachment: null })} tail={false} canRetry={false} retrying={false} onRetry={() => undefined} contactName="Ana" /></ul>);
+    expect(next.container.querySelector('.rounded-tl-sm')).toBeNull();
+  });
+});

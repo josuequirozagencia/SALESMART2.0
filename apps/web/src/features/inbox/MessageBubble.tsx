@@ -154,7 +154,7 @@ export function QuoteBlock({ quote, contactName, onJump }: { quote: ReplyQuote; 
 }
 
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
-export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '', contactName = '', onReply, onJump }: { spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode; contactName?: string; /** Si se puede responder citando este mensaje (v13 S3.3): lo que hace el gesto, el botón «Responder» y el teclado. */ onReply?: ((m: ChatMessage) => void) | undefined; onJump?: ((id: string) => void) | undefined }) {
+export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '', contactName = '', onReply, onJump, tail = true }: { /** La primera burbuja de un grupo lleva la esquina en «pico»; las siguientes, no. */ tail?: boolean; spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode; contactName?: string; /** Si se puede responder citando este mensaje (v13 S3.3): lo que hace el gesto, el botón «Responder» y el teclado. */ onReply?: ((m: ChatMessage) => void) | undefined; onJump?: ((id: string) => void) | undefined }) {
   const mobile = useBreakpoint() === 'mobile';
   const swipe = useSwipeReply({ enabled: mobile && onReply !== undefined && !m.is_note, onReply: () => onReply?.(m) });
   if (m.is_note) {
@@ -188,7 +188,7 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar,
       <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className={`flex w-full min-w-0 items-start gap-1 ${out ? 'justify-end' : ''}`}>
       {out ? replyButton : null}
-      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${bleed ? 'w-[78%] p-0 md:w-[330px]' : 'px-3 py-2'} ${out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-[var(--bubble-text)]' : 'rounded-tl-sm bg-[var(--bubble-in)] text-[var(--bubble-text)]'}`}>
+      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${bleed ? 'w-[78%] p-0 md:w-[330px]' : 'px-3 py-2'} ${out ? `${tail ? 'rounded-tr-sm ' : ''}bg-[var(--bubble-out)] text-[var(--bubble-text)]` : `${tail ? 'rounded-tl-sm ' : ''}bg-[var(--bubble-in)] text-[var(--bubble-text)]`}`}>
         <div className={bleed ? 'px-3 pt-2 empty:hidden' : 'contents'}>
           {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-[var(--bubble-time)]">{firstName(m.author.name)}</span> : null}
           {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-[var(--bubble-time)]">Agente de IA</span> : null}

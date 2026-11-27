@@ -8,6 +8,7 @@
 //   GET /v1/platform/ai/models
 //   POST /v1/platform/ai/models
 //   PUT /v1/platform/ai/models/:model
+//   POST /v1/platform/ai/models/:model/use-for-audio
 import 'reflect-metadata';
 import { Module, type INestApplication } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -651,6 +652,24 @@ describe('permisos de la base de datos y restricciones', () => {
 
 describe('Súper Admin: dar de alta un modelo de chat (v11 S4)', () => {
   afterEach(async () => { await admin.query(`DELETE FROM ai_model_prices WHERE model = 'gpt-4.1-mini'`); app.get(AiModelPricesService).invalidate(); }); // la tabla de plataforma no se trunca: no se deja el modelo para otras pruebas
+  it('POST /platform/ai/models/:model/use-for-audio: solo el Súper Admin; deja uno elegido, que gana al orden de preferencia, y audita', async () => {
+    await admin.query(`DELETE FROM ai_model_prices WHERE kind = 'transcription'`);
+    for (const model of ['gpt-mini', 'whisper-1']) expect((await call('POST', '/platform/ai/models', T.root, { model, kind: 'transcription', usd_per_minute: '0.006' })).status).toBe(201);
+    const rows = () => call('GET', '/platform/ai/models', T.root).then((r) => json<Array<Row>>(r)).then((l) => l.filter((x) => x['kind'] === 'transcription'));
+    expect((await rows()).find((x) => x['in_use'])!['model']).toBe('whisper-1'); // sin elección: el conocido gana al nombre inventado
+    for (const t of [T.alice, T.carol]) expect((await call('POST', '/platform/ai/models/gpt-mini/use-for-audio', t)).status).toBe(403);
+    expect((await call('POST', '/platform/ai/models/gpt-mini/use-for-audio')).status).toBe(401);
+    expect((await call('POST', '/platform/ai/models/no-existe/use-for-audio', T.root)).status).toBe(404);
+    expect((await call('POST', '/platform/ai/models/gpt-4o-mini/use-for-audio', T.root)).status).toBe(409);
+    expect((await call('POST', '/platform/ai/models/gpt-mini/use-for-audio', T.root)).status).toBe(200);
+    expect((await rows()).filter((x) => x['preferred']).map((x) => x['model'])).toEqual(['gpt-mini']);
+    expect((await rows()).find((x) => x['in_use'])!['model']).toBe('gpt-mini');
+    expect((await call('POST', '/platform/ai/models/whisper-1/use-for-audio', T.root)).status).toBe(200);
+    expect((await rows()).filter((x) => x['preferred']).map((x) => x['model'])).toEqual(['whisper-1']);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM platform_audit WHERE action = 'ai.model.use_for_audio'`)).rows[0].n).toBe(2);
+    await admin.query(`DELETE FROM ai_model_prices WHERE kind = 'transcription'`);
+  });
+
   it('POST /platform/ai/models: solo el Súper Admin; crea modelos de CHAT con su precio, 409 si ya existe, valida y audita', async () => {
     const body = { model: 'gpt-4.1-mini', usd_per_1m_input: '0.4', usd_per_1m_output: '1.6' };
     for (const t of [T.alice, T.carol]) expect((await call('POST', '/platform/ai/models', t, body)).status).toBe(403);

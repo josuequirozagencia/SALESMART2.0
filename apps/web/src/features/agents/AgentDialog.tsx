@@ -8,6 +8,8 @@ import { FollowUpTab } from './FollowUpTab';
 import { Avatar, COVER_CLASS, COVER_LABEL } from './agentUi';
 import { useAgent, useAgentMutations, useAgentOptions, useContactSearch, type Agent, type AgentOptions, type AgentPatch, type Cover, type TestTurn } from './useAgents';
 
+const FALLBACK_DEFAULT = 'Por ahora no puedo escuchar audios, ¿me lo escribes?';
+
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
 const areaCls = 'min-h-[96px] w-full rounded-[10px] border border-line bg-surface px-3 py-2.5 text-[14px] font-normal text-fg';
 type TabKey = 'general' | 'instructions' | 'knowledge' | 'behavior' | 'followup' | 'test';
@@ -230,6 +232,8 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
   const [readImages, setReadImages] = useState(a.read_images ?? false);
   const [listens, setListens] = useState(a.transcribe_audio ?? false);
   const canListen = o.transcription_available ?? false;
+  const [fallbackOn, setFallbackOn] = useState((a.audio_fallback_text ?? null) !== null);
+  const [fallback, setFallback] = useState(a.audio_fallback_text ?? FALLBACK_DEFAULT);
   // «Leer imágenes» solo se ofrece con un modelo que las entienda (el servidor lo vuelve a comprobar al guardar)
   const sees = (o.vision_models ?? []).includes(a.model);
   const [channels, setChannels] = useState<string[]>(a.channel_ids);
@@ -242,7 +246,7 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
     setOk(false);
     setError(undefined);
     try {
-      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions, read_images: readImages, transcribe_audio: listens } });
+      await m.update.mutateAsync({ id: a.id, patch: { split_enabled: split, split_blocks: Number(blocks), transfer_enabled: transfer, transfer_queue_id: transfer && queue ? queue : null, always_on: always, capture_fields: capture, tasks_enabled: tasks, suggestions_enabled: suggestions, read_images: readImages, transcribe_audio: listens, audio_fallback_text: fallbackOn ? (fallback.trim() || FALLBACK_DEFAULT) : null } });
       await m.setChannels.mutateAsync({ id: a.id, ids: channels });
       setOk(true);
     } catch (e) {
@@ -299,6 +303,12 @@ function BehaviorTab({ a, o }: { a: Agent; o: AgentOptions }) {
             {!canListen ? <span className="block text-[12.5px] font-normal text-muted">Todavía no hay un modelo de transcripción cargado: pídele al administrador de la plataforma que lo agregue.</span> : null}
           </span>
         </label>
+        <div className="grid gap-1.5">
+          <label className="inline-flex items-start gap-2 text-[13.5px] font-semibold"><input type="checkbox" className="mt-1" checked={fallbackOn} onChange={(e) => setFallbackOn(e.target.checked)} aria-label="Avisar al cliente cuando no pueda escuchar un audio" />
+            <span>Avisar al cliente cuando no pueda escuchar un audio<span className="block text-[12.5px] font-normal text-muted">Envía este texto una sola vez por conversación (no gasta créditos) antes de pasarla a una persona.</span></span>
+          </label>
+          {fallbackOn ? <textarea aria-label="Texto para el cliente" value={fallback} maxLength={300} rows={2} onChange={(e) => setFallback(e.target.value)} className="rounded-[10px] border border-line bg-surface px-3 py-2 text-[14px]" /> : null}
+        </div>
         <Alert kind="info">Las imágenes y los audios que el cliente envíe se enviarán al proveedor de IA (OpenAI) para procesarse. Actívalo solo si tu aviso de privacidad lo permite.</Alert>
       </section>
       <section aria-label="Sugerencias para el equipo" className="grid gap-2">

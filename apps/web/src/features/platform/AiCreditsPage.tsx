@@ -4,7 +4,7 @@ import { useIdempotencyKey } from '../../lib/idempotency';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
-import { KIND_LABEL, useAiLedger, useAiLimits, useAiModels, useAiOrgs, useAddModel, useAiPlatformMutations, useSetAiLimits, useSetModelPrice, type AiLimits, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
+import { KIND_LABEL, useAiLedger, useAiLimits, useAiModels, useAiOrgs, useAddModel, useAiPlatformMutations, useAudioModel, useSetAiLimits, useSetModelPrice, type AiLimits, type AiModelPrice, type AiOrg, type AiPricing } from '../ai/useAiCredits';
 
 const n = (v: number): string => v.toLocaleString('es-EC');
 const when = (iso: string): string => new Date(iso).toLocaleString('es', { dateStyle: 'medium', timeStyle: 'short' });
@@ -91,6 +91,7 @@ function LimitsForm({ l }: { l: AiLimits }) {
 
 function ModelRow({ m }: { m: AiModelPrice }) {
   const set = useSetModelPrice();
+  const useModel = useAudioModel();
   const [input, setInput] = useState(num(m.usd_per_1m_input));
   const [output, setOutput] = useState(num(m.usd_per_1m_output));
   const [vision, setVision] = useState(m.vision);
@@ -112,7 +113,10 @@ function ModelRow({ m }: { m: AiModelPrice }) {
   return (
     <li className="py-3">
       <form onSubmit={submit} noValidate aria-label={`Precio de ${m.model}`} className="grid gap-2">
-        <div className="flex flex-wrap items-center gap-2"><b className="text-[13.5px]">{m.model}</b><Pill kind="muted">{m.kind === 'embedding' ? 'Embeddings' : m.kind === 'transcription' ? 'Transcripción' : 'Chat'}</Pill></div>
+        <div className="flex flex-wrap items-center gap-2"><b className="text-[13.5px]">{m.model}</b><Pill kind="muted">{m.kind === 'embedding' ? 'Embeddings' : m.kind === 'transcription' ? 'Transcripción' : 'Chat'}</Pill>
+          {m.kind === 'transcription' && m.in_use ? <Pill kind="ok">En uso para los audios</Pill> : null}
+          {m.kind === 'transcription' && !m.in_use ? <Button type="button" className="!px-3 !py-1 !text-[12.5px]" aria-label={`Usar ${m.model} para los audios`} loading={useModel.isPending} onClick={() => { setError(undefined); useModel.mutate(m.model, { onError: (e2) => setError(friendlyError(e2, 'No pudimos elegir el modelo.')) }); }}>Usar para audios</Button> : null}
+        </div>
         {m.kind === 'transcription' ? (
           <div className="grid grid-cols-1 gap-2 min-[560px]:grid-cols-3 min-[560px]:items-end">
             <Field label="Por minuto de audio (USD)" hint="Se cobra la duración real del audio, redondeada hacia arriba al segundo.">{(f) => <Input {...f} inputMode="decimal" value={perMinute} onChange={(e) => setPerMinute(e.target.value)} />}</Field>
