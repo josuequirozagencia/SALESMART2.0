@@ -397,7 +397,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
   if (mode === 'empty') return send(200, { display_phone_number: '' });
   if (mode === 'rate') return send(429, { error: { code: 4, message: 'rate limit' } });
   // ── Archivos (M5.6d): subida a /media, datos de un archivo del cliente en /<id> y el archivo en /files/<nombre> ──
-  const upload = /^\/v21\.0\/(\d+)\/media$/.exec(url)?.[1];
+  const upload = /^\/v26.0\/(\d+)\/media$/.exec(url)?.[1];
   if (upload && req.method === 'POST') {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -414,7 +414,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     });
     return;
   }
-  const mediaId = /^\/v21\.0\/(\d+)$/.exec(url)?.[1];
+  const mediaId = /^\/v26.0\/(\d+)$/.exec(url)?.[1];
   if (mediaId && req.method === 'GET') {
     const auth = req.headers.authorization ?? '';
     if (auth === `Bearer ${BAD}`) return send(400, { error: { code: 190, message: 'Error validating access token' } });
@@ -450,7 +450,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     }
     return send(404, { error: { code: 100, message: 'no existe' } });
   }
-  const target = /^\/v21\.0\/(\d+)\/messages$/.exec(url)?.[1];
+  const target = /^\/v26.0\/(\d+)\/messages$/.exec(url)?.[1];
   if (target && req.method === 'POST') {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -470,7 +470,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     });
     return;
   }
-  const id = /^\/v21\.0\/(\d+)\?/.exec(url)?.[1];
+  const id = /^\/v26.0\/(\d+)\?/.exec(url)?.[1];
   if (!id) return send(404, { error: { code: 100, message: 'ruta desconocida' } });
   if (id === '99999999') return send(503, { error: { code: 2, message: 'servicio no disponible' } });
   const auth = req.headers.authorization ?? '';

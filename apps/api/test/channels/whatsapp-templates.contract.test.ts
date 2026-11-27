@@ -180,7 +180,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     res.end(JSON.stringify(body));
   };
   const auth = req.headers.authorization ?? '';
-  const list = /^\/v21\.0\/(\d+)\/message_templates\?(.*)$/.exec(url);
+  const list = /^\/v26.0\/(\d+)\/message_templates\?(.*)$/.exec(url);
   if (list && req.method === 'GET') {
     const waba = list[1]!;
     if (waba === '99999999') return send(503, { error: { code: 2, message: 'servicio no disponible' } });
@@ -194,7 +194,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     // `next` trae una URL de Meta: el adaptador NO debe seguirla (solo reenvía el cursor)
     return send(200, { data, paging: { cursors: { before: 'b', after: more ? 'cursor-2' : 'cursor-end' }, ...(more ? { next: 'https://evil.example/steal?token=1' } : {}) } });
   }
-  const target = /^\/v21\.0\/(\d+)\/messages$/.exec(url)?.[1];
+  const target = /^\/v26.0\/(\d+)\/messages$/.exec(url)?.[1];
   if (target && req.method === 'POST') {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -248,7 +248,7 @@ describe('MetaCloudProvider · plantillas · detalles de la Graph API', () => {
     const list = await new MetaCloudProvider({ baseUrl: `${origin}/` }).listTemplates({ accessToken: VALID }, '1234567890123');
     expect(list.map((t) => t.name)).toEqual(['bienvenida', 'recordatorio_cita', 'promo_corte', 'seguimiento_nombrado', 'catalogo_imagen', 'en_revision', 'rechazada_ejemplo']);
     expect(seen).toHaveLength(2);
-    expect(seen[0]).toMatch(/^GET \/v21\.0\/1234567890123\/message_templates\?fields=id%2Cname%2Clanguage%2Cstatus%2Ccategory%2Cparameter_format%2Ccomponents%2Crejected_reason&limit=100$/);
+    expect(seen[0]).toMatch(/^GET \/v26.0\/1234567890123\/message_templates\?fields=id%2Cname%2Clanguage%2Cstatus%2Ccategory%2Cparameter_format%2Ccomponents%2Crejected_reason&limit=100$/);
     expect(seen[1]).toMatch(/&after=cursor-2$/);
     expect(seen.some((s) => s.includes('evil.example'))).toBe(false);
   });
