@@ -4,7 +4,7 @@ import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
 import type { InboxAccess } from './inbox.access';
-import { createScheduledSchema, listConversationsQuerySchema, listScheduledQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type ListScheduledQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
+import { createScheduledSchema, listConversationsQuerySchema, listScheduledQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, setQueueSchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type ListScheduledQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SetQueueDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
 import { MentionsService } from './mentions.service';
 import { OutboundService } from './outbound.service';
@@ -22,6 +22,7 @@ const accessOf = (req: AuthedRequest): InboxAccess => ({
   canTransfer: req.principal?.permissions?.has('inbox.transfer') === true,
   canShare: req.principal?.permissions?.has('inbox.share') === true,
   canDelete: req.principal?.permissions?.has('conversations.delete') === true,
+  canSetQueue: req.principal?.permissions?.has('inbox.set_queue') === true,
 });
 
 /**
@@ -240,6 +241,18 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   take(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
     return this.inbox.take(accessOf(req), id);
+  }
+
+  /**
+   * Asigna o cambia el departamento de una conversación (V24): solo el administrador. No reparte ni cambia dueño, estado ni cronómetros. 404 `QUEUE_NOT_FOUND` si el departamento
+   * no existe, está archivado o es de otra empresa; `warning: OWNER_NOT_IN_QUEUE` si quien la tiene no pertenece a él.
+   */
+  @RequirePermission('inbox.set_queue')
+  @Put(':id/queue')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  setQueue(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(setQueueSchema)) b: SetQueueDto) {
+    return this.inbox.setQueue(accessOf(req), id, b.queue_id);
   }
 
   /** Elimina la conversación (borrado lógico, ADR-63): solo el administrador; queda auditado y los mensajes se conservan. */

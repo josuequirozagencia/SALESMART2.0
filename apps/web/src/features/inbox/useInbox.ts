@@ -196,6 +196,17 @@ export function useMentionOptions(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['mention-options', id], enabled, retry: false, staleTime: 30_000, queryFn: () => api<{ items: MentionOption[] }>(`/conversations/${id}/mention-options`) });
 }
 
+/** Asigna o cambia el departamento de la conversación (V24; solo con permiso). */
+export function useSetQueue(id: string) {
+  const qc = useQueryClient();
+  const refresh = useRefresh(id);
+  return useMutation({
+    mutationFn: (queueId: string) => api<Conversation & { warning: 'OWNER_NOT_IN_QUEUE' | null }>(`/conversations/${id}/queue`, { method: 'PUT', body: { queue_id: queueId } }),
+    onSuccess: ({ warning: _warning, ...c }) => qc.setQueryData(['conversation', id], c),
+    onSettled: () => Promise.all([refresh(), qc.invalidateQueries({ queryKey: ['sale-options', id] })]),
+  });
+}
+
 export type ConversationAction = 'accept' | 'take' | 'close';
 
 /** Aceptar, tomar o finalizar: el servidor devuelve la conversación ya actualizada. */

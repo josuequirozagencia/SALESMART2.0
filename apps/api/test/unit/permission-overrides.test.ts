@@ -52,7 +52,7 @@ describe('permisos efectivos', () => {
   });
 
   it('un dato indebido NO concede nada: ni el alcance «toda la empresa», ni administrar usuarios, ni permisos de plataforma, aunque estén en la tabla', () => {
-    const bad = ['contacts.view_all', 'inbox.view_all', 'analytics.view_all', 'users.manage', 'billing.manage', 'sales.manage', 'platform.plans.manage', 'agency.clients.read'] as PermissionKey[];
+    const bad = ['contacts.view_all', 'inbox.view_all', 'inbox.set_queue', 'analytics.view_all', 'users.manage', 'billing.manage', 'sales.manage', 'platform.plans.manage', 'agency.clients.read'] as PermissionKey[];
     const e = effectivePermissions('advisor', ADVISOR, { grant: bad, deny: [] });
     for (const k of bad) expect(e.has(k), k).toBe(false);
     expect([...e].sort()).toEqual([...ADVISOR].sort());

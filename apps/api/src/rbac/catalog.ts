@@ -12,6 +12,8 @@ export const PERMISSIONS = {
   'inbox.reply': 'tenant',
   'inbox.transfer': 'tenant',
   'inbox.share': 'tenant',
+  // V24: asignar o cambiar el departamento de una conversación. Solo el administrador.
+  'inbox.set_queue': 'tenant',
   // M5.6b (ADR-50): compartir con toda la empresa, editar y borrar las respuestas rápidas COMPARTIDAS. Crear y usar las personales basta con `inbox.reply`.
   'quick_replies.manage': 'tenant',
   'contacts.read': 'tenant',

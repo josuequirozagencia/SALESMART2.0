@@ -49,6 +49,7 @@ export const PERMISSION_META: Readonly<Record<ManageableKey, PermissionMeta>> = 
   'inbox.transfer': own('conversations', 'Transferir conversaciones', 'Pasar una conversación suya a otra persona.'),
   'inbox.share': own('conversations', 'Compartir conversaciones', 'Darle acceso a otra persona a una conversación suya.'),
   'inbox.view_all': all('conversations', 'Ver todas las conversaciones', 'Ver y responder las conversaciones de toda la empresa.'),
+  'inbox.set_queue': all('conversations', 'Cambiar el departamento de una conversación', 'Asignar o cambiar el departamento de cualquier conversación (define el catálogo, el horario y el cierre automático).'),
   'quick_replies.manage': cfg('conversations', 'Respuestas rápidas compartidas', 'Crear y editar las respuestas rápidas que usa todo el equipo.'),
   'contacts.read': own('contacts', 'Ver sus contactos', 'Ver los contactos que tiene asignados.'),
   'contacts.write': own('contacts', 'Crear y editar sus contactos', 'Crear contactos y editar los suyos.'),
