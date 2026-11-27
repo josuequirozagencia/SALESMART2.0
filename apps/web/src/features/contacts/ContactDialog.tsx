@@ -17,6 +17,7 @@ import { ContactOpportunitiesPanel } from '../pipelines/ContactOpportunitiesPane
 import { TasksPanel } from '../crm/TasksPanel';
 import { GhlFlowsPanel } from '../ghl/GhlFlowsPanel';
 import { ContactAppointmentsPanel } from './ContactAppointmentsPanel';
+import { LatestConversation } from './LatestConversation';
 import type { ContactTab } from './ContactQuickActions';
 import { TouchesPanel } from './TouchesPanel';
 import { useCustomFields } from '../custom-fields/useCustomFields';
@@ -179,6 +180,7 @@ export function ContactDialog({ contact: contactProp, owners, canAssign, canDele
       {contact && tab === 'agenda' ? <ContactAppointmentsPanel contactId={contact.id} /> : null}
       {contact && tab === 'activity' ? <TouchesPanel contactId={contact.id} /> : null}
       {contact && tab === 'ghl' ? <GhlFlowsPanel contactId={contact.id} canWrite={!readOnly} /> : null}
+      {contactProp && tab === 'data' ? <LatestConversation contactId={contactProp.id} /> : null}
       <form onSubmit={submit} noValidate className={`grid gap-3 ${tab === 'data' ? '' : 'hidden'}`} aria-label={editing ? 'Contacto' : 'Nuevo contacto'}>
         <Field label="Nombre" error={errors.name}>
           {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={200} autoComplete="off" disabled={disabled} autoFocus={!editing} />}

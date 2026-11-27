@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
+import { AssignmentViewService } from './assignment.view.service';
 import type { InboxAccess } from './inbox.access';
 import { createScheduledSchema, listConversationsQuerySchema, listScheduledQuerySchema, messagesQuerySchema, noteSchema, reactionSchema, replySchema, setQueueSchema, sendMediaSchema, sendTemplateSchema, type CreateScheduledDto, type ListConversationsQuery, type ListScheduledQuery, type MessagesQuery, type NoteDto, type ReactionDto, type ReplyDto, type SetQueueDto, type SendMediaDto, type SendTemplateDto } from './inbox.dto';
 import { InboxService } from './inbox.service';
@@ -39,6 +40,7 @@ export class InboxController {
     @Inject(ScheduledMessagesService) private readonly scheduledMessages: ScheduledMessagesService,
     @Inject(ReactionsService) private readonly reactions: ReactionsService,
     @Inject(MentionsService) private readonly mentions: MentionsService,
+    @Inject(AssignmentViewService) private readonly assignments: AssignmentViewService,
   ) {}
 
   @RequirePermission('inbox.read')
@@ -68,6 +70,14 @@ export class InboxController {
   @Header('Cache-Control', 'no-store')
   messages(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Query(new ZodValidationPipe(messagesQuerySchema)) q: MessagesQuery) {
     return this.inbox.messages(accessOf(req), id, q);
+  }
+
+  /** «Asignación» (V24): quién la tiene y cómo le llegó, con quién está compartida y quién la tuvo antes (sin `inbox.view_all`, solo los pasos propios). */
+  @RequirePermission('inbox.read')
+  @Get(':id/assignment')
+  @Header('Cache-Control', 'no-store')
+  assignment(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
+    return this.assignments.get(accessOf(req), id);
   }
 
   /** Pone la estrella de la persona que consulta en esta conversación (personal; repetirlo no cambia nada). */

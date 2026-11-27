@@ -2451,6 +2451,12 @@ El Inbox solo avisaba con la pestaña abierta (aviso en vivo, campana «Avisos»
 - **Migración:** las conversaciones abiertas y no eliminadas sin departamento toman el de su conexión (empresa por empresa por la RLS forzada).
 - **Sin validar** con datos reales hasta aplicar la migración en staging.
 
+### Enmienda V24 — «Asignación» visible (2026-11-27; sin migraciones; opción A aprobada; precisiones PROPUESTAS)
+- **`GET /v1/conversations/:id/assignment`** (`inbox.read`, visibilidad de siempre): dueño y desde cuándo, cómo le llegó y quién lo pidió, departamento, colaboradores vigentes y el historial (hasta 100) reconstruido de la auditoría de `owner_id`; **sin tabla nueva**. Cómo fue cada paso sale de quién y con qué origen se auditó (`assignment-steps.ts`), no de `assignment_source`.
+- Sin `inbox.view_all`: dueño, nombres y permisos de los colaboradores y solo los pasos propios. Nunca correos («Asesor» si no hay nombre); quien actúa desde fuera sale como «Soporte» o «Agencia». Fechas con la zona de la empresa (la envía el servidor).
+- Web: bloque «Asignación» en el panel del contacto (el «Responsable» pasa de «Datos» a este bloque) y, en la ficha del contacto, la conversación más reciente con su asesor y enlace.
+- **Límite conocido:** lo anterior a que existiera la auditoría de un cambio no aparece («Sin registro»). **Sin validar** con reparto y reasignaciones reales ni lector de pantalla.
+
 ## ADR-66 — Conversaciones «destacadas»: una estrella por persona (v10b)
 
 **Estado:** APROBADO el 2026-11-10 (el responsable eligió la opción «estrella por persona» y aprobó las precisiones tras revisar el PR #67, fusionado el mismo día). **Incluye una migración (`0129`), aplicada en staging el 2026-11-10.**

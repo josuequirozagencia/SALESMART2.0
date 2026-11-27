@@ -24,6 +24,39 @@ async function withDb<T>(fn: (db: pg.Client) => Promise<T>): Promise<T> {
   }
 }
 
+test('«Asignación»: el panel dice quién la tiene, cómo y con quién está compartida, y la ficha enlaza a la conversación', async ({ page, request }) => {
+  const { apiBase } = state();
+  await enableWhatsapp(request);
+  const email = await createAccount(request, uniqueEmail('v24asig'));
+  const adm = json(await apiLogin(request, email));
+  const ch = await request.post(`${apiBase}/v1/channels`, { headers: adm, data: { name: 'Línea asignación', waba_id: '1234567890123', phone_number_id: `${Date.now()}${Math.floor(Math.random() * 1000)}`, access_token: 'fake-valid-token' } });
+  expect(ch.status(), await ch.text()).toBe(201);
+  const channel = (await ch.json()) as { id: string };
+  const conversationId = await withDb(async (db) => {
+    const org = (await db.query(`SELECT m.organization_id AS org FROM organization_members m JOIN users u ON u.id = m.user_id WHERE u.email = $1 AND m.role = 'client_admin'`, [email])).rows[0].org as string;
+    const contact = (await db.query(`INSERT INTO contacts(id, organization_id, name) VALUES (gen_random_uuid(), $1, 'Cliente Asignado') RETURNING id`, [org])).rows[0].id as string;
+    await db.query(`INSERT INTO contact_phones(id, organization_id, contact_id, e164, is_primary) VALUES (gen_random_uuid(), $1, $2, '+593984219999', true)`, [org, contact]);
+    return (await db.query(`INSERT INTO conversations(id, organization_id, contact_id, channel_account_id, status, last_message_at, last_inbound_at, unread_count, peer_id) VALUES (gen_random_uuid(), $1, $2, $3, 'unassigned', now(), now(), 0, '593984219999') RETURNING id`, [org, contact, channel.id])).rows[0].id as string;
+  });
+  expect((await request.post(`${apiBase}/v1/conversations/${conversationId}/take`, { headers: adm })).status()).toBe(200);
+
+  await uiLogin(page, email);
+  await expect(page.getByRole('heading', { name: /Hola, / })).toBeVisible();
+  await page.goto(`/inbox/${conversationId}`);
+  const block = page.getByRole('region', { name: 'Asignación' });
+  await expect(block.getByText(/Tomada por /)).toBeVisible();
+  await expect(block.getByText('No está compartida')).toBeVisible();
+  await expect(block.getByRole('list', { name: 'Historial de asignación' }).getByRole('listitem')).toHaveCount(1);
+  await expect(block).not.toContainText('@');
+
+  await page.goto('/contacts');
+  await page.getByRole('button', { name: 'Abrir el contacto Cliente Asignado' }).click();
+  const ficha = page.getByRole('dialog', { name: 'Contacto' });
+  await expect(ficha.getByText(/Conversación abierta: atendida por/)).toBeVisible();
+  await ficha.getByRole('link', { name: 'Abrir conversación' }).click();
+  await expect(page).toHaveURL(new RegExp(`/inbox/${conversationId}$`));
+});
+
 test('conversación sin departamento: se asigna desde «Registrar venta» y la venta se registra con el catálogo', async ({ page, request }) => {
   const { apiBase } = state();
   await enableWhatsapp(request);
