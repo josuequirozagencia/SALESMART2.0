@@ -1,5 +1,7 @@
 # v19 — Diagnóstico: mensajes que llegan tarde (Jakilu Academy y «todas las empresas»)
 
+> **Documento histórico (foto del 2026-11-17).** Después se construyeron B1, B2, B3 y B4 (ver ADR-50 y ADR-54). Además, la conclusión sobre `@lid` (§1.3 y §3.4) **quedó superada**: ADR-73 encontró que el lector sí descartaba mensajes identificados solo con `@lid` (en una empresa, 30 contactos y unos 241 mensajes), que esta medición no veía. B5 no se construyó.
+
 > Fase A del prompt v19. **Solo lectura**: se consultó staging con cifras agregadas (conteos y tiempos); no se imprimió ningún teléfono, nombre de contacto ni texto de mensaje. Fecha de las mediciones: 2026-11-17, ~13:00 UTC (08:00 hora de Ecuador). El túnel a la base se cerró y se borraron los archivos con credenciales al terminar.
 
 ## 1. Resumen
