@@ -127,15 +127,50 @@ describe('MetaCapiProvider · verificar', () => {
 
 describe('MetaCapiProvider · nombres de anuncios (lookupAds)', () => {
   const AD = '120250251830440318';
-  it('pide a GET /?ids=…&fields=name,adset{id,name},campaign{id,name} con el token en la cabecera y devuelve los tres nombres; lo que Meta no trae queda null', async () => {
-    reply = (_q, res) => ok(res, 200, { [AD]: { name: 'Prefiero sufrir así', adset: { id: '1202', name: 'SERVICIOS PASIEL RMKT' }, campaign: { id: '1201', name: 'SERVICIOS PASIEL - RMKT NOV 2026' } } });
-    const out = await provider().lookupAds([AD, '999999'], creds);
-    expect(out).toEqual({ [AD]: { adName: 'Prefiero sufrir así', adsetId: '1202', adsetName: 'SERVICIOS PASIEL RMKT', campaignId: '1201', campaignName: 'SERVICIOS PASIEL - RMKT NOV 2026' }, '999999': null });
-    expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ method: 'GET', auth: `Bearer ${TOKEN}` });
-    expect(seen[0]!.url).toContain(`ids=${AD},999999`);
-    expect(seen[0]!.url).toContain('fields=name,adset{id,name},campaign{id,name}');
-    expect(seen[0]!.url).not.toContain(TOKEN);
+  const OTHER = '120250251830440999';
+  const NODE = { name: 'Prefiero sufrir así', adset: { id: '1202', name: 'SERVICIOS PASIEL RMKT' }, campaign: { id: '1201', name: 'SERVICIOS PASIEL - RMKT NOV 2026' } };
+  const NAMES = { adName: 'Prefiero sufrir así', adsetId: '1202', adsetName: 'SERVICIOS PASIEL RMKT', campaignId: '1201', campaignName: 'SERVICIOS PASIEL - RMKT NOV 2026' };
+  const GONE = { error: { code: 100, error_subcode: 33, message: 'Unsupported get request' } };
+  /** El anuncio AD existe; cualquier otro contesta lo que se indique. */
+  const onlyAd = (status: number, json: unknown) => {
+    reply = (q, res) => (q.url!.includes(AD) ? ok(res, 200, NODE) : ok(res, status, json));
+  };
+
+  it('pide UN GET /{anuncio}?fields=… por anuncio (nunca la consulta conjunta ?ids=, que Meta retiró), con el token en la cabecera; lo que Meta no da queda null', async () => {
+    onlyAd(400, GONE);
+    const out = await provider().lookupAds([AD, '999999', AD], creds);
+    expect(out).toEqual({ [AD]: NAMES, '999999': null });
+    expect(seen.map((x) => x.url).sort()).toEqual([AD, '999999'].map((id) => `/${GRAPH_VERSION}/${id}?fields=name,adset{id,name},campaign{id,name}`).sort());
+    for (const s of seen) {
+      expect(s).toMatchObject({ method: 'GET', auth: `Bearer ${TOKEN}` });
+      expect(s.url).not.toContain('ids=');
+      expect(s.url).not.toContain(TOKEN);
+    }
+  });
+
+  it('pide 50 anuncios como máximo', async () => {
+    reply = (_q, res) => ok(res, 200, NODE);
+    const out = await provider().lookupAds(Array.from({ length: 60 }, (_x, i) => String(1000000 + i)), creds);
+    expect(seen).toHaveLength(50);
+    expect(Object.values(out).filter(Boolean)).toHaveLength(50);
+  });
+
+  it('un anuncio sin permiso no tumba a los que sí se leen; si NINGUNO se puede leer y apunta al token, es error de credenciales', async () => {
+    onlyAd(403, { error: { code: 200, message: 'Requires ads_read' } });
+    expect(await provider().lookupAds([AD, OTHER], creds)).toEqual({ [AD]: NAMES, [OTHER]: null });
+    expect(await fail(provider().lookupAds([OTHER], creds))).toMatchObject({ credentials: true });
+    reply = (_q, res) => ok(res, 400, GONE);
+    expect(await fail(provider().lookupAds(['999999', OTHER], creds))).toMatchObject({ credentials: true });
+    expect(await provider().lookupAds(['999999'], creds)).toEqual({ '999999': null }); // uno solo que ya no existe
+  });
+
+  it('un token inválido o un límite cortan toda la consulta aunque otro anuncio se haya leído; un rechazo de la petición no se disfraza de «no existe»', async () => {
+    onlyAd(400, { error: { code: 190, message: 'Invalid OAuth access token' } });
+    expect(await fail(provider().lookupAds([AD, OTHER], creds))).toMatchObject({ credentials: true });
+    onlyAd(400, { error: { code: 17, message: 'User request limit reached' } });
+    expect(await fail(provider().lookupAds([AD, OTHER], creds))).toMatchObject({ retryable: true });
+    reply = (_q, res) => ok(res, 400, { error: { code: 100, message: 'Tried accessing nonexisting field' } });
+    expect(await fail(provider().lookupAds([AD], creds))).toMatchObject({ retryable: false, credentials: false });
   });
 
   it('ignora lo que no parece un id de anuncio (solo dígitos) y sin ids válidos ni siquiera llama a Meta', async () => {

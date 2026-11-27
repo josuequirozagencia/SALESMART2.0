@@ -1,3 +1,4 @@
+import { GRAPH_VERSION } from '../../meta/graph-version';
 import { normalizeMetaTemplate } from './meta-templates';
 import { parseMetaWebhook, verifyMetaSignature, wrapMetaValue } from './meta-webhook';
 import { WhatsAppProviderError, type DownloadedMedia, type NormalizedTemplate, type NumberInfo, type ParsedWebhook, type SendMediaInput, type SendReactionInput, type SendTemplateInput, type SendTextInput, type SentMessage, type WhatsAppCredentials, type WhatsAppProvider } from './whatsapp.port';
@@ -25,8 +26,8 @@ const RECIPIENT_CODES: ReadonlySet<number> = new Set([131026, 131030, 131021, 13
 const RATE_CODES: ReadonlySet<number> = new Set([130429, 131056, 80007, 4]);
 /** Plantilla que ya no existe (132001), en pausa (132015) o deshabilitada (132016). */
 const TEMPLATE_GONE_CODES: ReadonlySet<number> = new Set([132001, 132015, 132016]);
-/** Variables que no coinciden con la plantilla: cantidad (132000), texto demasiado largo (132005), política de formato (132007) o formato del parámetro (132012). */
-const TEMPLATE_PARAM_CODES: ReadonlySet<number> = new Set([132000, 132005, 132007, 132012]);
+/** Variables que no coinciden con la plantilla: cantidad (132000), texto demasiado largo (132005), política de formato (132007), formato del parámetro (132012) o parámetro inválido (132018, desde la v23). */
+const TEMPLATE_PARAM_CODES: ReadonlySet<number> = new Set([132000, 132005, 132007, 132012, 132018]);
 /** Subir o descargar un archivo que Meta no aceptó o no pudo leer (131053 al subir, 131052 al descargar). */
 const MEDIA_CODES: ReadonlySet<number> = new Set([131053, 131052]);
 /** Tope de espera al subir o descargar un archivo. */
@@ -75,7 +76,7 @@ export class MetaCloudProvider implements WhatsAppProvider {
 
   constructor(opts: MetaCloudOptions = {}) {
     this.base = (opts.baseUrl ?? 'https://graph.facebook.com').replace(/\/+$/, '');
-    this.version = opts.version ?? 'v21.0';
+    this.version = opts.version ?? GRAPH_VERSION;
     this.fetchFn = opts.fetchFn ?? fetch;
     this.timeoutMs = opts.timeoutMs ?? 10_000;
     this.trustMediaUrl = opts.trustMediaUrl ?? defaultTrustMediaUrl;

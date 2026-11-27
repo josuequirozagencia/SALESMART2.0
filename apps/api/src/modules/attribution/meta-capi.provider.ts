@@ -1,9 +1,15 @@
+import { GRAPH_VERSION } from '../../meta/graph-version';
 import { CapiSendError, type AdNames, type CapiCredentials, type CapiEvent, type CapiProvider } from './capi.ports';
 
-export const GRAPH_VERSION = 'v21.0';
+export { GRAPH_VERSION };
 const DEFAULT_BASE = 'https://graph.facebook.com';
 const DATASET_ID = /^\d{5,30}$/;
 const DEFAULT_TIMEOUT_MS = 10_000;
+/** Cuántos anuncios se piden a la vez a la Marketing API. */
+const AD_LOOKUP_CONCURRENCY = 5;
+type AdNode = { name?: unknown; adset?: { id?: unknown; name?: unknown }; campaign?: { id?: unknown; name?: unknown } };
+/** Por qué Meta no dio UN anuncio: `missing` = no existe o no se puede leer; `blocked` = falta permiso u otro rechazo de la petición. */
+interface AdFailure { failure: 'missing' | 'blocked'; error: CapiSendError }
 
 interface GraphError {
   message?: unknown;
@@ -79,27 +85,51 @@ export class MetaCapiProvider implements CapiProvider {
     }
   }
 
+  /**
+   * Un `GET /{anuncio}` por anuncio, de a pocos a la vez: Meta retiró la consulta conjunta `GET /?ids=` (octubre de 2026, todas las versiones).
+   * Un token inválido o un fallo pasajero cortan todo. Lo que falla en un solo anuncio lo deja en `null`, salvo que NINGUNO se haya podido leer por algo que apunta al token
+   * (sin permiso, otro rechazo, o todos «no existe» siendo varios): entonces se lanza, para no marcar como borrados anuncios que solo no se pueden leer.
+   */
   async lookupAds(adIds: readonly string[], credentials: CapiCredentials): Promise<Record<string, AdNames | null>> {
     const out: Record<string, AdNames | null> = Object.fromEntries(adIds.map((x) => [x, null]));
     const ids = [...new Set(adIds)].filter((x) => /^\d{5,30}$/.test(x)).slice(0, 50);
-    if (ids.length === 0) return out;
-    const url = `${this.baseUrl}/${GRAPH_VERSION}/?ids=${ids.join(',')}&fields=name,adset{id,name},campaign{id,name}`;
-    const res = await this.call(url, credentials.accessToken, { method: 'GET' });
-    if (!res.ok) throw await this.failure(res);
-    type Node = { name?: unknown; adset?: { id?: unknown; name?: unknown }; campaign?: { id?: unknown; name?: unknown } };
-    let body: Record<string, Node | undefined>;
+    const failures: AdFailure[] = [];
+    let found = 0;
+    for (let i = 0; i < ids.length; i += AD_LOOKUP_CONCURRENCY) {
+      const chunk = ids.slice(i, i + AD_LOOKUP_CONCURRENCY);
+      const results = await Promise.all(chunk.map((id) => this.lookupAd(id, credentials.accessToken)));
+      results.forEach((r, n) => {
+        if ('names' in r) {
+          out[chunk[n]!] = r.names;
+          found += 1;
+        } else failures.push(r);
+      });
+    }
+    if (found === 0) {
+      const blocking = failures.find((f) => f.failure === 'blocked') ?? (failures.length > 1 ? failures[0] : undefined);
+      if (blocking) throw blocking.error;
+    }
+    return out;
+  }
+
+  private async lookupAd(id: string, token: string): Promise<{ names: AdNames } | AdFailure> {
+    const res = await this.call(`${this.baseUrl}/${GRAPH_VERSION}/${id}?fields=name,adset{id,name},campaign{id,name}`, token, { method: 'GET' });
+    if (!res.ok) {
+      const g = await readError(res);
+      const error = this.errorFor(res.status, g);
+      const tokenInvalid = res.status === 401 || g.code === 190 || g.code === 102;
+      if (error.retryable || tokenInvalid) throw error;
+      const missing = res.status === 404 || (g.code === 100 && g.error_subcode === 33);
+      return { failure: missing ? 'missing' : 'blocked', error };
+    }
+    let a: AdNode | null;
     try {
-      body = (await res.json()) as Record<string, Node | undefined>;
+      a = (await res.json()) as AdNode | null;
     } catch {
       throw new CapiSendError('Meta respondió algo que no se entiende', true);
     }
     const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? safeText(v) : null);
-    for (const id of ids) {
-      const a = body[id];
-      if (!a || typeof a !== 'object') continue;
-      out[id] = { adName: str(a.name), adsetId: str(a.adset?.id), adsetName: str(a.adset?.name), campaignId: str(a.campaign?.id), campaignName: str(a.campaign?.name) };
-    }
-    return out;
+    return { names: { adName: str(a?.name), adsetId: str(a?.adset?.id), adsetName: str(a?.adset?.name), campaignId: str(a?.campaign?.id), campaignName: str(a?.campaign?.name) } };
   }
 
   async ensureMessagingDataset(wabaId: string, credentials: CapiCredentials): Promise<{ datasetId: string }> {
@@ -131,14 +161,17 @@ export class MetaCapiProvider implements CapiProvider {
   }
 
   private async failure(res: Response): Promise<CapiSendError> {
-    const g = await readError(res);
+    return this.errorFor(res.status, await readError(res));
+  }
+
+  private errorFor(status: number, g: GraphError): CapiSendError {
     // «Invalid parameter» no dice nada: Meta explica el motivo en el título y el mensaje para el usuario, y en el subcódigo
     const title = safeText(g.error_user_title);
     const detail = safeText(g.error_user_msg);
     const sub = typeof g.error_subcode === 'number' ? ` (${g.error_subcode})` : '';
     const text = [safeText(g.message), [title, detail].filter(Boolean).join('. ') + sub].filter((x) => x !== '' && x !== sub).join(' — ').slice(0, 290);
-    if (isCredentialError(res.status, g)) return new CapiSendError(`Meta rechazó las credenciales${text ? `: ${text}` : ''}`, false, true);
-    if (res.status === 429 || res.status >= 500 || isRateLimit(g)) return new CapiSendError(`Meta no pudo atender el envío ahora${text ? `: ${text}` : ''}`, true);
+    if (isCredentialError(status, g)) return new CapiSendError(`Meta rechazó las credenciales${text ? `: ${text}` : ''}`, false, true);
+    if (status === 429 || status >= 500 || isRateLimit(g)) return new CapiSendError(`Meta no pudo atender el envío ahora${text ? `: ${text}` : ''}`, true);
     return new CapiSendError(`Meta rechazó el evento${text ? `: ${text}` : ''}`, false);
   }
 }

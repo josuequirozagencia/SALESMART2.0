@@ -243,7 +243,7 @@ contract('Meta Cloud (servidor simulado)', () => ({
 }));
 
 describe('MetaCloudProvider · plantillas · detalles de la Graph API', () => {
-  it('pide GET /v21.0/<waba>/message_templates con los campos y el token como Bearer, y sigue la paginación con el cursor (nunca con la URL que trae la respuesta)', async () => {
+  it('pide GET /v26.0/<waba>/message_templates con los campos y el token como Bearer, y sigue la paginación con el cursor (nunca con la URL que trae la respuesta)', async () => {
     seen.length = 0;
     const list = await new MetaCloudProvider({ baseUrl: `${origin}/` }).listTemplates({ accessToken: VALID }, '1234567890123');
     expect(list.map((t) => t.name)).toEqual(['bienvenida', 'recordatorio_cita', 'promo_corte', 'seguimiento_nombrado', 'catalogo_imagen', 'en_revision', 'rechazada_ejemplo']);
@@ -269,7 +269,7 @@ describe('MetaCloudProvider · plantillas · detalles de la Graph API', () => {
     expect(by['rechazada_ejemplo']).toMatchObject({ status: 'rejected', rejectedReason: 'INVALID_FORMAT' });
   });
 
-  it('envía POST /v21.0/<id>/messages con type template, el idioma y los datos por parte (botón de URL con sub_type e index; variables con nombre)', async () => {
+  it('envía POST /v26.0/<id>/messages con type template, el idioma y los datos por parte (botón de URL con sub_type e index; variables con nombre)', async () => {
     sentBodies.length = 0;
     const p = new MetaCloudProvider({ baseUrl: origin });
     await p.sendTemplate({ accessToken: VALID }, '1090123456789', {
