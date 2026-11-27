@@ -10,6 +10,7 @@ import { useChatBackground } from '../../ui/chatBackground';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
+import { QueueAssignDialog, queueActionLabel } from './ConversationQueue';
 import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { Pill } from '../../ui/Pill';
 import { AppointmentDialog } from '../appointments/AppointmentDialog';
@@ -95,6 +96,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const [sale, setSale] = useState(false);
   const [appointment, setAppointment] = useState(false);
   const [flows, setFlows] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
@@ -112,6 +114,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   if (c.can.close) actions.push({ id: 'close', label: 'Finalizar', icon: 'check', group: 1, danger: true, onSelect: () => setConfirm(true) });
   if (attends && c.channel.kind === 'ghl') actions.push({ id: 'flows', label: 'Inscribir en un flujo', icon: 'bolt', group: 2, onSelect: () => setFlows(true) });
   if (collaborator) actions.push({ id: 'leave', label: 'Dejar de participar', icon: 'logout', group: 2, onSelect: () => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); } });
+  if (c.can.set_queue) actions.push({ id: 'queue', label: queueActionLabel(c), icon: 'building', group: 2, onSelect: () => setQueueOpen(true) });
   if (c.can.delete) actions.push({ id: 'delete', label: 'Eliminar conversación', icon: 'trash', group: 2, danger: true, onSelect: () => setDeleting(true) });
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
     onBackError(undefined);
@@ -216,6 +219,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
         {deleting ? <DeleteConversationDialog c={c} onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); navigate('/inbox'); }} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
         {sale ? <SaleDialog c={c} onClose={() => setSale(false)} /> : null}
+        {queueOpen ? <QueueAssignDialog c={c} onClose={() => setQueueOpen(false)} /> : null}
         {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
         {flows ? <GhlFlowsDialog contact={c.contact} onClose={() => setFlows(false)} /> : null}
       </div>

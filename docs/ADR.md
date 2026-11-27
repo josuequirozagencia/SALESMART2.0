@@ -2443,6 +2443,14 @@ El Inbox solo avisaba con la pestaña abierta (aviso en vivo, campana «Avisos»
 - Que una conexión movida tome el departamento nuevo con mensajes reales de WhatsApp oficial y de QR (Evolution) no se ha validado.
 - Sonido en iOS Safari (requiere gesto y depende del modo silencio).
 
+### Enmienda V24 — Departamento de una conversación (2026-11-27; migración `0158`; pedido del responsable, correcciones aprobadas; precisiones PROPUESTAS)
+- **Problema:** una conversación con dueño anterior a la asignación del departamento a su conexión quedaba sin departamento para siempre (las sin asignar sí lo toman al repartirse), y sin departamento no se puede vender.
+- **`PUT /v1/conversations/:id/queue`** con el permiso nuevo `inbox.set_queue` (solo administrador; no concedible a un asesor). Cambia `conversations.queue_id`, deja nota interna y auditoría `queue_id`; no reparte ni toca dueño, estado, cronómetros, ventas, oportunidades ni contacto. 404 uniforme (incluida la conversación eliminada), 404 `QUEUE_NOT_FOUND`, mismo departamento sin cambios, `warning: OWNER_NOT_IN_QUEUE`. La asignación vigente pasa a `manual` para no consumir el tope diario del departamento que la recibe.
+- **Efectos que sí siguen al departamento nuevo:** catálogo de venta, horario, reasignación por falta de respuesta en asignaciones futuras y **cierre automático** (una conversación «esperando al cliente» puede finalizarse según las horas del departamento nuevo). La ventana lo advierte.
+- **Registrar venta:** sin departamento propio se usa el de la conexión (activo) y se guarda en la misma transacción (nota y auditoría `automation`).
+- **Migración:** las conversaciones abiertas y no eliminadas sin departamento toman el de su conexión (empresa por empresa por la RLS forzada).
+- **Sin validar** con datos reales hasta aplicar la migración en staging.
+
 ## ADR-66 — Conversaciones «destacadas»: una estrella por persona (v10b)
 
 **Estado:** APROBADO el 2026-11-10 (el responsable eligió la opción «estrella por persona» y aprobó las precisiones tras revisar el PR #67, fusionado el mismo día). **Incluye una migración (`0129`), aplicada en staging el 2026-11-10.**

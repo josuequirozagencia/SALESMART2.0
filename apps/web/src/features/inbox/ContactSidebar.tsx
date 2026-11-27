@@ -12,6 +12,7 @@ import type { Contact, Conversation } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { ConversationTags } from './ConversationTags';
 import { AgentPanelBlock } from './AgentBanner';
+import { NoQueueNotice } from './ConversationQueue';
 import { ActionTiles, DangerRows, PrimaryActions } from './ConversationActions';
 import { personName } from './inboxFormat';
 import { SlaPill } from './SlaPill';
@@ -183,6 +184,8 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
 
       {/* v13 S2.1: el estado del agente (y por qué se pausó) vive aquí en todos los tamaños; ya no hay barra amarilla sobre el chat */}
       <AgentPanelBlock c={c} />
+
+      <NoQueueNotice c={c} />
 
       <QuickActions
         c={c}

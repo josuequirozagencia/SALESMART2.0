@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { channelAccounts, contactPhones, contactTags, contacts, conversationFavorites, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queues, responseTimers, type TenantTx } from '../../db';
+import { channelAccounts, contactPhones, contactTags, contacts, conversationFavorites, conversationParticipants, conversations, Database, messageAttachments, messages, qrAccounts, queueMembers, queues, responseTimers, type TenantTx } from '../../db';
 import { AppError, ConflictError, ForbiddenError, NotFoundError } from '../../errors';
 import { writeAudit } from '../audit';
 import { AttachmentsService } from '../attachments';
@@ -11,6 +11,7 @@ import { SlaService, type TimerContext } from '../sla';
 import { SystemTagsService, type TagView } from '../tags';
 import { decode, encode } from './inbox.cursor';
 import { abilities, channelState, collabColumn, loadConversation, scopeOf, visibleTo, type Collab, type InboxAccess, type InboxScope } from './inbox.access';
+import { setConversationQueue } from './conversation-queue';
 import type { InboxTab, ListConversationsQuery, MessagesQuery } from './inbox.dto';
 import { conversationView, messageView, type ConversationParts, type ConversationView, type MessageView, type ParticipantView } from './inbox.views';
 import { MessageQuotesService } from './message-quotes.service';
@@ -240,6 +241,27 @@ export class InboxService {
       await writeAudit(tx, { entityType: 'conversation', entityId: id, field: 'status', oldValue: c.status, newValue: 'closed' });
     });
     return this.get(access, id);
+  }
+
+  /**
+   * Asigna o cambia el departamento (V24). El mismo departamento no cambia nada ni deja rastro. Una conversación que no se ve (o eliminada) responde 404.
+   */
+  async setQueue(access: InboxAccess, id: string, queueId: string): Promise<ConversationView & { warning: 'OWNER_NOT_IN_QUEUE' | null }> {
+    const scope = scopeOf(access);
+    if (scope.canSetQueue !== true) throw new ForbiddenError();
+    const ownerOutside = await this.db.withTenant(async (tx) => {
+      const { c } = await loadConversation(tx, scope, id, true);
+      const [queue] = await tx.select({ id: queues.id, name: queues.name }).from(queues).where(and(eq(queues.id, queueId), isNull(queues.deletedAt))).for('share').limit(1);
+      if (!queue) throw new AppError(404, 'QUEUE_NOT_FOUND', 'Ese departamento no existe o está archivado');
+      if (c.queueId !== queue.id) {
+        const [before] = c.queueId ? await tx.select({ name: queues.name }).from(queues).where(eq(queues.id, c.queueId)).limit(1) : [];
+        await setConversationQueue(tx, c, queue, { actorId: scope.userId, source: 'manual', note: `Departamento asignado: ${queue.name} (antes: ${before?.name ?? 'ninguno'}).`, now: new Date() });
+      }
+      if (!c.ownerId) return false;
+      const [member] = await tx.select({ userId: queueMembers.userId }).from(queueMembers).where(and(eq(queueMembers.queueId, queue.id), eq(queueMembers.userId, c.ownerId), eq(queueMembers.active, true))).limit(1);
+      return !member;
+    });
+    return { ...(await this.get(access, id)), warning: ownerOutside ? 'OWNER_NOT_IN_QUEUE' : null };
   }
 
   /**

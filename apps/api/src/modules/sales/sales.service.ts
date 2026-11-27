@@ -6,7 +6,7 @@ import { TenantContext } from '../../tenant';
 import { AttributionService } from '../attribution';
 import { DomainEventBus } from '../events';
 import { writeAudit } from '../audit';
-import { loadConversation, scopeOf, type InboxAccess } from '../inbox';
+import { channelQueueOf, loadConversation, scopeOf, setConversationQueue, type InboxAccess } from '../inbox';
 import { OpportunitiesService } from '../opportunities';
 import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
 import { RealtimeService } from '../realtime';
@@ -145,7 +145,10 @@ export class SalesService {
     return this.db.withTenant(async (tx) => {
       const scope = scopeOf(access);
       const { c } = await loadConversation(tx, scope, conversationId);
-      const [queue] = c.queueId ? await tx.select({ id: queues.id, name: queues.name }).from(queues).where(and(eq(queues.id, c.queueId), isNull(queues.deletedAt))).limit(1) : [];
+      // Sin departamento propio vale el de la conexión (V24): se guardará en la conversación al registrar la venta
+      const queue = c.queueId
+        ? (await tx.select({ id: queues.id, name: queues.name }).from(queues).where(and(eq(queues.id, c.queueId), isNull(queues.deletedAt))).limit(1))[0]
+        : await channelQueueOf(tx, c.channelAccountId);
       const products = queue
         ? await tx.select().from(queueProducts).where(and(eq(queueProducts.queueId, queue.id), eq(queueProducts.active, true))).orderBy(asc(sql`lower(${queueProducts.name})`))
         : [];
@@ -196,18 +199,22 @@ export class SalesService {
     const { c } = await loadConversation(tx, scope, input.conversation_id, true);
     if (c.ownerId === null) throw new ConflictError('CONVERSATION_UNASSIGNED', 'La conversación aún no tiene asesor: asígnala o tómala antes de registrar la venta');
     if (c.ownerId !== scope.userId && !scope.viewAll) throw new ForbiddenError('NOT_OWNER', 'Solo quien tiene asignada la conversación, o un administrador, puede registrar la venta');
-    if (c.queueId === null) throw new ConflictError('SALE_NO_QUEUE', 'La conversación no pertenece a ningún departamento: sin departamento no hay catálogo para vender');
-    const [product] = await tx.select().from(queueProducts).where(and(eq(queueProducts.id, input.product_id), eq(queueProducts.queueId, c.queueId))).limit(1);
+    // Sin departamento propio se usa el de la conexión y queda guardado en la conversación, en esta misma transacción (V24)
+    const fallback = c.queueId === null ? await channelQueueOf(tx, c.channelAccountId) : null;
+    const queueId = c.queueId ?? fallback?.id;
+    if (!queueId) throw new ConflictError('SALE_NO_QUEUE', 'La conversación no pertenece a ningún departamento: sin departamento no hay catálogo para vender');
+    const [product] = await tx.select().from(queueProducts).where(and(eq(queueProducts.id, input.product_id), eq(queueProducts.queueId, queueId))).limit(1);
     if (!product || !product.active) throw new ConflictError('PRODUCT_UNAVAILABLE', 'Ese producto no está disponible en el catálogo del departamento de esta conversación');
 
     const down = input.down_payment ?? '0.00';
     const now = new Date();
+    if (fallback) await setConversationQueue(tx, c, fallback, { actorId: scope.userId, source: 'automation', note: `Departamento asignado: ${fallback.name} (el de la conexión, al registrar una venta).`, now });
     const [sale] = await tx
       .insert(sales)
       .values({
         contactId: c.contactId,
         conversationId: c.id,
-        queueId: c.queueId,
+        queueId,
         productId: product.id,
         productName: product.name,
         productKind: product.kind,
