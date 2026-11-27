@@ -42,6 +42,8 @@ export interface Agent extends AgentCard {
   read_images: boolean;
   /** El agente transcribe las notas de voz del cliente (v13 S5b, ADR-70). */
   transcribe_audio: boolean;
+  /** V23-D: texto que el agente envía cuando no puede escuchar un audio (null = ninguno). */
+  audio_fallback_text?: string | null;
   document_ids: string[];
   channel_ids: string[];
   readiness: { instructions: boolean; documents: boolean; channel: boolean };
@@ -106,6 +108,8 @@ export type AgentPatch = Partial<{
   suggestions_enabled: boolean;
   read_images: boolean;
   transcribe_audio: boolean;
+  /** V23-D: texto que el agente envía cuando no puede escuchar un audio (null = ninguno). */
+  audio_fallback_text?: string | null;
 }>;
 
 export function useAgents() {

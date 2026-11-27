@@ -60,6 +60,7 @@ export interface AgentDetail extends AgentCard {
   suggestions_enabled: boolean;
   read_images: boolean;
   transcribe_audio: boolean;
+  audio_fallback_text: string | null;
   document_ids: string[];
   channel_ids: string[];
   /** Qué le falta para poder responder (la pantalla lo muestra como lista de pendientes). */
@@ -251,6 +252,7 @@ export class AgentsService {
         if (patch.tasks_enabled !== undefined) note('tasks_enabled', cur.tasksEnabled, patch.tasks_enabled, () => (set.tasksEnabled = patch.tasks_enabled!));
         if (patch.suggestions_enabled !== undefined) note('suggestions_enabled', cur.suggestionsEnabled, patch.suggestions_enabled, () => (set.suggestionsEnabled = patch.suggestions_enabled!));
         if (patch.read_images !== undefined) note('read_images', cur.readImages, patch.read_images, () => (set.readImages = patch.read_images!));
+        if (patch.audio_fallback_text !== undefined) note('audio_fallback_text', cur.audioFallbackText === null ? 'sin texto' : 'con texto', patch.audio_fallback_text === null ? 'sin texto' : 'con texto', () => (set.audioFallbackText = patch.audio_fallback_text ?? null));
         if (patch.transcribe_audio !== undefined) note('transcribe_audio', cur.transcribeAudio, patch.transcribe_audio, () => (set.transcribeAudio = patch.transcribe_audio!));
         if (changes.length === 0) return;
         await tx.update(agents).set(set).where(eq(agents.id, id));
@@ -411,9 +413,9 @@ export class AgentsService {
   }
 
   /** Los ajustes que necesita el simulador (y, después, el agente en vivo): modelo, límites y cómo dividir. 404 si no existe. */
-  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; suggestionsEnabled: boolean; readImages: boolean; transcribeAudio: boolean; transferQueueId: string | null }> {
+  async runtimeSettings(id: string): Promise<{ id: string; name: string; model: string; temperature: number; maxTokens: number; maxChars: number; splitEnabled: boolean; splitBlocks: number; transferEnabled: boolean; audioFallbackText: string | null; alwaysOn: boolean; captureFields: string[]; tasksEnabled: boolean; suggestionsEnabled: boolean; readImages: boolean; transcribeAudio: boolean; transferQueueId: string | null }> {
     const r = await this.db.withTenant((tx) => this.byId(tx, id, false));
-    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, suggestionsEnabled: r.suggestionsEnabled, readImages: r.readImages, transcribeAudio: r.transcribeAudio, transferQueueId: r.transferQueueId };
+    return { id: r.id, name: r.name, model: r.model, temperature: Number(r.temperature), maxTokens: r.maxTokens, maxChars: r.maxChars, splitEnabled: r.splitEnabled, splitBlocks: r.splitBlocks, transferEnabled: r.transferEnabled, audioFallbackText: r.audioFallbackText, alwaysOn: r.alwaysOn, captureFields: r.captureFields, tasksEnabled: r.tasksEnabled, suggestionsEnabled: r.suggestionsEnabled, readImages: r.readImages, transcribeAudio: r.transcribeAudio, transferQueueId: r.transferQueueId };
   }
 
   // ------------------------------------------------------------------ interno
@@ -455,6 +457,7 @@ export class AgentsService {
       suggestions_enabled: r.suggestionsEnabled,
       read_images: r.readImages,
       transcribe_audio: r.transcribeAudio,
+      audio_fallback_text: r.audioFallbackText,
       document_ids: rel.documentIds,
       channel_ids: rel.channels.map((c) => c.id),
       readiness: { instructions: r.personality.trim() !== '' || r.objective.trim() !== '', documents: rel.documentIds.length > 0, channel: rel.channels.length > 0 },

@@ -94,7 +94,7 @@ export function useSetAiLimits() {
 }
 
 /** Precio de un modelo de IA (dólares por millón de tokens). SOLO plataforma. */
-export interface AiModelPrice { model: string; kind: 'embedding' | 'chat' | 'transcription'; usd_per_1m_input: string; usd_per_1m_output: string; /** ¿Entiende imágenes? (solo modelos de chat; ADR-70). */ vision: boolean; usd_per_minute: string | null; updated_at: string }
+export interface AiModelPrice { model: string; kind: 'embedding' | 'chat' | 'transcription'; usd_per_1m_input: string; usd_per_1m_output: string; /** ¿Entiende imágenes? (solo modelos de chat; ADR-70). */ vision: boolean; /** El modelo de transcripción elegido y el que está en uso (V23-D). */ preferred?: boolean; in_use?: boolean; usd_per_minute: string | null; updated_at: string }
 
 export function useAiModels() {
   return useQuery({ queryKey: ['platform', 'ai', 'models'], retry: false, queryFn: () => api<AiModelPrice[]>('/platform/ai/models') });
@@ -105,6 +105,15 @@ export function useAddModel() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (b: { model: string; kind?: 'chat' | 'transcription'; usd_per_1m_input?: string; usd_per_1m_output?: string; vision?: boolean; usd_per_minute?: string }) => api<AiModelPrice>('/platform/ai/models', { method: 'POST', body: b }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
+  });
+}
+
+/** Elige el modelo de transcripción que se usa para los audios (V23-D). */
+export function useAudioModel() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (model: string) => api<{ model: string; preferred: true }>(`/platform/ai/models/${encodeURIComponent(model)}/use-for-audio`, { method: 'POST' }),
     onSettled: () => qc.invalidateQueries({ queryKey: ['platform', 'ai', 'models'] }),
   });
 }

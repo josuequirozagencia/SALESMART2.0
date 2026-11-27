@@ -40,6 +40,7 @@ export const updateAgentSchema = z
     read_images: z.boolean(),
     /** El agente transcribe las notas de voz del cliente (v13 S5b, ADR-70): el audio se envía al proveedor de IA. */
     transcribe_audio: z.boolean(),
+    audio_fallback_text: z.string().trim().min(1).max(300).nullable(),
   })
   .partial()
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');

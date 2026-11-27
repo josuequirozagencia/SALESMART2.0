@@ -75,6 +75,9 @@ export type AgentOutcome = 'replied' | 'handed_off' | 'paused' | 'skipped' | 're
  *  - Sin clave de IA en la plataforma espera sin gastar intentos. Con «a toda hora» apagado, solo contesta con la cola abierta.
  * Las respuestas salen como mensajes `ai` en cola (los envía el despachador de siempre) y NO cuentan como respuesta humana. Todo cambio de estado deja una nota interna y queda auditado.
  */
+/** Motivos por los que el agente no pudo escuchar un audio: ante ellos se envía el texto fijo del agente, si tiene uno. */
+const CANT_HEAR: ReadonlySet<HandoffReason> = new Set<HandoffReason>(['audio_off', 'no_transcription', 'audio_unreadable', 'audio_too_long']);
+
 @Injectable()
 export class AgentRuntimeService {
   constructor(
@@ -206,7 +209,7 @@ export class AgentRuntimeService {
       }
       // Un audio que el agente NO puede escuchar nunca queda en silencio: sin nada más que contestar pasa a una persona diciendo EXACTAMENTE por qué; con texto en el mismo turno, el agente atiende el texto y se lo dice al cliente
       const cannotHear = audioMessages.length > 0 && !readsAudio;
-      if (cannotHear && text.trim() === '' && images.length === 0) return await this.handoff(job, settings.name, settings.transcribeAudio ? 'no_transcription' : 'audio_off', newest, false, now, route);
+      if (cannotHear && text.trim() === '' && images.length === 0) return await this.handoff(job, settings.name, settings.transcribeAudio ? 'no_transcription' : 'audio_off', newest, false, now, route, settings.audioFallbackText);
       if (cannotHear) mention += ` (El cliente envió ${audioMessages.length === 1 ? 'un audio' : `${audioMessages.length} audios`} que no puedes escuchar: pídele con amabilidad que lo escriba.)`;
       if (text.trim() === '' && images.length === 0 && !readsAudio) return await this.handoff(job, settings.name, 'unsupported_media', newest, false, now, route);
       if (job.turns >= MAX_AGENT_TURNS) return await this.handoff(job, settings.name, 'turn_limit', newest, false, now, route);
@@ -229,7 +232,7 @@ export class AgentRuntimeService {
         }
         if (r.status === 'handoff') {
           // Con texto o imágenes en el mismo turno, solo falla el audio: el agente igual atiende lo demás; sin nada más, pasa a una persona
-          if (text.trim() === '' && images.length === 0) return await this.handoff(job, settings.name, r.reason, newest, false, now, route);
+          if (text.trim() === '' && images.length === 0) return await this.handoff(job, settings.name, r.reason, newest, false, now, route, settings.audioFallbackText);
         } else {
           spoken = r.lines.map((l) => `[Audio del cliente, transcrito] ${l}`).join('\n');
           if (r.extra > 0) mention += ` (El cliente envió ${r.extra} ${r.extra === 1 ? 'audio' : 'audios'} más que no puedes escuchar.)`;
@@ -303,9 +306,14 @@ export class AgentRuntimeService {
   }
 
   /** Pasa la conversación a una persona: aviso al cliente (si fue él quien lo pidió), nota interna y estado. */
-  private async handoff(job: Claimed, agentName: string, reason: HandoffReason, newest: Date, tellClient: boolean, now: Date, route: Route): Promise<AgentOutcome> {
+  private async handoff(job: Claimed, agentName: string, reason: HandoffReason, newest: Date, tellClient: boolean, now: Date, route: Route, audioFallback: string | null = null): Promise<AgentOutcome> {
     return this.db.withTenant(async (tx) => {
       if (tellClient && !(await this.humanWroteSince(tx, job.conversationId, now))) await this.sendReplies(tx, job, [HANDOFF_MESSAGE], newest, now);
+      // V23-D: si no se pudo escuchar un audio y el agente tiene un texto fijo, se envía UNA sola vez por conversación (sin créditos: no pasa por la IA) y nunca si una persona ya escribió
+      if (audioFallback && CANT_HEAR.has(reason) && !(await this.humanWroteSince(tx, job.conversationId, now))) {
+        const [sent] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.conversationId, job.conversationId), eq(messages.senderType, 'ai'), eq(messages.body, audioFallback))).limit(1);
+        if (!sent) await this.sendReplies(tx, job, [audioFallback], newest, now);
+      }
       await tx.update(aiConversationState).set({ handledUntil: newest, processingStartedAt: null, updatedAt: now }).where(eq(aiConversationState.conversationId, job.conversationId));
       await this.setState(tx, job.conversationId, job.agentId, { status: 'handed_off', reason }, now, 'ai', agentName);
       await this.routeToQueue(tx, job, route, now);

@@ -332,6 +332,7 @@ function Messages({ c, onReply }: { c: Conversation; onReply: (m: ChatMessage) =
             <MessageBubble
               m={m}
               spacing={i === 0 ? '' : senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? 'mt-2.5' : 'mt-1'}
+              tail={i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at)}
               avatar={m.is_note ? undefined : avatarFor(m, i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at), c.contact.name, photos, c.contact.id)}
               contactName={c.contact.name}
               onReply={canQuote(c, m) ? onReply : undefined}
