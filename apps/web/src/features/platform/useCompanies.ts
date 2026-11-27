@@ -45,6 +45,15 @@ export function useAssignPlan() {
   });
 }
 
+/** El tope de espacio de la biblioteca de archivos de una empresa, en bytes (solo el Súper Admin). */
+export function useSetStorageQuota() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, bytes }: { id: string; bytes: number }) => api<{ id: string; storage_quota_bytes: number }>(`/platform/companies/${id}/storage-quota`, { method: 'PUT', body: { storage_quota_bytes: bytes } }),
+    onSettled: () => qc.invalidateQueries({ queryKey: ['platform'] }),
+  });
+}
+
 export interface NewCompanyInput {
   name: string;
   owner_email: string;

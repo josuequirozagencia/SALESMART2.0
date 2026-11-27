@@ -9,6 +9,10 @@ export const CAPI_MAX_ATTEMPTS = 5;
 /** Meta no acepta eventos de hace más de 7 días: pasado ese tiempo el evento caduca en vez de reintentarse. */
 export const CAPI_MAX_AGE_MS = 7 * 24 * 60 * 60_000;
 const MAX_BACKOFF_MS = 60 * 60_000;
+/** Lo que Meta no documenta para mensajería: las citas (`Schedule`) no están en su lista; se omiten hasta validarlas con una prueba. */
+const MESSAGING_SKIPPED: Record<string, string> = {
+  Schedule: 'Meta aún no acepta este tipo de evento por WhatsApp: pendiente de validar',
+};
 
 /**
  * Envía a Meta los eventos pendientes cuya hora ya llegó, de UNA empresa (el TenantContext lo pone quien llama: el job recorre las empresas una a una).
@@ -45,13 +49,24 @@ export class CapiSenderService {
         .for('update', { skipLocked: true });
       for (const ev of due) {
         const attempts = ev.attempts + 1;
-        if (now.getTime() - ev.createdAt.getTime() > CAPI_MAX_AGE_MS) {
+        // Meta cuenta la antigüedad desde la hora del HECHO (`event_time`), no desde que lo encolamos (v20: los clics recuperados llevan su hora real)
+        const happenedAt = Number(ev.payload['event_time'] ?? 0) * 1000;
+        if (now.getTime() - ev.createdAt.getTime() > CAPI_MAX_AGE_MS || (happenedAt > 0 && now.getTime() - happenedAt > CAPI_MAX_AGE_MS)) {
           await tx.update(metaEvents).set({ status: 'expired', lastError: 'El evento tiene más de 7 días: Meta ya no lo acepta', updatedAt: now }).where(eq(metaEvents.id, ev.id));
           continue;
         }
+        const messaging = ev.payload['action_source'] === 'business_messaging';
+        // Lo que no se manda por mensajería queda anotado como omitido con su motivo: no se pierde en silencio (ADR-55)
+        const skipReason = messaging ? MESSAGING_SKIPPED[ev.type] : undefined;
+        if (skipReason) {
+          await tx.update(metaEvents).set({ status: 'skipped', lastError: skipReason, updatedAt: now }).where(eq(metaEvents.id, ev.id));
+          continue;
+        }
         try {
-          const payload = await this.withWaba(tx, ev.contactId, ev.payload);
-          await this.provider.send({ eventId: ev.eventId, type: ev.type as 'Lead' | 'Schedule' | 'Purchase' | 'SaleCanceled', eventTime: new Date(Number(ev.payload['event_time'] ?? 0) * 1000), payload }, credentials);
+          const payload = messaging ? await this.forMessaging(tx, ev.contactId, ev.payload, creds) : ev.payload;
+          // Los eventos de mensajería salen al dataset de mensajes (vinculado a la cuenta de WhatsApp); si la empresa no configuró uno, al dataset de siempre
+          const target: CapiCredentials = messaging && creds?.messagingDatasetId ? { ...credentials, datasetId: creds.messagingDatasetId } : credentials;
+          await this.provider.send({ eventId: ev.eventId, type: ev.type as 'Lead' | 'Schedule' | 'Purchase' | 'SaleCanceled', eventTime: new Date(Number(ev.payload['event_time'] ?? 0) * 1000), payload }, target);
           await tx.update(metaEvents).set({ status: 'sent', attempts, sentAt: now, lastError: null, updatedAt: now }).where(eq(metaEvents.id, ev.id));
           if (creds) await this.settings.noteSendSuccess(tx, creds.id, now);
         } catch (e) {
@@ -77,20 +92,26 @@ export class CapiSenderService {
   }
 
   /**
-   * Meta exige la cuenta de WhatsApp Business en los eventos de mensajería. El evento se arma al ocurrir la venta o la cita; la cuenta se agrega al ENVIAR (la del número por el que
-   * habló el contacto, o la primera de la empresa) para no atar el evento a una conexión que pudo cambiar. Si no se encuentra, el evento sale como está.
+   * Deja el evento de mensajería como Meta lo pide. El nombre del Lead de mensajería es `LeadSubmitted` (el evento se guarda como `Lead`; el cambio es solo al enviar). Meta exige la cuenta de
+   * WhatsApp Business en `user_data`: con un dataset de mensajes configurado va SIEMPRE la cuenta guardada (el dataset está vinculado a ella y Meta rechaza otra); si no, la del número por el que
+   * habló el contacto, la guardada o la primera de la empresa. El evento se arma al ocurrir el hecho y la cuenta se agrega al ENVIAR para no atarlo a una conexión que pudo cambiar. Si no se
+   * encuentra ninguna, sale como está.
    */
-  private async withWaba(tx: TenantTx, contactId: string, payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+  private async forMessaging(tx: TenantTx, contactId: string, source: Record<string, unknown>, creds: { wabaId: string | null; messagingDatasetId: string | null } | null): Promise<Record<string, unknown>> {
+    const payload = source['event_name'] === 'Lead' ? { ...source, event_name: 'LeadSubmitted' } : source;
     const userData = payload['user_data'];
     if (!userData || typeof userData !== 'object' || !('ctwa_clid' in userData) || 'whatsapp_business_account_id' in userData) return payload;
-    const [byChat] = await tx
-      .select({ waba: whatsappAccounts.wabaId })
-      .from(conversations)
-      .innerJoin(whatsappAccounts, and(eq(whatsappAccounts.organizationId, conversations.organizationId), eq(whatsappAccounts.channelAccountId, conversations.channelAccountId)))
-      .where(eq(conversations.contactId, contactId))
-      .orderBy(desc(conversations.createdAt))
-      .limit(1);
-    const waba = byChat?.waba ?? (await tx.select({ waba: whatsappAccounts.wabaId }).from(whatsappAccounts).limit(1))[0]?.waba;
+    let waba: string | null | undefined = creds?.messagingDatasetId ? creds.wabaId : null;
+    if (!waba) {
+      const [byChat] = await tx
+        .select({ waba: whatsappAccounts.wabaId })
+        .from(conversations)
+        .innerJoin(whatsappAccounts, and(eq(whatsappAccounts.organizationId, conversations.organizationId), eq(whatsappAccounts.channelAccountId, conversations.channelAccountId)))
+        .where(eq(conversations.contactId, contactId))
+        .orderBy(desc(conversations.createdAt))
+        .limit(1);
+      waba = byChat?.waba ?? creds?.wabaId ?? (await tx.select({ waba: whatsappAccounts.wabaId }).from(whatsappAccounts).limit(1))[0]?.waba;
+    }
     return waba ? { ...payload, user_data: { ...(userData as Record<string, unknown>), whatsapp_business_account_id: waba } } : payload;
   }
 }

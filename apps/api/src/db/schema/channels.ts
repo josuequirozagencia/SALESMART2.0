@@ -116,12 +116,22 @@ export const qrAccounts = tenantTable(
     profileName: text('profile_name'),
     /** Primera vez que la sesión quedó abierta: de ahí corre el calentamiento de los límites de envío. */
     firstConnectedAt: ts('first_connected_at'),
+    /** El cliente declaró, al conectar, que el chip ya tenía uso previo y aceptó el riesgo de bloqueo: usa la curva de calentamiento «waiver» (arranca en {@link WARMUP_WAIVED_DAILY_LIMIT}, sube más rápido y a un techo más alto) en vez de la normal. */
+    warmupWaived: boolean('warmup_waived').notNull().default(false),
+    /** Cuándo se hizo esa declaración (para dejar rastro de cuándo se aceptó el riesgo). */
+    warmupWaivedAt: ts('warmup_waived_at'),
     connectedAt: ts('connected_at'),
     /** Última vez que Evolution avisó de algo de esta sesión. */
     lastEventAt: ts('last_event_at'),
     /** Última vez que el latido consultó el estado de la sesión. */
     lastHeartbeatAt: ts('last_heartbeat_at'),
     lastError: text('last_error'),
+    /** Última «puesta al día» (v19 B3): cuándo corrió, cuántos mensajes halló en Evolution, cuántos eran nuevos, si hubo más de los que se leyeron y el motivo del fallo (sin datos de clientes). */
+    lastCatchUpAt: ts('last_catch_up_at'),
+    lastCatchUpFound: integer('last_catch_up_found'),
+    lastCatchUpRecovered: integer('last_catch_up_recovered'),
+    lastCatchUpTruncated: boolean('last_catch_up_truncated'),
+    lastCatchUpError: text('last_catch_up_error'),
     /** Desde cuándo está caída la sesión (para decir hace cuánto y para no avisar dos veces). */
     downSince: ts('down_since'),
     createdAt: ts('created_at').notNull().defaultNow(),
@@ -133,6 +143,8 @@ export const qrAccounts = tenantTable(
     foreignKey({ name: 'qr_accounts_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
     check('qr_accounts_state_valid', sql`${t['state']!} IN ('created', 'connecting', 'open', 'logged_out', 'closed')`),
     check('qr_accounts_instance_shape', sql`${t['instanceName']!} ~ '^[a-z0-9-]{8,60}$'`),
+    check('qr_accounts_catch_up_counts', sql`(${t['lastCatchUpFound']!} IS NULL OR ${t['lastCatchUpFound']!} >= 0) AND (${t['lastCatchUpRecovered']!} IS NULL OR ${t['lastCatchUpRecovered']!} >= 0)`),
+    check('qr_accounts_catch_up_error_len', sql`${t['lastCatchUpError']!} IS NULL OR length(${t['lastCatchUpError']!}) <= 300`),
     check('qr_accounts_error_len', sql`${t['lastError']!} IS NULL OR length(${t['lastError']!}) <= 300`),
   ],
 );

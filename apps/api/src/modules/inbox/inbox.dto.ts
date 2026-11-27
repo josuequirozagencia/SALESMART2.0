@@ -30,9 +30,17 @@ export const reactionSchema = z
   .strict();
 export type ReactionDto = z.infer<typeof reactionSchema>;
 
+/** Asignar o cambiar el departamento de una conversación (V24). */
+export const setQueueSchema = z.object({ queue_id: z.uuid() }).strict();
+export type SetQueueDto = z.infer<typeof setQueueSchema>;
+
 /** Enviar un adjunto ya subido ( `attachment_id` de `POST …/attachments` ), con pie opcional. */
 export const sendMediaSchema = z.object({ attachment_id: z.uuid(), caption: z.string().trim().max(1024).optional() }).strict();
 export type SendMediaDto = z.infer<typeof sendMediaSchema>;
+
+/** Enviar un archivo de la biblioteca de la empresa a esta conversación (V21): solo el pie es opcional. */
+export const sendLibrarySchema = z.object({ caption: z.string().trim().max(1024).optional() }).strict();
+export type SendLibraryDto = z.infer<typeof sendLibrarySchema>;
 
 /** Enviar una plantilla: cuál y el valor de cada variable (clave = la `id` de la variable que informa la plantilla, p. ej. `body:1`). El servidor exige justo las que pide. */
 export const sendTemplateSchema = z

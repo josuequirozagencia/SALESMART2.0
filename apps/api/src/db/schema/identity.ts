@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, integer, jsonb, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
+import { bigint, boolean, check, index, integer, jsonb, text, timestamp, uniqueIndex, uuid, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { identityTable } from './helpers';
 
@@ -90,6 +90,8 @@ export const organizations = identityTable(
     country: text('country'),
     /** Moneda de la empresa (ISO 4217): en ella se muestran los precios del catálogo y las ventas (M6, ADR-51). */
     currency: text('currency').notNull().default('USD'),
+    /** Tope de espacio de la biblioteca de archivos de la empresa, en bytes (V21, ADR-75): 1 GB por omisión. Es un tope, no un espacio reservado; solo el Súper Admin lo cambia. El uso se DERIVA de los archivos. */
+    storageQuotaBytes: bigint('storage_quota_bytes', { mode: 'number' }).notNull().default(1_073_741_824),
     /** Cuándo se crearon los datos de ejemplo de la empresa (M10.6, ADR-56 B5); nulo = aún no. Evita recrear lo que el cliente borró. */
     sampleSeededAt: ts('sample_seeded_at'),
     /** El «dueño» de la empresa (F3, ADR-59 #7): quien aceptó la invitación del dueño o se registró. Solo el Súper Admin lo cambia. Es quien puede pedir la descarga de sus datos si la empresa se elimina. */
@@ -103,6 +105,7 @@ export const organizations = identityTable(
   (t) => [
     check('organizations_agency_access_level_valid', sql`${t.agencyAccessLevel} IN ('read', 'advisor', 'admin')`),
     check('organizations_currency_iso4217', sql`${t.currency} ~ '^[A-Z]{3}$'`),
+    check('organizations_storage_quota_valid', sql`${t.storageQuotaBytes} BETWEEN 0 AND 10995116277760`),
     check('organizations_country_iso2', sql`${t.country} IS NULL OR ${t.country} ~ '^[A-Z]{2}$'`),
     check('organizations_kind_valid',sql`${t.kind} IN ('platform', 'agency', 'client')`),
     check('organizations_platform_standalone', sql`${t.kind} <> 'platform' OR (${t.parentAgencyId} IS NULL AND ${t.createdByAgencyId} IS NULL)`),

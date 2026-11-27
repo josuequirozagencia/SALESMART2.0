@@ -2,14 +2,17 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Patch, 
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import { RequirePermission } from '../../rbac';
+import { CATCH_UP_MAX_HOURS, QrCatchUpService } from './qr-catch-up.service';
 import { QrConnectionsService } from './qr-connections.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
 const name = z.string().trim().min(1).max(60);
-const createSchema = z.strictObject({ name, queue_id: z.uuid().nullable().optional() });
+const createSchema = z.strictObject({ name, queue_id: z.uuid().nullable().optional(), prior_use_risk_accepted: z.boolean().optional() });
 const updateSchema = z
   .strictObject({ name: name.optional(), queue_id: z.uuid().nullable().optional() })
   .refine((b) => Object.keys(b).length > 0, 'No hay nada que cambiar');
+const catchUpSchema = z.strictObject({ hours: z.number().int().min(1).max(CATCH_UP_MAX_HOURS).default(48) });
+type CatchUpDto = z.infer<typeof catchUpSchema>;
 type CreateDto = z.infer<typeof createSchema>;
 type UpdateDto = z.infer<typeof updateSchema>;
 
@@ -20,7 +23,10 @@ type UpdateDto = z.infer<typeof updateSchema>;
 @RequirePermission('channels.manage')
 @Controller('qr-channels')
 export class QrController {
-  constructor(@Inject(QrConnectionsService) private readonly qr: QrConnectionsService) {}
+  constructor(
+    @Inject(QrConnectionsService) private readonly qr: QrConnectionsService,
+    @Inject(QrCatchUpService) private readonly catchUp: QrCatchUpService,
+  ) {}
 
   @Get()
   @Header('Cache-Control', 'no-store')
@@ -46,6 +52,17 @@ export class QrController {
   @Header('Cache-Control', 'no-store')
   code(@Param('id', idParam) id: string) {
     return this.qr.qr(id);
+  }
+
+  /**
+   * «Ponerse al día» (v19 B3): lee de Evolution los mensajes de las últimas `hours` horas (hasta 168), descarta los que ya están y pone el resto en cola para que entren a la bandeja. Solo lectura sobre Evolution;
+   * se puede repetir sin duplicar nada.
+   */
+  @Post(':id/catch-up')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  catchUpNow(@Param('id', idParam) id: string, @Body(new ZodValidationPipe(catchUpSchema)) b: CatchUpDto) {
+    return this.catchUp.run(id, b.hours);
   }
 
   @Post(':id/disconnect')

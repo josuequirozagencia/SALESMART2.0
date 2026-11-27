@@ -57,6 +57,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/platform/plans/:id/restore', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
   { route: 'GET /v1/platform/companies', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
   { route: 'PUT /v1/platform/companies/:id/plan', kind: 'platform', test: '../../platform/plans-companies.test.ts' },
+  { route: 'PUT /v1/platform/companies/:id/storage-quota', kind: 'platform', test: '../../library/library.test.ts' },
   // «Nueva empresa» con invitación (M2.3, ADR-39). Pruebas: test/platform/invitations.test.ts (acceso, A↔B, un solo uso, caducidad, concurrencia, límites)
   { route: 'POST /v1/platform/companies', kind: 'platform', test: '../../platform/invitations.test.ts' },
   { route: 'POST /v1/platform/companies/:id/invitation/resend', kind: 'platform', test: '../../platform/invitations.test.ts' },
@@ -107,6 +108,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/tags', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'GET /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/endpoint', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  // El Lead a mano (2026-11-23): el asesor coloca o quita la etiqueta del sistema «Lead» y al colocarla sale el Lead a Meta. Mismas pruebas.
+  { route: 'PUT /v1/contacts/:id/lead', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
+  { route: 'DELETE /v1/contacts/:id/lead', kind: 'tenant', isolationTest: '../../attribution/attribution.test.ts' },
   { route: 'POST /v1/attribution/ctwa/:endpointId', kind: 'public' },
   // Importar y exportar contactos (M3.5, ADR-47). Pruebas: test/imports/imports.test.ts
   { route: 'POST /v1/contacts/export', kind: 'tenant', isolationTest: '../../imports/imports.test.ts' },
@@ -207,6 +211,32 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/meta/settings/test', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   { route: 'GET /v1/meta/events', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
   { route: 'POST /v1/meta/events/:id/retry', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'POST /v1/meta/events/retry-all', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  { route: 'POST /v1/meta/messaging-dataset', kind: 'tenant', isolationTest: '../../attribution/meta.test.ts' },
+  // Biblioteca de archivos (V21, ADR-75). Pruebas: test/library/library.test.ts (A↔B, permisos, cuota, antivirus, carpetas)
+  { route: 'GET /v1/library', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'GET /v1/library/usage', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/assets', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'PATCH /v1/library/assets/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/assets/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'GET /v1/library/assets/:id/url', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'GET /v1/library/assets/:id/usage', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  // Espacio extra de la biblioteca (V21b). Pruebas: test/storage/storage.test.ts
+  { route: 'GET /v1/library/storage-plans', kind: 'tenant', isolationTest: '../../storage/storage.test.ts' },
+  { route: 'POST /v1/library/storage-requests', kind: 'tenant', isolationTest: '../../storage/storage.test.ts' },
+  { route: 'GET /v1/platform/storage-plans', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'POST /v1/platform/storage-plans', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'PATCH /v1/platform/storage-plans/:id', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'GET /v1/platform/storage-requests', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'GET /v1/platform/storage-companies', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'GET /v1/platform/companies/:id/storage-grants', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'POST /v1/platform/companies/:id/storage-grants', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'POST /v1/platform/companies/:id/storage-grants/:grantId/revoke', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'POST /v1/platform/companies/:id/storage-request/dismiss', kind: 'platform', test: '../../storage/storage.test.ts' },
+  { route: 'POST /v1/library/folders', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'PATCH /v1/library/folders/:id', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/library/folders/:id/archive', kind: 'tenant', isolationTest: '../../library/library.test.ts' },
+  { route: 'POST /v1/conversations/:id/library/:assetId/send', kind: 'tenant', isolationTest: '../../library/library-send.test.ts' },
   // Tablero y analítica (M6.5, ADR-51). Pruebas: test/analytics/analytics.test.ts (A↔B, alcance propio, cifras, CSV auditado)
   { route: 'GET /v1/analytics/summary', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
   { route: 'GET /v1/analytics/reports/:name', kind: 'tenant', isolationTest: '../../analytics/analytics.test.ts' },
@@ -248,6 +278,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/platform/ai/limits', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'GET /v1/platform/ai/organizations', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'PUT /v1/platform/ai/organizations/:id/margin', kind: 'platform', test: '../../ai/credits.test.ts' },
+  { route: 'POST /v1/platform/ai/models/:model/use-for-audio', kind: 'platform', test: '../../ai/knowledge.test.ts' },
   { route: 'POST /v1/platform/ai/organizations/:id/grants', kind: 'platform', test: '../../ai/credits.test.ts' },
   { route: 'GET /v1/platform/ai/organizations/:id/ledger', kind: 'platform', test: '../../ai/credits.test.ts' },
   // Conocimiento (M8.2, ADR-53). Pruebas: test/ai/knowledge.test.ts (A↔B, tipos de archivo, créditos, búsqueda sin respaldo)
@@ -297,6 +328,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/qr-channels', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'GET /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'POST /v1/qr-channels/:id/qr', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
+  { route: 'POST /v1/qr-channels/:id/catch-up', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'POST /v1/qr-channels/:id/disconnect', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'PATCH /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'DELETE /v1/qr-channels/:id', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
@@ -343,6 +375,8 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/contacts/:contactId/conversation', kind: 'tenant', isolationTest: '../../inbox/contact-conversation.test.ts' },
   { route: 'PUT /v1/conversations/:id/favorite', kind: 'tenant', isolationTest: '../../inbox/favorites.test.ts' },
   { route: 'DELETE /v1/conversations/:id/favorite', kind: 'tenant', isolationTest: '../../inbox/favorites.test.ts' },
+  { route: 'PUT /v1/conversations/:id/queue', kind: 'tenant', isolationTest: '../../inbox/conversation-queue.test.ts' },
+  { route: 'GET /v1/conversations/:id/assignment', kind: 'tenant', isolationTest: '../../inbox/conversation-assignment.test.ts' },
   { route: 'POST /v1/messages/:id/retry', kind: 'tenant', isolationTest: '../../inbox/inbox.test.ts' },
   // Transferir y compartir (M5.5a, ADR-14/50). Pruebas: test/inbox/sharing.test.ts (A↔B, quién puede, visibilidad del colaborador, el lead se mueve, notas automáticas, auditoría)
   { route: 'GET /v1/conversations/:id/transfer-options', kind: 'tenant', isolationTest: '../../inbox/sharing.test.ts' },
@@ -391,6 +425,9 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'GET /v1/campaigns/:id/results', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'POST /v1/campaigns/:id/export', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
   { route: 'POST /v1/campaigns/variants', kind: 'tenant', isolationTest: '../../campaigns/campaigns.test.ts' },
+  // Salud de las conexiones (v19 B1). Pruebas: test/connection-health/connection-health.test.ts
+  { route: 'GET /v1/connection-health', kind: 'tenant', isolationTest: '../../connection-health/connection-health.test.ts' },
+  { route: 'POST /v1/connection-health/events/:id/retry', kind: 'tenant', isolationTest: '../../connection-health/connection-health.test.ts' },
   // Mensajes programados (M5.6c, ADR-50). Pruebas: test/scheduled/scheduled.test.ts (A↔B, permisos, ventana de 24 h, límites, cancelar, envío a su hora, cancelación automática, concurrencia)
   { route: 'GET /v1/conversations/:id/scheduled', kind: 'tenant', isolationTest: '../../scheduled/scheduled.test.ts' },
   // Vista global (M5.10). Pruebas: test/scheduled/scheduled-global.test.ts (A↔B, alcance por persona, pestañas, cursor, filtro «mías», contactos borrados)
@@ -407,6 +444,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'POST /v1/push/unsubscribe', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
   { route: 'POST /v1/push/test', kind: 'tenant', isolationTest: '../../push/push.test.ts' },
   // Fotos de perfil (v5). Pruebas: test/photos/photos.test.ts (A↔B, visibilidad por persona, validación del contenido, tarea de contactos por QR)
+  { route: 'GET /v1/ads/creatives', kind: 'tenant', isolationTest: '../../qr/qr.test.ts' },
   { route: 'GET /v1/photos', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
   { route: 'GET /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },
   { route: 'PUT /v1/me/photo', kind: 'tenant', isolationTest: '../../photos/photos.test.ts' },

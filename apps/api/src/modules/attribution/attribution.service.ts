@@ -19,6 +19,9 @@ const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex
 /** Huella del teléfono como la pide Meta: solo dígitos (sin «+»), SHA-256. El teléfono en claro NUNCA se guarda en el evento. */
 export const phoneHash = (e164: string): string => sha256(e164.replace(/\D/g, ''));
 
+/** Un clic a registrar: lo mismo que el punto de entrada, pero el teléfono puede faltar (WhatsApp por QR con un contacto que solo trae su código `@lid`). */
+export type ClickInput = Omit<CtwaWebhookDto, 'phone'> & { phone: string | null };
+
 export interface RecordResult {
   contactCreated: boolean;
   /** El mismo clic ya estaba registrado: no se cambió nada. */
@@ -61,12 +64,14 @@ export class AttributionService {
 
   /**
    * Registra un clic de anuncio DENTRO de la transacción de quien llama: el punto de entrada externo (`record`) o el aviso de Meta del primer mensaje (`referral`, M6.6). Graba el primer
-   * y el último toque del contacto, el historial (`contact_touch_events`) y deja el Lead hacia Meta. `contactId` evita buscar de nuevo al contacto cuando ya se tiene.
+   * y el último toque del contacto y el historial (`contact_touch_events`); NO encola ningún evento hacia Meta ni pone la etiqueta `Lead` (desde el 2026-11-23 el Lead lo marca una persona: Meta ya cuenta las
+   * conversaciones iniciadas y Pasiel manda sus Lead por GoHighLevel). `contactId` evita buscar de nuevo al contacto cuando ya se tiene.
    */
-  async recordIn(tx: TenantTx, input: CtwaWebhookDto, now = new Date(), known?: { id: string; created: boolean }): Promise<RecordResult> {
+  async recordIn(tx: TenantTx, input: ClickInput, now = new Date(), known?: { id: string; created: boolean }): Promise<RecordResult> {
     const at = input.occurred_at ? new Date(input.occurred_at) : now;
     {
-      const { id, created } = known ?? (await this.contacts.findOrCreateByPhone(tx, input.phone, input.source));
+      if (!known && !input.phone) throw new ValidationError([{ path: 'phone', code: 'required', message: 'Falta el teléfono del contacto' }]);
+      const { id, created } = known ?? (await this.contacts.findOrCreateByPhone(tx, input.phone!, input.source));
       // El canal se fija UNA vez, cuando el contacto nace con este clic; un clic posterior no lo cambia
       if (created) await this.contacts.setChannelOnCreate(tx, id, channelOf(input.source, input.placement ?? null));
       const touch = await this.contacts.applyTouch(tx, id, {
@@ -81,27 +86,7 @@ export class AttributionService {
       // El historial lleva TODOS los clics (aunque uno viejo no cambie el último toque); es idempotente por el clic
       await this.touches.record(tx, id, { kind: 'ad_click', at, source: input.source, campaign: input.campaign_name, adset: input.adset_name, ad: input.ad_name, adId: input.ad_id, ctwaClid: input.ctwa_cl_id, headline: input.headline, thumbnailUrl: input.thumbnail_url, sourceUrl: input.source_url, originRef: input.ctwa_cl_id });
       if (touch.duplicate) return { contactCreated: created, duplicate: true };
-      // Una fila por clic (el id incluye la huella del clic): repetir la llamada no duplica nada aunque el último toque ya sea otro
-      const eventId = `lead:${id}:${sha256(input.ctwa_cl_id).slice(0, 24)}`;
-      await tx
-        .insert(metaEvents)
-        .values({
-          eventId,
-          type: 'Lead',
-          contactId: id,
-          sendAfter: now, // el Lead se envía sin ventana de gracia
-          payload: {
-            event_name: 'Lead',
-            event_time: Math.floor(at.getTime() / 1000),
-            event_id: eventId,
-            action_source: 'business_messaging',
-            messaging_channel: 'whatsapp',
-            user_data: { ph: [phoneHash(input.phone)], ctwa_clid: input.ctwa_cl_id },
-            custom_data: { campaign: input.campaign_name ?? null, adset: input.adset_name ?? null, ad: input.ad_name ?? null },
-          },
-        })
-        .onConflictDoNothing();
-      await this.tags.apply(tx, id, 'lead');
+      // Ni el Lead hacia Meta ni la etiqueta `Lead` salen solos (decisión del responsable, 2026-11-23): el clic queda en el contacto y el historial; el asesor coloca `Lead` a mano (`LeadMarkService`)
       return { contactCreated: created, duplicate: false };
     }
   }

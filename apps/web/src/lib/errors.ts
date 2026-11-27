@@ -44,7 +44,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Empresas, notas y tareas (ADR-48): el servidor ya redacta el motivo
     case 'COMPANY_EXISTS': case 'COMPANY_LIMIT': case 'NOTE_NOT_YOURS': case 'TASK_NOT_YOURS': case 'TASK_SCOPE': case 'TASK_ASSIGNEE_NOT_ALLOWED': return e.message;
     // Conexiones de canales (ADR-50): el servidor ya redacta el motivo (sin datos secretos)
-    case 'CHANNEL_EXISTS': case 'CHANNEL_NUMBER_IN_USE': case 'CHANNEL_LIMIT': case 'CHANNEL_TOKEN_INVALID': case 'CHANNEL_NUMBER_NOT_FOUND': case 'CHANNEL_PROVIDER_UNAVAILABLE': case 'CHANNEL_CREDENTIALS_UNREADABLE': case 'CHANNEL_VAULT_UNAVAILABLE': case 'CHANNEL_QUEUE_NOT_FOUND': return e.message;
+    case 'CHANNEL_EXISTS': case 'CHANNEL_NUMBER_IN_USE': case 'CHANNEL_LIMIT': case 'CHANNEL_TOKEN_INVALID': case 'CHANNEL_NUMBER_NOT_FOUND': case 'CHANNEL_PROVIDER_UNAVAILABLE': case 'CHANNEL_CREDENTIALS_UNREADABLE': case 'CHANNEL_VAULT_UNAVAILABLE': case 'CHANNEL_QUEUE_NOT_FOUND': case 'QUEUE_NOT_FOUND': return e.message;
     // Colas y reparto (ADR-07): el servidor ya redacta el motivo
     case 'META_UNAVAILABLE': case 'META_UNREACHABLE': case 'META_DISABLED': case 'EVENT_NOT_RETRYABLE': case 'EVENT_TOO_OLD': case 'APPOINTMENT_CLOSED': case 'APPOINTMENT_ALREADY_CANCELLED': case 'APPOINTMENT_NO_CONVERSATION': case 'PRODUCT_EXISTS': case 'PRODUCT_LIMIT': case 'PRODUCT_UNAVAILABLE': case 'SALE_NO_QUEUE': case 'SALE_CANCELLED': case 'SALE_ALREADY_CANCELLED': case 'PAYMENT_EXCEEDS_BALANCE': case 'CORRECTION_EXCEEDS_PAID': case 'CURRENCY_LOCKED': case 'REQUEST_LIMIT': case 'REQUEST_RESOLVED': case 'IDEMPOTENCY_MISMATCH': case 'IDEMPOTENCY_CONFLICT': case 'QUEUE_EXISTS': case 'QUEUE_LIMIT': case 'QUEUE_IN_USE': case 'QUEUE_DISTRIBUTION_OFF': return e.message;
     // Conexiones de un departamento (v7, ADR-65): el servidor ya redacta el motivo
@@ -96,6 +96,8 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     case 'EXTENSION_ALREADY_USED': return 'Tu cuenta ya usó su extensión.';
     case 'VALIDATION_ERROR': return 'Revisa los datos ingresados.';
     case 'UNAUTHORIZED': return 'Correo o contraseña incorrectos.';
+    // Biblioteca de archivos (V21, ADR-75): el servidor ya redacta el motivo (sin claves ni direcciones del almacenamiento)
+    case 'QUOTA_EXCEEDED': case 'FOLDER_EXISTS': case 'FOLDER_NOT_EMPTY': case 'VIRUS_SCAN_REQUIRED': return e.message;
     default: return e.status >= 500 ? 'Tuvimos un problema de nuestro lado. Inténtalo en unos minutos.' : fallback;
   }
 }

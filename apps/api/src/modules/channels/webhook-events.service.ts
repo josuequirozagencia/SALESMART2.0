@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { and, asc, eq, inArray, isNotNull, lte, ne, sql } from 'drizzle-orm';
-import { Database, webhookEvents, whatsappAccounts, type TenantTx } from '../../db';
+import { Database, webhookEvents, webhookIgnored, whatsappAccounts, type TenantTx } from '../../db';
 import type { AppLogger } from '../../logger';
 import { APP_LOGGER } from '../../tokens';
 import { ConversationsService, type NormalizedInboundEvent } from '../conversations';
 import type { OrgDirectory } from '../organizations';
 import type { AssignmentContext } from '../queues';
-import { parseStoredEvolution } from './evolution-webhook';
+import { parseStoredEvolution, type IgnoredReason } from './evolution-webhook';
 import { deepStripNul } from './meta-webhook';
 import { WHATSAPP_PROVIDER, type WhatsAppProvider } from './whatsapp.port';
 
@@ -24,6 +24,8 @@ const MAX_BACKOFF_MS = 10 * 60_000;
  */
 export const STATUS_WAIT_MS = 2 * 60_000;
 export const STATUS_RETRY_MS = 10_000;
+/** Más que esto de retraso entre la hora del proveedor y la entrada de un mensaje, o de espera de un aviso ya vencido, se registra como advertencia (v19 B4). */
+export const LATE_LOG_SECONDS = 60;
 
 const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex');
 
@@ -70,6 +72,15 @@ export class WebhookEventsService {
     });
   }
 
+  /** Cuenta un aviso ignorado (por conexión, hora y motivo) dentro de la transacción de quien llama. Solo un contador: nunca el contenido. */
+  async countIgnored(tx: TenantTx, channelAccountId: string, reason: IgnoredReason, now: Date): Promise<void> {
+    const hour = new Date(Math.floor(now.getTime() / 3_600_000) * 3_600_000);
+    await tx
+      .insert(webhookIgnored)
+      .values({ channelAccountId, hour, reason, n: 1 })
+      .onConflictDoUpdate({ target: [webhookIgnored.organizationId, webhookIgnored.channelAccountId, webhookIgnored.hour, webhookIgnored.reason], set: { n: sql`${webhookIgnored.n} + 1` } });
+  }
+
   /**
    * Procesa los avisos pendientes cuya hora ya llegó. Devuelve cuántos tomó (hechos o reprogramados). `dir` es lo de identidad que el reparto necesita (zona horaria
    * y quién puede recibir trabajo): quien llama lo lee ANTES, porque dentro de la transacción de negocio no se puede tocar la identidad.
@@ -84,6 +95,9 @@ export class WebhookEventsService {
         .orderBy(asc(webhookEvents.receivedAt), asc(webhookEvents.id))
         .limit(batch)
         .for('update', { skipLocked: true });
+      // B4: si el aviso más viejo esperó más de un minuto DESPUÉS de su hora, la tarea va atrasada (se carga con otra cosa o el proceso estuvo parado): se avisa en el registro, sin datos del cliente
+      const waited = due.length > 0 ? Math.round((now.getTime() - Math.min(...due.map((d) => d.nextAttemptAt.getTime()))) / 1000) : 0;
+      if (waited > LATE_LOG_SECONDS) this.log.warn({ waited_s: waited, due: due.length }, 'la tarea de avisos del webhook va atrasada');
       for (const ev of due) await this.processOne(tx, ev, now, assign);
       if (due.length < batch) await this.redactOld(tx, now);
       return due.length;
@@ -105,7 +119,13 @@ export class WebhookEventsService {
               // Lo que se escribió desde el teléfono (o el eco de un envío nuestro). `wait` = hay un envío en vuelo: el aviso espera como un estado que llega antes que su mensaje
               const r = await this.conversations.ingestDeviceMessage(tx, ev.channelAccountId, m, { now, timeZone: assign.timeZone, mayWait: now.getTime() - ev.receivedAt.getTime() < STATUS_WAIT_MS });
               if (r === 'wait') unknownTargets += 1;
-            } else await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign);
+            } else {
+              // v19 B3: un aviso recuperado con «ponerse al día» (marca `__catchup`) lleva mensajes viejos: se guardan, pero sin avisos al celular, reglas ni cronómetros
+              const r = await this.conversations.ingestInbound(tx, ev.channelAccountId, m, assign, undefined, (ev.payload)['__catchup'] === 1);
+              // B4: un mensaje que el proveedor fechó hace más de un minuto es de una cola que se atrasó aguas arriba (WhatsApp o Evolution): solo se registra el retraso, nunca el teléfono ni el texto
+              const lag = Math.round((now.getTime() - m.sentAt.getTime()) / 1000);
+              if (!r.duplicate && lag > LATE_LOG_SECONDS && (ev.payload)['__catchup'] !== 1) this.log.warn({ event_id: ev.id, channel_id: ev.channelAccountId, lag_s: lag }, 'mensaje entrante recibido con retraso respecto a su hora en el proveedor');
+            }
           }
           for (const s of event.statuses) if ((await this.conversations.applyStatus(tx, ev.channelAccountId, s)) === 'unknown') unknownTargets += 1;
           for (const r of event.reactions) if ((await this.conversations.applyReaction(tx, ev.channelAccountId, r)) === 'unknown') unknownTargets += 1;
@@ -128,6 +148,7 @@ export class WebhookEventsService {
     const label = errorLabel(failure);
     this.log.warn({ event_id: ev.id, attempts, err: label }, 'aviso de webhook no se pudo procesar');
     if (attempts >= EVENT_MAX_ATTEMPTS) {
+      this.log.error({ event_id: ev.id, channel_id: ev.channelAccountId, attempts, err: label }, 'aviso de webhook FALLIDO: agotó sus intentos y no se procesará solo');
       await tx.update(webhookEvents).set({ status: 'failed', attempts, processedAt: now, lastError: label }).where(eq(webhookEvents.id, ev.id));
     } else {
       const wait = Math.min(2 ** attempts * 7_500, MAX_BACKOFF_MS);
@@ -139,7 +160,7 @@ export class WebhookEventsService {
    * Los eventos normalizados de un aviso guardado. Un aviso de WhatsApp por QR (M9.6) lleva la marca `__qr`: se lee con el lector de Evolution, y el archivo que traía (ya guardado aparte en una clave
    * temporal) reemplaza al identificador del proveedor, que en este canal no existe. Los demás son de Meta.
    */
-  private parsedEvents(ev: EventRow): ReadonlyArray<{ event: NormalizedInboundEvent }> {
+  parsedEvents(ev: EventRow): ReadonlyArray<{ event: NormalizedInboundEvent }> {
     const p = ev.payload as Record<string, unknown>;
     if (p['__qr'] !== 1) return this.provider.parseStored(p, ev.receivedAt).events;
     const keys = (typeof p['media_keys'] === 'object' && p['media_keys'] !== null ? p['media_keys'] : {}) as Record<string, unknown>;

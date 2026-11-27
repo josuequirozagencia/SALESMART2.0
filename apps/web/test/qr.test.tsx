@@ -9,7 +9,7 @@ beforeEach(() => { vi.unstubAllGlobals(); resetWorld(); });
 const AT = '2026-10-27T15:00:00.000Z';
 const chan = (over: Partial<QrChannel> = {}): QrChannel => ({
   id: 'qc1', provider: 'evolution', is_official: false, name: 'Chip de ventas', state: 'open', phone: '+593990000001', profile_name: 'Negocio', queue_id: null, connected_at: AT, last_event_at: AT,
-  down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20 }, created_at: AT, ...over,
+  down_since: null, last_error: null, warmup: { day: 1, daily_limit: 20, waived: false, waived_at: null }, volume: { sent_24h: 0, limit: 20, level: 'ok' }, catch_up: null, created_at: AT, ...over,
 });
 
 interface World { items: QrChannel[]; available: boolean; calls: Record<string, Call[]>; qr: string | null; stateAfterQr: QrState | null }
@@ -43,6 +43,7 @@ function server(w: World): Record<string, Handler> {
       w.items = w.items.map((i) => ({ ...i, queue_id: b.queue_id === undefined ? i.queue_id : b.queue_id }));
       return { body: w.items[0] };
     }),
+    'POST /qr-channels/qc1/catch-up': guard('catchup', () => ({ body: { found: 12, recovered: 5, existing: 7, truncated: false, hours: 168 } })),
     'DELETE /qr-channels/qc1': guard('remove', () => {
       w.items = [];
       return { body: { id: 'qc1', deleted: true } };
@@ -81,10 +82,10 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
     await userEvent.click(dlg.getByRole('button', { name: 'Crear y mostrar el QR' }));
     expect(await dlg.findByText('Confirma que entiendes el riesgo de un canal no oficial.')).toBeInTheDocument();
     expect(w.calls['create']).toBeUndefined();
-    await userEvent.click(dlg.getByRole('checkbox'));
+    await userEvent.click(dlg.getByRole('checkbox', { name: /canal no oficial/ }));
     await userEvent.click(dlg.getByRole('button', { name: 'Crear y mostrar el QR' }));
     await waitFor(() => expect(w.calls['create']).toHaveLength(1));
-    expect(w.calls['create']![0]!.body).toEqual({ name: 'Chip de ventas', queue_id: null });
+    expect(w.calls['create']![0]!.body).toEqual({ name: 'Chip de ventas', queue_id: null, prior_use_risk_accepted: false });
     const pair = within(await screen.findByRole('dialog', { name: 'Vincular «Chip de ventas»' }));
     const img = await pair.findByAltText('Código QR para vincular WhatsApp');
     expect(img).toHaveAttribute('src', 'data:image/png;base64,QRQR');
@@ -95,7 +96,7 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
   }, 15000);
 
   it('una conexión abierta muestra su estado, teléfono, perfil y calentamiento; una caída lo explica y ofrece volver a vincular', async () => {
-    mockApi(server(world({ items: [chan(), chan({ id: 'qc2', name: 'Chip caído', state: 'logged_out', phone: null, profile_name: null, down_since: AT, last_error: 'El teléfono cerró la sesión: escanea un QR nuevo para volver a conectar', warmup: { day: 3, daily_limit: 50 } })] })));
+    mockApi(server(world({ items: [chan(), chan({ id: 'qc2', name: 'Chip caído', state: 'logged_out', phone: null, profile_name: null, down_since: AT, last_error: 'El teléfono cerró la sesión: escanea un QR nuevo para volver a conectar', warmup: { day: 3, daily_limit: 50, waived: false, waived_at: null } })] })));
     renderApp('/settings/connections');
     const s = await section();
     const ok = within(await s.findByRole('listitem', { name: 'Chip de ventas' }));
@@ -151,5 +152,43 @@ describe('Configuración › Conexiones › WhatsApp por QR', () => {
     await userEvent.click(s.getByRole('button', { name: 'Guardar' }));
     await waitFor(() => expect(w.calls['patch']).toHaveLength(2));
     expect((w.calls['patch']![1] as Call).body).toEqual({ queue_id: null });
+  });
+
+  it('«Recuperar mensajes» (v19 B3): elegir el periodo, pedirlo a la API y decir cuántos se recuperaron y cuántos ya estaban; la última revisión se ve en la tarjeta', async () => {
+    const w = world({ items: [chan({ catch_up: { at: AT, found: 3, recovered: 0, truncated: false, error: null } })] });
+    mockApi(server(w));
+    renderApp('/settings/connections');
+    const s = await section();
+    expect(await s.findByText(/Última revisión de mensajes/)).toBeInTheDocument();
+    expect(s.getByText(/· al día/)).toBeInTheDocument();
+    await userEvent.click(s.getByRole('button', { name: 'Recuperar mensajes de Chip de ventas' }));
+    const panel = within(s.getByRole('group', { name: 'Recuperar mensajes de Chip de ventas' }));
+    await userEvent.selectOptions(panel.getByRole('combobox', { name: 'Periodo a revisar' }), '168');
+    await userEvent.click(panel.getByRole('button', { name: 'Recuperar mensajes' }));
+    await waitFor(() => expect(w.calls['catchup']).toHaveLength(1));
+    expect((w.calls['catchup']![0] as Call).body).toEqual({ hours: 168 });
+    expect(await panel.findByText(/Se recuperaron 5 mensajes \(7 ya estaban\)/)).toBeInTheDocument();
+    expect(panel.getByText(/Los archivos y notas de voz de esos mensajes no se recuperan/)).toBeInTheDocument();
+  });
+});
+
+describe('aviso de volumen en la conexión QR (sin bloquear)', () => {
+  it('con el número cerca del límite del día muestra «Atención»; por encima, «Advertencia» con lo que significa; en ambos casos las respuestas siguen saliendo', async () => {
+    const w = world({ items: [chan({ volume: { sent_24h: 17, limit: 20, level: 'near' } })] });
+    mockApi(server(w));
+    renderApp('/settings/connections');
+    const s = await section();
+    expect(await s.findByText(/Atención: este número va en 17 de 20 mensajes del día/)).toBeInTheDocument();
+    expect(s.queryByText(/Advertencia: este número/)).toBeNull();
+  });
+
+  it('por encima del límite muestra la advertencia y deja claro que las respuestas a clientes siguen saliendo', async () => {
+    const w = world({ items: [chan({ volume: { sent_24h: 27, limit: 20, level: 'over' } })] });
+    mockApi(server(w));
+    renderApp('/settings/connections');
+    const s = await section();
+    expect(await s.findByText(/Advertencia: este número envió 27 mensajes en las últimas 24 h/)).toBeInTheDocument();
+    expect(s.getByText(/Las respuestas a clientes siguen saliendo/)).toBeInTheDocument();
+    expect(s.getByText('Volumen 24 h')).toBeInTheDocument();
   });
 });

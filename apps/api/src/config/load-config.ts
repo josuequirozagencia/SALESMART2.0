@@ -69,6 +69,8 @@ export interface AppConfig {
     /** Almacenamiento de archivos (M5.6d, ADR-50). */
     readonly storageProvider: 's3' | 'fake';
     readonly virusScanner: 'none' | 'clamav' | 'fake';
+    /** La biblioteca exige antivirus para compartir archivos (V21, ADR-75). */
+    readonly requireVirusScan: boolean;
     readonly clamavHost: string | undefined;
     readonly clamavPort: number;
     readonly audioTranscoder: 'none' | 'ffmpeg' | 'fake';
@@ -265,7 +267,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     push: { provider: e.PUSH_PROVIDER, enabled: pushEnabled, vapidPublicKey: e.VAPID_PUBLIC_KEY, vapidPrivateKey: e.VAPID_PRIVATE_KEY, vapidSubject: e.VAPID_SUBJECT },
     automations: { httpProvider: e.HTTP_OUT_PROVIDER },
     ai: { provider: e.AI_PROVIDER },
-    attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },
+    attachments: { storageProvider: e.STORAGE_PROVIDER, virusScanner: e.VIRUS_SCANNER, requireVirusScan: e.REQUIRE_VIRUS_SCAN === 'true', clamavHost: e.CLAMAV_HOST, clamavPort: e.CLAMAV_PORT, audioTranscoder: e.AUDIO_TRANSCODER, ffmpegPath: e.FFMPEG_PATH },
     frontend: {
       baseUrl: frontendBase,
       resetLinkBase: frontendBase === undefined ? undefined : frontendBase + e.RESET_LINK_PATH,

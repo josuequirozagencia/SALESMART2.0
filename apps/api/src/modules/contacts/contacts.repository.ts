@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { and, desc, eq, exists, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
-import { contactCompanies, contactListMembers, contactPhones, contactTags, contacts, customFieldValues, metaEvents, type TenantTx } from '../../db';
+import { contactCompanies, contactIdentities, contactListMembers, contactPhones, contactTags, contacts, customFieldValues, metaEvents, type TenantTx } from '../../db';
 import { ValidationError } from '../../errors';
 import { likeEscape } from '../organizations';
 import type { ResolvedCf } from './contact-filters';
@@ -160,6 +160,29 @@ export class ContactsRepository {
   byIds(tx: TenantTx, ids: readonly string[]): Promise<ContactRow[]> {
     if (ids.length === 0) return Promise.resolve([]);
     return tx.select().from(contacts).where(and(inArray(contacts.id, [...ids]), isNull(contacts.deletedAt))).orderBy(sql`${contacts.createdAt} DESC`, sql`${contacts.id} DESC`);
+  }
+
+  /** Contacto (vigente) de la empresa activa que tiene esa identidad (ADR-73: hoy solo `wa_lid`). Para los canales de entrada, que no tienen alcance por persona. */
+  async idByIdentity(tx: TenantTx, kind: 'wa_lid', value: string): Promise<string | undefined> {
+    const [r] = await tx
+      .select({ id: contacts.id })
+      .from(contactIdentities)
+      .innerJoin(contacts, and(eq(contacts.organizationId, contactIdentities.organizationId), eq(contacts.id, contactIdentities.contactId)))
+      .where(and(eq(contactIdentities.kind, kind), eq(contactIdentities.value, value), isNull(contacts.deletedAt)))
+      .limit(1);
+    return r?.id;
+  }
+
+  /** Guarda la identidad de un contacto; si la empresa ya la tenía registrada (de este u otro contacto) no hace nada. Devuelve si la guardó. */
+  async addIdentity(tx: TenantTx, contactId: string, kind: 'wa_lid', value: string): Promise<boolean> {
+    const r = await tx.insert(contactIdentities).values({ contactId, kind, value }).onConflictDoNothing({ target: [contactIdentities.organizationId, contactIdentities.kind, contactIdentities.value] }).returning({ id: contactIdentities.id });
+    return r.length > 0;
+  }
+
+  /** ¿El contacto tiene algún teléfono vigente? */
+  async hasPhone(tx: TenantTx, contactId: string): Promise<boolean> {
+    const [r] = await tx.select({ id: contactPhones.id }).from(contactPhones).where(and(eq(contactPhones.contactId, contactId), isNull(contactPhones.deletedAt))).limit(1);
+    return r !== undefined;
   }
 
   /** Contacto (vigente) de la empresa activa que tiene ese teléfono. Para los canales de entrada, que no tienen alcance por persona. */

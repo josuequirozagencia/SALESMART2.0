@@ -1,3 +1,4 @@
+import { prepareImage } from '../../lib/imagePrep';
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, api, tokens, type ErrorDetail } from '../../lib/api';
 import { useRealtimeStatus } from '../../lib/realtime';
@@ -9,8 +10,9 @@ import type { AgentStatus, ChatMessage, MentionOption, ChatMessagePage, Conversa
  */
 export const LIST_POLL_MS = 10_000;
 export const THREAD_POLL_MS = 5_000;
-export const LIVE_LIST_POLL_MS = 60_000;
-export const LIVE_THREAD_POLL_MS = 30_000;
+// Con el tiempo real «en vivo» solo quedan como respaldo, pero un respaldo de 30–60 s hacía que un aviso perdido se notara medio minuto después (v19 B2): ahora 15 s y 10 s
+export const LIVE_LIST_POLL_MS = 15_000;
+export const LIVE_THREAD_POLL_MS = 10_000;
 
 /** Intervalos de consulta según haya o no conexión en vivo. */
 function usePolling(): { list: number; thread: number } {
@@ -194,6 +196,17 @@ export function useMentionOptions(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['mention-options', id], enabled, retry: false, staleTime: 30_000, queryFn: () => api<{ items: MentionOption[] }>(`/conversations/${id}/mention-options`) });
 }
 
+/** Asigna o cambia el departamento de la conversación (V24; solo con permiso). */
+export function useSetQueue(id: string) {
+  const qc = useQueryClient();
+  const refresh = useRefresh(id);
+  return useMutation({
+    mutationFn: (queueId: string) => api<Conversation & { warning: 'OWNER_NOT_IN_QUEUE' | null }>(`/conversations/${id}/queue`, { method: 'PUT', body: { queue_id: queueId } }),
+    onSuccess: ({ warning: _warning, ...c }) => qc.setQueryData(['conversation', id], c),
+    onSettled: () => Promise.all([refresh(), qc.invalidateQueries({ queryKey: ['sale-options', id] })]),
+  });
+}
+
 export type ConversationAction = 'accept' | 'take' | 'close';
 
 /** Aceptar, tomar o finalizar: el servidor devuelve la conversación ya actualizada. */
@@ -313,7 +326,8 @@ export function useReact(conversationId: string) {
 
 export function useUploadAttachment(conversationId: string) {
   return useMutation({
-    mutationFn: async (file: File): Promise<UploadedAttachment> => {
+    mutationFn: async (original: File): Promise<UploadedAttachment> => {
+      const file = await prepareImage(original); // V23-C: las fotos pesadas se reducen antes de subir
       const res = await fetch(`/v1/conversations/${conversationId}/attachments`, {
         method: 'POST',
         headers: { 'content-type': file.type || 'application/octet-stream', 'x-filename': encodeURIComponent(file.name), 'x-requested-by': 'sales-smart-web', ...(tokens.get() ? { authorization: `Bearer ${tokens.get()}` } : {}) },

@@ -36,6 +36,8 @@ export const webhookEvents = tenantTable(
     receivedAt: ts('received_at').notNull().defaultNow(),
     processedAt: ts('processed_at'),
     redactedAt: ts('redacted_at'),
+    /** Cuándo la recuperación de anuncios (v20) revisó este aviso: aplicó el clic a su contacto, guardó la miniatura del anuncio y quitó sus bytes del aviso. */
+    adScannedAt: ts('ad_scanned_at'),
   },
   (t) => [
     foreignKey({ name: 'webhook_events_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
@@ -45,7 +47,33 @@ export const webhookEvents = tenantTable(
     check('webhook_events_error_len', sql`${t['lastError']!} IS NULL OR length(${t['lastError']!}) <= 300`),
     uniqueIndex('webhook_events_org_hash_uq').on(t['organizationId']!, t['payloadHash']!),
     index('webhook_events_due_idx').on(t['organizationId']!, t['nextAttemptAt']!).where(sql`${t['status']!} = 'pending'`),
+    // Los avisos con anuncio que la recuperación aún no revisó (índice parcial: la tarea no recorre los demás)
+    index('webhook_events_ad_scan_idx').on(t['organizationId']!, t['receivedAt']!).where(sql`${t['adScannedAt']!} IS NULL AND ${t['payload']!} @> '{"data":{"contextInfo":{"externalAdReply":{}}}}'::jsonb`),
     index('webhook_events_redact_idx').on(t['organizationId']!, t['processedAt']!).where(sql`${t['payload']!} IS NOT NULL AND ${t['status']!} <> 'pending'`),
+  ],
+);
+
+export const IGNORED_REASONS = ['group', 'status', 'from_me', 'no_phone', 'malformed', 'receipt', 'unsupported'] as const;
+
+/**
+ * Avisos de WhatsApp por QR que se IGNORARON, contados por conexión, hora y motivo (v19 B1; para «Salud de la conexión»): `group` (chats de grupo), `status` (estados de WhatsApp), `from_me` (reacciones puestas desde el
+ * teléfono), `no_phone` (sin teléfono resoluble), `malformed` (aviso sin lo mínimo), `receipt` (acuses de lectura del cliente: no son un estado de entrega) y `unsupported` (eventos que no usamos). Solo CONTADORES: nunca guarda
+ * el contenido de un aviso. TABLA DE NEGOCIO (RLS forzada); sin DELETE (la purga de una empresa la borra con ella).
+ */
+export const webhookIgnored = tenantTable(
+  'webhook_ignored',
+  {
+    channelAccountId: uuid('channel_account_id').notNull(),
+    /** La hora (truncada, en UTC) a la que pertenece el conteo. */
+    hour: ts('hour').notNull(),
+    reason: text('reason').notNull(),
+    n: integer('n').notNull().default(0),
+  },
+  (t) => [
+    primaryKey({ name: 'webhook_ignored_pk', columns: [t['organizationId']!, t['channelAccountId']!, t['hour']!, t['reason']!] }),
+    foreignKey({ name: 'webhook_ignored_channel_fk', columns: [t['organizationId']!, t['channelAccountId']!], foreignColumns: [channelAccounts.organizationId, channelAccounts.id] }),
+    check('webhook_ignored_reason_valid', sql`${t['reason']!} IN ('group', 'status', 'from_me', 'no_phone', 'malformed', 'receipt', 'unsupported')`),
+    check('webhook_ignored_n_valid', sql`${t['n']!} >= 0`),
   ],
 );
 

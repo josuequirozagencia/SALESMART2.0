@@ -1030,6 +1030,90 @@
       "when": 1796200000000,
       "tag": "0146_v17_variantes_ia",
       "breakpoints": true
+    },
+    {
+      "idx": 147,
+      "version": "7",
+      "when": 1796300000000,
+      "tag": "0147_v19_salud_conexion",
+      "breakpoints": true
+    },
+    {
+      "idx": 148,
+      "version": "7",
+      "when": 1796400000000,
+      "tag": "0148_v19_ponerse_al_dia",
+      "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1796500000000,
+      "tag": "0149_v19_contactos_lid",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1796600000000,
+      "tag": "0150_m107_qr_warmup_waiver",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1796700000000,
+      "tag": "0151_v20_anuncios",
+      "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1796800000000,
+      "tag": "0152_v20_nombres_anuncio",
+      "breakpoints": true
+    },
+    {
+      "idx": 153,
+      "version": "7",
+      "when": 1796900000000,
+      "tag": "0153_v20_mensajeria_meta",
+      "breakpoints": true
+    },
+    {
+      "idx": 154,
+      "version": "7",
+      "when": 1797000000000,
+      "tag": "0154_v21_biblioteca",
+      "breakpoints": true
+    },
+    {
+      "idx": 155,
+      "version": "7",
+      "when": 1797100000000,
+      "tag": "0155_v21b_planes_espacio",
+      "breakpoints": true
+    },
+    {
+      "idx": 156,
+      "version": "7",
+      "when": 1797200000000,
+      "tag": "0156_v23a_motivos_audio",
+      "breakpoints": true
+    },
+    {
+      "idx": 157,
+      "version": "7",
+      "when": 1797300000000,
+      "tag": "0157_v23d_audio_texto_y_modelo",
+      "breakpoints": true
+    },
+    {
+      "idx": 158,
+      "version": "7",
+      "when": 1797400000000,
+      "tag": "0158_v24_departamento_conversacion",
+      "breakpoints": true
     }
   ]
 }

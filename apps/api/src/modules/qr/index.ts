@@ -1,5 +1,7 @@
 export { QrModule } from './qr.module';
 export { QrHeartbeatJob } from './qr-heartbeat.job';
+export { QrCatchUpJob } from './qr-catch-up.job';
+export { QrCatchUpService, autoWindowStart, withKnownPhones, CATCH_UP_MAX_HOURS, type CatchUpResult } from './qr-catch-up.service';
 export { ContactPhotosJob, CONTACT_PHOTOS_BATCH, CONTACT_PHOTOS_RECHECK_MS } from './contact-photos.job';
 export { PHOTO_DOWNLOADER, MAX_CONTACT_PHOTO_BYTES, type PhotoDownloader } from './photo-downloader';
 export { QrOutboundService, type QrDispatch } from './qr-outbound.service';
@@ -8,3 +10,6 @@ export { QR_SESSION, QrSessionError, isRetryableQr, type QrSessionProvider, type
 export { FakeQrSession, FAKE_QR_KEY } from './qr-session.fake';
 export { EvolutionProvider } from './evolution.provider';
 export { dailyLimit, sendGate, warmupDay, MIN_GAP_MS } from './qr-limits';
+export { AdBackfillJob } from './ad-backfill.job';
+export { AdBackfillService, AD_BACKFILL_BATCH, type AdBackfillResult } from './ad-backfill.service';
+export { AdCreativesService, adInfoOf, type AdInfo } from './ad-creatives.service';

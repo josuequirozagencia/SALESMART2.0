@@ -6,6 +6,8 @@
 //   POST /v1/qr-channels/:id/disconnect
 //   PATCH /v1/qr-channels/:id
 //   DELETE /v1/qr-channels/:id
+//   POST /v1/qr-channels/:id/catch-up
+//   GET /v1/ads/creatives
 //   POST /v1/integrations/qr/webhook/:routeId
 import 'reflect-metadata';
 import { randomBytes } from 'node:crypto';
@@ -16,14 +18,16 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { CoreModule } from '../../src/core.module';
 import { DbModule } from '../../src/db';
 import { configureApp, HttpModule } from '../../src/http';
-import { AttachmentsModule, InboundMediaService } from '../../src/modules/attachments';
+import { AdsModule } from '../../src/modules/ads';
+import { AttachmentsModule, AttachmentsService, InboundMediaService, StorageGateway } from '../../src/modules/attachments';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { ChannelsModule, WebhookEventsService } from '../../src/modules/channels';
 import { ContactsModule } from '../../src/modules/contacts';
 import { InboxModule, OutboundDispatcher } from '../../src/modules/inbox';
 import { OrgDirectoryService, OrganizationsModule } from '../../src/modules/organizations';
 import { PlatformCredentialsReader } from '../../src/modules/platform';
-import { QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError } from '../../src/modules/qr';
+import { AdBackfillJob, AdBackfillService, QrCatchUpJob, QrCatchUpService, QrHeartbeatJob, QrModule, QR_SESSION, FAKE_QR_KEY, FakeQrSession, MAX_QR_CHANNELS, QrSessionError, autoWindowStart, withKnownPhones } from '../../src/modules/qr';
+import { DomainEventBus } from '../../src/modules/events';
 import { QueuesModule } from '../../src/modules/queues';
 import { Argon2idHasher } from '../../src/security';
 import { TenantContext } from '../../src/tenant';
@@ -31,7 +35,7 @@ import { ORG_A, ORG_B, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
 @Module({
-  imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, QueuesModule, ChannelsModule, AttachmentsModule, InboxModule, QrModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })],
+  imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, ContactsModule, QueuesModule, ChannelsModule, AttachmentsModule, InboxModule, QrModule, AdsModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })],
 })
 class TestAppModule {}
 
@@ -49,7 +53,7 @@ const saved = { ...process.env };
 const fake = (): FakeQrSession => app.get(QR_SESSION, { strict: false }) as FakeQrSession;
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE webhook_events, message_attachments, messages, conversations, contact_phones, contacts, qr_accounts, whatsapp_accounts, channel_routes, channel_accounts, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE ad_creatives, webhook_events, message_attachments, messages, conversations, contact_phones, contacts, qr_accounts, whatsapp_accounts, channel_routes, channel_accounts, queues, audit_logs, access_sessions, sessions, auth_throttle, organization_members, organizations, users CASCADE');
   await admin.query('TRUNCATE qr_routes');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte'], [ORG_B, 'client', 'Estudio Luna']] as const) {
     await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
@@ -286,6 +290,22 @@ describe('webhook de Evolution', () => {
     expect((await admin.query(`SELECT count(*)::int AS n FROM messages`)).rows[0].n).toBe(0);
   });
 
+  it('lo que se ignora se CUENTA por motivo y hora (solo un contador: nada del contenido), por conexión y empresa (v19 B1)', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await post(v.id, { ...upsert(inst, 'G-0000000000000003', { conversation: 'grupo' }), data: { key: { remoteJid: '120363424375113025@g.us', fromMe: false, id: 'G-0000000000000003' }, message: { conversation: 'x' } } });
+    await post(v.id, { ...upsert(inst, 'G-0000000000000004', { conversation: 'grupo' }), data: { key: { remoteJid: '120363424375113026@g.us', fromMe: false, id: 'G-0000000000000004' }, message: { conversation: 'x' } } });
+    await post(v.id, evt(inst, 'messages.update', { keyId: 'ACK-0000000000000001', status: 'READ', fromMe: false }));
+    await post(v.id, evt(inst, 'chats.update', { id: 'x' }));
+    await post(v.id, upsert('ss-otra-instancia-0000', 'O-0000000000000009', { conversation: 'ajeno' })); // otra instancia: no es de esta conexión, no cuenta
+    const rows = (await admin.query(`SELECT reason, sum(n)::int AS n FROM webhook_ignored WHERE channel_account_id = $1 GROUP BY reason ORDER BY reason`, [v.id])).rows as Array<{ reason: string; n: number }>;
+    expect(rows).toEqual([{ reason: 'group', n: 2 }, { reason: 'receipt', n: 1 }, { reason: 'unsupported', n: 1 }]);
+    // nunca el contenido
+    expect(JSON.stringify((await admin.query(`SELECT * FROM webhook_ignored`)).rows)).not.toMatch(/grupo|ajeno|x@/);
+    // la empresa B no ve nada de esto (RLS)
+    expect((await admin.query(`SELECT count(*)::int AS n FROM webhook_ignored WHERE organization_id = $1`, [ORG_B])).rows[0].n).toBe(0);
+  });
+
   it('un archivo que llega en base64 NO se guarda en el aviso: va al almacenamiento y el adjunto queda listo (con su revisión) y sin rastro temporal', async () => {
     const v = await mk(T.alice);
     const inst = await instanceOf(v.id);
@@ -411,6 +431,8 @@ describe('envío por la sesión', () => {
 
   it('calentamiento: el límite del día (20 el primer día) y la pausa mínima entre mensajes hacen esperar al siguiente, sin gastar intentos', async () => {
     const { v, conv } = await ready();
+    // un envío «en frío»: el cliente no escribió en las últimas 24 h (contestar a quien escribió primero no se frena con el límite del día)
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '3 days' WHERE id = $1`, [conv]);
     for (let i = 0; i < 20; i++) await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'previo', 'sent', now() - interval '2 hours', $4)`, [ORG_A, conv, v.id, `PREV${i}`]);
     const id = await queueOut(conv, v.id, 'El número 21');
     expect(await dispatch(id)).toEqual({ outcome: 'retry', code: 'rate_limited' });
@@ -425,6 +447,40 @@ describe('envío por la sesión', () => {
     const gap = await dispatch(next, new Date());
     expect(gap).toEqual({ outcome: 'retry', code: 'rate_limited' });
     expect(await dispatch(next, new Date(Date.now() + 10_000))).toEqual({ outcome: 'sent' });
+  });
+
+  it('respuestas al cliente que escribió en las últimas 24 h NO se frenan con el límite del día (solo con la pausa mínima); la campaña y el contacto en frío sí, y lo escrito desde el TELÉFONO no cuenta (v19)', async () => {
+    const { v, conv } = await ready();
+    const prev = (i: number, origin: string | null) =>
+      admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id, meta) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'previo', 'sent', now() - interval '2 hours', $4, $5::jsonb)`, [ORG_A, conv, v.id, `GATE${i}-${origin ?? 'p'}`, origin ? JSON.stringify({ origin }) : '{}']);
+    // 20 envíos de la PLATAFORMA en las últimas 24 h = el límite del primer día
+    for (let i = 0; i < 20; i++) await prev(i, null);
+    // 1) con el cliente escribiendo hace poco, la respuesta sale aunque ya se llegó al límite
+    const reply = await queueOut(conv, v.id, 'respuesta al cliente');
+    expect(await dispatch(reply)).toEqual({ outcome: 'sent' });
+    // 2) pero la pausa mínima sigue: otra enseguida espera unos segundos
+    const next = await queueOut(conv, v.id, 'otra enseguida');
+    expect(await dispatch(next, new Date())).toEqual({ outcome: 'retry', code: 'rate_limited' });
+    expect(await dispatch(next, new Date(Date.now() + 10_000))).toEqual({ outcome: 'sent' });
+    // 3) una campaña NO es respuesta: sigue frenada por el límite
+    const camp = await queueOut(conv, v.id, 'campaña');
+    await admin.query(`UPDATE messages SET sender_type = 'campaign' WHERE id = $1`, [camp]);
+    expect(await dispatch(camp, new Date(Date.now() + 20_000))).toEqual({ outcome: 'retry', code: 'rate_limited' });
+    await admin.query(`UPDATE messages SET status = 'failed', next_attempt_at = NULL WHERE id = $1`, [camp]); // fuera de la cola (un mensaje no sale antes que otro anterior suyo en cola)
+    // 4) si el cliente no escribe desde hace más de 24 h es un envío en frío: también frenado
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '3 days' WHERE id = $1`, [conv]);
+    const cold = await queueOut(conv, v.id, 'en frío');
+    expect(await dispatch(cold, new Date(Date.now() + 30_000))).toEqual({ outcome: 'retry', code: 'rate_limited' });
+  });
+
+  it('lo escrito desde el teléfono no cuenta para el límite del día ni para la pausa mínima: 200 mensajes del teléfono no frenan un envío en frío (v19)', async () => {
+    const { v, conv } = await ready();
+    await admin.query(`UPDATE conversations SET last_inbound_at = now() - interval '3 days' WHERE id = $1`, [conv]);
+    for (let i = 0; i < 200; i++) {
+      await admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id, meta) VALUES (gen_random_uuid(), $1, $2, $3, 'out', 'human', 'text', 'del teléfono', 'sent', now() - interval '1 second', $4, '{"origin":"device"}'::jsonb)`, [ORG_A, conv, v.id, `DEV${i}`]);
+    }
+    const id = await queueOut(conv, v.id, 'enviado por la plataforma');
+    expect(await dispatch(id)).toEqual({ outcome: 'sent' });
   });
 
   it('no se pueden enviar plantillas ni stickers por QR (falla con su motivo); un error del servidor se reintenta y un número inválido falla', async () => {
@@ -628,5 +684,629 @@ describe('mensajes escritos desde el teléfono (v9)', () => {
     expect(await countOf('messages', `organization_id = '${ORG_A}'`)).toBe(1);
     expect(await countOf('messages', `organization_id = '${ORG_B}'`)).toBe(1);
     expect((await admin.query(`SELECT body FROM messages WHERE organization_id = $1`, [ORG_A])).rows[0].body).toBe('de A');
+  });
+});
+
+describe('ponerse al día con Evolution (v19 B3)', () => {
+  const rec = (id: string, ageH: number, body: string, over: { who?: string; fromMe?: boolean; message?: Record<string, unknown> } = {}): Record<string, unknown> => {
+    const who = over.who ?? '593990000002';
+    return { key: { remoteJid: `${who}@s.whatsapp.net`, remoteJidAlt: `${who}@s.whatsapp.net`, fromMe: over.fromMe ?? false, id, participant: '' }, pushName: 'Cliente Prueba', status: 'DELIVERY_ACK', message: over.message ?? { conversation: body }, messageType: 'conversation', messageTimestamp: Math.floor(Date.now() / 1000 - ageH * 3600), instanceId: 'i-1', source: 'android' };
+  };
+  const give = (instance: string, records: Array<Record<string, unknown>>): void => void fake().stored.set(instance, records);
+  const catchUp = async (token: string, id: string, hours?: number) => call('POST', `/qr-channels/${id}/catch-up`, token, hours === undefined ? {} : { hours });
+  interface Result { found: number; recovered: number; existing: number; truncated: boolean; hours: number }
+
+  it('lo que Evolution tiene y la plataforma no, entra a la bandeja por el mismo camino (contacto, conversación, mensaje con su hora real); repetir no duplica; es histórico', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    give(inst, [rec('REC-0000000000001', 60, 'Hola, ¿precio?'), rec('REC-0000000000002', 59, 'Quedo atento'), rec('REC-0000000000003', 3, 'Buenas')]);
+    const r = await catchUp(T.alice, v.id, 96);
+    expect(r.status).toBe(200);
+    expect(await json<Result>(r)).toMatchObject({ found: 3, recovered: 3, existing: 0, truncated: false, hours: 96 });
+    await runEvents();
+    await runEvents();
+    expect(await countOf('messages')).toBe(3);
+    const rows = (await admin.query(`SELECT body, direction, meta, sent_at FROM messages ORDER BY sent_at`)).rows as Array<{ body: string; direction: string; meta: Record<string, unknown>; sent_at: Date }>;
+    expect(rows.map((x) => x.body)).toEqual(['Hola, ¿precio?', 'Quedo atento', 'Buenas']);
+    expect(rows.every((x) => x.direction === 'in' && x.meta['recovered'] === true)).toBe(true);
+    expect(Date.now() - rows[0]!.sent_at.getTime()).toBeGreaterThan(59 * HOUR); // conserva la hora REAL de WhatsApp, no la de hoy
+    const conv = await convOf(v.id);
+    expect(conv?.['unread_count']).toBe(3);
+    expect(await countOf('contacts')).toBe(1);
+    // repetir la pasada: ya existen, no se pone nada en cola ni se duplica
+    expect(await json<Result>(await catchUp(T.alice, v.id, 96))).toMatchObject({ found: 3, recovered: 0, existing: 3 });
+    await runEvents();
+    expect(await countOf('messages')).toBe(3);
+    const q = await qrRow(v.id);
+    expect(q['last_catch_up_found']).toBe(3);
+    expect(q['last_catch_up_recovered']).toBe(0);
+    expect(q['last_catch_up_error']).toBeNull();
+    // la lista de conexiones muestra el resultado, sin teléfonos ni textos
+    const list = await json<{ items: Array<{ id: string; catch_up: { found: number; recovered: number; truncated: boolean; error: string | null } | null }> }>(await call('GET', '/qr-channels', T.alice));
+    expect(list.items.find((i) => i.id === v.id)?.catch_up).toMatchObject({ found: 3, recovered: 0, truncated: false, error: null });
+  });
+
+  it('lo que ya recibió el webhook no se vuelve a traer; un mensaje escrito desde el teléfono entra como de salida; los grupos no', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    await post(v.id, upsert(inst, 'LIVE-000000000001', { conversation: 'ya llegó por el webhook' }));
+    await runEvents();
+    const group = rec('GRP-0000000000001', 18, 'grupo');
+    (group['key'] as Record<string, unknown>)['remoteJid'] = '120363424375113025@g.us';
+    give(inst, [rec('LIVE-000000000001', 0.1, 'ya llegó por el webhook'), rec('OLD-0000000000001', 20, 'se perdió'), rec('PH-00000000000001', 19, 'respuesta desde el teléfono', { fromMe: true }), group]);
+    expect(await json<Result>(await catchUp(T.alice, v.id, 48))).toMatchObject({ found: 3, recovered: 2, existing: 1 });
+    await runEvents();
+    expect(await countOf('messages')).toBe(3);
+    const phone = (await admin.query(`SELECT direction, sender_type, meta FROM messages WHERE external_id = 'PH-00000000000001'`)).rows[0] as { direction: string; sender_type: string; meta: Record<string, unknown> };
+    expect(phone).toMatchObject({ direction: 'out', sender_type: 'human' });
+    expect(phone.meta['origin']).toBe('device');
+  });
+
+  it('un mensaje recuperado de días atrás no dispara reglas ni cronómetros ni saludos; el hecho se emite marcado como histórico', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    const seen: Array<{ type: string; historical: boolean }> = [];
+    const off = app.get(DomainEventBus).subscribe((_tx, e) => {
+      seen.push({ type: e.type, historical: e.type === 'message_received' && e.historical === true });
+      return Promise.resolve();
+    });
+    give(inst, [rec('HIS-0000000000001', 30, 'mensaje viejo')]);
+    await catchUp(T.alice, v.id, 48);
+    await runEvents();
+    off();
+    expect(seen.filter((e) => e.type === 'message_received')).toEqual([{ type: 'message_received', historical: true }]);
+    expect(await countOf('messages', `sender_type = 'automation'`)).toBe(0);
+  });
+
+  it('hours se valida (1 a 168); una asesora no puede; otra empresa no la ve (404); una instancia que ya no existe da 409', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    expect((await catchUp(T.alice, v.id, 0)).status).toBe(400);
+    expect((await catchUp(T.alice, v.id, 169)).status).toBe(400);
+    expect((await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 24, otro: 1 })).status).toBe(400);
+    expect((await catchUp(T.carol, v.id, 24)).status).toBe(403);
+    expect((await catchUp(T.bob, v.id, 24)).status).toBe(404);
+    expect((await call('POST', `/qr-channels/${v.id}/catch-up`, undefined, { hours: 24 })).status).toBe(401);
+    expect((await catchUp(T.alice, v.id)).status).toBe(200); // sin hours: 48 por omisión
+    fake().instances.delete(inst);
+    const gone = await catchUp(T.alice, v.id, 24);
+    expect(gone.status).toBe(409);
+    expect((await json<{ error: { code: string } }>(gone)).error.code).toBe('QR_INSTANCE_MISSING');
+  });
+
+  it('si hay más mensajes que el tope de lectura se dice (truncated) y los recientes sí entran', async () => {
+    const v = await mk(T.alice);
+    const inst = await instanceOf(v.id);
+    await open(v.id);
+    app.get(QrCatchUpService).maxRecords = 1000;
+    give(inst, Array.from({ length: 1005 }, (_x, i) => rec(`BIG-${String(i).padStart(12, '0')}`, 40 - i / 100, `m${i}`, { who: `59399${String(1000 + (i % 7)).padStart(7, '0')}` })));
+    const r = await json<Result>(await catchUp(T.alice, v.id, 48));
+    expect(r.truncated).toBe(true);
+    expect(r.found).toBe(1000);
+    expect((await qrRow(v.id))['last_catch_up_truncated']).toBe(true);
+  });
+
+  it('la tarea automática: solo sesiones abiertas, y un fallo de Evolution deja constancia sin tumbar la tarea', async () => {
+    const open1 = await mk(T.alice, 'Abierta');
+    const closed = await mk(T.alice, 'Caída');
+    await open(open1.id);
+    const i1 = await instanceOf(open1.id);
+    give(i1, [rec('JOB-0000000000001', 10, 'desde la tarea')]);
+    const job = app.get(QrCatchUpJob);
+    const now = new Date();
+    expect(await job.run(now)).toBe(1);
+    await runEvents();
+    expect(await countOf('messages')).toBe(1);
+    expect((await qrRow(closed.id))['last_catch_up_at']).toBeNull();
+    expect(((await qrRow(open1.id))['last_catch_up_at'] as Date).getTime()).toBe(now.getTime());
+    // Evolution ya no tiene la instancia: la tarea no lanza y anota el motivo
+    fake().instances.delete(i1);
+    expect(await job.run(new Date(now.getTime() + 10 * 60_000))).toBe(0);
+    expect((await qrRow(open1.id))['last_catch_up_error']).toMatch(/No se pudo leer de Evolution/);
+  });
+});
+
+describe('ventana de la pasada automática (v19 B3)', () => {
+  it('sin pasada previa mira 7 días; con una previa, desde ella menos 15 min, y nunca más atrás de 48 h', () => {
+    const now = new Date('2026-11-17T12:00:00Z');
+    expect(autoWindowStart(null, now).toISOString()).toBe('2026-11-10T12:00:00.000Z');
+    expect(autoWindowStart(new Date('2026-11-17T11:50:00Z'), now).toISOString()).toBe('2026-11-17T11:35:00.000Z');
+    expect(autoWindowStart(new Date('2026-11-10T00:00:00Z'), now).toISOString()).toBe('2026-11-15T12:00:00.000Z');
+  });
+});
+
+describe('contactos por su código @lid cuando WhatsApp no entrega el teléfono (ADR-73)', () => {
+  const LID = '257720267587711@lid';
+  const lidMsg = (instance: string, id: string, text: string, over: { lid?: string; alt?: string; name?: string } = {}) =>
+    evt(instance, 'messages.upsert', { key: { remoteJid: over.lid ?? LID, ...(over.alt ? { remoteJidAlt: over.alt } : {}), fromMe: false, id, participant: '' }, pushName: over.name ?? 'Cliente Lid', status: 'DELIVERY_ACK', message: { conversation: text }, messageType: 'conversation', messageTimestamp: Math.floor(Date.now() / 1000), instanceId: 'i-1', source: 'ios' });
+  const contactsOf = async (org = ORG_A) => (await admin.query(`SELECT c.id, c.name, c.source, (SELECT count(*)::int FROM contact_phones p WHERE p.contact_id = c.id AND p.deleted_at IS NULL) AS phones FROM contacts c WHERE c.organization_id = $1 AND c.deleted_at IS NULL ORDER BY c.created_at`, [org])).rows as Array<{ id: string; name: string; source: string; phones: number }>;
+  const idsOf = async (org = ORG_A) => (await admin.query(`SELECT contact_id, kind, value FROM contact_identities WHERE organization_id = $1`, [org])).rows as Array<{ contact_id: string; kind: string; value: string }>;
+  const setup = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    return { v, inst: await instanceOf(v.id) };
+  };
+
+  it('un mensaje solo con @lid crea un contacto SIN teléfono con el nombre de su perfil, su identidad y su conversación; el siguiente mensaje del mismo código es el mismo contacto', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID1-0000000000001', 'Hola, ¿precio?'));
+    await runEvents();
+    const [c] = await contactsOf();
+    expect(c).toMatchObject({ name: 'Cliente Lid', source: 'whatsapp', phones: 0 });
+    expect(await idsOf()).toEqual([{ contact_id: c!.id, kind: 'wa_lid', value: LID }]);
+    expect((await convOf(v.id))?.['peer_id']).toBe(LID);
+    expect(await countOf('messages')).toBe(1);
+    expect(await countOf('contact_tags', `contact_id = '${c!.id}'`)).toBe(0); // la etiqueta Lead ya no se pone sola: la coloca el asesor
+    await post(v.id, lidMsg(inst, 'LID1-0000000000002', 'Sigo aquí'));
+    await runEvents();
+    expect(await contactsOf()).toHaveLength(1);
+    expect(await countOf('messages')).toBe(2);
+    expect(await countOf('conversations')).toBe(1);
+  });
+
+  it('sin nombre de perfil se llama «Contacto sin teléfono»', async () => {
+    const { v, inst } = await setup();
+    const body = lidMsg(inst, 'LID2-0000000000001', 'hola');
+    (body.data as Record<string, unknown>)['pushName'] = '';
+    await post(v.id, body);
+    await runEvents();
+    expect((await contactsOf())[0]!.name).toBe('Contacto sin teléfono');
+  });
+
+  it('cuando después llega el teléfono (remoteJidAlt) el MISMO contacto lo aprende: no se duplica y el teléfono queda como principal', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID3-0000000000001', 'primero sin teléfono'));
+    await runEvents();
+    await post(v.id, lidMsg(inst, 'LID3-0000000000002', 'ahora con teléfono', { alt: '593991230001@s.whatsapp.net' }));
+    await runEvents();
+    const cs = await contactsOf();
+    expect(cs).toHaveLength(1);
+    expect(cs[0]!.phones).toBe(1);
+    expect((await admin.query(`SELECT e164, is_primary FROM contact_phones WHERE contact_id = $1`, [cs[0]!.id])).rows[0]).toEqual({ e164: '+593991230001', is_primary: true });
+    expect(await countOf('conversations')).toBe(1);
+  });
+
+  it('con teléfono y código desde el primer mensaje se guarda el par; un mensaje posterior solo con el código es la misma persona', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID4-0000000000001', 'con teléfono', { alt: '593991230002@s.whatsapp.net' }));
+    await runEvents();
+    const [c] = await contactsOf();
+    expect(c!.phones).toBe(1);
+    expect(await idsOf()).toEqual([{ contact_id: c!.id, kind: 'wa_lid', value: LID }]);
+    await post(v.id, lidMsg(inst, 'LID4-0000000000002', 'esta vez sin teléfono'));
+    await runEvents();
+    expect(await contactsOf()).toHaveLength(1);
+    expect(await countOf('messages')).toBe(2);
+  });
+
+  it('si el teléfono que llega ya era de OTRO contacto NO se fusionan: queda constancia en la auditoría y cada contacto sigue como estaba', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID5-0000000000001', 'sin teléfono')); // contacto A, solo con código
+    await post(v.id, upsert(inst, 'PH5-0000000000001', { conversation: 'desde su teléfono' }, '593991230003')); // contacto B, con teléfono
+    await runEvents();
+    expect(await contactsOf()).toHaveLength(2);
+    await post(v.id, lidMsg(inst, 'LID5-0000000000002', 'ahora trae el teléfono de B', { alt: '593991230003@s.whatsapp.net' }));
+    await runEvents();
+    const cs = await contactsOf();
+    expect(cs).toHaveLength(2); // sin fusión automática
+    expect(cs.map((c) => c.phones).sort()).toEqual([0, 1]);
+    const conflict = (await admin.query(`SELECT entity_id, new_value FROM audit_logs WHERE organization_id = $1 AND field = 'wa_lid_conflict'`, [ORG_A])).rows as Array<{ entity_id: string; new_value: { other_contact_id: string } }>;
+    expect(conflict).toHaveLength(1);
+    const withPhone = cs.find((c) => c.phones === 1)!;
+    expect(conflict[0]!.entity_id).toBe(withPhone.id);
+    expect(conflict[0]!.new_value.other_contact_id).toBe(cs.find((c) => c.phones === 0)!.id);
+  });
+
+  it('responder a un contacto sin teléfono falla con su motivo (lid_no_phone) y NO manda nada a los dígitos del código; con el teléfono ya conocido sale al teléfono', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID6-0000000000001', 'hola'));
+    await runEvents();
+    const conv = (await convOf(v.id))!['id'] as string;
+    const id = await queueOut(conv, v.id, 'te respondo');
+    expect(await dispatch(id)).toMatchObject({ outcome: 'failed' });
+    expect(fake().sent).toHaveLength(0);
+    expect((await msg(id))['meta']).toMatchObject({ error_code: 'lid_no_phone' });
+    expect(String((await msg(id))['error'])).toMatch(/no nos entregó el teléfono/);
+    // llega el teléfono: ahora se responde a ESE teléfono, no a los dígitos del código
+    await post(v.id, lidMsg(inst, 'LID6-0000000000002', 'ahora sí', { alt: '593991230004@s.whatsapp.net' }));
+    await runEvents();
+    const id2 = await queueOut(conv, v.id, 'ya te veo');
+    expect(await dispatch(id2)).toEqual({ outcome: 'sent' });
+    expect(fake().sent).toHaveLength(1);
+    expect(fake().sent[0]!.to).toBe('593991230004');
+  });
+
+  it('un contacto con teléfono cuya conversación quedó con el código como destino también recibe al teléfono (antes habría ido a los dígitos del código)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, lidMsg(inst, 'LID7-0000000000001', 'hola', { alt: '593991230005@s.whatsapp.net' }));
+    await runEvents();
+    expect((await convOf(v.id))?.['peer_id']).toBe(LID);
+    const id = await queueOut((await convOf(v.id))!['id'] as string, v.id, 'respuesta');
+    expect(await dispatch(id)).toEqual({ outcome: 'sent' });
+    expect(fake().sent[0]!.to).toBe('593991230005');
+  });
+
+  it('aislamiento A↔B: el mismo código en otra empresa es otro contacto y su identidad no se ve desde la primera', async () => {
+    const a = await mk(T.alice);
+    const b = await mk(T.bob, 'Chip de Luna');
+    await open(a.id);
+    const instA = await instanceOf(a.id);
+    const instB = await instanceOf(b.id);
+    fake().setState(instB, 'open');
+    await post(a.id, lidMsg(instA, 'ISO-0000000000001', 'en A'));
+    await post(b.id, lidMsg(instB, 'ISO-0000000000001', 'en B', { name: 'Otra persona' }));
+    await runEvents(ORG_A);
+    await runEvents(ORG_B);
+    expect((await contactsOf(ORG_A)).map((c) => c.name)).toEqual(['Cliente Lid']);
+    expect((await contactsOf(ORG_B)).map((c) => c.name)).toEqual(['Otra persona']);
+    expect(await idsOf(ORG_A)).toHaveLength(1);
+    expect(await idsOf(ORG_B)).toHaveLength(1);
+    expect((await idsOf(ORG_A))[0]!.contact_id).not.toBe((await idsOf(ORG_B))[0]!.contact_id);
+  });
+
+  it('«ponerse al día»: un @lid con teléfono en OTRO registro del mismo código se resuelve por ese teléfono; sin ninguno entra como contacto sin teléfono', async () => {
+    const { v, inst } = await setup();
+    const now = Math.floor(Date.now() / 1000);
+    const rec = (id: string, lid: string, ageH: number, alt?: string): Record<string, unknown> => ({ key: { remoteJid: lid, ...(alt ? { remoteJidAlt: alt } : {}), fromMe: false, id }, pushName: 'Desde historial', message: { conversation: `m-${id}` }, messageType: 'conversation', messageTimestamp: now - ageH * 3600 });
+    const A = '111111111111@lid';
+    const B = '222222222222@lid';
+    fake().stored.set(inst, [rec('H-A-00000000001', A, 30), rec('H-A-00000000002', A, 20, '593991230006@s.whatsapp.net'), rec('H-B-00000000001', B, 10)]);
+    const r = await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 48 });
+    expect(r.status).toBe(200);
+    expect(await json<{ found: number; recovered: number }>(r)).toMatchObject({ found: 3, recovered: 3 });
+    await runEvents();
+    const cs = await contactsOf();
+    expect(cs).toHaveLength(2);
+    expect(cs.map((c) => c.phones).sort()).toEqual([0, 1]); // A: con teléfono (por el registro hermano); B: sin teléfono
+    expect(await countOf('messages')).toBe(3);
+    expect((await idsOf()).map((i) => i.value).sort()).toEqual([A, B]);
+  });
+});
+
+describe('teléfonos que Evolution entrega en algunos registros (withKnownPhones, ADR-73)', () => {
+  const R = (lid: string, id: string, alt?: string): Record<string, unknown> => ({ key: { remoteJid: lid, ...(alt ? { remoteJidAlt: alt } : {}), fromMe: false, id } });
+  it('copia el teléfono a los registros del mismo código que no lo traen, sin tocar los originales ni los de otros códigos', () => {
+    const a = R('100000@lid', 'a');
+    const b = R('100000@lid', 'b', '593990000009@s.whatsapp.net');
+    const c = R('200000@lid', 'c');
+    const d = { key: { remoteJid: '593990000010@s.whatsapp.net', id: 'd' } };
+    const out = withKnownPhones([a, b, c, d]);
+    expect((out[0]!['key'] as Record<string, unknown>)['remoteJidAlt']).toBe('593990000009@s.whatsapp.net');
+    expect((out[2]!['key'] as Record<string, unknown>)['remoteJidAlt']).toBeUndefined();
+    expect(out[3]).toBe(d);
+    expect((a['key'] as Record<string, unknown>)['remoteJidAlt']).toBeUndefined(); // el original no cambió
+  });
+});
+
+describe('aviso de volumen por conexión QR (v19, sin bloquear)', () => {
+  it('la lista y el detalle dicen cuántos mensajes envió la plataforma en 24 h y si pasan del límite del día (ok / cerca 80 % / por encima); lo escrito desde el teléfono no cuenta', async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    const conv = (await admin.query(`SELECT 1`)).rows; void conv;
+    const cv = await json<{ items: Array<{ id: string; volume: { sent_24h: number; limit: number; level: string } }> }>(await call('GET', '/qr-channels', T.alice));
+    expect(cv.items.find((i) => i.id === v.id)?.volume).toEqual({ sent_24h: 0, limit: 20, level: 'ok' });
+    const insert = (n: number, origin: string | null) =>
+      admin.query(`INSERT INTO messages(id, organization_id, conversation_id, channel_account_id, direction, sender_type, kind, body, status, sent_at, external_id, meta) SELECT gen_random_uuid(), $1, c.id, $2, 'out', 'human', 'text', 'x', 'sent', now() - interval '1 hour', $3 || g::text, $4::jsonb FROM generate_series(1, $5) g CROSS JOIN LATERAL (SELECT id FROM conversations WHERE channel_account_id = $2 LIMIT 1) c`, [ORG_A, v.id, `VOL-${origin ?? 'p'}-${randomBytes(4).toString('hex')}-`, origin ? JSON.stringify({ origin }) : '{}', n]);
+    // no hay conversación todavía: se crea una con un cliente
+    await post(v.id, upsert(await instanceOf(v.id), 'VOL-IN-0000000001', { conversation: 'hola' }));
+    await runEvents();
+    await insert(17, null); // 17 de 20 → cerca del límite
+    await insert(50, 'device'); // del teléfono: no cuenta
+    const near = await json<{ items: Array<{ id: string; volume: { sent_24h: number; limit: number; level: string } }> }>(await call('GET', '/qr-channels', T.alice));
+    expect(near.items.find((i) => i.id === v.id)?.volume).toEqual({ sent_24h: 17, limit: 20, level: 'near' });
+    await insert(10, null); // 27 → por encima
+    const one = await json<{ volume: { sent_24h: number; level: string } }>(await call('GET', `/qr-channels/${v.id}`, T.alice));
+    expect(one.volume).toMatchObject({ sent_24h: 27, level: 'over' });
+    // a otra empresa no le sale nada de esta conexión
+    expect((await call('GET', `/qr-channels/${v.id}`, T.bob)).status).toBe(404);
+  });
+});
+
+describe('clics de anuncio por WhatsApp QR (v20 · ADR-55)', () => {
+  const adMsg = (instance: string, id: string, o: { clid?: string | null; ad?: string; title?: string; app?: string; who?: string; lid?: string; ageH?: number } = {}) =>
+    evt(instance, 'messages.upsert', {
+      key: { remoteJid: o.lid ?? `${o.who ?? '593990000002'}@s.whatsapp.net`, ...(o.lid ? {} : { remoteJidAlt: `${o.who ?? '593990000002'}@s.whatsapp.net` }), fromMe: false, id, participant: '' },
+      pushName: 'Cliente Anuncio',
+      status: 'DELIVERY_ACK',
+      message: { conversation: 'Hola, vengo del anuncio' },
+      messageType: 'conversation',
+      messageTimestamp: Math.floor(Date.now() / 1000 - (o.ageH ?? 0) * 3600),
+      instanceId: 'i-1',
+      source: 'android',
+      contextInfo: { externalAdReply: { title: o.title ?? 'Cupos abiertos', body: 'Escríbenos', ...(o.clid === null ? {} : { ctwaClid: o.clid ?? 'CLID-PRUEBA-0001' }), sourceId: o.ad ?? '120210000000000001', sourceUrl: 'https://fb.me/ejemplo', sourceApp: o.app ?? 'instagram', mediaType: 1, thumbnail: { '0': 255, '1': 216 } } },
+    });
+  const setup = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    return { v, inst: await instanceOf(v.id) };
+  };
+  const contact = async (org = ORG_A) => (await admin.query(`SELECT id, channel, ctwa_cl_id, first_touch_ad_id, last_touch_ad_id, first_touch_ad, last_touch_ad, first_touch_source FROM contacts WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at`, [org])).rows as Array<Record<string, string | null>>;
+  const metaEvents = async (org = ORG_A) => (await admin.query(`SELECT type, status, payload FROM meta_events WHERE organization_id = $1 ORDER BY created_at`, [org])).rows as Array<{ type: string; status: string; payload: { event_id: string; user_data: Record<string, unknown>; custom_data: Record<string, unknown> } }>;
+
+  it('un mensaje con anuncio deja en el contacto el click id, el id del anuncio y el titular (primer y último toque), el canal de la red y el historial, y NO deja ningún evento hacia Meta (el Lead de los chats se quitó el 2026-11-23)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000001'));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ channel: 'instagram', ctwa_cl_id: 'CLID-PRUEBA-0001', first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000001', first_touch_source: 'meta_ctwa' });
+    expect(c!['first_touch_ad']).toBeNull(); // el titular NO es el nombre del anuncio (v20): vive en el historial y en el anuncio, no en el nombre
+    const touches = (await admin.query(`SELECT kind, ad_id, ctwa_clid, headline, source_url FROM contact_touch_events WHERE contact_id = $1`, [c!['id']])).rows;
+    expect(touches).toEqual([{ kind: 'ad_click', ad_id: '120210000000000001', ctwa_clid: 'CLID-PRUEBA-0001', headline: 'Cupos abiertos', source_url: 'https://fb.me/ejemplo' }]);
+    expect(await metaEvents()).toHaveLength(0);
+    expect(await countOf('contact_tags', `contact_id = '${c!['id']}'`)).toBe(0); // la etiqueta Lead no se pone sola: la coloca el asesor
+  });
+
+  it('Facebook como red: el contacto nuevo queda con canal «facebook»; sin red reconocible, también facebook (regla de siempre)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000002', { app: 'facebook', who: '593990000011' }));
+    await post(v.id, adMsg(inst, 'ADI-0000000000003', { app: 'whatsapp', who: '593990000012', clid: 'CLID-PRUEBA-0002' }));
+    await runEvents();
+    const rows = await contact();
+    expect(rows.map((r) => r['channel']).sort()).toEqual(['facebook', 'facebook']);
+  });
+
+  it('el mismo clic repetido no duplica (ni contacto, ni toque, ni evento); un clic de OTRO anuncio cambia el último toque y conserva el primero', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000004'));
+    await runEvents();
+    await post(v.id, adMsg(inst, 'ADI-0000000000005')); // otro mensaje con el MISMO clic
+    await runEvents();
+    expect(await contact()).toHaveLength(1);
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
+    expect(await metaEvents()).toHaveLength(0);
+    await post(v.id, adMsg(inst, 'ADI-0000000000006', { clid: 'CLID-PRUEBA-0003', ad: '120210000000000002', title: 'Otro anuncio' }));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000002', ctwa_cl_id: 'CLID-PRUEBA-0003' });
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(2);
+    expect(await metaEvents()).toHaveLength(0);
+  });
+
+  it('sin click id no se registra atribución (el contacto entra normal, con su toque de primer mensaje y sin evento)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000007', { clid: null }));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ channel: 'whatsapp', ctwa_cl_id: null, first_touch_ad_id: null });
+    expect(await metaEvents()).toHaveLength(0);
+    expect(await countOf('contact_touch_events', `kind = 'message_in'`)).toBe(1);
+  });
+
+  it('un clic de hace más de 7 días se guarda en el contacto y el historial pero NO genera evento hacia Meta (Meta no lo aceptaría)', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000008', { ageH: 9 * 24 }));
+    await runEvents();
+    expect((await contact())[0]).toMatchObject({ ctwa_cl_id: 'CLID-PRUEBA-0001', first_touch_ad_id: '120210000000000001' });
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
+    expect(await metaEvents()).toHaveLength(0);
+    expect(await countOf('contact_tags', `true`)).toBe(0);
+  });
+
+  it('un clic que llega de un contacto con solo su código @lid (sin teléfono) también se atribuye (sin teléfono) y no deja evento hacia Meta', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, adMsg(inst, 'ADI-0000000000009', { lid: '257720267587799@lid' }));
+    await runEvents();
+    const [c] = await contact();
+    expect(c).toMatchObject({ ctwa_cl_id: 'CLID-PRUEBA-0001', last_touch_ad_id: '120210000000000001' });
+    expect(await countOf('contact_phones')).toBe(0);
+    expect(await metaEvents()).toHaveLength(0);
+  });
+
+  it('lo que llega por «ponerse al día» también atribuye (histórico) y repetir la pasada no duplica', async () => {
+    const { v, inst } = await setup();
+    const rec = { key: { remoteJid: '593990000021@s.whatsapp.net', remoteJidAlt: '593990000021@s.whatsapp.net', fromMe: false, id: 'ADI-HIST-0000001' }, pushName: 'Desde historial', message: { conversation: 'hola' }, messageType: 'conversation', messageTimestamp: Math.floor(Date.now() / 1000 - 5 * 3600), contextInfo: { externalAdReply: { title: 'Cupos', ctwaClid: 'CLID-HIST-0001', sourceId: '120210000000000003', sourceApp: 'facebook', sourceUrl: 'https://fb.me/h' } } };
+    fake().stored.set(inst, [rec]);
+    expect((await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 24 })).status).toBe(200);
+    await runEvents();
+    await call('POST', `/qr-channels/${v.id}/catch-up`, T.alice, { hours: 24 });
+    await runEvents();
+    expect(await contact()).toHaveLength(1);
+    expect((await contact())[0]).toMatchObject({ channel: 'facebook', ctwa_cl_id: 'CLID-HIST-0001', last_touch_ad_id: '120210000000000003' });
+    expect(await metaEvents()).toHaveLength(0);
+  });
+
+  it('aislamiento A↔B: el clic de la empresa A nunca aparece en la B (ni contacto, ni toque, ni evento)', async () => {
+    const a = await mk(T.alice);
+    const b = await mk(T.bob, 'Chip de Luna');
+    await open(a.id);
+    fake().setState(await instanceOf(b.id), 'open');
+    await post(a.id, adMsg(await instanceOf(a.id), 'ADI-ISO-000000001'));
+    await runEvents(ORG_A);
+    await runEvents(ORG_B);
+    expect(await contact(ORG_A)).toHaveLength(1);
+    expect(await contact(ORG_B)).toHaveLength(0);
+    expect(await countOf('contact_touch_events', `organization_id = '${ORG_B}'`)).toBe(0);
+    expect(await metaEvents(ORG_B)).toHaveLength(0);
+  });
+});
+
+describe('recuperación de anuncios de avisos guardados (v20 · ADR-55)', () => {
+  const JPEG = { '0': 255, '1': 216, '2': 255, '3': 224, '4': 1, '5': 2, '6': 3, '7': 4 };
+  const dataOf = (id: string, o: { clid?: string; ad?: string; title?: string; who?: string; ageH?: number; thumb?: boolean } = {}) => ({
+    key: { remoteJid: `${o.who ?? '593990000002'}@s.whatsapp.net`, remoteJidAlt: `${o.who ?? '593990000002'}@s.whatsapp.net`, fromMe: false, id, participant: '' },
+    pushName: 'Cliente Anuncio',
+    message: { conversation: 'Hola, vengo del anuncio' },
+    messageType: 'conversation',
+    messageTimestamp: Math.floor(Date.now() / 1000 - (o.ageH ?? 2) * 3600),
+    contextInfo: { externalAdReply: { title: o.title ?? 'Cupos abiertos', body: 'Escríbenos', ctwaClid: o.clid ?? 'CLID-BF-0001', sourceId: o.ad ?? '120210000000000001', sourceUrl: 'https://fb.me/ejemplo', sourceApp: 'instagram', ...(o.thumb === false ? {} : { thumbnail: JPEG }) } },
+  });
+  /** Un aviso ya guardado (como los de antes de leer los anuncios), con el mensaje ya ingerido SIN atribución. */
+  const stored = async (v: View, inst: string, id: string, o: Parameters<typeof dataOf>[1] = {}, withMessage = true): Promise<void> => {
+    if (withMessage) {
+      await post(v.id, upsert(inst, id, { conversation: 'Hola, vengo del anuncio' }, o.who ?? '593990000002'));
+      await runEvents();
+    }
+    const payload = { __qr: 1, instance: inst, event: 'messages.upsert', data: dataOf(id, o), media_keys: {} };
+    await admin.query(`INSERT INTO webhook_events(id, organization_id, channel_account_id, phone_number_id, payload, payload_hash, status, received_at, processed_at) VALUES (gen_random_uuid(), $1, $2, $3, $4::jsonb, $5, 'done', now() - interval '2 days', now() - interval '2 days')`, [ORG_A, v.id, inst, JSON.stringify(payload), randomBytes(32).toString('hex')]);
+  };
+  const run = (org = ORG_A) => inOrg(org, () => app.get(AdBackfillService).run(new Date()));
+  const contactAds = async (org = ORG_A) => (await admin.query(`SELECT ctwa_cl_id, first_touch_ad_id, last_touch_ad_id, first_touch_ad FROM contacts WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at`, [org])).rows as Array<Record<string, string | null>>;
+  const creatives = async (org = ORG_A) => (await admin.query(`SELECT source_id, headline, body, source_url, platform, thumbnail_key, thumbnail_mime FROM ad_creatives WHERE organization_id = $1 ORDER BY source_id`, [org])).rows as Array<Record<string, string | null>>;
+  const events = async () => (await admin.query(`SELECT payload, ad_scanned_at FROM webhook_events WHERE payload @> '{"__qr":1}'::jsonb AND payload->'data'->'contextInfo' IS NOT NULL`)).rows as Array<{ payload: Record<string, unknown>; ad_scanned_at: Date | null }>;
+  const setup = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    return { v, inst: await instanceOf(v.id) };
+  };
+
+  it('aplica el clic al contacto del mensaje con su hora real, recuerda el anuncio con su miniatura UNA vez (los bytes quedan en el almacenamiento) y quita los bytes del aviso; repetir no cambia nada', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000001');
+    const r = await run();
+    expect(r).toMatchObject({ scanned: 1, applied: 1, withoutMessage: 0, ads: 1 });
+    expect((await contactAds())[0]).toMatchObject({ ctwa_cl_id: 'CLID-BF-0001', first_touch_ad_id: '120210000000000001', last_touch_ad_id: '120210000000000001' });
+    const [ad] = await creatives();
+    expect(ad).toMatchObject({ source_id: '120210000000000001', headline: 'Cupos abiertos', body: 'Escríbenos', source_url: 'https://fb.me/ejemplo', platform: 'instagram', thumbnail_mime: 'image/jpeg' });
+    expect((await app.get(AttachmentsService).read(ad!['thumbnail_key']!)).equals(Buffer.from([255, 216, 255, 224, 1, 2, 3, 4]))).toBe(true);
+    const [ev] = await events();
+    expect(ev!.ad_scanned_at).not.toBeNull();
+    expect(JSON.stringify(ev!.payload)).toContain('[miniatura]');
+    expect(JSON.stringify(ev!.payload)).not.toContain('"thumbnail":{');
+    // repetir: nada que revisar, nada que cambiar
+    expect(await run()).toMatchObject({ scanned: 0, applied: 0 });
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(1);
+    expect(await creatives()).toHaveLength(1);
+  });
+
+  it('dos avisos del MISMO anuncio: una sola fila de anuncio y una sola miniatura guardada; cada clic distinto queda en el historial', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000002', { clid: 'CLID-BF-A', who: '593990000031' });
+    await stored(v, inst, 'BF-0000000000003', { clid: 'CLID-BF-B', who: '593990000032' });
+    expect(await run()).toMatchObject({ scanned: 2, applied: 2, ads: 1 });
+    expect(await creatives()).toHaveLength(1);
+    expect(await countOf('contact_touch_events', `kind = 'ad_click'`)).toBe(2);
+    expect((await creatives())[0]!['thumbnail_key']).not.toBeNull();
+  });
+
+  it('un aviso cuyo mensaje nunca se guardó se marca como revisado y no atribuye a nadie; el anuncio sí se recuerda', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000004', {}, false);
+    expect(await run()).toMatchObject({ scanned: 1, applied: 0, withoutMessage: 1, ads: 1 });
+    expect(await contactAds()).toHaveLength(0);
+    expect((await events())[0]!.ad_scanned_at).not.toBeNull();
+  });
+
+  it('ningún clic recuperado genera evento hacia Meta (el Lead de los chats se quitó), ni el viejo ni el reciente', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-0000000000005', { ageH: 9 * 24, clid: 'CLID-BF-VIEJO', who: '593990000041' });
+    await stored(v, inst, 'BF-0000000000006', { ageH: 3, clid: 'CLID-BF-NUEVO', who: '593990000042' });
+    await run();
+    expect(await contactAds()).toHaveLength(2);
+    expect((await admin.query(`SELECT count(*)::int AS n FROM meta_events WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(0);
+  });
+
+  it('camino en vivo: un mensaje con anuncio recuerda el anuncio con su miniatura y el aviso se guarda SIN los bytes', async () => {
+    const { v, inst } = await setup();
+    await post(v.id, evt(inst, 'messages.upsert', { ...dataOf('BF-LIVE-000000001', { clid: 'CLID-LIVE-1' }), status: 'DELIVERY_ACK', instanceId: 'i-1', source: 'android' }));
+    await runEvents();
+    const [ad] = await creatives();
+    expect(ad).toMatchObject({ source_id: '120210000000000001', thumbnail_mime: 'image/jpeg' });
+    expect(ad!['thumbnail_key']).not.toBeNull();
+    expect(JSON.stringify((await events())[0]!.payload)).not.toContain('"thumbnail":{');
+    expect((await contactAds())[0]).toMatchObject({ ctwa_cl_id: 'CLID-LIVE-1' });
+    // el mismo anuncio en otro mensaje no sube otra miniatura
+    const key = ad!['thumbnail_key'];
+    await post(v.id, evt(inst, 'messages.upsert', { ...dataOf('BF-LIVE-000000002', { clid: 'CLID-LIVE-2', who: '593990000051' }), status: 'DELIVERY_ACK', instanceId: 'i-1', source: 'android' }));
+    await runEvents();
+    expect((await creatives())).toHaveLength(1);
+    expect((await creatives())[0]!['thumbnail_key']).toBe(key);
+  });
+
+  it('aislamiento A↔B: la tarea de una empresa no ve los avisos de otra, y un anuncio con el mismo id en otra empresa es otra fila', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-ISO-000000001');
+    expect(await run(ORG_B)).toMatchObject({ scanned: 0, applied: 0 });
+    expect((await events())[0]!.ad_scanned_at).toBeNull();
+    expect(await creatives(ORG_B)).toHaveLength(0);
+    await run(ORG_A);
+    expect(await creatives(ORG_A)).toHaveLength(1);
+    expect(await creatives(ORG_B)).toHaveLength(0);
+    expect(await contactAds(ORG_B)).toHaveLength(0);
+  });
+
+  it('la tarea recorre las empresas con WhatsApp por QR', async () => {
+    const { v, inst } = await setup();
+    await stored(v, inst, 'BF-JOB-000000001');
+    expect(await app.get(AdBackfillJob).run(new Date())).toBe(1);
+    expect(await app.get(AdBackfillJob).run(new Date())).toBe(0);
+  });
+});
+
+describe('anuncios de la empresa: GET /v1/ads/creatives (v20 · ADR-55)', () => {
+  const JPEG = { '0': 255, '1': 216, '2': 255, '3': 224, '4': 1, '5': 2, '6': 3, '7': 4 };
+  const adEvent = (instance: string, id: string, ad: string, title: string, app: string) =>
+    evt(instance, 'messages.upsert', {
+      key: { remoteJid: '593990000002@s.whatsapp.net', remoteJidAlt: '593990000002@s.whatsapp.net', fromMe: false, id, participant: '' },
+      pushName: 'Cliente Anuncio',
+      status: 'DELIVERY_ACK',
+      message: { conversation: 'Hola' },
+      messageType: 'conversation',
+      messageTimestamp: Math.floor(Date.now() / 1000),
+      instanceId: 'i-1',
+      source: 'android',
+      contextInfo: { externalAdReply: { title, body: 'Escríbenos', ctwaClid: `CLID-${id}`, sourceId: ad, sourceUrl: 'https://fb.me/ejemplo', sourceApp: app, thumbnail: JPEG } },
+    });
+  const get = (token: string | undefined, query: string) => call('GET', `/ads/creatives${query}`, token);
+  const seedAds = async () => {
+    const v = await mk(T.alice);
+    await open(v.id);
+    const inst = await instanceOf(v.id);
+    await post(v.id, adEvent(inst, 'ADS-0000000000001', '120210000000000011', 'Define Tu Abdomen', 'instagram'));
+    await post(v.id, adEvent(inst, 'ADS-0000000000002', '120210000000000012', 'Spaencasa.Ec', 'facebook'));
+    await runEvents();
+  };
+
+  it('da el titular, el texto, la dirección, la red y la dirección firmada de la miniatura de cada anuncio pedido; un id que no existe no sale', async () => {
+    await seedAds();
+    const r = await get(T.alice, '?ids=120210000000000011,120210000000000012,999');
+    expect(r.status).toBe(200);
+    expect(r.headers.get('cache-control')).toBe('no-store');
+    const { items } = await json<{ items: Record<string, { headline: string; body: string; source_url: string; platform: string; thumbnail_url: string | null }> }>(r);
+    expect(Object.keys(items).sort()).toEqual(['120210000000000011', '120210000000000012']);
+    expect(items['120210000000000011']).toMatchObject({ headline: 'Define Tu Abdomen', body: 'Escríbenos', source_url: 'https://fb.me/ejemplo', platform: 'instagram' });
+    expect(items['120210000000000012']).toMatchObject({ headline: 'Spaencasa.Ec', platform: 'facebook' });
+    expect(items['120210000000000011']!.thumbnail_url).toMatch(/^https?:\/\//);
+  });
+
+  it('incluye los nombres reales de anuncio, conjunto y campaña cuando ya se consultaron, y null mientras no', async () => {
+    await seedAds();
+    await admin.query(`UPDATE ad_creatives SET ad_name = 'Prefiero sufrir así', adset_name = 'SERVICIOS PASIEL RMKT', campaign_name = 'SERVICIOS PASIEL - RMKT NOV 2026', names_status = 'ok' WHERE source_id = '120210000000000011'`);
+    const { items } = await json<{ items: Record<string, { ad_name: string | null; adset_name: string | null; campaign_name: string | null; names_status: string | null }> }>(await get(T.alice, '?ids=120210000000000011,120210000000000012'));
+    expect(items['120210000000000011']).toMatchObject({ ad_name: 'Prefiero sufrir así', adset_name: 'SERVICIOS PASIEL RMKT', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026', names_status: 'ok' });
+    expect(items['120210000000000012']).toMatchObject({ ad_name: null, adset_name: null, campaign_name: null, names_status: null });
+  });
+
+  it('también lo ve el asesor (puede ver contactos); sin sesión 401', async () => {
+    await seedAds();
+    expect((await get(T.carol, '?ids=120210000000000011')).status).toBe(200);
+    expect((await get(undefined, '?ids=120210000000000011')).status).toBe(401);
+  });
+
+  it('aislamiento A↔B: otra empresa pidiendo el mismo id no obtiene nada del anuncio de la primera', async () => {
+    await seedAds();
+    const r = await get(T.bob, '?ids=120210000000000011,120210000000000012');
+    expect(r.status).toBe(200);
+    expect(await json<{ items: Record<string, unknown> }>(r)).toEqual({ items: {} });
+  });
+
+  it('valida lo que se pide: sin ids, demasiados (más de 50), caracteres que no son de un id y parámetros de más son 400', async () => {
+    expect((await get(T.alice, '')).status).toBe(400);
+    expect((await get(T.alice, '?ids=')).status).toBe(400);
+    expect((await get(T.alice, `?ids=${Array.from({ length: 51 }, (_x, i) => `a${i}`).join(',')}`)).status).toBe(400);
+    expect((await get(T.alice, '?ids=a%27%3B--')).status).toBe(400);
+    expect((await get(T.alice, '?ids=abc&otro=1')).status).toBe(400);
+    expect((await get(T.alice, `?ids=${'a,'.repeat(10)}b`)).status).toBe(200); // los repetidos se juntan
+  });
+
+  it('con el almacenamiento caído el anuncio se responde sin imagen (no rompe la pantalla)', async () => {
+    await seedAds();
+    const storage = app.get(StorageGateway);
+    const spy = vi.spyOn(storage, 'signedUrl').mockRejectedValue(new Error('almacenamiento caído'));
+    const r = await json<{ items: Record<string, { headline: string; thumbnail_url: string | null }> }>(await get(T.alice, '?ids=120210000000000011'));
+    spy.mockRestore();
+    expect(r.items['120210000000000011']).toMatchObject({ headline: 'Define Tu Abdomen', thumbnail_url: null });
   });
 });

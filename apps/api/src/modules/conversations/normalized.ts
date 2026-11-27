@@ -28,13 +28,17 @@ export interface NormalizedReferral {
   readonly body: string | null;
   readonly thumbnailUrl: string | null;
   readonly ctwaClid: string | null;
+  /** Red donde se vio el anuncio, si el canal la informa (WhatsApp por QR: `externalAdReply.sourceApp`). Define el canal del contacto nuevo. */
+  readonly platform?: 'facebook' | 'instagram' | null;
 }
 
 /** Mensaje que ENTRA: lo escribió un contacto. Un mismo `externalId` por canal identifica un mensaje (idempotencia). */
 export interface NormalizedMessage {
   readonly externalId: string;
-  /** Teléfono de quien escribe, en E.164 con «+». */
-  readonly from: string;
+  /** Teléfono de quien escribe, en E.164 con «+». `null` solo en WhatsApp por QR cuando WhatsApp identifica al contacto con su código `@lid` y no entrega el teléfono (ADR-73): entonces `lid` va lleno. */
+  readonly from: string | null;
+  /** El código `…@lid` con el que WhatsApp identifica a quien escribe (WhatsApp por QR), cuando lo informa. Sirve para reconocer al mismo contacto aunque no haya teléfono. */
+  readonly lid?: string;
   /** Identificador de quien escribe tal como lo informó el proveedor (sin normalizar; para depurar). */
   readonly fromRaw: string;
   /** Nombre del perfil del contacto en el proveedor, si lo informa. */

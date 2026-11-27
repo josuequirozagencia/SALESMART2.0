@@ -951,8 +951,36 @@ describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
     const c = await mkConv();
     await inboundAudio(c.id);
     await tick();
-    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'audio_off' });
     expect(transcribes()).toHaveLength(0);
+  });
+
+  it('un audio junto con texto y la opción apagada: el agente atiende el texto y le pide al cliente que escriba el audio (no lo ignora en silencio)', async () => {
+    await liveAgent({ docs: true });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await inbound(c.id, 'Hola, ¿qué horario tienen?');
+    ai.chatReply = () => 'Atendemos de 9 a 18';
+    await tick();
+    expect(transcribes()).toHaveLength(0);
+    expect(chats()).toHaveLength(1);
+    expect(JSON.stringify(chats()[0])).toContain('que no puedes escuchar');
+    expect(await aiMessages(c.id)).toHaveLength(1);
+  });
+
+  it('con texto fijo configurado, avisa al cliente UNA sola vez por conversación y sin gastar créditos; sin texto no envía nada', async () => {
+    const ASK = 'Por ahora no puedo escuchar audios, ¿me lo escribes?';
+    await liveAgent({ docs: true, patch: { audio_fallback_text: ASK } });
+    const c = await mkConv();
+    await inboundAudio(c.id);
+    await tick();
+    expect((await aiMessages(c.id)).map((x) => x['body'])).toEqual([ASK]);
+    expect(chats()).toHaveLength(0);
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'audio_off' });
+    expect((await call('POST', `/conversations/${c.id}/ai/resume`, T.alice)).status).toBe(200);
+    await inboundAudio(c.id);
+    await tick(new Date(Date.now() + 5000));
+    expect((await aiMessages(c.id)).map((x) => x['body'])).toEqual([ASK]); // no se repite
   });
 
   it('sin modelo de transcripción cargado el audio sigue yendo a una persona', async () => {
@@ -962,7 +990,7 @@ describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
     const c = await mkConv();
     await inboundAudio(c.id);
     await tick();
-    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'no_transcription' });
     expect(transcribes()).toHaveLength(0);
   });
 
@@ -992,8 +1020,8 @@ describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
     const amr = await mkConv();
     await inboundAudio(amr.id, { bytes: AMR });
     await tick();
-    expect(await state(big.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
-    expect(await state(amr.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(await state(big.id)).toMatchObject({ status: 'handed_off', reason: 'audio_unreadable' });
+    expect(await state(amr.id)).toMatchObject({ status: 'handed_off', reason: 'audio_unreadable' });
     expect(transcribes()).toHaveLength(0);
   });
 
@@ -1035,7 +1063,7 @@ describe('escuchar audios del cliente (v13 S5b, ADR-70)', () => {
     const c = await mkConv();
     await inboundAudio(c.id);
     await tick();
-    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'unsupported_media' });
+    expect(await state(c.id)).toMatchObject({ status: 'handed_off', reason: 'audio_unreadable' });
     expect(chats()).toHaveLength(0);
     expect(transcribes()).toHaveLength(1);
   });

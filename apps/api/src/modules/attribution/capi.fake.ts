@@ -1,4 +1,4 @@
-import { CapiSendError, type CapiCredentials, type CapiEvent, type CapiProvider } from './capi.ports';
+import { CapiSendError, type AdNames, type CapiCredentials, type CapiEvent, type CapiProvider } from './capi.ports';
 
 /** Fake de Conversions API para pruebas: guarda lo enviado (y con qué credenciales) y permite simular fallos. Debe pasar el mismo contract test que el adaptador real. */
 export class FakeCapiProvider implements CapiProvider {
@@ -22,6 +22,38 @@ export class FakeCapiProvider implements CapiProvider {
   /** La próxima comprobación falla con este error. */
   failNextVerify(error: CapiSendError): void {
     this.verifyFailures.push(error);
+  }
+
+  /** Anuncios que «conoce Meta» en las pruebas (id → nombres). Los demás salen como no encontrados. */
+  readonly ads = new Map<string, AdNames>();
+  readonly lookups: string[][] = [];
+  private lookupFailures: CapiSendError[] = [];
+
+  failNextLookup(error: CapiSendError): void {
+    this.lookupFailures.push(error);
+  }
+
+  lookupAds(adIds: readonly string[], _credentials: CapiCredentials): Promise<Record<string, AdNames | null>> {
+    const fail = this.lookupFailures.shift();
+    if (fail) return Promise.reject(fail);
+    this.lookups.push([...adIds]);
+    return Promise.resolve(Object.fromEntries(adIds.map((id) => [id, this.ads.get(id) ?? null])));
+  }
+
+  /** Dataset de mensajes que «devuelve Meta» por cuenta de WhatsApp (las pruebas lo cargan; si no, uno fijo). */
+  readonly messagingDatasets = new Map<string, string>();
+  readonly ensured: Array<{ wabaId: string; credentials: CapiCredentials }> = [];
+  private ensureFailures: CapiSendError[] = [];
+
+  failNextEnsure(error: CapiSendError): void {
+    this.ensureFailures.push(error);
+  }
+
+  ensureMessagingDataset(wabaId: string, credentials: CapiCredentials): Promise<{ datasetId: string }> {
+    const fail = this.ensureFailures.shift();
+    if (fail) return Promise.reject(fail);
+    this.ensured.push({ wabaId, credentials });
+    return Promise.resolve({ datasetId: this.messagingDatasets.get(wabaId) ?? '1030123066792188' });
   }
 
   last(): CapiEvent | undefined {

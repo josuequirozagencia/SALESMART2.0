@@ -11,32 +11,44 @@ import { useSwipeReply } from './useSwipeReply';
 import type { ReplyQuote } from '../../lib/types';
 import { splitMentions } from './mentions';
 import { LocationCard } from './LocationCard';
+import { AudioPlayer, useStableUrl } from './AudioPlayer';
 import { validPlace, type Place } from '../../lib/osm';
 
-const TICK: Record<string, { text: string; label: string; cls: string }> = {
-  queued: { text: '◷', label: 'Enviando', cls: 'opacity-60' },
-  sent: { text: '✓', label: 'Enviado', cls: 'opacity-60' },
-  delivered: { text: '✓✓', label: 'Entregado', cls: 'opacity-60' },
-  read: { text: '✓✓', label: 'Leído', cls: 'text-info opacity-100' },
-  failed: { text: '!', label: 'No se pudo enviar', cls: 'text-crit font-bold opacity-100' },
-};
+/** Estado de entrega (V23-B): como WhatsApp, un check gris al enviarse, dos al entregarse y dos AZULES solo al leerse. Íconos SVG (no caracteres) con el solapamiento de WhatsApp. */
+const TICK_LABEL: Record<string, string> = { queued: 'Enviando', sent: 'Enviado', delivered: 'Entregado', read: 'Leído', failed: 'No se pudo enviar' };
 
-/** Sobre el degradado (`onGrad`) el color no puede distinguir «leído» de «entregado» (el azul no tiene contraste): se distingue por el peso y la transparencia suave de los gráficos (≥ 3:1). */
-const TICK_ON_GRAD: Record<string, string> = { queued: 'opacity-75', sent: 'opacity-75', delivered: 'opacity-75', read: 'font-black', failed: 'font-black underline' };
-
-function Ticks({ status, onGrad = false }: { status: ChatMessage['status']; onGrad?: boolean }) {
-  const t = TICK[status];
-  return t ? <span role="img" aria-label={t.label} title={t.label} className={`ml-1 tracking-[-0.34em] ${onGrad ? (TICK_ON_GRAD[status] ?? '') : t.cls}`}>{t.text}</span> : null;
+function Ticks({ status }: { status: ChatMessage['status'] }) {
+  const label = TICK_LABEL[status];
+  if (!label) return null;
+  if (status === 'queued') return <span role="img" aria-label={label} title={label} className="ml-1 text-[var(--tick-grey)]">◷</span>;
+  if (status === 'failed') return <span role="img" aria-label={label} title={label} className="ml-1 font-bold text-crit">!</span>;
+  const color = status === 'read' ? 'text-[var(--tick-read)]' : 'text-[var(--tick-grey)]';
+  return (
+    <span role="img" aria-label={label} title={label} className={`ml-1 inline-flex ${color}`}>
+      <svg width={status === 'sent' ? 12 : 17} height="11" viewBox={status === 'sent' ? '0 0 12 11' : '0 0 17 11'} fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M1.5 6l3 3L10.5 1.8" />
+        {status === 'sent' ? null : <path d="M6 6l3 3L15.5 1.8" />}
+      </svg>
+    </span>
+  );
 }
 
 /** Una imagen del hilo. En móvil se toca para verla ampliada a pantalla completa (con botón de cerrar); en escritorio es un enlace a otra pestaña, como siempre. */
-function ChatImage({ url, name }: { url: string; name: string }) {
+/** El video con una dirección estable: si el hilo se vuelve a pedir y la dirección firmada cambia, el video no se recarga a media reproducción. */
+function ChatVideo({ id, url, bleed = false }: { id: string; url: string; bleed?: boolean }) {
+  const [src, refresh] = useStableUrl(id, url);
+  return <video src={src} controls preload="metadata" onError={() => { refresh(); }} className={bleed ? 'block w-full' : 'max-w-full rounded-lg'} />;
+}
+
+function ChatImage({ url, name, bleed = false }: { url: string; name: string; bleed?: boolean }) {
+  const imgCls = bleed ? 'block h-auto max-h-[420px] w-full object-cover' : 'h-auto max-w-full rounded-lg';
+  const wrapCls = bleed ? 'block w-full' : 'mt-1 block max-w-full';
   const mobile = useBreakpoint() === 'mobile';
   const [open, setOpen] = useState(false);
-  if (!mobile) return <a href={url} target="_blank" rel="noopener noreferrer" className="mt-1 block"><img src={url} alt={name} className="h-auto max-w-full rounded-lg" loading="lazy" /></a>;
+  if (!mobile) return <a href={url} target="_blank" rel="noopener noreferrer" className={wrapCls}><img src={url} alt={name} className={imgCls} loading="lazy" /></a>;
   return (
     <>
-      <button type="button" aria-label="Ver la imagen ampliada" onClick={() => setOpen(true)} className="mt-1 block max-w-full"><img src={url} alt={name} className="h-auto max-w-full rounded-lg" loading="lazy" /></button>
+      <button type="button" aria-label="Ver la imagen ampliada" onClick={() => setOpen(true)} className={wrapCls}><img src={url} alt={name} className={imgCls} loading="lazy" /></button>
       {open ? (
         <Drawer label="Imagen ampliada" placement="full" onClose={() => setOpen(false)}>
           <div className="relative grid h-full w-full place-items-center bg-black">
@@ -83,8 +95,8 @@ function Body({ m }: { m: ChatMessage }) {
         : att.scan_status === 'pending' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo se está revisando…</span>
         : att.url ? (
           att.mime_type?.startsWith('image/') ? <ChatImage url={att.url} name="Imagen" />
-          : att.mime_type?.startsWith('video/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Video</span><video src={att.url} controls className="max-w-full rounded-lg" /></>
-          : att.mime_type?.startsWith('audio/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Audio</span><audio src={att.url} controls className="w-full max-w-full" /></>
+          : att.mime_type?.startsWith('video/') ? <><span className="mb-0.5 block text-[12px] font-semibold opacity-80">Video</span><ChatVideo id={att.id} url={att.url} /></>
+          : att.mime_type?.startsWith('audio/') ? <AudioPlayer id={att.id} url={att.url} filename={att.filename} />
           : <DocumentCard url={att.url} mime={att.mime_type} size={att.size_bytes} filename={att.filename} />
         ) : att.scan_status === 'skipped' && m.kind !== 'text' ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí · sin revisar</span>
         : m.media ? <span className="mt-0.5 block text-[12px] italic opacity-70">El archivo aún no se puede ver aquí.</span> : null
@@ -142,7 +154,7 @@ export function QuoteBlock({ quote, contactName, onJump }: { quote: ReplyQuote; 
 }
 
 /** Una burbuja del hilo: del cliente (izquierda), nuestra (derecha, con su estado de envío) o una nota interna (centrada, nunca sale al cliente). */
-export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '', contactName = '', onReply, onJump }: { spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode; contactName?: string; /** Si se puede responder citando este mensaje (v13 S3.3): lo que hace el gesto, el botón «Responder» y el teclado. */ onReply?: ((m: ChatMessage) => void) | undefined; onJump?: ((id: string) => void) | undefined }) {
+export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar, spacing = '', contactName = '', onReply, onJump, tail = true }: { /** La primera burbuja de un grupo lleva la esquina en «pico»; las siguientes, no. */ tail?: boolean; spacing?: string; m: ChatMessage; canRetry: boolean; retrying: boolean; onRetry: (id: string) => void; onReact?: ((id: string, emoji: string | null) => void) | undefined; avatar?: ReactNode; contactName?: string; /** Si se puede responder citando este mensaje (v13 S3.3): lo que hace el gesto, el botón «Responder» y el teclado. */ onReply?: ((m: ChatMessage) => void) | undefined; onJump?: ((id: string) => void) | undefined }) {
   const mobile = useBreakpoint() === 'mobile';
   const swipe = useSwipeReply({ enabled: mobile && onReply !== undefined && !m.is_note, onReply: () => onReply?.(m) });
   if (m.is_note) {
@@ -159,7 +171,11 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar,
   }
   const out = m.direction === 'out';
   // v13 S3.1: lo que escribe una persona lleva el color del tema; el agente de IA y los avisos automáticos, una variante suave (con su etiqueta) para distinguirse sin perder contraste
-  const grad = out && m.sender_type !== 'ai' && m.sender_type !== 'automation';
+  const att = m.attachment;
+  // V23-B: imagen o video a borde de la burbuja, sin marco; el pie va debajo y la hora sobre la foto cuando no hay pie
+  const bleed = !!att?.url && att.scan_status !== 'infected' && att.scan_status !== 'pending' && (att.mime_type?.startsWith('image/') === true || att.mime_type?.startsWith('video/') === true);
+  const isImage = att?.mime_type?.startsWith('image/') === true;
+  const overlayTime = bleed && isImage && !m.text;
   const canReact = !out && onReact !== undefined;
   const replyButton = onReply ? (
     <button type="button" aria-label="Responder a este mensaje" title="Responder" onClick={() => onReply(m)} className="grid size-8 shrink-0 place-items-center self-center rounded-full text-muted opacity-0 hover:bg-surface2 hover:opacity-100 focus-visible:opacity-100 group-hover/msg:opacity-100 max-md:sr-only max-md:focus-visible:not-sr-only max-md:focus-visible:size-11 max-md:focus-visible:opacity-100"><Icon name="reply" size={16} /></button>
@@ -168,27 +184,42 @@ export function MessageBubble({ m, canRetry, retrying, onRetry, onReact, avatar,
     <li id={`msg-${m.id}`} className={`group/msg relative ${spacing}`}>
       {onReply ? <span aria-hidden="true" className="pointer-events-none absolute left-2 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full bg-surface2 text-muted" style={{ opacity: swipe.progress, transform: `translateY(-50%) scale(${0.6 + 0.4 * swipe.progress})` }}><Icon name="reply" size={16} /></span> : null}
       <div className={`flex gap-2 ${out ? 'flex-row-reverse' : ''}`} style={swipe.style} {...swipe.handlers}>
-      {avatar !== undefined ? <span className="w-7 shrink-0 self-start">{avatar}</span> : null}
+      {avatar !== undefined ? <span className="w-6 shrink-0 self-start">{avatar}</span> : null}
       <div className={`flex min-w-0 flex-1 flex-col ${out ? 'items-end' : 'items-start'}`}>
       <div className={`flex w-full min-w-0 items-start gap-1 ${out ? 'justify-end' : ''}`}>
       {out ? replyButton : null}
-      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg px-3 py-2 text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${grad ? 'bubble-grad rounded-tr-sm' : out ? 'rounded-tr-sm bg-[var(--bubble-out)] text-fg' : 'rounded-tl-sm border border-line bg-[var(--bubble-in)] text-fg'}`}>
-        {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">{firstName(m.author.name)}</span> : null}
-        {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Agente de IA</span> : null}
-        {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Mensaje automático</span> : null}
-        {m.template ? <span className="mb-0.5 block text-[11px] font-semibold text-muted">Plantilla · <span className="font-mono">{m.template.name}</span></span> : null}
-        {m.reply_to ? <QuoteBlock quote={m.reply_to} contactName={contactName} onJump={onJump} /> : null}
-        <Body m={m} />
+      <div className={`relative w-fit min-w-24 max-w-[min(80%,420px)] break-words rounded-lg text-[14px] [box-shadow:var(--bubble-shadow)] ${m.reaction || m.my_reaction ? 'mb-3' : ''} ${bleed ? 'w-[78%] p-0 md:w-[330px]' : 'px-3 py-2'} ${out ? `${tail ? 'rounded-tr-sm ' : ''}bg-[var(--bubble-out)] text-[var(--bubble-text)]` : `${tail ? 'rounded-tl-sm ' : ''}bg-[var(--bubble-in)] text-[var(--bubble-text)]`}`}>
+        <div className={bleed ? 'px-3 pt-2 empty:hidden' : 'contents'}>
+          {out && m.author ? <span className="mb-0.5 block text-[11px] font-semibold text-[var(--bubble-time)]">{firstName(m.author.name)}</span> : null}
+          {out && m.sender_type === 'ai' ? <span className="mb-0.5 block text-[11px] font-semibold text-[var(--bubble-time)]">Agente de IA</span> : null}
+          {out && m.sender_type === 'automation' ? <span className="mb-0.5 block text-[11px] font-semibold text-[var(--bubble-time)]">Mensaje automático</span> : null}
+          {m.template ? <span className="mb-0.5 block text-[11px] font-semibold text-[var(--bubble-time)]">Plantilla · <span className="font-mono">{m.template.name}</span></span> : null}
+          {m.reply_to ? <QuoteBlock quote={m.reply_to} contactName={contactName} onJump={onJump} /> : null}
+        </div>
+        {bleed && att?.url ? (
+          <div className={`relative overflow-hidden ${m.reply_to || (out && (m.author || m.sender_type === 'ai' || m.sender_type === 'automation')) || m.template ? 'mt-1.5' : 'rounded-t-lg'} ${m.text ? '' : 'rounded-b-lg'}`}>
+            {isImage ? <ChatImage url={att.url} name="Imagen" bleed /> : <ChatVideo id={att.id} url={att.url} bleed />}
+            {overlayTime ? (
+              <span className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-end bg-gradient-to-t from-black/60 to-transparent px-2 pb-1 pt-6 text-[11px] text-white [--bubble-time:#fff] [--tick-grey:#fff] [--tick-read:#7fd4ff]">
+                <time dateTime={m.sent_at}>{bubbleTime(m.sent_at)}</time>
+                {out ? <Ticks status={m.status} /> : null}
+              </span>
+            ) : null}
+          </div>
+        ) : <Body m={m} />}
+        {bleed && m.text ? <span className="block whitespace-pre-wrap break-words px-3 pt-1.5">{m.text}</span> : null}
         {m.template && m.template.buttons.length > 0 ? (
           <span className="mt-1.5 flex flex-wrap gap-1.5" aria-label="Botones de la plantilla">
             {m.template.buttons.map((b, i) => <span key={i} className="rounded-full border border-line bg-surface px-2.5 py-0.5 text-[12px] font-semibold text-accent">{b.text}</span>)}
           </span>
         ) : null}
-        <span className="mt-0.5 flex items-center justify-end text-[11px] text-muted">
-          {out && m.extra?.['origin'] === 'device' ? <span className="mr-1">Desde el teléfono ·</span> : null}
-          <time dateTime={m.sent_at}>{bubbleTime(m.sent_at)}</time>
-          {out ? <Ticks status={m.status} onGrad={grad} /> : null}
-        </span>
+        {overlayTime ? null : (
+          <span className={`mt-0.5 flex items-center justify-end text-[11px] text-[var(--bubble-time)] ${bleed ? 'px-3 pb-1.5' : ''}`}>
+            {out && m.extra?.['origin'] === 'device' ? <span className="mr-1">Desde el teléfono ·</span> : null}
+            <time dateTime={m.sent_at}>{bubbleTime(m.sent_at)}</time>
+            {out ? <Ticks status={m.status} /> : null}
+          </span>
+        )}
         {m.reaction ? <span role="img" aria-label={`Reacción del cliente: ${m.reaction}`} className="absolute -bottom-3 right-2 rounded-full border border-line bg-surface px-1.5 py-0.5 text-[13px] leading-none shadow-sm">{m.reaction}</span> : null}
         {m.my_reaction ? <span role="img" aria-label={`Tu reacción: ${m.my_reaction}`} className="absolute -bottom-3 left-2 rounded-full border border-accent bg-accent-soft px-1.5 py-0.5 text-[13px] leading-none shadow-sm">{m.my_reaction}</span> : null}
       </div>

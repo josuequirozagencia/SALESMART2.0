@@ -20,6 +20,7 @@ import { CalendarPage } from './features/calendar/CalendarPage';
 import { GhlPage } from './features/ghl/GhlPage';
 import { SalesPage } from './features/sales/SalesPage';
 import { CampaignsPage } from './features/campaigns/CampaignsPage';
+import { LibraryPage } from './features/library/LibraryPage';
 import { ConnectionsPage } from './features/channels/ConnectionsPage';
 import { QueuesPage } from './features/queues/QueuesPage';
 import { UsersPage } from './features/team/UsersPage';
@@ -36,6 +37,7 @@ import { AgenciesPage } from './features/platform/AgenciesPage';
 import { CompaniesPage } from './features/platform/CompaniesPage';
 import { PlansPage } from './features/platform/PlansPage';
 import { BrandingPage } from './features/platform/BrandingPage';
+import { StoragePage } from './features/platform/StoragePage';
 import { ProvidersPage } from './features/platform/ProvidersPage';
 import { PlatformShell } from './features/platform/PlatformShell';
 import { TrialsPage } from './features/platform/TrialsPage';
@@ -130,6 +132,7 @@ export function App() {
         <Route path="/agenda" element={<AgendaPage />} />
         <Route path="/sales" element={<SalesPage />} />
         <Route path="/campaigns" element={<CampaignsPage />} />
+        <Route path="/library" element={<LibraryPage />} />
         <Route path="/analytics" element={<AnalyticsPage />} />
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/contacts/companies" element={<ClientCompaniesPage />} />
@@ -164,6 +167,7 @@ export function App() {
       <Route path="/platform/access" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AccessPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/agency/clients" element={<AgencyGate>{(me, out) => <AgencyShell me={me} onLogout={out}><ClientsPage /></AgencyShell>}</AgencyGate>} />
       <Route path="/platform/providers" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><ProvidersPage /></PlatformShell>}</PlatformGate>} />
+      <Route path="/platform/storage" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><StoragePage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/branding" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><BrandingPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/ai" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><AiCreditsPage /></PlatformShell>}</PlatformGate>} />
       <Route path="/platform/plans" element={<PlatformGate>{(me, out) => <PlatformShell me={me} onLogout={out}><PlansPage /></PlatformShell>}</PlatformGate>} />

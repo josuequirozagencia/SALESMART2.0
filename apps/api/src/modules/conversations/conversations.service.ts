@@ -3,12 +3,11 @@ import { and, eq, gt, isNull, ne, sql } from 'drizzle-orm';
 import { conversations, messageAttachments, messages, type TenantTx } from '../../db';
 import { writeAudit, type AuditSource } from '../audit';
 import { DomainEventBus } from '../events';
-import { AttributionService } from '../attribution';
+import { AttributionService, type ClickInput } from '../attribution';
 import { ContactsService, ContactTouchesService } from '../contacts';
 import { AssignmentService, type AssignmentContext } from '../queues';
 import { RealtimeService } from '../realtime';
 import { SlaService } from '../sla';
-import { SystemTagsService } from '../tags';
 import { AutoMessagesService } from './auto-messages.service';
 import type { NormalizedMessage, NormalizedReaction, NormalizedStatus } from './normalized';
 
@@ -57,7 +56,6 @@ export class ConversationsService {
     @Inject(ContactTouchesService) private readonly touches: ContactTouchesService,
     @Inject(AttributionService) private readonly attribution: AttributionService,
     @Inject(AssignmentService) private readonly assignment: AssignmentService,
-    @Inject(SystemTagsService) private readonly tags: SystemTagsService,
     @Inject(SlaService) private readonly sla: SlaService,
     @Inject(AutoMessagesService) private readonly autoMessages: AutoMessagesService,
     @Optional() @Inject(RealtimeService) private readonly realtime?: RealtimeService,
@@ -69,17 +67,17 @@ export class ConversationsService {
    * actualiza la conversación (último mensaje, no leídos; si esperaba al cliente, vuelve a «trabajando») y, si sigue «sin asignar», la reparte según la cola de su
    * conexión (M5.3). `assign` trae lo de identidad que el reparto necesita (zona horaria y quién puede recibir trabajo): se resuelve antes de abrir la transacción.
    */
-  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext, opts?: IngestOptions): Promise<IngestResult> {
+  async ingestInbound(tx: TenantTx, channelAccountId: string, m: NormalizedMessage, assign: AssignmentContext, opts?: IngestOptions, historical = false): Promise<IngestResult> {
     const [seen] = await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId))).limit(1);
     if (seen) return { duplicate: true, conversationId: null, contactCreated: false, conversationCreated: false };
 
-    const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', m.profileName);
-    // Alguien nuevo que escribe es un lead (ADR-08): lo pone el sistema. No se manda evento a Meta: sin un clic de anuncio no hay a quién atribuirlo
-    if (contact.created) await this.tags.apply(tx, contact.id, 'lead');
-    // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial) y el Lead hacia Meta; un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
+    const contact = opts ? { id: opts.contactId, created: opts.contactCreated ?? false } : await this.contacts.resolveWhatsapp(tx, { phone: m.from, lid: m.lid ?? null, name: m.profileName });
+    // La etiqueta `Lead` ya no se pone sola al llegar alguien nuevo (2026-11-23): la coloca el asesor (`LeadMarkService`) y entonces sale el evento a Meta
+    // Clic a un anuncio (M6.6): Meta trae el anuncio en el primer mensaje. Se graba el toque (primero y último, historial); un mensaje común de alguien nuevo deja solo su toque «primer mensaje»
     const clid = m.referral?.ctwaClid ?? null;
+    // WhatsApp por QR puede traer el clic de un contacto que WhatsApp identifica solo con su código `@lid` (sin teléfono): el clic se guarda igual (v20, ADR-55)
     if (clid) {
-      await this.attribution.recordIn(tx, { phone: m.from, ctwa_cl_id: clid, source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, ad_name: m.referral?.headline ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() }, m.sentAt, contact);
+      await this.attribution.recordIn(tx, this.clickOf(m, clid), m.sentAt, contact);
     } else if (contact.created) {
       await this.touches.record(tx, contact.id, { kind: 'message_in', at: m.sentAt, source: 'whatsapp', originRef: m.externalId });
     }
@@ -95,7 +93,7 @@ export class ConversationsService {
         kind: m.kind,
         body: m.text,
         media: m.media ? { id: m.media.id, mime_type: m.media.mimeType, filename: m.media.filename } : null,
-        meta: { wa_id: m.fromRaw, ...m.extra },
+        meta: { wa_id: m.fromRaw, ...m.extra, ...(historical ? { recovered: true } : {}) },
         replyToMessageId: await this.quotedId(tx, channelAccountId, m.replyToExternalId),
         status: 'received',
         sentAt: m.sentAt,
@@ -106,8 +104,9 @@ export class ConversationsService {
     // Dos entregas del mismo mensaje a la vez: gana una y la otra no toca la conversación
     if (inserted.length === 0) return { duplicate: true, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
 
-    this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: inserted[0]!.id, kind: 'created' }, inbound: true });
-    await this.events?.emit(tx, { type: 'message_received', contactId: contact.id, key: `message_received:${inserted[0]!.id}`, channelId: channelAccountId, conversationId: conv.id, kind: m.kind, messageId: inserted[0]!.id });
+    // Un mensaje recuperado de días atrás (v19 B3, «ponerse al día») no avisa al celular de nadie (push) ni dispara automatizaciones; la pantalla sí se actualiza y las bajas de campañas sí cuentan
+    this.realtime?.touchHere(conv.id, { created: conv.created, message: { id: inserted[0]!.id, kind: 'created' }, inbound: !historical });
+    await this.events?.emit(tx, { type: 'message_received', contactId: contact.id, key: `message_received:${inserted[0]!.id}`, channelId: channelAccountId, conversationId: conv.id, kind: m.kind, messageId: inserted[0]!.id, ...(historical ? { historical: true as const } : {}) });
 
     // Adjunto entrante (M5.6d): el mensaje queda, y aparte el archivo en `message_attachments` para que la tarea `attachments` lo descargue y lo revise (no bloquea la ingesta)
     await this.queueMediaDownload(tx, conv.id, inserted[0]!.id, m);
@@ -128,10 +127,35 @@ export class ConversationsService {
     // Una conversación sin dueño (nueva, o que antes no tenía a quién) se reparte ahora; si ya tiene dueño no se toca
     const a = await this.assignment.assignConversation(tx, conv.id, assign);
     // Si ya tenía dueño, el cliente espera una respuesta POSTERIOR (el cronómetro corre desde su mensaje, no desde que lo procesamos); si acaba de asignarse, ya corre el de primera respuesta
+    // Lo recuperado de días atrás (v19 B3) no arranca cronómetros ni saludos: reasignaría en masa por mensajes viejos
+    if (historical) return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
     if (!a.assigned && a.ownerId) await this.sla.startFollowup(tx, { id: conv.id, ownerId: a.ownerId, queueId: a.queueId }, { now: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, timeZone: assign.timeZone });
     // Saludo o aviso de fuera de horario de la cola (M5.5c): salen al cliente como mensaje automático, que no es una respuesta humana
     await this.autoMessages.afterInbound(tx, { conversationId: conv.id, channelAccountId, queueId: a.queueId, created: conv.created, receivedAt: m.sentAt.getTime() <= assign.now.getTime() ? m.sentAt : assign.now, inboundAt: m.sentAt, now: assign.now, timeZone: assign.timeZone });
     return { duplicate: false, conversationId: conv.id, contactCreated: contact.created, conversationCreated: conv.created };
+  }
+
+  /** El clic de anuncio que trae un mensaje, como lo registra la atribución (el mismo para el mensaje que llega y para la recuperación de avisos guardados, v20). */
+  private clickOf(m: NormalizedMessage, clid: string): ClickInput {
+    return { phone: m.from, ctwa_cl_id: clid, ...(m.referral?.platform ? { placement: m.referral.platform } : {}), source: 'meta_ctwa', ad_id: m.referral?.sourceId ?? undefined, headline: m.referral?.headline ?? undefined, thumbnail_url: m.referral?.thumbnailUrl ?? undefined, source_url: m.referral?.sourceUrl ?? undefined, occurred_at: m.sentAt.toISOString() };
+  }
+
+  /**
+   * Recuperación de anuncios (v20): un aviso YA guardado trae el clic de un mensaje que ya existe. Busca el contacto de ese mensaje (por `(canal, id del mensaje)`) y le aplica el clic con su hora real: primer y último toque,
+   * historial y, solo si es de hace menos de 7 días, el Lead hacia Meta. Idempotente (el mismo clic no cambia nada). `no_message`: el mensaje nunca se guardó (no hay a quién atribuir).
+   */
+  async applyBackfillClick(tx: TenantTx, channelAccountId: string, m: NormalizedMessage): Promise<'applied' | 'no_click' | 'no_message'> {
+    const clid = m.referral?.ctwaClid ?? null;
+    if (!clid) return 'no_click';
+    const [row] = await tx
+      .select({ contactId: conversations.contactId })
+      .from(messages)
+      .innerJoin(conversations, and(eq(conversations.organizationId, messages.organizationId), eq(conversations.id, messages.conversationId)))
+      .where(and(eq(messages.channelAccountId, channelAccountId), eq(messages.externalId, m.externalId), eq(messages.direction, 'in')))
+      .limit(1);
+    if (!row) return 'no_message';
+    await this.attribution.recordIn(tx, this.clickOf(m, clid), m.sentAt, { id: row.contactId, created: false });
+    return 'applied';
   }
 
   /** El archivo de un mensaje que entra, aparte en `message_attachments`: la tarea `attachments` lo descarga y lo revisa. */
@@ -179,7 +203,7 @@ export class ConversationsService {
         .limit(1);
       if (inFlight) return 'wait';
     }
-    const contact = await this.contacts.findOrCreateByPhone(tx, m.from, 'whatsapp', null);
+    const contact = await this.contacts.resolveWhatsapp(tx, { phone: m.from, lid: m.lid ?? null, name: null, audit: 'meta' });
     const conv = await this.openConversation(tx, contact.id, channelAccountId, m.fromRaw, 'meta');
     const inserted = await tx
       .insert(messages)

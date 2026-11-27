@@ -59,6 +59,10 @@ export class AiAdminService {
     return this.models.list();
   }
 
+  useModelForAudio(model: string): Promise<{ model: string; preferred: true }> {
+    return this.models.useForAudio(model);
+  }
+
   setModelPrice(model: string, b: ModelPriceDto): Promise<ModelPriceView> {
     return this.models.set(model, b);
   }

@@ -397,7 +397,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
   if (mode === 'empty') return send(200, { display_phone_number: '' });
   if (mode === 'rate') return send(429, { error: { code: 4, message: 'rate limit' } });
   // ── Archivos (M5.6d): subida a /media, datos de un archivo del cliente en /<id> y el archivo en /files/<nombre> ──
-  const upload = /^\/v21\.0\/(\d+)\/media$/.exec(url)?.[1];
+  const upload = /^\/v26.0\/(\d+)\/media$/.exec(url)?.[1];
   if (upload && req.method === 'POST') {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -414,7 +414,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     });
     return;
   }
-  const mediaId = /^\/v21\.0\/(\d+)$/.exec(url)?.[1];
+  const mediaId = /^\/v26.0\/(\d+)$/.exec(url)?.[1];
   if (mediaId && req.method === 'GET') {
     const auth = req.headers.authorization ?? '';
     if (auth === `Bearer ${BAD}`) return send(400, { error: { code: 190, message: 'Error validating access token' } });
@@ -450,7 +450,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     }
     return send(404, { error: { code: 100, message: 'no existe' } });
   }
-  const target = /^\/v21\.0\/(\d+)\/messages$/.exec(url)?.[1];
+  const target = /^\/v26.0\/(\d+)\/messages$/.exec(url)?.[1];
   if (target && req.method === 'POST') {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -470,7 +470,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     });
     return;
   }
-  const id = /^\/v21\.0\/(\d+)\?/.exec(url)?.[1];
+  const id = /^\/v26.0\/(\d+)\?/.exec(url)?.[1];
   if (!id) return send(404, { error: { code: 100, message: 'ruta desconocida' } });
   if (id === '99999999') return send(503, { error: { code: 2, message: 'servicio no disponible' } });
   const auth = req.headers.authorization ?? '';
@@ -518,12 +518,12 @@ contract('Meta Cloud (servidor simulado)', () => {
 });
 
 describe('MetaCloudProvider · detalles de la Graph API', () => {
-  it('consulta GET /v21.0/<id> con los campos pedidos y el token como Bearer', async () => {
+  it('consulta GET /v26.0/<id> con los campos pedidos y el token como Bearer', async () => {
     mode = 'normal';
     seen.length = 0;
     const info = await new MetaCloudProvider({ baseUrl: `${origin}/` }).describeNumber({ accessToken: VALID }, '1090123456789');
     expect(info).toEqual({ displayPhone: '+593 98 421 7730', verifiedName: 'Barbería Norte' });
-    expect(seen).toEqual([{ url: '/v21.0/1090123456789?fields=display_phone_number,verified_name', auth: `Bearer ${VALID}` }]);
+    expect(seen).toEqual([{ url: '/v26.0/1090123456789?fields=display_phone_number,verified_name', auth: `Bearer ${VALID}` }]);
   });
 
   it('un id que no son solo dígitos no sale a la red (no puede alterar la ruta)', async () => {
@@ -550,13 +550,13 @@ describe('MetaCloudProvider · detalles de la Graph API', () => {
     await expect(new MetaCloudProvider({ baseUrl: 'http://127.0.0.1:1', timeoutMs: 2_000 }).describeNumber({ accessToken: VALID }, '1090123456789')).rejects.toMatchObject({ code: 'unavailable' });
   });
 
-  it('envía POST /v21.0/<id>/messages con el cuerpo de un texto de WhatsApp, el token como Bearer y sin vista previa de enlaces', async () => {
+  it('envía POST /v26.0/<id>/messages con el cuerpo de un texto de WhatsApp, el token como Bearer y sin vista previa de enlaces', async () => {
     mode = 'normal';
     seen.length = 0;
     sentBodies.length = 0;
     const sent = await new MetaCloudProvider({ baseUrl: `${origin}/` }).sendText({ accessToken: VALID }, '1090123456789', { to: '593984217730', text: 'Hola Ana, ¿te agendo?' });
     expect(sent).toEqual({ externalId: 'wamid.HBgMNTkzOTg0MjE3NzMwFQIAERgS' });
-    expect(seen).toEqual([{ url: '/v21.0/1090123456789/messages', auth: `Bearer ${VALID}` }]);
+    expect(seen).toEqual([{ url: '/v26.0/1090123456789/messages', auth: `Bearer ${VALID}` }]);
     expect(sentBodies).toEqual([{ messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'text', text: { preview_url: false, body: 'Hola Ana, ¿te agendo?' } }]);
   });
 
@@ -580,7 +580,7 @@ describe('MetaCloudProvider · detalles de la Graph API', () => {
     const p = new MetaCloudProvider({ baseUrl: `${origin}/` });
     await p.sendReaction({ accessToken: VALID }, '1090123456789', { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '\u{1F44D}' });
     await p.sendReaction({ accessToken: VALID }, '1090123456789', { to: '593984217730', targetExternalId: 'wamid.IN1', emoji: '' });
-    expect(seen.map((x) => x.url)).toEqual(['/v21.0/1090123456789/messages', '/v21.0/1090123456789/messages']);
+    expect(seen.map((x) => x.url)).toEqual(['/v26.0/1090123456789/messages', '/v26.0/1090123456789/messages']);
     expect(sentBodies).toEqual([
       { messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'reaction', reaction: { message_id: 'wamid.IN1', emoji: '\u{1F44D}' } },
       { messaging_product: 'whatsapp', recipient_type: 'individual', to: '593984217730', type: 'reaction', reaction: { message_id: 'wamid.IN1', emoji: '' } },
@@ -626,7 +626,7 @@ describe('MetaCloudProvider · detalles de la Graph API', () => {
 describe('MetaCloudProvider · archivos (sendMedia y downloadMedia)', () => {
   const meta = (extra: ConstructorParameters<typeof MetaCloudProvider>[0] = {}) => new MetaCloudProvider({ baseUrl: origin, trustMediaUrl: (u) => u.origin === origin, ...extra });
 
-  it('sube el archivo a POST /v21.0/<número>/media (multipart, con el token) y manda el mensaje que lo referencia por su identificador, con pie', async () => {
+  it('sube el archivo a POST /v26.0/<número>/media (multipart, con el token) y manda el mensaje que lo referencia por su identificador, con pie', async () => {
     mode = 'normal';
     uploads.length = 0;
     sentBodies.length = 0;
@@ -634,7 +634,7 @@ describe('MetaCloudProvider · archivos (sendMedia y downloadMedia)', () => {
     const sent = await meta().sendMedia({ accessToken: VALID }, '1090123456789', { to: TO, kind: 'image', bytes, mimeType: 'image/jpeg', filename: 'foto.jpg', caption: 'Mira esto' });
     expect(sent.externalId).toMatch(/^wamid\./);
     expect(uploads).toHaveLength(1);
-    expect(uploads[0]).toMatchObject({ url: '/v21.0/1090123456789/media', auth: `Bearer ${VALID}` });
+    expect(uploads[0]).toMatchObject({ url: '/v26.0/1090123456789/media', auth: `Bearer ${VALID}` });
     expect(uploads[0]!.contentType).toMatch(/^multipart\/form-data; boundary=/);
     expect(uploads[0]!.size).toBeGreaterThanOrEqual(bytes.length);
     expect(sentBodies).toEqual([{ messaging_product: 'whatsapp', recipient_type: 'individual', to: TO, type: 'image', image: { id: '555000111222', caption: 'Mira esto' } }]);

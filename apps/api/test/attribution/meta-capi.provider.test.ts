@@ -124,3 +124,109 @@ describe('MetaCapiProvider · verificar', () => {
     await expect(provider().verify(creds)).resolves.toEqual({ name: null });
   });
 });
+
+describe('MetaCapiProvider · nombres de anuncios (lookupAds)', () => {
+  const AD = '120250251830440318';
+  const OTHER = '120250251830440999';
+  const NODE = { name: 'Prefiero sufrir así', adset: { id: '1202', name: 'SERVICIOS PASIEL RMKT' }, campaign: { id: '1201', name: 'SERVICIOS PASIEL - RMKT NOV 2026' } };
+  const NAMES = { adName: 'Prefiero sufrir así', adsetId: '1202', adsetName: 'SERVICIOS PASIEL RMKT', campaignId: '1201', campaignName: 'SERVICIOS PASIEL - RMKT NOV 2026' };
+  const GONE = { error: { code: 100, error_subcode: 33, message: 'Unsupported get request' } };
+  /** El anuncio AD existe; cualquier otro contesta lo que se indique. */
+  const onlyAd = (status: number, json: unknown) => {
+    reply = (q, res) => (q.url!.includes(AD) ? ok(res, 200, NODE) : ok(res, status, json));
+  };
+
+  it('pide UN GET /{anuncio}?fields=… por anuncio (nunca la consulta conjunta ?ids=, que Meta retiró), con el token en la cabecera; lo que Meta no da queda null', async () => {
+    onlyAd(400, GONE);
+    const out = await provider().lookupAds([AD, '999999', AD], creds);
+    expect(out).toEqual({ [AD]: NAMES, '999999': null });
+    expect(seen.map((x) => x.url).sort()).toEqual([AD, '999999'].map((id) => `/${GRAPH_VERSION}/${id}?fields=name,adset{id,name},campaign{id,name}`).sort());
+    for (const s of seen) {
+      expect(s).toMatchObject({ method: 'GET', auth: `Bearer ${TOKEN}` });
+      expect(s.url).not.toContain('ids=');
+      expect(s.url).not.toContain(TOKEN);
+    }
+  });
+
+  it('pide 50 anuncios como máximo', async () => {
+    reply = (_q, res) => ok(res, 200, NODE);
+    const out = await provider().lookupAds(Array.from({ length: 60 }, (_x, i) => String(1000000 + i)), creds);
+    expect(seen).toHaveLength(50);
+    expect(Object.values(out).filter(Boolean)).toHaveLength(50);
+  });
+
+  it('un anuncio sin permiso no tumba a los que sí se leen; si NINGUNO se puede leer y apunta al token, es error de credenciales', async () => {
+    onlyAd(403, { error: { code: 200, message: 'Requires ads_read' } });
+    expect(await provider().lookupAds([AD, OTHER], creds)).toEqual({ [AD]: NAMES, [OTHER]: null });
+    expect(await fail(provider().lookupAds([OTHER], creds))).toMatchObject({ credentials: true });
+    reply = (_q, res) => ok(res, 400, GONE);
+    expect(await fail(provider().lookupAds(['999999', OTHER], creds))).toMatchObject({ credentials: true });
+    expect(await provider().lookupAds(['999999'], creds)).toEqual({ '999999': null }); // uno solo que ya no existe
+  });
+
+  it('un token inválido o un límite cortan toda la consulta aunque otro anuncio se haya leído; un rechazo de la petición no se disfraza de «no existe»', async () => {
+    onlyAd(400, { error: { code: 190, message: 'Invalid OAuth access token' } });
+    expect(await fail(provider().lookupAds([AD, OTHER], creds))).toMatchObject({ credentials: true });
+    onlyAd(400, { error: { code: 17, message: 'User request limit reached' } });
+    expect(await fail(provider().lookupAds([AD, OTHER], creds))).toMatchObject({ retryable: true });
+    reply = (_q, res) => ok(res, 400, { error: { code: 100, message: 'Tried accessing nonexisting field' } });
+    expect(await fail(provider().lookupAds([AD], creds))).toMatchObject({ retryable: false, credentials: false });
+  });
+
+  it('ignora lo que no parece un id de anuncio (solo dígitos) y sin ids válidos ni siquiera llama a Meta', async () => {
+    const out = await provider().lookupAds(['abc', '../x'], creds);
+    expect(out).toEqual({ abc: null, '../x': null });
+    expect(seen).toHaveLength(0);
+  });
+
+  it('un token sin permiso para leer anuncios es un error de credenciales (definitivo); un límite de uso, reintentable; el mensaje no lleva el token', async () => {
+    reply = (_q, res) => ok(res, 403, { error: { message: `(#200) Requires ads_read ${TOKEN}`, code: 200 } });
+    const denied = await fail(provider().lookupAds([AD], creds));
+    expect(denied).toMatchObject({ credentials: true, retryable: false });
+    expect(denied.message).not.toContain(TOKEN);
+    reply = (_q, res) => ok(res, 429, { error: { message: 'límite', code: 4 } });
+    expect(await fail(provider().lookupAds([AD], creds))).toMatchObject({ retryable: true });
+  });
+});
+
+describe('MetaCapiProvider · el motivo real del rechazo (v20)', () => {
+  it('«Invalid parameter» llega con el título, el mensaje para el usuario y el subcódigo que da Meta, sin pasar de 300 caracteres ni filtrar el token', async () => {
+    reply = (_q, res) => ok(res, 400, { error: { message: 'Invalid parameter', type: 'OAuthException', code: 100, error_subcode: 2804132, error_user_title: 'No hay ninguna cuenta de WhatsApp Business vinculada con este conjunto de datos', error_user_msg: `Enviaste "whatsapp_business_account_id" en user_data, pero el conjunto de datos no tiene ninguna cuenta vinculada. ${TOKEN}` } });
+    const e = await fail(provider().send(sampleEvent(), creds));
+    expect(e).toMatchObject({ retryable: false, credentials: false });
+    expect(e.message).toContain('Invalid parameter');
+    expect(e.message).toContain('No hay ninguna cuenta de WhatsApp Business vinculada');
+    expect(e.message).toContain('(2804132)');
+    expect(e.message).not.toContain(TOKEN);
+    expect(e.message.length).toBeLessThanOrEqual(300);
+  });
+
+  it('sin título ni mensaje del usuario el texto no cambia', async () => {
+    reply = (_q, res) => ok(res, 400, { error: { code: 100, message: 'Invalid parameter' } });
+    expect((await fail(provider().send(sampleEvent(), creds))).message).toBe('Meta rechazó el evento: Invalid parameter');
+  });
+});
+
+describe('MetaCapiProvider · dataset de mensajes (ensureMessagingDataset)', () => {
+  const WABA = '935383352872554';
+  it('pide POST /{cuenta}/dataset con el token en la cabecera y devuelve el dataset', async () => {
+    reply = (_q, res) => ok(res, 200, { id: '1030123066792188' });
+    await expect(provider().ensureMessagingDataset(WABA, creds)).resolves.toEqual({ datasetId: '1030123066792188' });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ method: 'POST', url: `/${GRAPH_VERSION}/${WABA}/dataset`, auth: `Bearer ${TOKEN}` });
+    expect(seen[0]!.url).not.toContain(TOKEN);
+  });
+
+  it('una cuenta con forma inválida no sale a la red; una respuesta sin id o con un id raro es un fallo definitivo; un permiso que falta, un fallo de credenciales', async () => {
+    for (const waba of ['../../me', '12', 'abc', '1 2 3 4 5']) expect(await fail(provider().ensureMessagingDataset(waba, creds))).toMatchObject({ credentials: true, retryable: false });
+    expect(seen).toEqual([]);
+    reply = (_q, res) => ok(res, 200, {});
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ retryable: false });
+    reply = (_q, res) => ok(res, 200, { id: '../x' });
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ retryable: false });
+    reply = (_q, res) => ok(res, 403, { error: { code: 200, message: 'Requires whatsapp_business_manage_events permission' } });
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ credentials: true, retryable: false });
+    reply = (_q, res) => { res.writeHead(200); res.end('<html>'); };
+    expect(await fail(provider().ensureMessagingDataset(WABA, creds))).toMatchObject({ retryable: true });
+  });
+});

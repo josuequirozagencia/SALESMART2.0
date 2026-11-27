@@ -17,6 +17,8 @@ import { kindLabel } from './inboxFormat';
 import { quoteWho } from './MessageBubble';
 import { ScheduleDialog } from './ScheduleDialog';
 import { SheetButton } from './SheetButton';
+import { LibraryPicker } from '../library/LibraryPicker';
+import { useLibraryAccess } from '../library/useLibrary';
 import { TemplatePicker } from './TemplatePicker';
 import { useConversationQuickReplies, useMentionOptions, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
 import { useLongPress } from './useLongPress';
@@ -67,6 +69,8 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   const [text, setText] = useState(() => readDraft(c.id).text);
   const [caret, setCaret] = useState(() => readDraft(c.id).text.length);
   const [picker, setPicker] = useState(false);
+  const [library, setLibrary] = useState(false);
+  const libraryAccess = useLibraryAccess().data !== undefined;
   const [manage, setManage] = useState(false);
   const [scheduling, setScheduling] = useState(false);
   const [attaching, setAttaching] = useState(false);
@@ -278,10 +282,12 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
         </div>
           ) : null}
           {c.channel.kind === 'ghl' || c.channel.kind === 'qr' ? null : <button type="button" onClick={() => setPicker(true)} className={`rounded-full border px-3 py-1 text-[12.5px] font-semibold ${c.window.open ? 'border-line text-muted hover:text-fg' : 'border-accent bg-accent text-accent-ink'}`}>Plantillas</button>}
+          {libraryAccess && c.channel.kind !== 'ghl' ? <button type="button" onClick={() => setLibrary(true)} className="rounded-full border border-line px-3 py-1 text-[12.5px] font-semibold text-muted hover:text-fg">Biblioteca</button> : null}
           <button type="button" onClick={() => setManage(true)} className="rounded-full border border-line px-3 py-1 text-[12.5px] font-semibold text-muted hover:text-fg">Respuestas rápidas</button>
         </div>
       ) : null}
       {picker ? <TemplatePicker c={c} onClose={() => setPicker(false)} /> : null}
+      {library ? <LibraryPicker c={c} onClose={() => setLibrary(false)} /> : null}
       {manage ? <QuickRepliesDialog onClose={() => setManage(false)} /> : null}
       {scheduling ? <ScheduleDialog c={c} text={trimmed} onClose={() => setScheduling(false)} onDone={() => { setText(''); setCaret(0); }} /> : null}
       <input ref={cameraRef} type="file" accept="image/*,video/*" capture="environment" hidden aria-label="Tomar foto o video con la cámara" onChange={onMedia} />
@@ -452,6 +458,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
             ) : null}
             {c.can.reply && c.channel.kind !== 'ghl' && c.channel.kind !== 'qr' ? <SheetButton icon="form" {...(c.window.open ? {} : { primary: true, hint: 'La ventana de 24 h está cerrada: solo puedes escribir con una plantilla' })} onClick={() => { setSheet(false); setPicker(true); }}>Plantillas</SheetButton> : null}
             {!noteMode && !pendingAttachment && suggestion.available ? <SheetButton icon="bot" disabled={suggestion.pending} hint="La IA prepara un borrador que tú revisas y envías" onClick={() => { setSheet(false); suggestion.run(); }}>Sugerir respuesta</SheetButton> : null}
+            {c.can.reply && libraryAccess && c.channel.kind !== 'ghl' ? <SheetButton icon="image" disabled={!!block || !!pendingAttachment} hint="Archivos de tu empresa: catálogos, fotos, PDF" onClick={() => { setSheet(false); setLibrary(true); }}>Biblioteca</SheetButton> : null}
             {c.can.reply ? <SheetButton icon="bolt" onClick={() => { setSheet(false); setManage(true); }}>Respuestas rápidas</SheetButton> : null}
             {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <SheetButton icon="clock" disabled={!trimmed || pending.length > 0} hint={trimmed ? undefined : 'Escribe el mensaje primero'} onClick={() => { setSheet(false); setScheduling(true); }}>Programar mensaje</SheetButton> : null}
             {c.can.note ? (

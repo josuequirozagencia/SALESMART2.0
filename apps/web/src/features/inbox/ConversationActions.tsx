@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { friendlyError } from '../../lib/errors';
 import type { Conversation } from '../../lib/types';
 import { Button } from '../../ui/controls';
+import { QueueAssignDialog, queueActionLabel } from './ConversationQueue';
 import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { ScheduledDialog } from './ScheduledList';
 import { SheetButton, Tile } from './SheetButton';
@@ -37,6 +38,7 @@ export function ActionTiles({ c, onClose }: { c: Conversation; onClose: () => vo
   const navigate = useNavigate();
   const [transfer, setTransfer] = useState(false);
   const [scheduledOpen, setScheduledOpen] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const scheduled = useScheduledMessages(c.id);
   const fav = useFavorite(c.id);
   const pending = (scheduled.data?.items ?? []).filter((m) => m.status === 'scheduled').length;
@@ -44,8 +46,10 @@ export function ActionTiles({ c, onClose }: { c: Conversation; onClose: () => vo
     <>
       <Tile icon="star" label={c.favorite ? 'Quitar de destacadas' : 'Destacar'} onClick={() => fav.mutate(!c.favorite)} />
       {c.can.transfer || c.can.share ? <Tile icon="swap" label="Transferir o compartir" onClick={() => setTransfer(true)} /> : null}
+      {c.can.set_queue ? <Tile icon="building" label={queueActionLabel(c)} onClick={() => setQueueOpen(true)} /> : null}
       <Tile icon="clock" label={pending > 0 ? `Mensajes programados (${pending})` : 'Mensajes programados'} onClick={() => setScheduledOpen(true)} />
       {transfer ? <TransferDialog c={c} onClose={() => setTransfer(false)} onTransferred={(r) => { setTransfer(false); if (!r.still_visible) navigate('/inbox'); else onClose(); }} /> : null}
+      {queueOpen ? <QueueAssignDialog c={c} onClose={() => setQueueOpen(false)} /> : null}
       {scheduledOpen ? <ScheduledDialog conversationId={c.id} onClose={() => setScheduledOpen(false)} /> : null}
     </>
   );

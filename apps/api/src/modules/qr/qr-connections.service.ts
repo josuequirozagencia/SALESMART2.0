@@ -1,9 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { uuidv7 } from '@sales-smart/shared';
-import { and, asc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNull, sql } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { channelAccounts, Database, qrAccounts, type TenantTx } from '../../db';
+import { channelAccounts, Database, messages, qrAccounts, type TenantTx } from '../../db';
 import { ConflictError, NotFoundError, ServiceUnavailableError } from '../../errors';
 import type { AppLogger } from '../../logger';
 import { APP_CONFIG, APP_LOGGER } from '../../tokens';
@@ -36,7 +36,11 @@ export interface QrChannelView {
   down_since: string | null;
   last_error: string | null;
   /** Calentamiento: día en que va y cuántos mensajes puede enviar hoy. */
-  warmup: { day: number; daily_limit: number };
+  warmup: { day: number; daily_limit: number; waived: boolean; waived_at: string | null };
+  /** Volumen de lo que la plataforma envió por esta sesión en las últimas 24 h (sin lo escrito desde el teléfono): `ok`, `near` (80 % del límite) u `over` (más que el límite). Es un aviso: no bloquea nada. */
+  volume: { sent_24h: number; limit: number; level: 'ok' | 'near' | 'over' };
+  /** La última «puesta al día» (v19 B3), o null si nunca corrió. Solo cifras y el motivo del fallo: nada de clientes. */
+  catch_up: { at: string; found: number; recovered: number; truncated: boolean; error: string | null } | null;
   created_at: string;
 }
 
@@ -75,7 +79,7 @@ export class QrConnectionsService {
     return baseUrl && apiKey ? { baseUrl, apiKey } : null;
   }
 
-  private async mustCredentials(): Promise<QrCredentials> {
+  async mustCredentials(): Promise<QrCredentials> {
     if (this.cfg.channels.qrProvider === 'none') throw new ServiceUnavailableError('QR_DISABLED', 'WhatsApp por QR está apagado en este entorno');
     const c = await this.credentials();
     if (!c) throw new ServiceUnavailableError('QR_NOT_CONFIGURED', 'WhatsApp por QR no está configurado: el administrador de la plataforma debe guardar la URL y la clave de Evolution en Proveedores');
@@ -89,7 +93,7 @@ export class QrConnectionsService {
   }
 
   /** Un error del proveedor, traducido a uno nuestro (con un texto que la persona entiende; nunca la clave ni la dirección del servidor). */
-  private translate(e: unknown): unknown {
+  translate(e: unknown): unknown {
     if (!(e instanceof QrSessionError)) return e;
     if (e.code === 'not_configured') return new ServiceUnavailableError('QR_NOT_CONFIGURED', 'El servidor de WhatsApp por QR rechazó la clave de la plataforma: el administrador de la plataforma debe revisarla en Proveedores');
     if (e.code === 'not_found') return new ConflictError('QR_INSTANCE_MISSING', 'La sesión de WhatsApp por QR ya no existe en el servidor: vuelve a crear la conexión');
@@ -99,10 +103,11 @@ export class QrConnectionsService {
   async list(): Promise<QrList> {
     const rows = await this.db.withTenant((tx) => this.rows(tx));
     const now = new Date();
-    return { items: rows.map((r) => this.view(r, now)), available: (await this.credentials()) !== null, limits: { max_channels: MAX_QR_CHANNELS } };
+    const sent = await this.db.withTenant((tx) => this.sentLast24h(tx, rows.map((r) => r.a.id)));
+    return { items: rows.map((r) => this.view(r, now, sent.get(r.a.id) ?? 0)), available: (await this.credentials()) !== null, limits: { max_channels: MAX_QR_CHANNELS } };
   }
 
-  async create(input: { name: string; queue_id?: string | null }): Promise<QrChannelView> {
+  async create(input: { name: string; queue_id?: string | null; prior_use_risk_accepted?: boolean }): Promise<QrChannelView> {
     const creds = await this.mustCredentials();
     await this.db.withTenant(async (tx) => {
       const [n] = await tx.select({ n: sql<number>`count(*)::int` }).from(channelAccounts).where(and(isNull(channelAccounts.deletedAt), eq(channelAccounts.provider, 'evolution')));
@@ -119,11 +124,18 @@ export class QrConnectionsService {
       throw this.translate(e);
     }
     try {
+      const riskAccepted = input.prior_use_risk_accepted === true;
+      const now = new Date();
       return await this.db.withTenant(async (tx) => {
         const [a] = await tx.insert(channelAccounts).values({ id, provider: 'evolution', isOfficial: false, name: input.name, queueId: input.queue_id ?? null }).returning();
-        const [q] = await tx.insert(qrAccounts).values({ channelAccountId: id, instanceName: instance, state: 'connecting' }).returning();
+        const [q] = await tx
+          .insert(qrAccounts)
+          .values({ channelAccountId: id, instanceName: instance, state: 'connecting', warmupWaived: riskAccepted, warmupWaivedAt: riskAccepted ? now : null })
+          .returning();
         await writeAudit(tx, { entityType: AUDIT, entityId: id, newValue: { name: a!.name, provider: 'evolution', official: false, queue_id: a!.queueId }, source: 'manual' });
-        return this.view({ a: a!, q: q! }, new Date());
+        // Deja rastro de que el cliente declaró uso previo del chip y aceptó el riesgo de bloqueo (curva de calentamiento propia, más rápida y con techo más alto)
+        if (riskAccepted) await writeAudit(tx, { entityType: AUDIT, entityId: id, field: 'qr_warmup_waived', oldValue: false, newValue: true, source: 'manual' });
+        return this.view({ a: a!, q: q! }, now);
       });
     } catch (e) {
       await this.provider.deleteInstance(creds, instance).catch(() => undefined); // no quedan instancias huérfanas
@@ -134,7 +146,8 @@ export class QrConnectionsService {
 
   async get(id: string): Promise<QrChannelView> {
     const r = await this.db.withTenant((tx) => this.mustGet(tx, id));
-    return this.view(r, new Date());
+    const sent = await this.db.withTenant((tx) => this.sentLast24h(tx, [id]));
+    return this.view(r, new Date(), sent.get(id) ?? 0);
   }
 
   /** El estado de la sesión AHORA, consultado a Evolution (la pantalla lo pide cada pocos segundos mientras se escanea el QR). */
@@ -290,7 +303,22 @@ export class QrConnectionsService {
     if (!(await this.queueRules.queueExists(tx, id))) throw new NotFoundError();
   }
 
-  private view(r: Row, now: Date): QrChannelView {
+  /** Mensajes que la plataforma envió por cada conexión en las últimas 24 h (lo escrito desde el teléfono no cuenta: no pasó por la plataforma). */
+  private async sentLast24h(tx: TenantTx, channelIds: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (channelIds.length === 0) return out;
+    const since = new Date(Date.now() - 24 * 60 * 60_000);
+    const rows = await tx
+      .select({ channel: messages.channelAccountId, n: sql<number>`count(*)::int` })
+      .from(messages)
+      .where(and(inArray(messages.channelAccountId, channelIds), eq(messages.direction, 'out'), inArray(messages.status, ['sent', 'delivered', 'read']), gt(messages.sentAt, since), sql`coalesce(${messages.meta}->>'origin', '') <> 'device'`))
+      .groupBy(messages.channelAccountId);
+    for (const r of rows) out.set(r.channel, r.n);
+    return out;
+  }
+
+  private view(r: Row, now: Date, sent24h = 0): QrChannelView {
+    const limit = dailyLimit(r.q.firstConnectedAt, now, r.q.warmupWaived);
     return {
       id: r.a.id,
       provider: 'evolution',
@@ -304,7 +332,9 @@ export class QrConnectionsService {
       last_event_at: iso(r.q.lastEventAt),
       down_since: iso(r.q.downSince),
       last_error: r.q.lastError,
-      warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: dailyLimit(r.q.firstConnectedAt, now) },
+      warmup: { day: warmupDay(r.q.firstConnectedAt, now), daily_limit: limit, waived: r.q.warmupWaived, waived_at: iso(r.q.warmupWaivedAt) },
+      volume: { sent_24h: sent24h, limit, level: sent24h > limit ? 'over' : sent24h >= Math.ceil(limit * 0.8) ? 'near' : 'ok' },
+      catch_up: r.q.lastCatchUpAt ? { at: r.q.lastCatchUpAt.toISOString(), found: r.q.lastCatchUpFound ?? 0, recovered: r.q.lastCatchUpRecovered ?? 0, truncated: r.q.lastCatchUpTruncated ?? false, error: r.q.lastCatchUpError } : null,
       created_at: r.a.createdAt.toISOString(),
     };
   }

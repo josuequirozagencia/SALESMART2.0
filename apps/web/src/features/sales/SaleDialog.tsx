@@ -7,6 +7,7 @@ import { money } from '../../lib/format';
 import type { Conversation } from '../../lib/types';
 import { Alert, Button, Field, Input, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
+import { QueueAssignForm } from '../inbox/ConversationQueue';
 import { METHOD_LABEL, useCreateSale, useIdempotencyKey, useSaleOptions, type PaymentMethod } from './useSales';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal text-fg';
@@ -15,7 +16,7 @@ const asMoney = (v: string): string => v.trim().replace(',', '.');
 const cents = (v: string): number => Math.round(Number(asMoney(v)) * 100);
 
 const BLOCKED: Record<NonNullable<ReturnType<typeof useSaleOptions>['data']>['blocked'] & string, string> = {
-  no_queue: 'Esta conversación no pertenece a ningún departamento: sin departamento no hay catálogo para vender. Un administrador debe asignarle un departamento.',
+  no_queue: 'Esta conversación no pertenece a ningún departamento: sin departamento no hay catálogo para vender.',
   no_products: 'El departamento de esta conversación no tiene productos o servicios activos. Un administrador puede agregarlos en Departamentos.',
   unassigned: 'La conversación aún no tiene asesor: asígnala o tómala antes de registrar la venta.',
   not_owner: 'Solo quien tiene asignada la conversación, o un administrador, puede registrar la venta.',
@@ -31,6 +32,7 @@ export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => voi
   const { state } = useSession();
   const [confetti, setConfetti] = useState(false);
   const idem = useIdempotencyKey();
+  const [assigning, setAssigning] = useState(false);
   const [productId, setProductId] = useState('');
   const [quantity, setQuantity] = useState('1');
   const [total, setTotal] = useState('');
@@ -104,11 +106,21 @@ export function SaleDialog({ c, onClose }: { c: Conversation; onClose: () => voi
     );
   }
 
+  // El departamento se asigna dentro de esta misma ventana y se vuelve al formulario (V24)
+  if (assigning) {
+    return (
+      <Modal title="Asignar departamento" onClose={onClose}>
+        <QueueAssignForm c={c} onDone={() => { setAssigning(false); void options.refetch(); }} onCancel={() => setAssigning(false)} />
+      </Modal>
+    );
+  }
+
   return (
     <Modal title="Registrar venta" onClose={onClose}>
       {options.isPending ? <div className="grid place-items-center py-6 text-muted"><Spinner label="Cargando el catálogo" /></div> : null}
       {options.isError ? <Alert>{friendlyError(options.error, 'No se pudo cargar el catálogo del departamento')}</Alert> : null}
-      {data?.blocked ? <Alert>{BLOCKED[data.blocked]}</Alert> : null}
+      {data?.blocked ? <Alert>{BLOCKED[data.blocked]}{data.blocked === 'no_queue' && !c.can.set_queue ? ' Pídele a un administrador que le asigne un departamento a esta conversación.' : ''}</Alert> : null}
+      {data?.blocked === 'no_queue' && c.can.set_queue ? <div><Button variant="primary" onClick={() => setAssigning(true)}>Asignar departamento</Button></div> : null}
       {data && !data.blocked ? (
         <div className="grid gap-3">
           <p className="text-[12.5px] text-muted">Cliente: <b>{c.contact.name}</b> · Departamento: <b>{data.queue?.name}</b> · Moneda: <b>{currency}</b></p>

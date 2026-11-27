@@ -107,6 +107,20 @@ export class AttachmentsService {
     }
   }
 
+  /**
+   * Guarda un archivo propio de la empresa que NO es un adjunto de una conversación (v20: la miniatura de un anuncio, una sola vez por anuncio) bajo `org/<empresa>/<carpeta>/<uuid>`.
+   * Devuelve null si el almacenamiento no responde: quien llama lo vuelve a intentar con el siguiente aviso.
+   */
+  async putAsset(organizationId: string, folder: 'ads', bytes: Buffer, mime: string): Promise<string | null> {
+    const key = `org/${organizationId}/${folder}/${uuidv7()}`;
+    try {
+      await this.storage.put(key, bytes, mime);
+      return key;
+    } catch {
+      return null;
+    }
+  }
+
   async read(key: string): Promise<Buffer> {
     try {
       return await this.storage.get(key);

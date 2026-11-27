@@ -107,6 +107,8 @@ export interface Company {
   owner_email: string | null;
   timezone: string;
   country: string | null;
+  /** Tope de espacio de la biblioteca de archivos (V21), en bytes. */
+  storage_quota_bytes: number;
   created_at: string;
   trial_ends_at: string | null;
   /** Invitación pendiente del dueño (solo en estado `invited`). */
@@ -413,6 +415,8 @@ export interface ContactTouch {
   campaign: string | null;
   adset: string | null;
   ad: string | null;
+  /** Id del anuncio de Meta (v20). */
+  ad_id?: string | null;
 }
 /** Canal de entrada del contacto (M3.3 §11). */
 export type ContactChannel = 'facebook' | 'instagram' | 'whatsapp' | 'manual' | 'other';
@@ -839,7 +843,7 @@ export interface Conversation {
   /** Ventana de 24 h de WhatsApp oficial para escribir libremente al cliente. */
   window: { open: boolean; expires_at: string | null };
   /** Lo que la persona puede hacer; es solo ayuda de presentación, el servidor vuelve a verificarlo. */
-  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean; transfer: boolean; share: boolean; delete?: boolean };
+  can: { reply: boolean; note: boolean; accept: boolean; take: boolean; close: boolean; transfer: boolean; share: boolean; delete?: boolean; set_queue?: boolean };
   /** El cronómetro de respuesta; null si no hay nada que medir (sin asignar, o finalizada sin respuesta). */
   sla: ConversationSla | null;
 }
@@ -910,7 +914,7 @@ export interface MentionOption {
 /** Un aviso del centro de avisos: menciones en notas (F1, ADR-57) y avisos de tareas (F2, ADR-58). */
 export interface AppNotification {
   id: string;
-  type: 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created';
+  type: 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created' | 'connection_health';
   created_at: string;
   read_at: string | null;
   /** Null en un aviso de vencimiento o de una tarea que creó el sistema. */
@@ -923,6 +927,8 @@ export interface AppNotification {
   task: { id: string; title: string; due_at: string | null; status: 'open' | 'done'; contact_id: string | null } | null;
   /** Solo en los avisos de una venta nueva (v13 S4.2). Opcional: los avisos de antes no lo traen. */
   sale?: { id: string; product: string; amount: string; currency: string; seller: { id: string; name: string } | null; contact: { id: string; name: string } } | null;
+  /** Solo en las alertas de una conexión (v19 B1). Opcional: los avisos de antes no lo traen. */
+  connection?: { id: string; name: string; reason: 'lag' | 'silent' | 'failed' | 'backlog' } | null;
 }
 export interface NotificationPage {
   items: AppNotification[];

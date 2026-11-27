@@ -81,6 +81,7 @@ Variables del servicio «app» (todas con valor seguro por omisión; `fake` se r
 |---|---|---|
 | `STORAGE_PROVIDER` | `s3` o `none` | `s3` (recomendado: Cloudflare R2) |
 | `VIRUS_SCANNER` | `none` o `clamav` | `none` (los archivos quedan «sin revisar», con aviso visible) |
+| `REQUIRE_VIRUS_SCAN` | `true` o `false` | `false` en el piloto. Con `true`, la biblioteca de archivos (V21) no deja marcar un archivo como disponible para asesores ni para la IA mientras `VIRUS_SCANNER` sea `none`. **Ponerlo en `true` antes de usar la biblioteca con varios clientes.** |
 | `CLAMAV_HOST` / `CLAMAV_PORT` | host y puerto del servicio ClamAV | solo con `clamav` (obligatorio si se activa) |
 | `AUDIO_TRANSCODER` | `none` o `ffmpeg` | `none` (las grabaciones WebM se rechazan con explicación) |
 | `PUSH_PROVIDER` | `webpush`, `none` o `fake` | `webpush` (sin claves VAPID el push queda apagado) |

@@ -1,8 +1,11 @@
 import type { EvolutionConnectionState } from '../channels';
 import type { SentMessage } from '../channels';
-import { QrSessionError, type QrCodeResult, type QrCredentials, type QrQuoted, type QrSendMedia, type QrSessionProvider } from './qr-session.port';
+import { QrSessionError, type QrCodeResult, type QrCredentials, type QrQuoted, type QrRecentMessages, type QrSendMedia, type QrSessionProvider } from './qr-session.port';
 
 const TIMEOUT_MS = 20_000;
+/** Registros por página y páginas como máximo al recuperar mensajes (v19 B3): acota la lectura aunque Evolution tenga miles. */
+const FIND_PAGE_SIZE = 100;
+const FIND_MAX_PAGES = 100;
 /** Los eventos que Evolution debe mandar a nuestro webhook (los que lee `parseEvolutionWebhook`). */
 export const EVOLUTION_EVENTS = ['QRCODE_UPDATED', 'CONNECTION_UPDATE', 'MESSAGES_UPSERT', 'MESSAGES_UPDATE'] as const;
 
@@ -105,6 +108,46 @@ export class EvolutionProvider implements QrSessionProvider {
       if (e instanceof QrSessionError && (e.code === 'rejected' || e.code === 'recipient_invalid')) return null;
       throw e;
     }
+  }
+
+  /**
+   * `POST /chat/findMessages/{instancia}` con `{ where: { key: { fromMe } }, page, offset }` → `{ messages: { total, records } }`, los más nuevos primero (visto en Evolution v2.3.7 el 2026-11-17 contra la
+   * sesión de una empresa real). Se piden por separado los entrantes y los escritos desde el teléfono, y se corta al pasar de `sinceMs`. Los grupos y los estados de WhatsApp (que la plataforma no usa y en
+   * Evolution son la mayoría de los registros) no cuentan para el tope, y el tope vale por cada sentido: así una sesión con muchos grupos no deja fuera los chats 1:1 más viejos del periodo. Solo lectura.
+   */
+  async listRecentMessages(c: QrCredentials, instance: string, input: { sinceMs: number; maxRecords: number }): Promise<QrRecentMessages> {
+    const sinceS = input.sinceMs / 1000;
+    const out: Array<Record<string, unknown>> = [];
+    let truncated = false;
+    for (const fromMe of [false, true]) {
+      let kept = 0;
+      for (let page = 1; page <= FIND_MAX_PAGES; page++) {
+        const j = await this.call(c, 'POST', `/chat/findMessages/${encodeURIComponent(instance)}`, { where: { key: { fromMe } }, page, offset: FIND_PAGE_SIZE });
+        const messages = isObj(j) ? j['messages'] : null;
+        const records = isObj(messages) && Array.isArray(messages['records']) ? (messages['records'] as unknown[]).filter(isObj) : [];
+        if (records.length === 0) break;
+        let older = 0;
+        for (const r of records) {
+          const ts = Number(r['messageTimestamp']);
+          if (!Number.isFinite(ts) || ts < sinceS) {
+            older += 1;
+            continue;
+          }
+          const key = r['key'];
+          const jid = isObj(key) && typeof key['remoteJid'] === 'string' ? key['remoteJid'] : '';
+          if (jid.endsWith('@g.us') || jid === 'status@broadcast') continue; // no son chats con un cliente
+          if (kept >= input.maxRecords) {
+            truncated = true;
+            continue;
+          }
+          kept += 1;
+          out.push(r);
+        }
+        if (older === records.length || records.length < FIND_PAGE_SIZE) break; // la página entera ya es anterior al periodo (o era la última)
+        if (page === FIND_MAX_PAGES) truncated = true;
+      }
+    }
+    return { records: out, truncated };
   }
 
   async sendText(c: QrCredentials, instance: string, input: { to: string; text: string; replyTo?: QrQuoted | undefined }): Promise<SentMessage> {

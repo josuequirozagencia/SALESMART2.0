@@ -77,6 +77,14 @@ export class AiAdminController {
     return this.admin.addModel(b);
   }
 
+  /** Elige el modelo de transcripción que se usa para los audios. */
+  @Post('models/:model/use-for-audio')
+  @HttpCode(200)
+  @Header('Cache-Control', 'no-store')
+  useForAudio(@Param('model', new ZodValidationPipe(modelParamSchema)) model: string) {
+    return this.admin.useModelForAudio(model);
+  }
+
   @Put('models/:model')
   @Header('Cache-Control', 'no-store')
   setModel(@Param('model', new ZodValidationPipe(modelParamSchema)) model: string, @Body(new ZodValidationPipe(modelPriceSchema)) b: ModelPriceDto) {

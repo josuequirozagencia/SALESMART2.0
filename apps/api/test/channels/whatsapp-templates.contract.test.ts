@@ -180,7 +180,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     res.end(JSON.stringify(body));
   };
   const auth = req.headers.authorization ?? '';
-  const list = /^\/v21\.0\/(\d+)\/message_templates\?(.*)$/.exec(url);
+  const list = /^\/v26.0\/(\d+)\/message_templates\?(.*)$/.exec(url);
   if (list && req.method === 'GET') {
     const waba = list[1]!;
     if (waba === '99999999') return send(503, { error: { code: 2, message: 'servicio no disponible' } });
@@ -194,7 +194,7 @@ function handler(req: IncomingMessage, res: ServerResponse): void {
     // `next` trae una URL de Meta: el adaptador NO debe seguirla (solo reenvía el cursor)
     return send(200, { data, paging: { cursors: { before: 'b', after: more ? 'cursor-2' : 'cursor-end' }, ...(more ? { next: 'https://evil.example/steal?token=1' } : {}) } });
   }
-  const target = /^\/v21\.0\/(\d+)\/messages$/.exec(url)?.[1];
+  const target = /^\/v26.0\/(\d+)\/messages$/.exec(url)?.[1];
   if (target && req.method === 'POST') {
     const chunks: Buffer[] = [];
     req.on('data', (c: Buffer) => chunks.push(c));
@@ -243,12 +243,12 @@ contract('Meta Cloud (servidor simulado)', () => ({
 }));
 
 describe('MetaCloudProvider · plantillas · detalles de la Graph API', () => {
-  it('pide GET /v21.0/<waba>/message_templates con los campos y el token como Bearer, y sigue la paginación con el cursor (nunca con la URL que trae la respuesta)', async () => {
+  it('pide GET /v26.0/<waba>/message_templates con los campos y el token como Bearer, y sigue la paginación con el cursor (nunca con la URL que trae la respuesta)', async () => {
     seen.length = 0;
     const list = await new MetaCloudProvider({ baseUrl: `${origin}/` }).listTemplates({ accessToken: VALID }, '1234567890123');
     expect(list.map((t) => t.name)).toEqual(['bienvenida', 'recordatorio_cita', 'promo_corte', 'seguimiento_nombrado', 'catalogo_imagen', 'en_revision', 'rechazada_ejemplo']);
     expect(seen).toHaveLength(2);
-    expect(seen[0]).toMatch(/^GET \/v21\.0\/1234567890123\/message_templates\?fields=id%2Cname%2Clanguage%2Cstatus%2Ccategory%2Cparameter_format%2Ccomponents%2Crejected_reason&limit=100$/);
+    expect(seen[0]).toMatch(/^GET \/v26.0\/1234567890123\/message_templates\?fields=id%2Cname%2Clanguage%2Cstatus%2Ccategory%2Cparameter_format%2Ccomponents%2Crejected_reason&limit=100$/);
     expect(seen[1]).toMatch(/&after=cursor-2$/);
     expect(seen.some((s) => s.includes('evil.example'))).toBe(false);
   });
@@ -269,7 +269,7 @@ describe('MetaCloudProvider · plantillas · detalles de la Graph API', () => {
     expect(by['rechazada_ejemplo']).toMatchObject({ status: 'rejected', rejectedReason: 'INVALID_FORMAT' });
   });
 
-  it('envía POST /v21.0/<id>/messages con type template, el idioma y los datos por parte (botón de URL con sub_type e index; variables con nombre)', async () => {
+  it('envía POST /v26.0/<id>/messages con type template, el idioma y los datos por parte (botón de URL con sub_type e index; variables con nombre)', async () => {
     sentBodies.length = 0;
     const p = new MetaCloudProvider({ baseUrl: origin });
     await p.sendTemplate({ accessToken: VALID }, '1090123456789', {

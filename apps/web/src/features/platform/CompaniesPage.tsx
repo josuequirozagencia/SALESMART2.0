@@ -8,6 +8,7 @@ import { Alert, Button, Spinner } from '../../ui/controls';
 import { Modal } from '../../ui/Modal';
 import { Pill, type PillKind } from '../../ui/Pill';
 import { AssignPlanDialog } from './AssignPlanDialog';
+import { StorageQuotaDialog } from './StorageQuotaDialog';
 import { ChangeAgencyDialog } from './ChangeAgencyDialog';
 import { DeleteCompanyDialog } from './DeleteCompanyDialog';
 import { ExportCompanyDialog } from './ExportCompanyDialog';
@@ -33,7 +34,7 @@ const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-2 text-[
 /** Días que faltan para el borrado definitivo (se redondea hacia arriba: «1 día» hasta el último minuto). */
 const daysLeft = (iso: string): number => Math.max(0, Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000));
 
-function Row({ c, onPlan, onAgency, onResend, onEnter, onDelete, onRecover, onExport, resending, entering }: { c: Company; onPlan: (c: Company) => void; onAgency: (c: Company) => void; onResend: (c: Company) => void; onEnter: (c: Company) => void; onDelete: (c: Company) => void; onRecover: (c: Company) => void; onExport: (c: Company) => void; resending: boolean; entering: boolean }) {
+function Row({ c, onPlan, onSpace, onAgency, onResend, onEnter, onDelete, onRecover, onExport, resending, entering }: { c: Company; onPlan: (c: Company) => void; onSpace: (c: Company) => void; onAgency: (c: Company) => void; onResend: (c: Company) => void; onEnter: (c: Company) => void; onDelete: (c: Company) => void; onRecover: (c: Company) => void; onExport: (c: Company) => void; resending: boolean; entering: boolean }) {
   const [kind, label] = STATE[c.state];
   const deleted = c.state === 'deleted' || c.state === 'purged';
   // Solo dentro del plazo de 7 días se puede recuperar o descargar; después el borrado ya está en marcha o terminó
@@ -63,6 +64,7 @@ function Row({ c, onPlan, onAgency, onResend, onEnter, onDelete, onRecover, onEx
         {open ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Descargar todo de ${c.name}`} onClick={() => onExport(c)}>Descargar todo</Button> : null}
         {!deleted && c.state !== 'suspended' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Entrar a ${c.name} (soporte)`} loading={entering} onClick={() => onEnter(c)}>Entrar</Button> : null}
         {!deleted ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar el plan de ${c.name}`} onClick={() => onPlan(c)}>{c.plan ? 'Cambiar plan' : 'Asignar plan'}</Button> : null}
+        {!deleted && c.kind === 'client' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar el espacio de ${c.name}`} onClick={() => onSpace(c)}>Espacio</Button> : null}
         {!deleted && c.kind === 'client' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Cambiar la administración de ${c.name}`} onClick={() => onAgency(c)}>Administración</Button> : null}
         {c.state === 'invited' ? <Button className="!px-3 !py-1.5 !text-[12.5px]" aria-label={`Reenviar la invitación de ${c.name}`} loading={resending} onClick={() => onResend(c)}>Reenviar invitación</Button> : null}
         {!deleted ? <Button className="!px-3 !py-1.5 !text-[12.5px]" variant="danger" aria-label={`Eliminar ${c.name}`} onClick={() => onDelete(c)}>Eliminar</Button> : null}
@@ -76,6 +78,7 @@ export function CompaniesPage() {
   const [text, setText] = useState('');
   const [filters, setFilters] = useState<CompanyFilters>(NO_FILTERS);
   const [target, setTarget] = useState<Company | null>(null);
+  const [spaceTarget, setSpaceTarget] = useState<Company | null>(null);
   const [creating, setCreating] = useState(false);
   const [agencyTarget, setAgencyTarget] = useState<Company | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Company | null>(null);
@@ -157,11 +160,12 @@ export function CompaniesPage() {
       {q.isSuccess && items.length === 0 ? (
         <p className="rounded-2xl border border-dashed border-line p-8 text-center text-[13.5px] text-muted">{filtered ? 'Ninguna empresa coincide con los filtros.' : 'Todavía no hay empresas.'}</p>
       ) : null}
-      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onAgency={setAgencyTarget} onResend={resendInvitation} onEnter={(x) => void enter(x)} onDelete={setDeleteTarget} onRecover={setRecoverTarget} onExport={setExportTarget} resending={resend.isPending && resend.variables === c.id} entering={entering === c.id} />)}</ul> : null}
+      {items.length > 0 ? <ul className="grid gap-3" aria-label="Empresas">{items.map((c) => <Row key={c.id} c={c} onPlan={setTarget} onSpace={setSpaceTarget} onAgency={setAgencyTarget} onResend={resendInvitation} onEnter={(x) => void enter(x)} onDelete={setDeleteTarget} onRecover={setRecoverTarget} onExport={setExportTarget} resending={resend.isPending && resend.variables === c.id} entering={entering === c.id} />)}</ul> : null}
       {q.hasNextPage ? <div className="grid place-items-center"><Button loading={q.isFetchingNextPage} onClick={() => void q.fetchNextPage()}>Cargar más</Button></div> : null}
 
       {resendError ? <Alert>{resendError}</Alert> : null}
       {enterError ? <Alert>{enterError}</Alert> : null}
+      {spaceTarget ? <StorageQuotaDialog company={spaceTarget} onClose={() => setSpaceTarget(null)} /> : null}
       {target ? <AssignPlanDialog company={target} plans={plans.data?.items ?? []} onClose={() => setTarget(null)} /> : null}
       {agencyTarget ? <ChangeAgencyDialog company={agencyTarget} agencies={agencies.data?.items ?? []} onClose={() => setAgencyTarget(null)} /> : null}
       {deleteTarget ? <DeleteCompanyDialog company={deleteTarget} onClose={() => setDeleteTarget(null)} /> : null}

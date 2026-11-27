@@ -17,10 +17,11 @@ import { ContactOpportunitiesPanel } from '../pipelines/ContactOpportunitiesPane
 import { TasksPanel } from '../crm/TasksPanel';
 import { GhlFlowsPanel } from '../ghl/GhlFlowsPanel';
 import { ContactAppointmentsPanel } from './ContactAppointmentsPanel';
+import { LatestConversation } from './LatestConversation';
 import type { ContactTab } from './ContactQuickActions';
 import { TouchesPanel } from './TouchesPanel';
 import { useCustomFields } from '../custom-fields/useCustomFields';
-import { useTags } from '../tags/useTags';
+import { leadNotice, useSetLead, useTags } from '../tags/useTags';
 import { useCreateContact, useDeleteContact, useUpdateContact, type ContactInput } from './useContacts';
 
 const selectCls = 'w-full rounded-[10px] border border-line bg-surface px-3 py-[11px] text-[14px] font-normal';
@@ -62,6 +63,10 @@ export function ContactDialog({ contact: contactProp, owners, canAssign, canDele
   const customTags = (useTags().data?.items ?? []).filter((t) => !t.is_system);
   const initialTags = (contact?.tags ?? []).filter((t) => !t.is_system).map((t) => t.id);
   const [tagIds, setTagIds] = useState<string[]>(initialTags);
+  // «Lead» (del sistema) se marca a mano y al marcarlo sale el Lead a Meta: se aplica al instante, no con «Guardar»
+  const setLead = useSetLead(contact?.id ?? '');
+  const [leadOn, setLeadOn] = useState((contact?.tags ?? []).some((t) => t.system_key === 'lead'));
+  const [leadMsg, setLeadMsg] = useState<string>();
   const [formError, setFormError] = useState<string>();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [tab, setTab] = useState<ContactTab>(contactProp || initialTab === 'data' ? initialTab : 'data');
@@ -175,6 +180,7 @@ export function ContactDialog({ contact: contactProp, owners, canAssign, canDele
       {contact && tab === 'agenda' ? <ContactAppointmentsPanel contactId={contact.id} /> : null}
       {contact && tab === 'activity' ? <TouchesPanel contactId={contact.id} /> : null}
       {contact && tab === 'ghl' ? <GhlFlowsPanel contactId={contact.id} canWrite={!readOnly} /> : null}
+      {contactProp && tab === 'data' ? <LatestConversation contactId={contactProp.id} /> : null}
       <form onSubmit={submit} noValidate className={`grid gap-3 ${tab === 'data' ? '' : 'hidden'}`} aria-label={editing ? 'Contacto' : 'Nuevo contacto'}>
         <Field label="Nombre" error={errors.name}>
           {(p) => <Input {...p} value={name} onChange={(e) => setName(e.target.value)} maxLength={200} autoComplete="off" disabled={disabled} autoFocus={!editing} />}
@@ -225,9 +231,28 @@ export function ContactDialog({ contact: contactProp, owners, canAssign, canDele
 
         <CompanyField contact={contact} value={companies} onChange={setCompanies} disabled={disabled} />
 
-        {customTags.length > 0 ? (
+        {contact || customTags.length > 0 ? (
           <fieldset className="grid gap-1.5" disabled={disabled}>
             <legend className="text-[12.5px] font-semibold">Etiquetas</legend>
+            {contact ? (
+              <div className="grid gap-0.5">
+                <label className="inline-flex w-fit cursor-pointer items-center gap-1.5 rounded-full border border-line bg-surface px-3 py-1 text-[13px] has-[:checked]:border-accent has-[:checked]:bg-accent-soft">
+                  <input
+                    type="checkbox"
+                    checked={leadOn}
+                    disabled={setLead.isPending}
+                    onChange={() => {
+                      setLeadMsg(undefined);
+                      setFormError(undefined);
+                      setLead.mutate(!leadOn, { onSuccess: (r) => { setLeadOn(r.lead); setLeadMsg(leadNotice(r)); }, onError: (err) => setFormError(friendlyError(err, 'No pudimos cambiar el Lead.')) });
+                    }}
+                  />
+                  Lead
+                </label>
+                <span className="text-[12px] text-muted">Etiqueta del sistema: al marcarla se avisa a Meta (una vez por contacto).</span>
+                {leadMsg ? <span role="status" className="text-[12px] text-muted">{leadMsg}</span> : null}
+              </div>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {customTags.map((t) => {
                 const on = tagIds.includes(t.id);

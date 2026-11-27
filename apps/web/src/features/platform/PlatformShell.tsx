@@ -18,6 +18,7 @@ export function PlatformShell({ me, onLogout, children }: { me: Me; onLogout: ()
         { to: '/platform/agencies', label: 'Agencias', icon: 'swap' },
         { to: '/platform/plans', label: 'Planes', icon: 'card' },
         { to: '/platform/providers', label: 'Proveedores', icon: 'plug' },
+        { to: '/platform/storage', label: 'Espacio', icon: 'image' },
         { to: '/platform/branding', label: 'Marca', icon: 'image' },
         { to: '/platform/ai', label: 'Créditos IA', icon: 'bolt' },
         { to: '/platform/access', label: 'Accesos', icon: 'shield' },

@@ -27,8 +27,8 @@ type TagRow = typeof tags.$inferSelect;
 export const toTagView = (r: TagRow): TagView => ({ id: r.id, name: r.name, color: r.color, system_key: (r.systemKey as SystemTagKey | null) ?? null, is_system: r.isSystem });
 
 /**
- * Etiquetas del SISTEMA (M3.3, ADR-45): `Lead`, `Cita agendada` y `Venta`. Solo el sistema las pone (atribución, citas, ventas): ninguna ruta HTTP lo permite
- * y este servicio no ofrece quitarlas. Cada empresa recibe las suyas al primer uso (idempotente). Trabaja DENTRO de la transacción del que llama.
+ * Etiquetas del SISTEMA (M3.3, ADR-45): `Lead`, `Cita agendada` y `Venta`. Nadie las edita ni las borra. `Cita agendada` y `Venta` solo las pone el sistema (citas, ventas); `Lead` la coloca
+ * o quita una persona (`setLeadByUser`) y los formularios web la ponen solos. Cada empresa recibe las suyas al primer uso (idempotente). Trabaja DENTRO de la transacción del que llama.
  */
 @Injectable()
 export class SystemTagsService {
@@ -58,6 +58,24 @@ export class SystemTagsService {
     if (inserted.length === 0) return false;
     await writeAudit(tx, { entityType: 'contact', entityId: contactId, field: 'tag', oldValue: null, newValue: key, source: 'automation' });
     await this.bus.emit(tx, { contactId, tagName: SYSTEM_TAGS[key].name, tagKind: 'system', op: 'add', origin: 'local' });
+    return true;
+  }
+
+  /**
+   * Una PERSONA coloca o quita la etiqueta `Lead` de un contacto: es la única etiqueta del sistema que se maneja a mano (decisión del responsable, 2026-11-23: el Lead hacia Meta sale cuando el
+   * asesor la coloca; el sistema ya no la pone al llegar un mensaje). Quien llama comprobó que el contacto es visible para la persona. Devuelve true solo si algo cambió.
+   */
+  async setLeadByUser(tx: TenantTx, contactId: string, on: boolean): Promise<boolean> {
+    const tagId = (await this.ensure(tx)).get('lead')!;
+    if (on) {
+      const inserted = await tx.insert(contactTags).values({ contactId, tagId, setBy: 'user' }).onConflictDoNothing().returning({ tagId: contactTags.tagId });
+      if (inserted.length === 0) return false;
+    } else {
+      const removed = await tx.delete(contactTags).where(and(eq(contactTags.contactId, contactId), eq(contactTags.tagId, tagId))).returning({ tagId: contactTags.tagId });
+      if (removed.length === 0) return false;
+    }
+    await writeAudit(tx, { entityType: 'contact', entityId: contactId, field: 'tag', oldValue: on ? null : 'lead', newValue: on ? 'lead' : null, source: 'manual' });
+    await this.bus.emit(tx, { contactId, tagName: SYSTEM_TAGS.lead.name, tagKind: 'system', op: on ? 'add' : 'remove', origin: 'local' });
     return true;
   }
 

@@ -223,3 +223,21 @@ body { font-size: min(var(--fs-max), max(var(--fs-min), calc(13.5px - var(--fs-s
 
 /* Botón primario con el degradado de la marca y su brillo (v10); el texto usa --on-grad */
 button.bg-accent.border-accent, a.bg-accent { background: var(--grad); border-color: transparent; color: var(--on-grad); box-shadow: 0 6px 16px var(--glow); }
+
+/* V23-B: el hilo se ve como WhatsApp en todos los temas (colores, tipografía y estado de entrega). Los contrastes están medidos: la hora y el check gris pasan 4,5:1 sobre la burbuja, el check azul pasa 3:1 (gráfico). */
+.chat-thread {
+  --bubble-out: #d9fdd3; --bubble-in: #ffffff; --bubble-text: #111b21; --bubble-time: #4b5c66;
+  --tick-grey: #5c6d77; --tick-read: #1b78bd; --date-pill-bg: rgba(255, 255, 255, 0.92); --date-pill-fg: #54656f;
+  font-family: -apple-system, "SF Pro Text", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.35;
+}
+:root[data-theme="dark"] .chat-thread {
+  --bubble-out: #005c4b; --bubble-in: #202c33; --bubble-text: #e9edef; --bubble-time: #c1ccd2;
+  --tick-grey: #c1ccd2; --tick-read: #53bdeb; --date-pill-bg: #182229; --date-pill-fg: #aebac1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .chat-thread {
+    --bubble-out: #005c4b; --bubble-in: #202c33; --bubble-text: #e9edef; --bubble-time: #c1ccd2;
+    --tick-grey: #c1ccd2; --tick-read: #53bdeb; --date-pill-bg: #182229; --date-pill-fg: #aebac1;
+  }
+}

@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { and, count, desc, eq, exists, gt, inArray, isNull, lt, ne, or, sql, type SQL } from 'drizzle-orm';
-import { contacts, conversations, Database, messageMentions, messages, notifications, sales, tasks, type TenantTx } from '../../db';
+import { channelAccounts, contacts, conversations, Database, messageMentions, messages, notifications, sales, tasks, type TenantTx } from '../../db';
 import { NotFoundError } from '../../errors';
 import { decodeTimeCursor, encodeTimeCursor } from '../../http';
 import { TenantContext } from '../../tenant';
@@ -17,7 +17,7 @@ export interface NotificationsAccess {
   readonly viewAll: boolean;
 }
 
-export type NotificationType = 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created';
+export type NotificationType = 'mention' | 'task_assigned' | 'task_due' | 'calendar_reconnect' | 'sale_created' | 'connection_health';
 
 export interface NotificationView {
   id: string;
@@ -35,6 +35,8 @@ export interface NotificationView {
   task: { id: string; title: string; due_at: string | null; status: 'open' | 'done'; contact_id: string | null } | null;
   /** Solo en los avisos de una venta nueva (v13 S4.2): se lee de la venta al pedir la lista. */
   sale: { id: string; product: string; amount: string; currency: string; seller: { id: string; name: string } | null; contact: { id: string; name: string } } | null;
+  /** Solo en las alertas de una conexión (v19 B1): cuál y por qué (`lag`, `silent`, `failed`, `backlog`). */
+  connection: { id: string; name: string; reason: 'lag' | 'silent' | 'failed' | 'backlog' } | null;
 }
 
 export interface NotificationPage {
@@ -135,7 +137,7 @@ export class NotificationsService {
       ),
     );
     // Alerta de sistema (v11 67c): no depende de ninguna conversación ni tarea; es de quien la recibe
-    const system = eq(notifications.type, 'calendar_reconnect');
+    const system = inArray(notifications.type, ['calendar_reconnect', 'connection_health']);
     // Venta nueva (v13 S4.2): solo la ve quien ve toda la empresa (la administración) y mientras la venta exista; un asesor nunca ve avisos de ventas ajenas
     const sale = and(eq(notifications.type, 'sale_created'), viewAll ? exists(tx.select({ one: sql`1` }).from(sales).where(and(eq(sales.organizationId, notifications.organizationId), eq(sales.id, notifications.saleId)))) : sql`false`);
     return [eq(notifications.userId, me), gt(notifications.createdAt, since), or(mention, task, system, sale), extra];
@@ -185,7 +187,9 @@ export class NotificationsService {
           ? []
           : (await tx.select({ id: sales.id, product: sales.productName, amount: sales.amount, currency: sales.currency, sellerId: sales.sellerId, contactId: contacts.id, contactName: contacts.name }).from(sales).innerJoin(contacts, and(eq(contacts.organizationId, sales.organizationId), eq(contacts.id, sales.contactId))).where(inArray(sales.id, saleIds))).map((s) => [s.id, s]),
       );
-      return { rows, page, unread, bodies, contactsByConversation, tasksById, salesById };
+      const channelIds = page.map((r) => r.n.channelAccountId).filter((x): x is string => x !== null);
+      const channelsById = new Map<string, string>(channelIds.length === 0 ? [] : (await tx.select({ id: channelAccounts.id, name: channelAccounts.name }).from(channelAccounts).where(inArray(channelAccounts.id, channelIds))).map((c) => [c.id, c.name]));
+      return { rows, page, unread, bodies, contactsByConversation, tasksById, salesById, channelsById };
     });
     const names = await this.members.labels([...new Set([...data.page.map((r) => r.n.actorId), ...[...data.salesById.values()].map((s) => s.sellerId)].filter((x): x is string => x !== null))]);
     const last = data.page[data.page.length - 1];
@@ -204,6 +208,7 @@ export class NotificationsService {
           message_id: r.n.messageId,
           excerpt: r.n.messageId && data.bodies.get(r.n.messageId) ? excerpt(data.bodies.get(r.n.messageId)!) : null,
           task: task ? { id: task.id, title: task.title, due_at: task.dueAt ? task.dueAt.toISOString() : null, status: task.status as 'open' | 'done', contact_id: task.contactId } : null,
+          connection: r.n.channelAccountId && r.n.alertReason ? { id: r.n.channelAccountId, name: data.channelsById.get(r.n.channelAccountId) ?? 'Conexión', reason: r.n.alertReason as 'lag' | 'silent' | 'failed' | 'backlog' } : null,
           sale: sale ? { id: sale.id, product: sale.product, amount: sale.amount, currency: sale.currency, seller: names.get(sale.sellerId) ?? { id: sale.sellerId, name: 'Persona desconocida' }, contact: { id: sale.contactId, name: sale.contactName } } : null,
         };
       }),

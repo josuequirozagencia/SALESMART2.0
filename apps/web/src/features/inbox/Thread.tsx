@@ -10,6 +10,7 @@ import { useChatBackground } from '../../ui/chatBackground';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { Avatar } from '../../ui/Avatar';
 import { Icon } from '../../ui/Icon';
+import { QueueAssignDialog, queueActionLabel } from './ConversationQueue';
 import { DeleteConversationDialog } from './DeleteConversationDialog';
 import { Pill } from '../../ui/Pill';
 import { AppointmentDialog } from '../appointments/AppointmentDialog';
@@ -95,6 +96,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   const [sale, setSale] = useState(false);
   const [appointment, setAppointment] = useState(false);
   const [flows, setFlows] = useState(false);
+  const [queueOpen, setQueueOpen] = useState(false);
   const [rowEl, setRowEl] = useState<HTMLDivElement | null>(null);
   const now = useNow(30_000);
   const mobile = useBreakpoint() === 'mobile';
@@ -112,6 +114,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
   if (c.can.close) actions.push({ id: 'close', label: 'Finalizar', icon: 'check', group: 1, danger: true, onSelect: () => setConfirm(true) });
   if (attends && c.channel.kind === 'ghl') actions.push({ id: 'flows', label: 'Inscribir en un flujo', icon: 'bolt', group: 2, onSelect: () => setFlows(true) });
   if (collaborator) actions.push({ id: 'leave', label: 'Dejar de participar', icon: 'logout', group: 2, onSelect: () => { onBackError(undefined); leave.mutate(meId, { onSuccess: () => navigate('/inbox'), onError: (e) => onBackError(friendlyError(e, 'No pudimos quitarte de la conversación.')) }); } });
+  if (c.can.set_queue) actions.push({ id: 'queue', label: queueActionLabel(c), icon: 'building', group: 2, onSelect: () => setQueueOpen(true) });
   if (c.can.delete) actions.push({ id: 'delete', label: 'Eliminar conversación', icon: 'trash', group: 2, danger: true, onSelect: () => setDeleting(true) });
   const run = (a: 'accept' | 'take' | 'close', fallback: string) => {
     onBackError(undefined);
@@ -216,6 +219,7 @@ function Header({ c, meId, onBackError, layout }: { c: Conversation; meId: strin
         {deleting ? <DeleteConversationDialog c={c} onClose={() => setDeleting(false)} onDeleted={() => { setDeleting(false); navigate('/inbox'); }} /> : null}
         {dialog ? <TransferDialog c={c} onClose={() => setDialog(false)} onTransferred={(r) => { setDialog(false); if (!r.still_visible) navigate('/inbox'); }} /> : null}
         {sale ? <SaleDialog c={c} onClose={() => setSale(false)} /> : null}
+        {queueOpen ? <QueueAssignDialog c={c} onClose={() => setQueueOpen(false)} /> : null}
         {appointment ? <AppointmentDialog c={c} onClose={() => setAppointment(false)} /> : null}
         {flows ? <GhlFlowsDialog contact={c.contact} onClose={() => setFlows(false)} /> : null}
       </div>
@@ -318,7 +322,7 @@ function Messages({ c, onReply }: { c: Conversation; onReply: (m: ChatMessage) =
         if (stick.current) setNewCount((n) => (n === 0 ? n : 0));
       }}
       style={chatBg.style}
-      className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 md:px-4 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden ${chatBg.className}`}
+      className={`chat-thread min-h-0 flex-1 overflow-y-auto overscroll-contain px-1.5 py-3 md:px-2.5 max-md:[scrollbar-width:none] max-md:[&::-webkit-scrollbar]:hidden ${chatBg.className}`}
     >
       {q.isPending ? <div className="grid place-items-center py-10 text-muted"><Spinner label="Cargando mensajes" /></div> : null}
       {q.isError ? <Alert>{friendlyError(q.error, 'No pudimos cargar los mensajes.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert> : null}
@@ -328,10 +332,11 @@ function Messages({ c, onReply }: { c: Conversation; onReply: (m: ChatMessage) =
       <ul className="grid">
         {items.map((m, i) => (
           <Fragment key={m.id}>
-            {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-surface2 px-3 py-0.5 shadow-sm text-[11.5px] font-semibold text-muted">{dayLabel(m.sent_at, now)}</span></li> : null}
+            {i === 0 || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? <li className="sticky top-1 z-[1] my-1 text-center"><span className="rounded-full bg-[var(--date-pill-bg)] px-3 py-1 text-[12px] font-semibold text-[var(--date-pill-fg)] shadow-[0_1px_1px_rgba(0,0,0,.08)]">{dayLabel(m.sent_at, now)}</span></li> : null}
             <MessageBubble
               m={m}
               spacing={i === 0 ? '' : senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at) ? 'mt-2.5' : 'mt-1'}
+              tail={i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at)}
               avatar={m.is_note ? undefined : avatarFor(m, i === 0 || senderKey(items[i - 1]!) !== senderKey(m) || dayKey(items[i - 1]!.sent_at) !== dayKey(m.sent_at), c.contact.name, photos, c.contact.id)}
               contactName={c.contact.name}
               onReply={canQuote(c, m) ? onReply : undefined}

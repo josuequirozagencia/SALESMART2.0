@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEvolutionWebhook, phoneFromJid, redactEvolutionPayload, verifyEvolutionToken } from '../../src/modules/channels/evolution-webhook';
+import { adThumbnailOf, parseEvolutionWebhook, phoneFromJid, redactEvolutionPayload, verifyEvolutionToken } from '../../src/modules/channels/evolution-webhook';
 
 /**
  * Los avisos de abajo reproducen la FORMA de los eventos reales que capturó el spike del 2026-10-27 (Evolution v2.3.7, `spikes/whatsapp-qr/INFORME.md`), con teléfonos, nombres,
@@ -80,13 +80,16 @@ describe('mensajes entrantes (messages.upsert)', () => {
     expect(parseEvolutionWebhook(upsert('REA-0000000000000003', { reactionMessage: { text: '👍' } }), NOW).ignored).toBe(1);
   });
 
-  it('el identificador con sufijo de dispositivo o solo @lid: se usa remoteJidAlt; sin teléfono resoluble se descarta', () => {
+  it('el identificador con sufijo de dispositivo o solo @lid: se usa remoteJidAlt; sin teléfono resoluble el mensaje entra con su código @lid (ADR-73)', () => {
     const dev = parseEvolutionWebhook(upsert('DEV-0000000000000001', { conversation: 'hola' }, {}, { remoteJid: `${CLIENT}:50@s.whatsapp.net` }), NOW);
     expect(dev.events[0]!.event.messages[0]!.from).toBe(`+${CLIENT}`);
     const lid = parseEvolutionWebhook(upsert('LID-0000000000000001', { conversation: 'hola' }, {}, { remoteJid: '257720267587711@lid' }), NOW);
     expect(lid.events[0]!.event.messages[0]!.from).toBe(`+${CLIENT}`); // por remoteJidAlt
     const lost = parseEvolutionWebhook(upsert('LID-0000000000000002', { conversation: 'hola' }, {}, { remoteJid: '257720267587711@lid', remoteJidAlt: '257720267587711@lid' }), NOW);
-    expect(lost).toMatchObject({ events: [], ignored: 1 });
+    expect(lost.ignored).toBe(0);
+    expect(lost.events[0]!.event.messages[0]).toMatchObject({ from: null, lid: '257720267587711@lid' });
+    // con teléfono Y código, el mensaje lleva los dos (el contacto se reconoce por el teléfono y se guarda el par)
+    expect(lid.events[0]!.event.messages[0]).toMatchObject({ from: `+${CLIENT}`, lid: '257720267587711@lid' });
   });
 
   it('grupos y estados de WhatsApp se ignoran (y se cuentan), también los que escribe el teléfono', () => {
@@ -215,7 +218,7 @@ describe('mensajes escritos desde el teléfono (fromMe, v9)', () => {
     const lid = parseEvolutionWebhook(mine('PH-LID-00000000001', { conversation: 'ok' }, {}), NOW);
     expect(lid.events[0]!.event.messages[0]).toMatchObject({ from: `+${CLIENT}`, origin: 'device' });
     const onlyLid = parseEvolutionWebhook(upsert('PH-LID-00000000002', { conversation: 'ok' }, {}, { fromMe: true, remoteJid: '154640482095149@lid', remoteJidAlt: undefined }), NOW);
-    expect(onlyLid).toMatchObject({ events: [], ignored: 1 });
+    expect(onlyLid.events[0]!.event.messages[0]).toMatchObject({ from: null, lid: '154640482095149@lid', origin: 'device' });
   });
 
   it('la reacción que pone el teléfono se sigue ignorando; la del cliente se sigue leyendo', () => {
@@ -226,5 +229,106 @@ describe('mensajes escritos desde el teléfono (fromMe, v9)', () => {
 
   it('un tipo que no reconocemos queda como unsupported (se registra, sin contenido)', () => {
     expect(parseEvolutionWebhook(mine('PH-UNS-000000000001', { pollCreationMessage: { name: '¿?' } }), NOW).events[0]!.event.messages[0]).toMatchObject({ kind: 'unsupported', text: null, origin: 'device' });
+  });
+});
+
+describe('motivo de lo ignorado (v19 B1)', () => {
+  const key = (over: Record<string, unknown> = {}) => ({ remoteJid: '593984000001@s.whatsapp.net', fromMe: false, id: 'IGN-0000000000000001', ...over });
+  const body = (event: string, data: unknown) => ({ instance: 'ss-instancia-0001', event, data });
+  const R = (b: unknown) => parseEvolutionWebhook(b, NOW).ignoredReason;
+
+  it('cada descarte dice por qué: grupo, estado de WhatsApp, reacción del teléfono, sin teléfono, formato roto, acuse de lectura y evento que no usamos', () => {
+    expect(R(body('messages.upsert', { key: key({ remoteJid: '120363424375113025@g.us' }), message: { conversation: 'x' } }))).toBe('group');
+    expect(R(body('messages.upsert', { key: key({ remoteJid: 'status@broadcast' }), message: { conversation: 'x' } }))).toBe('status');
+    expect(R(body('messages.upsert', { key: key({ fromMe: true }), message: { reactionMessage: { key: { id: 'A' }, text: '👍' } } }))).toBe('from_me');
+    expect(R(body('messages.upsert', { key: key({ remoteJid: 'abc@s.whatsapp.net' }), message: { conversation: 'x' } }))).toBe('no_phone');
+    expect(R(body('messages.upsert', { key: key(), message: null }))).toBe('malformed');
+    expect(R(body('messages.update', { keyId: 'X', status: 'READ', fromMe: false }))).toBe('receipt');
+    expect(R(body('messages.update', { keyId: 'X', status: 'ALGO_NUEVO', fromMe: true }))).toBe('unsupported');
+    expect(R(body('chats.update', { id: 'x' }))).toBe('unsupported');
+    expect(R('no es un objeto')).toBe('malformed');
+  });
+
+  it('lo que sí se procesa no trae motivo; «PENDING» (nuestro propio envío) tampoco cuenta como ignorado', () => {
+    expect(R(body('messages.upsert', { key: key(), message: { conversation: 'Hola' }, messageTimestamp: 1_700_000_000 }))).toBeNull();
+    expect(R(body('messages.update', { keyId: 'X', status: 'PENDING', fromMe: true }))).toBeNull();
+    expect(R(body('connection.update', { state: 'open' }))).toBeNull();
+  });
+});
+
+describe('anuncio de Meta que trae el mensaje (externalAdReply, v20 · ADR-55)', () => {
+  const ad = (over: Record<string, unknown> = {}) => ({ title: 'Cupos abiertos', body: 'Escríbenos hoy', ctwaClid: 'AfcLICK-DE-PRUEBA-0001', sourceId: '120210000000000001', sourceUrl: 'https://fb.me/ejemplo', sourceApp: 'instagram', mediaType: 1, thumbnail: { '0': 255, '1': 216 }, ...over });
+  const msg = (id: string, referral: Record<string, unknown> | null, fromMe = false, where: 'top' | 'inside' = 'top') =>
+    parseEvolutionWebhook(
+      where === 'top'
+        ? upsert(id, { conversation: 'Hola, vengo del anuncio' }, referral ? { contextInfo: { externalAdReply: referral } } : {}, { fromMe })
+        : upsert(id, { extendedTextMessage: { text: 'Hola', contextInfo: { externalAdReply: referral } } }, {}, { fromMe }),
+      NOW,
+    ).events[0]?.event.messages[0];
+
+  it('lee click id, id del anuncio, titular, texto, dirección y la red; la miniatura NO entra al mensaje', () => {
+    const m = msg('AD-0000000000001', ad());
+    expect(m?.referral).toEqual({ sourceId: '120210000000000001', sourceType: 'ad', sourceUrl: 'https://fb.me/ejemplo', headline: 'Cupos abiertos', body: 'Escríbenos hoy', thumbnailUrl: null, ctwaClid: 'AfcLICK-DE-PRUEBA-0001', platform: 'instagram' });
+    expect(JSON.stringify(m)).not.toMatch(/thumbnail"?:\{/);
+  });
+
+  it('también lo lee cuando va dentro del contenido del mensaje (texto extendido)', () => {
+    expect(msg('AD-0000000000002', ad({ sourceApp: 'facebook' }), false, 'inside')?.referral).toMatchObject({ ctwaClid: 'AfcLICK-DE-PRUEBA-0001', platform: 'facebook' });
+  });
+
+  it('la red solo es facebook o instagram: «whatsapp» u otra cosa queda sin red; sin click id pero con id de anuncio sigue habiendo referencia (faltó en 4 de 203 avisos reales)', () => {
+    expect(msg('AD-0000000000003', ad({ sourceApp: 'whatsapp' }))?.referral?.platform).toBeNull();
+    const sinClid = msg('AD-0000000000004', ad({ ctwaClid: undefined }))?.referral;
+    expect(sinClid).toMatchObject({ ctwaClid: null, sourceId: '120210000000000001' });
+  });
+
+  it('sin click id ni id de anuncio no hay referencia; un aviso sin anuncio no la trae; lo escrito desde el teléfono tampoco', () => {
+    expect(msg('AD-0000000000005', ad({ ctwaClid: undefined, sourceId: undefined }))).not.toHaveProperty('referral');
+    expect(msg('AD-0000000000006', null)).not.toHaveProperty('referral');
+    expect(msg('AD-0000000000007', ad(), true)).not.toHaveProperty('referral');
+  });
+
+  it('los textos se acotan y se limpian de caracteres de control; nada de esto cambia teléfono, texto ni hora del mensaje', () => {
+    const m = msg('AD-0000000000008', ad({ title: `T\u0000í\u0007tulo ${'x'.repeat(400)}`, ctwaClid: ` ${'c'.repeat(600)} ` }));
+    expect(m?.referral?.headline?.length).toBeLessThanOrEqual(300);
+    expect(/\p{Cc}/u.test(m?.referral?.headline ?? '')).toBe(false);
+    expect(m?.referral?.ctwaClid?.length).toBeLessThanOrEqual(500);
+    expect(m).toMatchObject({ from: `+${CLIENT}`, kind: 'text', text: 'Hola, vengo del anuncio' });
+  });
+});
+
+describe('miniatura del anuncio (adThumbnailOf) y redacción del aviso (v20 · ADR-55)', () => {
+  const withAd = (thumbnail: unknown, over: Record<string, unknown> = {}) => ({ message: { conversation: 'Hola' }, contextInfo: { externalAdReply: { sourceId: '120210000000000001', title: 'Cupos', ...(thumbnail === undefined ? {} : { thumbnail }), ...over } } });
+  const jpeg = [255, 216, 255, 224, 0, 16, 74, 70];
+
+  it('lee los bytes cuando Evolution manda una lista de números (objeto con índices, como llega) o un arreglo, y detecta el tipo por su contenido', () => {
+    const obj = Object.fromEntries(jpeg.map((n, i) => [String(i), n]));
+    expect(adThumbnailOf(withAd(obj))).toMatchObject({ sourceId: '120210000000000001', mime: 'image/jpeg' });
+    expect(adThumbnailOf(withAd(jpeg))?.bytes.equals(Buffer.from(jpeg))).toBe(true);
+    expect(adThumbnailOf(withAd([0x89, 0x50, 0x4e, 0x47, 1, 2]))?.mime).toBe('image/png');
+    expect(adThumbnailOf(withAd([...Buffer.from('RIFF'), 0, 0, 0, 0, ...Buffer.from('WEBP')]))?.mime).toBe('image/webp');
+  });
+
+  it('también acepta base64; y lo busca dentro del contenido del mensaje', () => {
+    expect(adThumbnailOf(withAd(Buffer.from(jpeg).toString('base64')))?.mime).toBe('image/jpeg');
+    expect(adThumbnailOf({ message: { extendedTextMessage: { text: 'x', contextInfo: { externalAdReply: { sourceId: '9', thumbnail: jpeg } } } } })?.sourceId).toBe('9');
+  });
+
+  it('rechaza lo que no es una imagen, lo muy grande, lo que no son bytes y lo que no trae id de anuncio', () => {
+    expect(adThumbnailOf(withAd([1, 2, 3, 4, 5]))).toBeNull(); // bytes que no son una imagen
+    expect(adThumbnailOf(withAd(['a', 'b']))).toBeNull();
+    expect(adThumbnailOf(withAd([300, 216, 255, 224]))).toBeNull(); // un valor que no es un byte
+    expect(adThumbnailOf(withAd(Array.from({ length: 100_001 }, () => 255)))).toBeNull();
+    expect(adThumbnailOf(withAd(jpeg, { sourceId: undefined }))).toBeNull();
+    expect(adThumbnailOf(withAd(undefined))).toBeNull();
+    expect(adThumbnailOf({ message: { conversation: 'sin anuncio' } })).toBeNull();
+    expect(adThumbnailOf(withAd('no es base64 válido ¡!'))).toBeNull();
+  });
+
+  it('el aviso que se guarda no lleva los bytes de la miniatura (ni la del anuncio ni la de un medio), pero conserva el resto', () => {
+    const out = redactEvolutionPayload({ data: { contextInfo: { externalAdReply: { sourceId: '1', thumbnail: { '0': 255 }, ctwaClid: 'C' } }, message: { imageMessage: { jpegThumbnail: 'AAAA', caption: 'foto' } } }, apikey: 'SECRETA' });
+    expect(JSON.stringify(out)).not.toContain('SECRETA');
+    expect(out.data.contextInfo.externalAdReply).toEqual({ sourceId: '1', thumbnail: '[miniatura]', ctwaClid: 'C' });
+    expect(out.data.message.imageMessage).toEqual({ jpegThumbnail: '[miniatura]', caption: 'foto' });
   });
 });

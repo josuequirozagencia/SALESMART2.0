@@ -1,8 +1,11 @@
 export { AttributionModule } from './attribution.module';
-export { AttributionService, DEFAULT_GRACE_MS, MAX_GRACE_MS, phoneHash, type RecordResult } from './attribution.service';
+export { AttributionService, DEFAULT_GRACE_MS, MAX_GRACE_MS, phoneHash, type ClickInput, type RecordResult } from './attribution.service';
+export { LeadMarkService, type LeadMarkResult } from './lead-mark.service';
 export { CapiSenderService, CAPI_BATCH, CAPI_MAX_ATTEMPTS, CAPI_MAX_AGE_MS } from './capi-sender.service';
 export { CapiSenderJob } from './capi-sender.job';
+export { AdNamesJob } from './ad-names.job';
+export { AdNamesService, AD_NAMES_BATCH } from './ad-names.service';
 export { FakeCapiProvider } from './capi.fake';
-export { CAPI_PROVIDER, CapiSendError, NoCapiProvider, type CapiCredentials, type CapiEvent, type CapiEventType, type CapiProvider } from './capi.ports';
+export { CAPI_PROVIDER, CapiSendError, NoCapiProvider, type AdNames, type CapiCredentials, type CapiEvent, type CapiEventType, type CapiProvider } from './capi.ports';
 export { MetaCapiProvider, GRAPH_VERSION } from './meta-capi.provider';
 export { MetaSettingsService, DEFAULT_GRACE_MINUTES, type MetaSettingsView, type MetaEventView } from './meta-settings.service';

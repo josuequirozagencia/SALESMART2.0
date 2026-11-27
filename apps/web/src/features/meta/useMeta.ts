@@ -6,6 +6,9 @@ export interface MetaSettings {
   /** ¿El servidor puede hablar con Meta y cifrar credenciales? Si no, no se puede guardar. */
   available: boolean;
   dataset_id: string | null;
+  /** Cuenta de WhatsApp Business y dataset donde Meta recibe los eventos de los chats (v20). */
+  waba_id: string | null;
+  messaging_dataset_id: string | null;
   /** Últimos 4 del token: lo único que se devuelve de él. */
   token_last4: string | null;
   grace_minutes: number;
@@ -29,7 +32,7 @@ export interface MetaEvent {
   can_retry: boolean;
 }
 export interface MetaEventList { items: MetaEvent[]; next_cursor: string | null }
-export interface SaveMetaInput { dataset_id: string; access_token?: string; grace_minutes: number; test_event_code: string | null; enabled: boolean }
+export interface SaveMetaInput { dataset_id: string; access_token?: string; waba_id?: string | null; messaging_dataset_id?: string | null; grace_minutes: number; test_event_code: string | null; enabled: boolean }
 export type EventStatusFilter = '' | MetaEvent['status'];
 
 export function useMetaSettings() {
@@ -57,7 +60,19 @@ export function useSaveMeta() {
 
 export function useTestMeta() {
   const done = useDone();
-  return useMutation({ mutationFn: () => api<{ ok: true; dataset_name: string | null }>('/meta/settings/test', { method: 'POST' }), onSettled: done });
+  return useMutation({ mutationFn: () => api<{ ok: true; dataset_name: string | null; messaging_dataset_name: string | null }>('/meta/settings/test', { method: 'POST' }), onSettled: done });
+}
+
+/** «Crear o recuperar el dataset de mensajes» de la cuenta de WhatsApp Business: Meta lo da y el servidor lo guarda junto con la cuenta. */
+export function useMessagingDataset() {
+  const done = useDone();
+  return useMutation({ mutationFn: (wabaId: string) => api<MetaSettings>('/meta/messaging-dataset', { method: 'POST', body: { waba_id: wabaId } }), onSettled: done });
+}
+
+/** Vuelve a poner en cola los eventos fallidos o bloqueados que Meta aún acepta; los de más de 7 días pasan a «vencido». */
+export function useRetryAllMetaEvents() {
+  const done = useDone();
+  return useMutation({ mutationFn: () => api<{ requeued: number; expired: number }>('/meta/events/retry-all', { method: 'POST' }), onSettled: done });
 }
 
 export function useRetryMetaEvent() {

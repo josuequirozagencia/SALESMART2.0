@@ -376,18 +376,18 @@ describe('procesar: contacto, conversación y mensajes', () => {
     expect(by('wamid.Q2').meta).toEqual({ wa_id: ANA }); // la cita no se mezcla con los datos del tipo
   });
 
-  it('quien escribe por primera vez es un lead: el sistema le pone la etiqueta «Lead»; a un contacto que ya existía no se le pone ni se le quita nada, y no se manda ningún evento a Meta', async () => {
+  it('quien escribe por primera vez NO recibe la etiqueta «Lead» (la coloca el asesor); a un contacto que ya existía no se le pone ni se le quita nada, y no se manda ningún evento a Meta', async () => {
     expect((await call('POST', '/contacts', aliceToken, { name: 'Ya existía', phones: [`+${BETO}`] })).status).toBe(201);
     await post(wa({ id: 'wamid.N1' })); // Ana, nueva
     await post(wa({ from: BETO, id: 'wamid.E1', name: 'Beto' })); // Beto, que ya era contacto
     await runJob();
     const tagsOf = async (name: string) => (await admin.query(`SELECT t.system_key, ct.set_by FROM contact_tags ct JOIN tags t ON t.id = ct.tag_id AND t.organization_id = ct.organization_id JOIN contacts c ON c.id = ct.contact_id WHERE c.organization_id = $1 AND c.name = $2`, [ORG_A, name])).rows;
-    expect(await tagsOf('Ana Torres')).toEqual([{ system_key: 'lead', set_by: 'system' }]);
+    expect(await tagsOf('Ana Torres')).toEqual([]);
     expect(await tagsOf('Ya existía')).toEqual([]);
     expect((await admin.query(`SELECT count(*)::int AS n FROM meta_events WHERE organization_id = $1`, [ORG_A])).rows[0].n).toBe(0);
     await post(wa({ id: 'wamid.N2', ts: T0 + 5 })); // Ana vuelve a escribir: no se repite
     await runJob();
-    expect(await tagsOf('Ana Torres')).toHaveLength(1);
+    expect(await tagsOf('Ana Torres')).toHaveLength(0);
   });
 
   it('los siguientes mensajes del mismo contacto caen en LA MISMA conversación (una abierta por contacto y canal) y suman no leídos', async () => {

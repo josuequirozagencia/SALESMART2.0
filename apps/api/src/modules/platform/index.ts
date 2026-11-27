@@ -6,6 +6,8 @@ export { PlatformCredentialsReader, type ActiveCredentials } from './providers/c
 export { CredentialVault, VaultOpenError } from './providers/credential-vault';
 export { AiPricingService, type AiPrice, type AiPricingView } from './ai-pricing.service';
 export { AiLimitsService, DEFAULT_AI_LIMITS, type AiLimits, type AiLimitsView } from './ai-limits.service';
+export { StoragePlansService } from './storage-plans.service';
+export { planSchema, planUpdateSchema, requestSchema, grantSchema, revokeSchema, toBytes, type PlanDto, type PlanUpdateDto, type PlanView, type PublicPlanView, type RequestDto, type GrantDto, type RevokeDto, type GrantView, type RequestView } from './storage-plans.dto';
 export { AiModelPricesService, type ModelPrice, type ModelPriceView } from './ai-model-prices.service';
 export { BrandingStore, type AssetRef, type AssetChange, type BrandSnapshot } from './branding/branding.store';
 export { BRANDING_ASSETS, ICON_VARIANTS, ICON_VARIANT_NAMES, BADGE_PX, IMAGE_MAX_BYTES, ICON_MIN_PX, ICON_MAX_PX, LOGO_MAX_WIDTH, DEFAULT_APP_NAME, NAME_MIN, NAME_MAX, SHORT_NAME_MAX, checkName, type BrandingAsset, type IconVariant, type NameCheck } from './branding/brand-files';

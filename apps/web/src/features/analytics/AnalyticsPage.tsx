@@ -6,6 +6,7 @@ import { Alert, Button, Spinner } from '../../ui/controls';
 import { exportReport, PERIODS, useAdvisorExport, useExportsLog, usePeriod, useRefreshExports, useReport, useSetAdvisorExport, type Report, type ReportColumn, type ReportName, type WinningMode } from './useAnalytics';
 import { PAGE_TITLE } from '../../ui/PageHeader';
 import { CampaignsSummaryCard } from '../campaigns/CampaignsSummaryCard';
+import { useAdCreatives } from '../contacts/useAdCreatives';
 
 const selectCls = 'rounded-[10px] border border-line bg-surface px-3 py-[9px] text-[13.5px] font-normal text-fg';
 type TabName = ReportName | 'downloads';
@@ -30,7 +31,26 @@ function cell(col: ReportColumn, value: unknown, currency: string): string {
   return String(value);
 }
 
+/** La celda «Anuncio» del reporte «Anuncio ganador»: miniatura, titular y id (v20). Sin miniatura se muestra el nombre o el titular como texto. */
+function AdCell({ name, id, creative }: { name: unknown; id: unknown; creative: { headline: string | null; thumbnail_url: string | null; ad_name?: string | null; adset_name?: string | null; campaign_name?: string | null } | undefined }) {
+  const title = creative?.ad_name ?? creative?.headline ?? (typeof name === 'string' ? name : 'Anuncio sin título');
+  const where = [creative?.campaign_name, creative?.adset_name].filter((x): x is string => !!x).join(' · ');
+  const adId = typeof id === 'string' ? id : null;
+  return (
+    <div className="flex items-center gap-2.5">
+      {creative?.thumbnail_url ? <img src={creative.thumbnail_url} alt={`Miniatura del anuncio «${title}»`} width={40} height={40} loading="lazy" className="h-10 w-10 shrink-0 rounded-md border border-line object-cover" /> : null}
+      <div className="grid min-w-0">
+        <span className="break-words">{title}</span>
+        {where ? <span className="break-words text-[11.5px] text-muted">{where}</span> : null}
+        {adId ? <span className="text-[11.5px] text-muted">ID {adId.length > 14 ? `${adId.slice(0, 6)}…${adId.slice(-4)}` : adId}</span> : null}
+      </div>
+    </div>
+  );
+}
+
 function ReportTable({ r }: { r: Report }) {
+  const winning = r.report === 'winning_ads';
+  const ads = useAdCreatives(winning ? r.rows.map((row) => (typeof row['ad_id'] === 'string' ? row['ad_id'] : null)) : []);
   const right = (c: ReportColumn): string => (c.type === 'money' || c.type === 'number' ? 'text-right font-mono' : '');
   return (
     <div className="overflow-x-auto rounded-2xl border border-line bg-surface">
@@ -44,7 +64,11 @@ function ReportTable({ r }: { r: Report }) {
         <tbody>
           {r.rows.map((row, i) => (
             <tr key={i} className="border-b border-line last:border-0">
-              {r.columns.map((c) => <td key={c.key} className={`px-3 py-2 ${right(c)}`}>{cell(c, row[c.key], r.currency)}</td>)}
+              {r.columns.map((c, ci) => (
+                <td key={c.key} className={`px-3 py-2 ${right(c)}`}>
+                  {winning && ci === 0 && typeof row['ad_id'] === 'string' ? <AdCell name={row[c.key]} id={row['ad_id']} creative={ads.data?.items[row['ad_id']]} /> : cell(c, row[c.key], r.currency)}
+                </td>
+              ))}
             </tr>
           ))}
         </tbody>

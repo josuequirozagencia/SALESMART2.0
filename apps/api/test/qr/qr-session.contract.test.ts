@@ -17,12 +17,15 @@ interface Harness {
   dropSession(instance: string): void;
   /** «WhatsApp» tiene esta foto para este número. */
   givePicture(phone: string, url: string): void;
+  /** «Evolution» tiene guardados estos mensajes (forma de un `messages.upsert`) para esta instancia. */
+  giveMessages(instance: string, records: Array<Record<string, unknown>>): void;
 }
 
 // ---- servidor de Evolution simulado --------------------------------------------------------------------------------------------------------
 const KEY = 'evo-global-key-for-tests';
 const states = new Map<string, 'open' | 'connecting' | 'close'>();
 const pictures = new Map<string, string>();
+const storedMessages = new Map<string, Array<Record<string, unknown>>>();
 /** Los cuerpos de los mensajes que el servidor simulado recibió (para comprobar lo que el adaptador manda). */
 const sentBodies: Array<{ path: string; body: Record<string, unknown> }> = [];
 let seq = 0;
@@ -54,6 +57,13 @@ beforeAll(async () => {
         if (states.get(inst) !== 'open') return send(400, { status: 400, error: 'Bad Request', response: { message: ['Connection Closed'] } });
         return send(201, { wuid: `${String(body['number'])}@s.whatsapp.net`, profilePictureUrl: pictures.get(String(body['number'])) ?? null });
       }
+      if (a === 'chat' && b === 'findMessages') {
+        const fromMe = ((body['where'] as { key?: { fromMe?: boolean } } | undefined)?.key?.fromMe) === true;
+        const all = (storedMessages.get(inst) ?? []).filter((r) => (r['key'] as { fromMe: boolean }).fromMe === fromMe).sort((x, y) => Number(y['messageTimestamp']) - Number(x['messageTimestamp']));
+        const size = Number(body['offset'] ?? 50);
+        const page = Number(body['page'] ?? 1);
+        return send(200, { messages: { total: all.length, pages: Math.ceil(all.length / size), currentPage: page, records: all.slice((page - 1) * size, page * size) } });
+      }
       if (a === 'message') {
         sentBodies.push({ path: url.pathname, body });
         if (states.get(inst) !== 'open') return send(400, { status: 400, error: 'Bad Request', response: { message: ['Connection Closed'] } });
@@ -75,12 +85,12 @@ const harnesses: Array<[string, () => Harness]> = [
     'fake',
     () => {
       const provider = new FakeQrSession();
-      return { provider, creds: { baseUrl: 'http://fake', apiKey: FAKE_QR_KEY }, badCreds: { baseUrl: 'http://fake', apiKey: 'otra' }, openSession: (i) => provider.setState(i, 'open'), dropSession: (i) => provider.setState(i, 'closed'), givePicture: (p, u) => void provider.pictures.set(p, u) };
+      return { provider, creds: { baseUrl: 'http://fake', apiKey: FAKE_QR_KEY }, badCreds: { baseUrl: 'http://fake', apiKey: 'otra' }, openSession: (i) => provider.setState(i, 'open'), dropSession: (i) => provider.setState(i, 'closed'), givePicture: (p, u) => void provider.pictures.set(p, u), giveMessages: (i, r) => void provider.stored.set(i, r) };
     },
   ],
   [
     'evolution (servidor simulado)',
-    () => ({ provider: new EvolutionProvider(), creds: { baseUrl: base, apiKey: KEY }, badCreds: { baseUrl: base, apiKey: 'otra' }, openSession: (i) => void states.set(i, 'open'), dropSession: (i) => void states.set(i, 'close'), givePicture: (p, u) => void pictures.set(p, u) }),
+    () => ({ provider: new EvolutionProvider(), creds: { baseUrl: base, apiKey: KEY }, badCreds: { baseUrl: base, apiKey: 'otra' }, openSession: (i) => void states.set(i, 'open'), dropSession: (i) => void states.set(i, 'close'), givePicture: (p, u) => void pictures.set(p, u), giveMessages: (i, r) => void storedMessages.set(i, r) }),
   ],
 ];
 
@@ -141,6 +151,28 @@ describe.each(harnesses)('puerto de sesión por QR: %s', (_name, make) => {
     await expect(h.provider.fetchProfilePicture(h.creds, 'no-existe-0000', '593990000020')).rejects.toMatchObject({ code: 'not_found' });
     h.dropSession(i);
     await expect(h.provider.fetchProfilePicture(h.creds, i, '593990000020')).rejects.toMatchObject({ code: 'session_down' });
+  });
+
+  it('ponerse al día (v19 B3): devuelve entrantes y escritos desde el teléfono dentro del periodo, los más nuevos primero, con tope y aviso de truncado', async () => {
+    const h = make();
+    const i = await fresh(h);
+    h.openSession(i);
+    const now = Math.floor(Date.now() / 1000);
+    const rec = (id: string, ageH: number, fromMe: boolean): Record<string, unknown> => ({ key: { id, fromMe, remoteJid: '593990000030@s.whatsapp.net' }, message: { conversation: 'x' }, messageTimestamp: now - ageH * 3600 });
+    const grp = rec('G', 1, false);
+    (grp['key'] as { remoteJid: string }).remoteJid = '120363424375113025@g.us';
+    const est = rec('S', 1, false);
+    (est['key'] as { remoteJid: string }).remoteJid = 'status@broadcast';
+    h.giveMessages(i, [rec('A', 1, false), rec('B', 5, false), rec('C', 30, false), rec('D', 2, true), rec('E', 90, false), grp, est]);
+    const r = await h.provider.listRecentMessages(h.creds, i, { sinceMs: Date.now() - 48 * 3_600_000, maxRecords: 100 });
+    expect(r.truncated).toBe(false);
+    expect(r.records.map((x) => (x['key'] as { id: string }).id).sort()).toEqual(['A', 'B', 'C', 'D']);
+    const cut = await h.provider.listRecentMessages(h.creds, i, { sinceMs: Date.now() - 48 * 3_600_000, maxRecords: 2 });
+    expect(cut.records).toHaveLength(3); // 2 entrantes (el tope vale por sentido) + 1 escrito desde el teléfono; los grupos y estados no cuentan
+    expect(cut.truncated).toBe(true);
+    expect(await h.provider.listRecentMessages(h.creds, i, { sinceMs: Date.now(), maxRecords: 10 })).toMatchObject({ records: [], truncated: false });
+    await expect(h.provider.listRecentMessages(h.badCreds, i, { sinceMs: 0, maxRecords: 1 })).rejects.toMatchObject({ code: 'not_configured' });
+    await expect(h.provider.listRecentMessages(h.creds, 'no-existe-0000', { sinceMs: 0, maxRecords: 1 })).rejects.toMatchObject({ code: 'not_found' });
   });
 
   it('un sticker no se puede enviar por QR', async () => {

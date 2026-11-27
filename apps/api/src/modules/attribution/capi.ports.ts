@@ -33,6 +33,15 @@ export class CapiSendError extends Error {
   }
 }
 
+/** Nombres que Meta da a un anuncio, su conjunto y su campaña (v20, ADR-55 enmienda). Solo lectura. */
+export interface AdNames {
+  adName: string | null;
+  adsetId: string | null;
+  adsetName: string | null;
+  campaignId: string | null;
+  campaignName: string | null;
+}
+
 export interface CapiProvider {
   /** `none` = sin proveedor configurado: el job no envía y los eventos quedan pendientes. */
   readonly kind: 'none' | 'fake' | 'meta';
@@ -41,6 +50,16 @@ export interface CapiProvider {
   send(event: CapiEvent, credentials: CapiCredentials): Promise<void>;
   /** Comprueba que el dataset existe y que el token puede usarlo. Devuelve el nombre del dataset si Meta lo informa. Lanza `CapiSendError`. */
   verify(credentials: CapiCredentials): Promise<{ name: string | null }>;
+  /**
+   * Busca los nombres de hasta 50 anuncios por su id (Marketing API, solo lectura). Devuelve una entrada por id pedido: `null` = Meta no lo devuelve (borrado o sin acceso con este token).
+   * Lanza `CapiSendError` si el token no puede leer anuncios (`credentials = true`) o Meta no responde.
+   */
+  lookupAds(adIds: readonly string[], credentials: CapiCredentials): Promise<Record<string, AdNames | null>>;
+  /**
+   * Crea o recupera el dataset vinculado a una cuenta de WhatsApp Business (`POST /{cuenta}/dataset`): es donde Meta recibe los eventos de mensajería. Si la cuenta ya tenía uno, devuelve ese.
+   * El token necesita los permisos de WhatsApp (`whatsapp_business_management` y `whatsapp_business_manage_events`). Lanza `CapiSendError`.
+   */
+  ensureMessagingDataset(wabaId: string, credentials: CapiCredentials): Promise<{ datasetId: string }>;
 }
 
 export const CAPI_PROVIDER = Symbol('CAPI_PROVIDER');
@@ -53,6 +72,12 @@ export class NoCapiProvider implements CapiProvider {
     return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
   }
   verify(): Promise<{ name: string | null }> {
+    return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
+  }
+  lookupAds(): Promise<Record<string, AdNames | null>> {
+    return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
+  }
+  ensureMessagingDataset(): Promise<{ datasetId: string }> {
     return Promise.reject(new CapiSendError('No hay proveedor de Conversions API configurado', false));
   }
 }

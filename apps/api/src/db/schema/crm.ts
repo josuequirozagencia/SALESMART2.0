@@ -89,6 +89,64 @@ export const contactPhones = tenantTable(
 );
 
 /**
+ * Identidades de un contacto fuera de su teléfono (ADR-73, v19): hoy solo `wa_lid`, el código interno `…@lid` con el que WhatsApp identifica a un contacto cuando NO entrega su teléfono. Sirve para reconocer al
+ * mismo contacto en el siguiente mensaje y para saber a qué contacto aplicar el teléfono cuando por fin llega. Único por empresa (el mismo código en otra empresa es otro contacto). Sin DELETE para `app_rw`.
+ */
+export const contactIdentities = tenantTable(
+  'contact_identities',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    contactId: uuid('contact_id').notNull(),
+    kind: text('kind').notNull(),
+    value: text('value').notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({ name: 'contact_identities_contact_fk', columns: [t['organizationId']!, t['contactId']!], foreignColumns: [contacts.organizationId, contacts.id] }),
+    check('contact_identities_kind_valid', sql`${t['kind']!} IN ('wa_lid')`),
+    check('contact_identities_lid_shape', sql`${t['kind']!} <> 'wa_lid' OR ${t['value']!} ~ '^[0-9]{5,30}@lid$'`),
+    uniqueIndex('contact_identities_org_kind_value_uq').on(t['organizationId']!, t['kind']!, t['value']!),
+    index('contact_identities_contact_idx').on(t['organizationId']!, t['contactId']!),
+  ],
+);
+
+/**
+ * El anuncio de Meta de donde llegan los clientes (v20, ADR-55): UNA fila por anuncio y empresa, con lo que el mensaje trae (titular, texto, dirección, red) y la miniatura guardada UNA vez en el almacenamiento
+ * (la miniatura viaja en cada aviso; aquí se guarda una sola copia). No trae campaña ni conjunto: solo el id del anuncio. Sin DELETE para `app_rw`.
+ */
+export const adCreatives = tenantTable(
+  'ad_creatives',
+  {
+    id: uuid('id').primaryKey().$defaultFn(uuidv7),
+    sourceId: text('source_id').notNull(),
+    headline: text('headline'),
+    body: text('body'),
+    sourceUrl: text('source_url'),
+    platform: text('platform'),
+    thumbnailKey: text('thumbnail_key'),
+    thumbnailMime: text('thumbnail_mime'),
+    /** Nombres reales de la Marketing API (v20): anuncio, conjunto y campaña. Se rellenan con la tarea `ad-names` si la empresa conectó Meta; null = aún no consultado o Meta no lo devolvió. */
+    adName: text('ad_name'),
+    adsetId: text('adset_id'),
+    adsetName: text('adset_name'),
+    campaignId: text('campaign_id'),
+    campaignName: text('campaign_name'),
+    /** Última consulta a Meta y su resultado: `ok`, `not_found` (Meta no lo devuelve), `no_access` (el token no puede leer anuncios) o `error` (pasajero). null = nunca consultado. */
+    namesCheckedAt: ts('names_checked_at'),
+    namesStatus: text('names_status'),
+    firstSeenAt: ts('first_seen_at').notNull().defaultNow(),
+    lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('ad_creatives_org_source_uq').on(t['organizationId']!, t['sourceId']!),
+    check('ad_creatives_source_shape', sql`length(${t['sourceId']!}) BETWEEN 1 AND 100`),
+    check('ad_creatives_platform_valid', sql`${t['platform']!} IS NULL OR ${t['platform']!} IN ('facebook', 'instagram')`),
+    check('ad_creatives_names_status_valid', sql`${t['namesStatus']!} IS NULL OR ${t['namesStatus']!} IN ('ok', 'not_found', 'no_access', 'error')`),
+    check('ad_creatives_mime_valid', sql`${t['thumbnailMime']!} IS NULL OR ${t['thumbnailMime']!} IN ('image/jpeg', 'image/png', 'image/webp')`),
+  ],
+);
+
+/**
  * Etiquetas (M3.3, ADR-45). Las del SISTEMA (`lead`, `appointment`, `sale`) las crea el servicio al primer uso en cada empresa, no se borran ni se renombran
  * y solo las pone el sistema. Las personalizadas llegan en M3.4. `app_rw` no tiene DELETE (borrado lógico).
  */

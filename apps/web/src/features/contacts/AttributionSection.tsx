@@ -4,6 +4,7 @@ import { shortDateTime } from '../../lib/format';
 import type { Contact, ContactTouch } from '../../lib/types';
 import { ChannelBadge } from '../../ui/ChannelBadge';
 import { Pill, type PillKind } from '../../ui/Pill';
+import { useAdCreatives, type AdCreative } from './useAdCreatives';
 
 const CAPI: Record<string, [PillKind, string]> = {
   pending: ['info', 'Pendiente de enviar'],
@@ -39,6 +40,45 @@ function Touch({ label, t }: { label: string; t: ContactTouch | null }) {
   );
 }
 
+const NETWORK: Record<string, string> = { facebook: 'Facebook', instagram: 'Instagram' };
+
+/**
+ * El anuncio de donde llegó el contacto (v20, ADR-55): miniatura, titular, texto, red y su id. El titular es lo que Meta muestra en el anuncio; NO es el nombre del anuncio (Meta no lo entrega en el mensaje).
+ * Sin miniatura (el anuncio no la trajo o el almacenamiento no responde) se muestra igual, sin imagen.
+ */
+export function AdCard({ adId, ad, fallbackTitle }: { adId: string; ad: AdCreative | undefined; fallbackTitle: string | null }) {
+  const title = ad?.ad_name ?? ad?.headline ?? fallbackTitle ?? 'Anuncio sin título';
+  return (
+    <div className="flex gap-3 rounded-xl border border-line bg-surface2 p-2.5 min-[520px]:col-span-2" aria-label="Anuncio de origen">
+      {ad?.thumbnail_url ? (
+        <img src={ad.thumbnail_url} alt={`Miniatura del anuncio «${title}»`} width={64} height={64} loading="lazy" className="h-16 w-16 shrink-0 rounded-lg border border-line object-cover" />
+      ) : (
+        <div aria-hidden="true" className="grid h-16 w-16 shrink-0 place-items-center rounded-lg border border-line bg-surface text-[11px] text-muted">Sin imagen</div>
+      )}
+      <div className="grid min-w-0 gap-0.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="break-words text-[13px] font-semibold">{title}</span>
+          {ad?.platform ? <Pill kind="info">{NETWORK[ad.platform]}</Pill> : null}
+        </div>
+        {ad?.campaign_name || ad?.adset_name ? (
+          <dl className="grid gap-0.5 text-[12.5px]">
+            {ad.campaign_name ? <div className="flex flex-wrap gap-x-1.5"><dt className="text-muted">Campaña:</dt><dd className="break-words font-medium">{ad.campaign_name}</dd></div> : null}
+            {ad.adset_name ? <div className="flex flex-wrap gap-x-1.5"><dt className="text-muted">Conjunto:</dt><dd className="break-words font-medium">{ad.adset_name}</dd></div> : null}
+          </dl>
+        ) : ad?.names_status === 'no_access' ? (
+          <p className="text-[12px] text-muted">Para ver la campaña y el conjunto, el token de Meta necesita el permiso «ads_read».</p>
+        ) : null}
+        {ad?.ad_name && ad.headline && ad.headline !== ad.ad_name ? <p className="break-words text-[12.5px] text-muted">Titular: {ad.headline}</p> : null}
+        {ad?.body ? <p className="line-clamp-2 break-words text-[12.5px] text-muted">{ad.body}</p> : null}
+        <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-muted">
+          <span>ID del anuncio: <code className="rounded bg-surface px-1 py-0.5" title={adId}>{short(adId)}</code></span>
+          {ad?.source_url ? <a href={ad.source_url} target="_blank" rel="noopener noreferrer" className="font-semibold text-accent hover:underline">Ver anuncio</a> : null}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 /**
  * «Origen del lead» (M3.3, ADR-45): de qué anuncio de Meta llegó el contacto. 100% de solo lectura y colapsable (no llama al servidor). Solo se muestra si el
  * contacto tiene datos de atribución.
@@ -47,8 +87,12 @@ export function AttributionSection({ contact }: { contact: Contact }) {
   const a = contact.attribution;
   const [open, setOpen] = useState(true);
   const [copied, setCopied] = useState(false);
-  if (!a) return null;
+  const adId = a?.last_touch?.ad_id ?? a?.first_touch?.ad_id ?? null;
+  const creative = useAdCreatives([adId]);
+  // Sin atribución no se inventa nada: texto exacto de V20 §7
+  if (!a) return <p aria-label="Origen del lead" className="rounded-xl border border-line px-3 py-2.5 text-[13px] text-muted">Atribución del anuncio no disponible</p>;
   const last = a.last_touch;
+  const ad = adId ? creative.data?.items[adId] : undefined;
   const capi = a.capi ? (CAPI[a.capi.status] ?? ['muted', a.capi.status]) : null;
 
   async function copy() {
@@ -84,10 +128,14 @@ export function AttributionSection({ contact }: { contact: Contact }) {
             <dt className="text-[12px] text-muted">Conjunto de anuncios</dt>
             <dd className="break-words text-[13px]">{last?.adset ?? '—'}</dd>
           </div>
-          <div>
-            <dt className="text-[12px] text-muted">Anuncio</dt>
-            <dd className="break-words text-[13px]">{last?.ad ?? '—'}</dd>
-          </div>
+          {adId ? <AdCard adId={adId} ad={ad} fallbackTitle={last?.ad ?? null} /> : null}
+          {/* Un nombre real del anuncio (si llegó por el punto de entrada) solo se muestra si no es el mismo texto del titular */}
+          {!adId || (last?.ad && last.ad !== (ad?.headline ?? null) && last.ad !== (ad?.ad_name ?? null)) ? (
+            <div>
+              <dt className="text-[12px] text-muted">{adId ? 'Nombre del anuncio' : 'Anuncio'}</dt>
+              <dd className="break-words text-[13px]">{last?.ad ?? '—'}</dd>
+            </div>
+          ) : null}
           <div className="min-[520px]:col-span-2">
             <dt className="text-[12px] text-muted">CTWA Click ID</dt>
             <dd className="flex items-center gap-2 text-[13px]">

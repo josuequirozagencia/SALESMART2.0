@@ -12,6 +12,8 @@ import type { Contact, Conversation } from '../../lib/types';
 import { Alert, Button, Spinner } from '../../ui/controls';
 import { ConversationTags } from './ConversationTags';
 import { AgentPanelBlock } from './AgentBanner';
+import { AssignmentSection } from './AssignmentSection';
+import { NoQueueNotice } from './ConversationQueue';
 import { ActionTiles, DangerRows, PrimaryActions } from './ConversationActions';
 import { personName } from './inboxFormat';
 import { SlaPill } from './SlaPill';
@@ -184,6 +186,8 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
       {/* v13 S2.1: el estado del agente (y por qué se pausó) vive aquí en todos los tamaños; ya no hay barra amarilla sobre el chat */}
       <AgentPanelBlock c={c} />
 
+      <NoQueueNotice c={c} />
+
       <QuickActions
         c={c}
         canEdit={contact !== undefined}
@@ -192,6 +196,9 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
         {...(actions ? { lead: <PrimaryActions c={c} onClose={onClose} onError={actions.onError} />, extraTiles: <ActionTiles c={c} onClose={onClose} /> } : {})}
       />
 
+      {/* V24: no depende de que la persona pueda ver el contacto: la conversación manda */}
+      <Block id="assignment" title="Asignación" st={st}><AssignmentSection c={c} responsible={contact ? (contact.owner ? personName(contact.owner.name) : null) : undefined} /></Block>
+
       {q.isPending ? <div className="grid place-items-center py-8 text-muted"><Spinner label="Cargando el contacto" /></div> : null}
       {q.isError ? <div className="p-4"><Alert>{friendlyError(q.error, 'No pudimos cargar los datos del contacto.')} <Button variant="link" onClick={() => void q.refetch()}>Reintentar</Button></Alert></div> : null}
 
@@ -199,9 +206,8 @@ export function ContactSidebar({ c, onClose, actions }: { c: Conversation; onClo
         <>
           <Block id="data" title="Datos" st={st}>
             <dl className="grid gap-1.5 text-[13px]">
-              <div><dt className="text-[12px] text-muted">Teléfonos</dt><dd>{contact.phones.length > 0 ? contact.phones.map((p) => p.e164 + (p.primary && contact.phones.length > 1 ? ' (principal)' : '')).join(' · ') : '—'}</dd></div>
+              <div><dt className="text-[12px] text-muted">Teléfonos</dt><dd>{contact.phones.length > 0 ? contact.phones.map((p) => p.e164 + (p.primary && contact.phones.length > 1 ? ' (principal)' : '')).join(' · ') : 'Sin teléfono'}</dd></div>
               {contact.email ? <div><dt className="text-[12px] text-muted">Correo</dt><dd className="break-all">{contact.email}</dd></div> : null}
-              <div><dt className="text-[12px] text-muted">Responsable</dt><dd>{contact.owner ? personName(contact.owner.name) : 'Sin responsable'}</dd></div>
               <div><dt className="text-[12px] text-muted">Consentimiento</dt><dd>{CONSENT[contact.consent]}</dd></div>
               {contact.companies.length > 0 ? <div><dt className="text-[12px] text-muted">Empresas</dt><dd>{contact.companies.map((x) => x.name).join(', ')}</dd></div> : null}
             </dl>

@@ -221,3 +221,88 @@ describe('Ficha del contacto · Actividad', () => {
     expect(d.queryByRole('list', { name: 'Actividad de origen' })).not.toBeInTheDocument();
   });
 });
+
+describe('Ficha del contacto · anuncio de origen (v20)', () => {
+  const AD = { source_id: '120210000000000011', headline: 'Define Tu Abdomen', body: 'Escríbenos hoy y agenda tu cita', source_url: 'https://fb.me/ejemplo', platform: 'instagram' as const, thumbnail_url: 'https://almacen.test/miniatura.jpg' };
+  const withAd = (over: Partial<ContactAttribution> = {}) => attribution({ first_touch: { at: '2026-10-10T15:00:00.000Z', source: 'meta_ctwa', campaign: null, adset: null, ad: null, ad_id: AD.source_id }, last_touch: { at: '2026-10-12T09:00:00.000Z', source: 'meta_ctwa', campaign: null, adset: null, ad: null, ad_id: AD.source_id }, ...over });
+
+  it('muestra la miniatura, el titular, el texto, la red, el id y «Ver anuncio»; pide el anuncio por su id', async () => {
+    const calls: string[] = [];
+    mockApi({ ...contactsServer(contact({ attribution: withAd() })).routes, 'GET /ads/creatives': (c) => { calls.push(c.query.get('ids') ?? ''); return { body: { items: { [AD.source_id]: AD } } }; } });
+    renderApp('/contacts');
+    const d = await openContact();
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(await card.findByAltText('Miniatura del anuncio «Define Tu Abdomen»')).toHaveAttribute('src', 'https://almacen.test/miniatura.jpg');
+    expect(card.getByText('Define Tu Abdomen')).toBeInTheDocument();
+    expect(card.getByText('Escríbenos hoy y agenda tu cita')).toBeInTheDocument();
+    expect(card.getByText('Instagram')).toBeInTheDocument();
+    expect(card.getByText('12021000…0011')).toBeInTheDocument();
+    expect(card.getByRole('link', { name: 'Ver anuncio' })).toHaveAttribute('href', 'https://fb.me/ejemplo');
+    expect(card.getByRole('link', { name: 'Ver anuncio' })).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(calls).toEqual([AD.source_id]);
+    // el titular no se repite como «nombre del anuncio»
+    expect(d.queryByText('Nombre del anuncio')).not.toBeInTheDocument();
+  });
+
+  it('un nombre real del anuncio (distinto del titular) se muestra aparte como «Nombre del anuncio»', async () => {
+    mockApi({ ...contactsServer(contact({ attribution: withAd({ last_touch: { at: '2026-10-12T09:00:00.000Z', source: 'meta_ctwa', campaign: null, adset: null, ad: 'Promo abdomen 02', ad_id: AD.source_id } }) })).routes, 'GET /ads/creatives': () => ({ body: { items: { [AD.source_id]: AD } } }) });
+    renderApp('/contacts');
+    const d = await openContact();
+    await d.findByLabelText('Anuncio de origen');
+    expect(d.getByText('Nombre del anuncio')).toBeInTheDocument();
+    expect(d.getByText('Promo abdomen 02')).toBeInTheDocument();
+  });
+
+  it('sin miniatura (o sin datos del anuncio) se muestra igual, con el id y sin imagen', async () => {
+    mockApi({ ...contactsServer(contact({ attribution: withAd() })).routes, 'GET /ads/creatives': () => ({ body: { items: { [AD.source_id]: { ...AD, thumbnail_url: null } } } }) });
+    renderApp('/contacts');
+    const d = await openContact();
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(await card.findByText('Define Tu Abdomen')).toBeInTheDocument();
+    expect(card.getByText('Sin imagen')).toBeInTheDocument();
+    expect(card.queryByRole('img')).not.toBeInTheDocument();
+  });
+
+  it('si el servidor falla al pedir el anuncio la ficha sigue mostrando el id y no se rompe', async () => {
+    mockApi({ ...contactsServer(contact({ attribution: withAd() })).routes, 'GET /ads/creatives': () => ({ status: 503, body: { error: { code: 'X', message: 'caído', request_id: 'r' } } as never }) });
+    renderApp('/contacts');
+    const d = await openContact();
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(card.getByText('Anuncio sin título')).toBeInTheDocument();
+    expect(card.getByText('12021000…0011')).toBeInTheDocument();
+  });
+
+  it('un contacto sin atribución dice, con el texto exacto, que la atribución del anuncio no está disponible; no inventa nada', async () => {
+    mockApi(contactsServer(contact({ attribution: null, tags: [], source: 'manual' })).routes);
+    renderApp('/contacts');
+    const d = await openContact();
+    expect(d.getByText('Atribución del anuncio no disponible')).toBeInTheDocument();
+    expect(d.queryByLabelText('Anuncio de origen')).not.toBeInTheDocument();
+  });
+});
+
+describe('Ficha del contacto · campaña y conjunto del anuncio (v20)', () => {
+  const AD = { source_id: '120250251830440318', headline: 'Define Tu Abdomen', body: null, source_url: null, platform: 'facebook' as const, thumbnail_url: null };
+  const touch = { at: '2026-10-10T15:00:00.000Z', source: 'meta_ctwa', campaign: null, adset: null, ad: null, ad_id: AD.source_id };
+  const open = async (creative: Record<string, unknown>) => {
+    mockApi({ ...contactsServer(contact({ attribution: attribution({ first_touch: touch, last_touch: touch }) })).routes, 'GET /ads/creatives': () => ({ body: { items: { [AD.source_id]: { ...AD, ...creative } } } }) });
+    renderApp('/contacts');
+    return openContact();
+  };
+
+  it('muestra el nombre real del anuncio, la campaña y el conjunto; el titular queda aparte', async () => {
+    const d = await open({ ad_name: 'Prefiero sufrir así', adset_name: 'SERVICIOS PASIEL RMKT', campaign_name: 'SERVICIOS PASIEL - RMKT NOV 2026', names_status: 'ok' });
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(await card.findByText('Prefiero sufrir así')).toBeInTheDocument();
+    expect(card.getByText('SERVICIOS PASIEL - RMKT NOV 2026')).toBeInTheDocument();
+    expect(card.getByText('SERVICIOS PASIEL RMKT')).toBeInTheDocument();
+    expect(card.getByText('Titular: Define Tu Abdomen')).toBeInTheDocument();
+  });
+
+  it('si el token de Meta no puede leer anuncios avisa qué permiso falta, sin inventar nombres', async () => {
+    const d = await open({ names_status: 'no_access' });
+    const card = within(await d.findByLabelText('Anuncio de origen'));
+    expect(await card.findByText(/necesita el permiso «ads_read»/)).toBeInTheDocument();
+    expect(card.queryByText(/Campaña:/)).not.toBeInTheDocument();
+  });
+});

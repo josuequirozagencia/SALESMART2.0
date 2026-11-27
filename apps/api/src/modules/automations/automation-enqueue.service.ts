@@ -33,6 +33,8 @@ export class AutomationEnqueueService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onEvent(tx: TenantTx, event: DomainEvent, origin: AutomationOrigin | null): Promise<void> {
+    // Un mensaje recuperado de días atrás (v19 B3, «ponerse al día») es un dato, no un hecho nuevo: no dispara reglas
+    if (event.type === 'message_received' && event.historical) return;
     const rules = await tx
       .select()
       .from(automations)

@@ -1,6 +1,6 @@
 import { readLocation } from './location';
 import { timingSafeEqual } from 'node:crypto';
-import type { DeliveryState, InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedStatus } from '../conversations';
+import type { DeliveryState, InboundKind, NormalizedInboundEvent, NormalizedMedia, NormalizedMessage, NormalizedReaction, NormalizedReferral, NormalizedStatus } from '../conversations';
 import { stripNul } from './meta-webhook';
 
 /**
@@ -28,6 +28,8 @@ const E164_RE = /^\+[1-9]\d{7,14}$/;
 const SECRET_KEYS = new Set(['apikey', 'destination', 'token', 'jwt', 'secret']);
 /** El archivo en base64 que viaja dentro del aviso. */
 const INLINE_KEYS = new Set(['base64']);
+/** Miniaturas (la del anuncio de Meta y la de los medios): bytes que no se guardan en cada aviso. La del anuncio se guarda UNA vez por anuncio (v20). */
+const THUMB_KEYS = new Set(['thumbnail', 'jpegThumbnail']);
 
 /** Copia del aviso apta para guardarse: sin claves secretas y sin los archivos en base64 (que se guardan aparte). */
 export function redactEvolutionPayload<T>(value: T): T {
@@ -36,11 +38,39 @@ export function redactEvolutionPayload<T>(value: T): T {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value)) {
       if (SECRET_KEYS.has(k.toLowerCase())) continue;
-      out[k] = INLINE_KEYS.has(k) && typeof v === 'string' ? `[archivo: ${v.length} caracteres]` : redactEvolutionPayload(v);
+      out[k] = INLINE_KEYS.has(k) && typeof v === 'string' ? `[archivo: ${v.length} caracteres]` : THUMB_KEYS.has(k) && v !== null && typeof v === 'object' ? '[miniatura]' : THUMB_KEYS.has(k) && typeof v === 'string' ? '[miniatura]' : redactEvolutionPayload(v);
     }
     return out as T;
   }
   return value;
+}
+
+/** Tamaño máximo de la miniatura de un anuncio que se guarda (las de Evolution pesan 1 a 3 KB). */
+export const MAX_AD_THUMBNAIL_BYTES = 100_000;
+
+/**
+ * La miniatura del anuncio de Meta que trae el aviso (v20): `externalAdReply.thumbnail`, que Evolution manda como lista de números (los bytes de un JPEG) o como texto en base64. Devuelve el id del anuncio
+ * y los bytes, solo si hay `sourceId` y los bytes son realmente una imagen (JPEG, PNG o WebP, por su contenido) de hasta 100 KB. Pura.
+ */
+export function adThumbnailOf(data: Record<string, unknown>): { sourceId: string; bytes: Buffer; mime: string } | null {
+  const holders: unknown[] = [data['contextInfo']];
+  const message = isObj(data['message']) ? data['message'] : {};
+  for (const v of Object.values(message)) holders.push(isObj(v) ? v['contextInfo'] : null);
+  const ad = holders.map((h) => (isObj(h) && isObj(h['externalAdReply']) ? h['externalAdReply'] : null)).find((x) => x !== null);
+  if (!ad) return null;
+  const sourceId = str(ad['sourceId']);
+  const raw = ad['thumbnail'];
+  if (!sourceId || sourceId.length > 100 || raw === null || raw === undefined) return null;
+  let bytes: Buffer | null = null;
+  if (typeof raw === 'string') {
+    if (/^[A-Za-z0-9+/=\s]+$/.test(raw) && raw.length <= MAX_AD_THUMBNAIL_BYTES * 2) bytes = Buffer.from(raw, 'base64');
+  } else if (Array.isArray(raw) || isObj(raw)) {
+    const values = Array.isArray(raw) ? raw : Object.keys(raw).sort((a, b) => Number(a) - Number(b)).map((k) => (raw)[k]);
+    if (values.length > 0 && values.length <= MAX_AD_THUMBNAIL_BYTES && values.every((n) => typeof n === 'number' && Number.isInteger(n) && n >= 0 && n <= 255)) bytes = Buffer.from(values as number[]);
+  }
+  if (!bytes || bytes.length < 4 || bytes.length > MAX_AD_THUMBNAIL_BYTES) return null;
+  const mime = bytes[0] === 0xff && bytes[1] === 0xd8 ? 'image/jpeg' : bytes.subarray(0, 4).toString('latin1') === '\x89PNG' ? 'image/png' : bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP' ? 'image/webp' : null;
+  return mime ? { sourceId, bytes, mime } : null;
 }
 
 /** Token del webhook (`?token=`) comparado en tiempo constante. Un token vacío nunca autentica. */
@@ -64,6 +94,9 @@ export interface EvolutionConnection {
   readonly profileName: string | null;
 }
 
+/** Por qué se ignoró un aviso (v19 B1): se cuenta por conexión y hora para «Salud de la conexión». */
+export type IgnoredReason = 'group' | 'status' | 'from_me' | 'no_phone' | 'malformed' | 'receipt' | 'unsupported';
+
 export interface ParsedEvolution {
   /** Nombre de la instancia de Evolution (identifica la conexión; hace de «número» del evento normalizado). */
   readonly instance: string | null;
@@ -77,9 +110,18 @@ export interface ParsedEvolution {
   readonly inlineMedia: ReadonlyMap<string, string>;
   /** Mensajes o estados descartados (grupos, propios del chip, sin teléfono, tipo que no usamos, formato roto). */
   readonly ignored: number;
+  /** El motivo, cuando el aviso se ignoró (o era un evento que no usamos); null si se procesó. */
+  readonly ignoredReason: IgnoredReason | null;
 }
 
-const EMPTY: Omit<ParsedEvolution, 'instance'> = { events: [], connection: null, qr: null, inlineMedia: new Map(), ignored: 0 };
+const EMPTY: Omit<ParsedEvolution, 'instance'> = { events: [], connection: null, qr: null, inlineMedia: new Map(), ignored: 0, ignoredReason: null };
+
+/** «123456789012345@lid» → el código `@lid` de WhatsApp (ADR-73); cualquier otro identificador → null. De 5 a 30 dígitos; el sufijo de dispositivo (`:12`) se quita. */
+export function lidFromJid(jid: unknown): string | null {
+  const s = str(jid);
+  const m = s ? /^(\d{5,30})(?::\d+)?@lid$/.exec(s) : null;
+  return m ? `${m[1]}@lid` : null;
+}
 
 /** «593999999999@s.whatsapp.net» (o con sufijo de dispositivo `:12`) → teléfono E.164; cualquier otro identificador (`@lid`, `@g.us`…) → null. */
 export function phoneFromJid(jid: unknown): string | null {
@@ -165,33 +207,55 @@ function quotedIdOf(message: Record<string, unknown>): string | null {
   return null;
 }
 
+/**
+ * El anuncio de Meta de donde vino el cliente (v20, ADR-55): Evolution lo trae en `contextInfo.externalAdReply` del aviso (o dentro del contenido del mensaje) con `ctwaClid` (el identificador que Meta pide para
+ * atribuir), `sourceId` (el id del ANUNCIO; no trae campaña ni conjunto), `title`, `body`, `sourceUrl` y `sourceApp` (facebook o instagram). Visto en Evolution v2.3.7 contra una empresa real: 199 de 203 avisos
+ * con anuncio traían `ctwaClid` y todos `sourceId`. La miniatura NO se lee aquí. Sin `ctwaClid` ni `sourceId` no hay referencia. Función pura.
+ */
+export function adReferralOf(data: Record<string, unknown>, message: Record<string, unknown>): NormalizedReferral | null {
+  const holders: unknown[] = [data['contextInfo'], ...Object.values(message).map((v) => (isObj(v) ? v['contextInfo'] : null))];
+  const ad = holders.map((h) => (isObj(h) && isObj(h['externalAdReply']) ? h['externalAdReply'] : null)).find((x) => x !== null);
+  if (!ad) return null;
+  const s = (k: string, n: number): string | null => {
+    const v = ad[k];
+    return typeof v === 'string' && v !== '' ? stripNul(v).replace(/\p{Cc}/gu, ' ').trim().slice(0, n) || null : null;
+  };
+  const app = s('sourceApp', 20)?.toLowerCase() ?? null;
+  const ref: NormalizedReferral = { sourceId: s('sourceId', 100), sourceType: 'ad', sourceUrl: s('sourceUrl', 1000), headline: s('title', 300), body: s('body', 500), thumbnailUrl: null, ctwaClid: s('ctwaClid', 500), platform: app === 'facebook' || app === 'instagram' ? app : null };
+  return ref.ctwaClid !== null || ref.sourceId !== null ? ref : null;
+}
+
 function upsert(instance: string, data: Record<string, unknown>, now: Date): Omit<ParsedEvolution, 'instance'> {
   const key = isObj(data['key']) ? data['key'] : null;
   const message = isObj(data['message']) ? data['message'] : null;
   const id = key ? str(key['id']) : null;
   const remote = key ? str(key['remoteJid']) : null;
-  if (!key || !message || !id || !remote) return { ...EMPTY, ignored: 1 };
+  if (!key || !message || !id || !remote) return { ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   // Los grupos y los estados de WhatsApp no son una conversación con un cliente
-  if (remote.endsWith('@g.us') || remote === 'status@broadcast') return { ...EMPTY, ignored: 1 };
+  if (remote === 'status@broadcast') return { ...EMPTY, ignored: 1, ignoredReason: 'status' };
+  if (remote.endsWith('@g.us')) return { ...EMPTY, ignored: 1, ignoredReason: 'group' };
   const fromMe = key['fromMe'] === true;
   const content = contentOf(id, message);
   if (content === 'reaction') {
     // La reacción que pone el teléfono a un mensaje no se trae (v9, fuera de alcance)
-    if (fromMe) return { ...EMPTY, ignored: 1 };
+    if (fromMe) return { ...EMPTY, ignored: 1, ignoredReason: 'from_me' };
     const r = message['reactionMessage'] as Record<string, unknown>;
     const target = isObj(r['key']) ? str(r['key']['id']) : null;
     const emoji = typeof r['text'] === 'string' ? stripNul(r['text']).trim() : '';
-    if (!target || emoji.length > 32 || /\p{Cc}/u.test(emoji)) return { ...EMPTY, ignored: 1 };
+    if (!target || emoji.length > 32 || /\p{Cc}/u.test(emoji)) return { ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
     const reaction: NormalizedReaction = { targetExternalId: target, emoji: emoji === '' ? null : emoji, at: toDate(data['messageTimestamp'], now) };
     return { ...EMPTY, events: [{ event: { phoneNumberId: instance, messages: [], statuses: [], reactions: [reaction] }, raw: redactEvolutionPayload(data) }] };
   }
   // El teléfono sale del identificador de teléfono; si solo hay un `@lid`, se usa la variante `remoteJidAlt` que Evolution da en los chats 1:1
   const from = phoneFromJid(remote) ?? phoneFromJid(key['remoteJidAlt']);
-  if (!from) return { ...EMPTY, ignored: 1 };
+  // Sin teléfono pero con el código `@lid` (ADR-73): el contacto se reconoce por ese código; sin ninguno de los dos no hay a quién atribuir el mensaje
+  const lid = lidFromJid(remote) ?? lidFromJid(key['remoteJidAlt']);
+  if (!from && !lid) return { ...EMPTY, ignored: 1, ignoredReason: 'no_phone' };
   const quotedId = quotedIdOf(message);
   const msg: NormalizedMessage = {
     externalId: id,
     from,
+    ...(lid ? { lid } : {}),
     fromRaw: remote,
     // En un mensaje del teléfono el `pushName` es el de la persona dueña de la línea, no el del cliente
     profileName: fromMe ? null : str(data['pushName']),
@@ -201,6 +265,7 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
     extra: content.extra,
     sentAt: toDate(data['messageTimestamp'], now),
     ...(fromMe ? { origin: 'device' as const } : {}),
+    ...(!fromMe && adReferralOf(data, message) ? { referral: adReferralOf(data, message) } : {}),
     ...(quotedId ? { replyToExternalId: quotedId } : {}),
   };
   const inline = new Map<string, string>();
@@ -211,11 +276,11 @@ function upsert(instance: string, data: Record<string, unknown>, now: Date): Omi
 function update(instance: string, data: Record<string, unknown>, now: Date): Omit<ParsedEvolution, 'instance'> {
   const id = str(data['keyId']) ?? (isObj(data['key']) ? str(data['key']['id']) : null);
   const status = str(data['status']);
-  if (!id || !status) return { ...EMPTY, ignored: 1 };
+  if (!id || !status) return { ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   // Solo importan los estados de lo que NOSOTROS enviamos; el «leído» de los mensajes del cliente (fromMe: false) no es un estado de entrega
-  if (data['fromMe'] !== true) return { ...EMPTY, ignored: 1 };
+  if (data['fromMe'] !== true) return { ...EMPTY, ignored: 1, ignoredReason: 'receipt' };
   const state = STATUS_MAP[status.toUpperCase()];
-  if (!state) return { ...EMPTY, ignored: status.toUpperCase() === 'PENDING' ? 0 : 1 };
+  if (!state) return status.toUpperCase() === 'PENDING' ? { ...EMPTY } : { ...EMPTY, ignored: 1, ignoredReason: 'unsupported' };
   const s: NormalizedStatus = { externalId: id, state, at: now, error: state === 'failed' ? { code: 'unknown', title: 'El envío falló en WhatsApp' } : null };
   return { ...EMPTY, events: [{ event: { phoneNumberId: instance, messages: [], statuses: [s], reactions: [] }, raw: redactEvolutionPayload(data) }] };
 }
@@ -233,11 +298,11 @@ function connectionOf(data: Record<string, unknown>): EvolutionConnection | null
  * (`send.message`, grupos, contactos, chats…) se ignoran sin error; nunca lanza por un contenido mal formado.
  */
 export function parseEvolutionWebhook(body: unknown, now = new Date()): ParsedEvolution {
-  if (!isObj(body)) return { instance: null, ...EMPTY, ignored: 1 };
+  if (!isObj(body)) return { instance: null, ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   const instance = str(body['instance']);
   const event = str(body['event'])?.toLowerCase().replaceAll('_', '.') ?? null;
   const data = isObj(body['data']) ? body['data'] : null;
-  if (!instance || !event || !data) return { instance, ...EMPTY, ignored: 1 };
+  if (!instance || !event || !data) return { instance, ...EMPTY, ignored: 1, ignoredReason: 'malformed' };
   switch (event) {
     case 'messages.upsert':
       return { instance, ...upsert(instance, data, now) };
@@ -250,7 +315,7 @@ export function parseEvolutionWebhook(body: unknown, now = new Date()): ParsedEv
       return { instance, ...EMPTY, qr: { updated: isObj(data['qrcode']), limitReached: limit } };
     }
     default:
-      return { instance, ...EMPTY }; // send.message, groups.*, contacts.*, chats.*…: no los usamos
+      return { instance, ...EMPTY, ignoredReason: 'unsupported' }; // send.message, groups.*, contacts.*, chats.*…: no los usamos (se cuentan aparte, no son «ignorados» con error)
   }
 }
 

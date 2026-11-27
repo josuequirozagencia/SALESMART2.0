@@ -70,6 +70,19 @@ export class OrgDirectoryService {
     return row?.currency ?? 'USD';
   }
 
+  /** Tope de espacio de la biblioteca de archivos de la empresa del contexto, en bytes (V21, ADR-75). Se lee ANTES de la transacción de negocio y SIN caché: es lo que decide si una subida cabe. */
+  async storageQuotaBytes(): Promise<number> {
+    const org = TenantContext.current().organizationId;
+    const [row] = await this.db.withIdentity((tx) => tx.select({ quota: organizations.storageQuotaBytes }).from(organizations).where(eq(organizations.id, org)).limit(1));
+    return row?.quota ?? 1_073_741_824;
+  }
+
+  /** El cupo incluido de una empresa concreta (para el Súper Admin, que lo consulta desde el contexto de plataforma). */
+  async storageQuotaBytesOf(organizationId: string): Promise<number> {
+    const [row] = await this.db.withIdentity((tx) => tx.select({ quota: organizations.storageQuotaBytes }).from(organizations).where(eq(organizations.id, organizationId)).limit(1));
+    return row?.quota ?? 1_073_741_824;
+  }
+
   /** Cambia la moneda de la empresa del contexto (la regla de cuándo se puede la aplica ventas). */
   async setCurrency(currency: string): Promise<void> {
     const org = TenantContext.current().organizationId;
