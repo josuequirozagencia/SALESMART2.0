@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation } from 'react-router-dom';
+import { NameNotice } from '../features/profile/NameNotice';
 import { ROLE_LABEL } from '../lib/format';
 import type { Me } from '../lib/types';
 import { useBrand, useDocumentTitle } from '../lib/platformBrand';
@@ -170,14 +171,17 @@ export function SidebarShell({ me, groups, navLabel, onLogout, banner, extra, wi
           {extraNode}
           <div className={`border-t border-white/10 ${compact ? 'grid justify-items-center gap-1 px-2 py-2' : 'grid gap-1 p-3'}`}>
             {bottom ? null : <ThemeToggle onDark />}
+            {compact ? null : <NameNotice me={me} onDark />}
             <div className={`flex items-center gap-2.5 ${compact ? 'flex-col pt-1' : 'pt-1'}`}>
-              <span title={compact ? `${name} · ${ROLE_LABEL[me.role] ?? me.role}` : undefined}><Avatar name={name} src={photoUrl} size={36} tone="grad" /></span>
-              {compact ? null : (
-                <span className="min-w-0 flex-1 text-[12.5px] leading-tight">
-                  <b className="block truncate">{name}</b>
-                  <span className="block truncate text-white/65">{ROLE_LABEL[me.role] ?? me.role}</span>
-                </span>
-              )}
+              <Link to="/profile" aria-label="Mi perfil" title={compact ? `Mi perfil · ${name} · ${ROLE_LABEL[me.role] ?? me.role}` : 'Mi perfil'} className={`flex min-h-10 items-center gap-2.5 rounded-lg hover:bg-white/10 ${compact ? 'justify-center' : 'min-w-0 flex-1'}`}>
+                <Avatar name={name} src={photoUrl} size={36} tone="grad" />
+                {compact ? null : (
+                  <span className="min-w-0 flex-1 text-[12.5px] leading-tight">
+                    <b className="block truncate">{name}</b>
+                    <span className="block truncate text-white/65">{ROLE_LABEL[me.role] ?? me.role}</span>
+                  </span>
+                )}
+              </Link>
               {compact ? (
                 <button type="button" onClick={onLogout} aria-label="Cerrar sesión" title="Cerrar sesión" className="grid size-10 place-items-center rounded-[10px] text-white/80 hover:bg-white/10"><Icon name="logout" size={18} /></button>
               ) : (

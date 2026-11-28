@@ -1,5 +1,6 @@
 import { Dashboard } from '../features/analytics/Dashboard';
 import { OnboardingCard } from '../features/onboarding/OnboardingCard';
+import { NameNotice } from '../features/profile/NameNotice';
 import type { Me } from '../lib/types';
 import { PAGE_TITLE } from '../ui/PageHeader';
 
@@ -10,6 +11,7 @@ export function HomeScreen({ me }: { me: Me }) {
   return (
     <div className="grid gap-5">
       <h1 className={PAGE_TITLE}>Hola, {me.organization.name}</h1>
+      <NameNotice me={me} />
       <OnboardingCard me={me} />
       <Dashboard />
     </div>

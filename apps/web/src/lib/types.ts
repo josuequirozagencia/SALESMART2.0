@@ -169,6 +169,8 @@ export interface InvitationPreview {
   role: string;
   expires_at: string;
   account_exists: boolean;
+  /** La cuenta existe pero no tiene nombre: hay que escribirlo al aceptar (V25). */
+  needs_name?: boolean;
 }
 
 export interface CompanyList {

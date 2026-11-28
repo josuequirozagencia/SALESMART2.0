@@ -1,0 +1,3 @@
+-- V25 (ADR-76): la historia del equipo admite el cambio del perfil propio (`profile_updated`).
+ALTER TABLE "member_history" DROP CONSTRAINT "member_history_kind_valid";--> statement-breakpoint
+ALTER TABLE "member_history" ADD CONSTRAINT "member_history_kind_valid" CHECK ("member_history"."kind" IN ('invited', 'invitation_cancelled', 'role_changed', 'permissions_changed', 'queues_changed', 'deactivated', 'reactivated', 'removed', 'sessions_revoked', 'access_reset', 'profile_updated'));

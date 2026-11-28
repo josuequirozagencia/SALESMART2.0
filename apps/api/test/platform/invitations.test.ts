@@ -262,6 +262,23 @@ describe('«Nueva empresa» e invitaciones', () => {
       expect(await json(await preview(existing.token))).toMatchObject({ email: 'alice@a.test', account_exists: true });
     });
 
+    it('cuenta existente SIN nombre: la vista previa lo avisa y al aceptar hay que escribirlo, después de validar la contraseña; con nombre, no se pisa (V25)', async () => {
+      const { token } = await invited({ owner_email: 'alice@a.test', name: 'Otra Empresa' });
+      expect(await json(await preview(token))).toMatchObject({ account_exists: true, needs_name: true });
+      const bare = (body: Record<string, unknown>) => call('POST', '/auth/invitations/accept', undefined, { token, password: PW, ...body });
+      expect(await codeOf(await bare({ password: 'otra-clave-distinta' }))).toBe('INVALID_PASSWORD'); // sin la contraseña no se revela nada más
+      const r = await bare({});
+      expect(r.status).toBe(400);
+      expect(await json(r)).toMatchObject({ error: { code: 'VALIDATION_ERROR', details: [{ path: 'full_name' }] } });
+      expect((await admin.query(`SELECT count(*)::int n FROM invitations WHERE consumed_at IS NOT NULL`)).rows[0].n).toBe(0);
+      expect((await bare({ full_name: 'Alicia Torres' })).status).toBe(200);
+      expect((await admin.query(`SELECT full_name FROM users WHERE id = $1`, [IDS.alice])).rows[0].full_name).toBe('Alicia Torres');
+      const again = await invited({ owner_email: 'alice@a.test', name: 'Tercera Empresa' });
+      expect(await json(await preview(again.token))).toMatchObject({ account_exists: true, needs_name: false });
+      expect((await call('POST', '/auth/invitations/accept', undefined, { token: again.token, password: PW, full_name: 'Otro Nombre' })).status).toBe(200);
+      expect((await admin.query(`SELECT full_name FROM users WHERE id = $1`, [IDS.alice])).rows[0].full_name).toBe('Alicia Torres');
+    });
+
     it('cuenta nueva SIN plan: crea el usuario activo y verificado, la membresía client_admin y la prueba de 7 días; el enlace queda consumido', async () => {
       const { orgId, token } = await invited();
       const r = await accept(token);
@@ -307,6 +324,7 @@ describe('«Nueva empresa» e invitaciones', () => {
 
     it('cuenta EXISTENTE: no se duplica el usuario ni cambia su contraseña; confirma con la actual y se AÑADE la membresía', async () => {
       const { orgId, token } = await invited({ owner_email: 'alice@a.test', name: 'Segunda Empresa' });
+      await admin.query(`UPDATE users SET full_name = 'Alicia Torres' WHERE id = $1`, [IDS.alice]); // con nombre: basta la contraseña (sin nombre hay que escribirlo, ver arriba)
       const usersBefore = (await admin.query(`SELECT count(*)::int AS n FROM users`)).rows[0].n;
       const wrong = await accept(token, { password: 'No-Es-La-Clave-1' });
       expect(wrong.status).toBe(400);

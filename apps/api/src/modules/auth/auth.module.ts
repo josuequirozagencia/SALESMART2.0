@@ -20,6 +20,7 @@ import { SessionService } from './session.service';
 import { PermissionService } from './permission.service';
 import { PasswordController } from './password/password.controller';
 import { PasswordService } from './password/password.service';
+import { MyProfileStore } from './profile/my-profile.store';
 import { ThrottleService } from './throttle.service';
 import { FakeCaptchaVerifier, UnavailableCaptchaVerifier } from './signup/fakes';
 import { CAPTCHA_VERIFIER } from './signup/ports';
@@ -50,6 +51,7 @@ import { SignupService } from './signup/signup.service';
     PasswordConfirmationService,
     AccessSessionsService,
     AccessResetService,
+    MyProfileStore,
     PermissionService,
     SignupLimiter,
     // Anti-bots (ADR-37): Turnstile. 'none' (503) o fake de desarrollo/pruebas (la config lo prohíbe en producción). El correo vive en MailModule.
@@ -65,6 +67,6 @@ import { SignupService } from './signup/signup.service';
       inject: [APP_CONFIG],
     },
      IdentityCleanupJob, SessionService, ThrottleService, LocalAccessResolver, { provide: PASSWORD_HASHER, useFactory: () => new Argon2idHasher() }],
-  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService, CompanyExportStore, CompanyPurgeStore, PasswordConfirmationService],
+  exports: [SessionService, LocalAccessResolver, PermissionService, IdentityCleanupJob, CAPTCHA_VERIFIER, InvitationsService, CompanyExportStore, CompanyPurgeStore, PasswordConfirmationService, MyProfileStore],
 })
 export class AuthModule {}

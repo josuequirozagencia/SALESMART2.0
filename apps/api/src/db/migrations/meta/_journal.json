@@ -1121,6 +1121,13 @@
       "when": 1797500000000,
       "tag": "0159_v251_perfil_empresa",
       "breakpoints": true
+    },
+    {
+      "idx": 160,
+      "version": "7",
+      "when": 1797600000000,
+      "tag": "0160_v252_historial_de_perfil",
+      "breakpoints": true
     }
   ]
 }

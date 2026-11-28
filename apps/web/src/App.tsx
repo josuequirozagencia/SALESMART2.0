@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes } from 'react-router-dom';
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AgencyShell } from './features/agency/AgencyShell';
 import { ClientsPage } from './features/agency/ClientsPage';
 import { AppShell } from './features/app/AppShell';
@@ -55,6 +55,7 @@ import { SignupScreen } from './screens/SignupScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
 import { Spinner } from './ui/controls';
 import { CompanyProfilePage } from './features/organization/CompanyProfilePage';
+import { ProfilePage } from './features/profile/ProfilePage';
 
 function Splash() {
   return <div className="grid min-h-full place-items-center text-muted"><Spinner label="Cargando" /></div>;
@@ -100,13 +101,16 @@ function AppGate() {
   const { state, logout } = useSession();
   const clientOrg = state.status === 'authed' && state.me.organization.kind === 'client';
   const trial = useTrial(clientOrg);
+  const { pathname } = useLocation();
   if (state.status === 'loading') return <Splash />;
   if (state.status === 'anon') return <Navigate to="/login" replace />;
-  if (state.me.role === 'super_admin' && state.me.organization.kind === 'platform') return <Navigate to="/platform/companies" replace />;
-  if (state.me.organization.kind === 'agency') return <Navigate to="/agency/clients" replace />;
+  const out = () => void logout();
+  // «Mi perfil» existe también en la consola de plataforma y en la de la agencia, cada una con su marco (V25)
+  const profile = pathname === '/profile';
+  if (state.me.role === 'super_admin' && state.me.organization.kind === 'platform') return profile ? <PlatformShell me={state.me} onLogout={out}><Outlet /></PlatformShell> : <Navigate to="/platform/companies" replace />;
+  if (state.me.organization.kind === 'agency') return profile ? <AgencyShell me={state.me} onLogout={out}><Outlet /></AgencyShell> : <Navigate to="/agency/clients" replace />;
   if (clientOrg && trial.isPending) return <Splash />;
   const t = trial.data ?? null;
-  const out = () => void logout();
   // La pantalla de «vencida» es del propio cliente; una agencia o el Súper Admin que entra ve la empresa en SOLO LECTURA (con su banner)
   if (t?.status === 'expired' && !state.me.acting_as) return <TrialExpiredScreen trial={t} role={state.me.role} onLogout={out} />;
   return <AppShell me={state.me} trial={t} onLogout={out}><Outlet /></AppShell>;
@@ -141,6 +145,7 @@ export function App() {
         <Route path="/companies" element={<Navigate to="/contacts/companies" replace />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />
         <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/profile" element={<ProfilePage />} />
         <Route path="/settings/company" element={<CompanyProfilePage />} />
         <Route path="/settings/fields" element={<CustomFieldsPage />} />
         <Route path="/settings/tags" element={<TagsPage />} />

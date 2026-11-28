@@ -44,6 +44,8 @@ export interface InvitationPreview {
   expires_at: string;
   /** Si el correo ya tiene cuenta: la web pide su contraseña actual en lugar de crear una. */
   account_exists: boolean;
+  /** La cuenta existe pero no tiene nombre: al aceptar hay que escribirlo (V25). */
+  needs_name: boolean;
 }
 
 /** Lo que el administrador eligió al invitar a alguien a su equipo y se aplica AL ACEPTAR (M10.3): ajustes de permisos y departamentos. `cancelled` marca una invitación cancelada. */
@@ -247,10 +249,10 @@ export class InvitationsService {
     if (!parsed) throw new InvalidInvitationError();
     const found = await this.db.withIdentity(async (tx) => {
       const row = await this.loadValid(tx, parsed.sessionId, parsed.hash, false);
-      const [u] = await tx.select({ id: users.id }).from(users).where(eq(users.email, row.email)).limit(1);
-      return { row, accountExists: !!u };
+      const [u] = await tx.select({ id: users.id, fullName: users.fullName }).from(users).where(eq(users.email, row.email)).limit(1);
+      return { row, accountExists: !!u, needsName: !!u && !u.fullName };
     });
-    return { organization_name: found.row.orgName, email: found.row.email, role: found.row.role, expires_at: found.row.expiresAt.toISOString(), account_exists: found.accountExists };
+    return { organization_name: found.row.orgName, email: found.row.email, role: found.row.role, expires_at: found.row.expiresAt.toISOString(), account_exists: found.accountExists, needs_name: found.needsName };
   }
 
   async accept(input: { token: string; password: string; fullName?: string; phone?: string; ip?: string }): Promise<{ status: 'accepted'; email: string; account_created: boolean }> {
@@ -279,12 +281,12 @@ export class InvitationsService {
       newHash = await this.hasher.hash(input.password);
     }
 
-    type Outcome = { kind: 'ok'; created: boolean; email: string; orgId: string; userId: string; setup: MemberSetup | null; role: string } | { kind: 'bad_password' } | { kind: 'conflict' };
+    type Outcome = { kind: 'ok'; created: boolean; email: string; orgId: string; userId: string; setup: MemberSetup | null; role: string } | { kind: 'bad_password' } | { kind: 'needs_name' } | { kind: 'conflict' };
     const out = await this.db.withIdentity(async (tx): Promise<Outcome> => {
       const inv = await this.loadValid(tx, parsed.sessionId, parsed.hash, true);
       const now = new Date();
       const [existing] = await tx
-        .select({ id: users.id, hash: users.passwordHash, status: users.status, verifiedAt: users.emailVerifiedAt, deletedAt: users.deletedAt })
+        .select({ id: users.id, hash: users.passwordHash, status: users.status, verifiedAt: users.emailVerifiedAt, deletedAt: users.deletedAt, fullName: users.fullName })
         .from(users)
         .where(eq(users.email, inv.email))
         .for('update')
@@ -294,6 +296,11 @@ export class InvitationsService {
       if (existing) {
         if (existing.status !== 'active' || existing.verifiedAt === null || existing.deletedAt !== null) throw new InvalidInvitationError();
         if (!(await this.hasher.verify(existing.hash, input.password))) return { kind: 'bad_password' };
+        // Quien ya tiene cuenta pero no nombre lo escribe ahora (V25). Se pide DESPUÉS de validar la contraseña y antes de escribir nada
+        if (!existing.fullName) {
+          if (!input.fullName) return { kind: 'needs_name' };
+          await tx.update(users).set({ fullName: input.fullName, updatedAt: now }).where(eq(users.id, existing.id));
+        }
         userId = existing.id;
       } else {
         if (newHash === null) return { kind: 'conflict' }; // la cuenta no existía en la lectura previa y ahora tampoco: reintento limpio
@@ -350,6 +357,7 @@ export class InvitationsService {
       await this.throttle.recordFailure(eKey); // quien tiene el enlace no puede adivinar la contraseña de la cuenta sin límite
       throw new AppError(400, 'INVALID_PASSWORD', 'La contraseña no es correcta');
     }
+    if (out.kind === 'needs_name') throw new ValidationError([{ path: 'full_name', code: 'required', message: 'Escribe tu nombre completo' }]);
     if (out.kind === 'conflict') throw new ConflictError('CONFLICT', 'La cuenta cambió mientras se procesaba la solicitud. Vuelve a intentarlo');
     if (!out.created) await this.throttle.reset(eKey);
     // Los departamentos elegidos al invitar son de negocio: se aplican ya confirmada la aceptación (si falla, la persona entra igual y el administrador los pone a mano)

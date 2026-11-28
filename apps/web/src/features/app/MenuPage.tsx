@@ -6,6 +6,7 @@ import { Icon } from '../../ui/Icon';
 import { ThemeToggle } from '../../ui/ThemeToggle';
 import { NotificationsBell } from '../notifications/NotificationsBell';
 import { ViewAsMenu } from '../context/ViewAs';
+import { NameNotice } from '../profile/NameNotice';
 import { useMyPhoto } from '../photos/usePhotos';
 import { useAppNav } from './AppNav';
 
@@ -61,6 +62,11 @@ export function MenuPage() {
         })}
       </nav>
       <section aria-label="Cuenta y ajustes" className="grid gap-2 border-t border-line pt-4">
+        <NameNotice me={me} />
+        <Link to="/profile" className="flex min-h-12 items-center gap-3 rounded-xl border border-line bg-surface px-4 text-[13px] font-semibold hover:bg-surface2">
+          <Icon name="users" />
+          Mi perfil
+        </Link>
         {settings ? (
           <Link to={settings.to} className="flex min-h-12 items-center gap-3 rounded-xl border border-line bg-surface px-4 text-[13px] font-semibold hover:bg-surface2">
             <Icon name={settings.icon} />

@@ -740,7 +740,7 @@ export const memberHistory = identityTable(
     createdAt: ts('created_at').notNull().defaultNow(),
   },
   (t) => [
-    check('member_history_kind_valid', sql`${t.kind} IN ('invited', 'invitation_cancelled', 'role_changed', 'permissions_changed', 'queues_changed', 'deactivated', 'reactivated', 'removed', 'sessions_revoked', 'access_reset')`),
+    check('member_history_kind_valid', sql`${t.kind} IN ('invited', 'invitation_cancelled', 'role_changed', 'permissions_changed', 'queues_changed', 'deactivated', 'reactivated', 'removed', 'sessions_revoked', 'access_reset', 'profile_updated')`),
     index('member_history_org_idx').on(t.organizationId, t.createdAt),
     index('member_history_user_idx').on(t.userId, t.createdAt),
   ],
