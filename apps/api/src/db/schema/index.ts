@@ -35,3 +35,4 @@ export { automations, automationRuns, automationRunSteps, automationSettings } f
 export { campaigns, campaignRecipients, campaignAdvisorLimits, campaignSettings, CAMPAIGN_STATUSES, RECIPIENT_STATUSES, SKIP_REASONS } from './campaigns';
 export { mediaFolders, mediaAssets } from './library';
 export { storagePlans, storageGrants, storageRequests } from './storage';
+export { organizationProfiles } from './organization-profile';

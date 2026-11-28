@@ -54,6 +54,7 @@ import { ResetScreen } from './screens/ResetScreen';
 import { SignupScreen } from './screens/SignupScreen';
 import { VerifyScreen } from './screens/VerifyScreen';
 import { Spinner } from './ui/controls';
+import { CompanyProfilePage } from './features/organization/CompanyProfilePage';
 
 function Splash() {
   return <div className="grid min-h-full place-items-center text-muted"><Spinner label="Cargando" /></div>;
@@ -140,6 +141,7 @@ export function App() {
         <Route path="/companies" element={<Navigate to="/contacts/companies" replace />} />
         <Route path="/opportunities" element={<OpportunitiesPage />} />
         <Route path="/tasks" element={<TasksPage />} />
+        <Route path="/settings/company" element={<CompanyProfilePage />} />
         <Route path="/settings/fields" element={<CustomFieldsPage />} />
         <Route path="/settings/tags" element={<TagsPage />} />
         <Route path="/settings/attribution" element={<AttributionPage />} />
