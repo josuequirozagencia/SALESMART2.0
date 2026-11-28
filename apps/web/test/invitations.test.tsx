@@ -236,6 +236,20 @@ describe('Aceptar la invitación', () => {
     expect(api.last('POST /auth/invitations/accept')?.body).toEqual({ token: TOKEN, password: 'la-buena-2026' });
   });
 
+  it('cuenta existente sin nombre: pide el nombre además de la contraseña y lo manda (V25)', async () => {
+    const api = mockApi({ ...anon(), 'POST /auth/invitations/preview': () => ({ body: { ...PREVIEW_OLD, needs_name: true } }), 'POST /auth/invitations/accept': () => ({ body: { status: 'accepted', email: 'dueno@cafe.test', account_created: false } }) });
+    goInvite();
+    const u = userEvent.setup();
+    await u.type(await screen.findByLabelText('Tu contraseña actual'), 'la-buena-2026');
+    await u.click(screen.getByRole('button', { name: 'Añadir esta empresa' }));
+    expect(screen.getByText('Escribe tu nombre')).toBeInTheDocument();
+    expect(api.count('POST /auth/invitations/accept')).toBe(0);
+    await u.type(screen.getByLabelText('Nombre completo'), 'Dora Quinde');
+    await u.click(screen.getByRole('button', { name: 'Añadir esta empresa' }));
+    expect(await screen.findByText(/ya tienes acceso a Café Origen/)).toBeInTheDocument();
+    expect(api.last('POST /auth/invitations/accept')?.body).toEqual({ token: TOKEN, password: 'la-buena-2026', full_name: 'Dora Quinde' });
+  });
+
   it('si al aceptar el enlace ya venció o se usó, pasa a la pantalla correspondiente', async () => {
     mockApi({ ...anon(), 'POST /auth/invitations/preview': () => ({ body: PREVIEW_NEW }), 'POST /auth/invitations/accept': () => err(400, 'INVITATION_EXPIRED') });
     goInvite();

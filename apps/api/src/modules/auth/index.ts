@@ -12,3 +12,4 @@ export { PasswordConfirmationService } from './company-lifecycle/password-confir
 export { InvitationsService, type InvitationIssued, type MemberInvitationView, type MemberSetup } from './invitations/invitations.service';
 export { memberJoined, type MemberJoined } from './invitations/member-joined';
 export { orgReady, type OrgReady } from './org-ready';
+export { MyProfileStore, type MyIdentity, type MyProfileField, type ProfileHistory } from './profile/my-profile.store';

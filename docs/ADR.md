@@ -3206,6 +3206,14 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 - La validación Zod vive en el módulo de la API (como el resto de los DTO), no en `packages/shared`.
 - Cambiar la zona olvida la memoria de 30 s de la zona; con varias instancias habría hasta 30 s de retraso. El nombre del calendario propio de Google no se renombra.
 
+### Precisiones de la 25.2 (PROPUESTAS)
+- `GET|PATCH /v1/me/profile` con `@SelfService`: no acepta identificadores de usuario ni de empresa, ni el correo. La identidad la escribe solo `modules/auth`; el horario propio sale de `sla`.
+- **Constancia:** miembro en su empresa → `audit_logs` (`user.profile`, solo nombres de campos) y fila `profile_updated` en `member_history` si cambió el nombre; soporte o agencia dentro de un cliente → fila en `member_history` de su empresa de origen y nada en el cliente; Súper Admin en la Consola → auditoría de plataforma. El teléfono no se guarda en ninguna.
+- Límite de 20 cambios por persona cada 10 minutos, en memoria del proceso (se reinicia con cada despliegue), en lugar de una clase nueva de `signup_attempts`.
+- «Cambiar contraseña» no tenía pantalla: se construyó en «Mi perfil» sobre la ruta existente. «Apariencia» y «Notificaciones» se enlazan solo en empresas cliente. La foto solo la ve quien es miembro y tiene `inbox.read`.
+- Con la prueba vencida la interfaz muestra la pantalla de «vencida», así que el cliente no llega a «Mi perfil» aunque la API lo permita.
+- No se construyó una pantalla de historial del equipo.
+
 ### Alternativas descartadas
 Mover el nombre o la zona a la tabla de negocio (rompe la identidad como fuente única); dar a `app_identity` permiso sobre `audit_logs` (rompe ADR-25); un solo permiso (la agencia en solo lectura no podría consultar).
 

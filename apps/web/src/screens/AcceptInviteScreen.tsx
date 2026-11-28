@@ -72,6 +72,7 @@ export function AcceptInviteScreen() {
 
   const inv = preview.data;
   const existing = inv.account_exists;
+  const needsName = existing && inv.needs_name === true;
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -85,15 +86,17 @@ export function AcceptInviteScreen() {
       const pw = passwordError(password);
       if (pw) next.password = pw;
       if (confirm !== password) next.confirm = 'Las contraseñas no coinciden';
-    } else if (password === '') {
-      next.password = 'Escribe tu contraseña actual';
+    } else {
+      if (password === '') next.password = 'Escribe tu contraseña actual';
+      if (needsName && fullName.length < 2) next.name = 'Escribe tu nombre';
+      else if (needsName && fullName.length > 100) next.name = 'Usa como máximo 100 caracteres';
     }
     setErrors(next);
     setFormError(undefined);
     if (Object.keys(next).length > 0) return;
     setBusy(true);
     try {
-      await api<{ status: string }>('/auth/invitations/accept', { method: 'POST', auth: false, body: { token, password, ...(existing ? {} : { full_name: fullName, phone: e164 }) } });
+      await api<{ status: string }>('/auth/invitations/accept', { method: 'POST', auth: false, body: { token, password, ...(existing ? (needsName ? { full_name: fullName } : {}) : { full_name: fullName, phone: e164 }) } });
       nav('/login', { replace: true, state: { notice: existing ? `Listo: ya tienes acceso a ${inv.organization_name}. Inicia sesión con tu contraseña de siempre.` : `Cuenta lista. Inicia sesión con ${inv.email} y la contraseña que elegiste.` } });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'INVITATION_EXPIRED') setBadLink('expired');
@@ -114,6 +117,11 @@ export function AcceptInviteScreen() {
         <Title sub={<>Te invitaron a administrar {inv.role === 'agency' ? 'la agencia ' : ''}<b>{inv.organization_name}</b> con <b>{inv.email}</b>.</>}>
           {existing ? 'Confirma tu identidad' : 'Crea tu cuenta'}
         </Title>
+        {needsName ? (
+          <Field label="Nombre completo" error={errors.name} hint="Tu cuenta aún no tiene nombre: así te verán tu equipo y tus clientes.">
+            {(p) => <Input {...p} autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} />}
+          </Field>
+        ) : null}
         {existing ? (
           <Field label="Tu contraseña actual" error={errors.password} hint="Este correo ya tiene una cuenta en Sales Smart. No cambiaremos tu contraseña: solo añadiremos esta empresa.">
             {(p) => <PasswordInput {...p} autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} />}
