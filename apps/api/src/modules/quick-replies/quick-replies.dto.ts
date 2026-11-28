@@ -18,11 +18,15 @@ const body = z
   .max(MAX_BODY, `Máximo ${MAX_BODY} caracteres`)
   .refine((v) => !/[^\P{Cc}\n\r\t]/u.test(v), 'caracteres no permitidos');
 
-export const createQuickReplySchema = z.object({ shortcut, body, shared: z.boolean().optional() }).strict();
+export const MAX_ASSETS = 3;
+/** Archivos de la biblioteca de una respuesta (V25), en el orden en que se envían. */
+const assetIds = z.array(z.uuid()).max(MAX_ASSETS, `Hasta ${MAX_ASSETS} archivos`).refine((v) => new Set(v).size === v.length, 'No repitas un archivo');
+
+export const createQuickReplySchema = z.object({ shortcut, body, shared: z.boolean().optional(), asset_ids: assetIds.optional() }).strict();
 export type CreateQuickReplyDto = z.infer<typeof createQuickReplySchema>;
 
 export const updateQuickReplySchema = z
-  .object({ shortcut: shortcut.optional(), body: body.optional(), shared: z.boolean().optional() })
+  .object({ shortcut: shortcut.optional(), body: body.optional(), shared: z.boolean().optional(), asset_ids: assetIds.optional() })
   .strict()
   .refine((b) => Object.keys(b).length > 0, { message: 'no hay nada que cambiar' });
 export type UpdateQuickReplyDto = z.infer<typeof updateQuickReplySchema>;

@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Header, HttpCode, Inject, Param, Patch, 
 import { z } from 'zod';
 import { ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
+import type { LibraryAccess } from '../library';
 import { RequirePermission } from '../../rbac';
 import { createQuickReplySchema, updateQuickReplySchema, type CreateQuickReplyDto, type UpdateQuickReplyDto } from './quick-replies.dto';
 import { QuickRepliesService } from './quick-replies.service';
@@ -10,6 +11,11 @@ import { BUILT_IN_LABELS, BUILT_IN_VARIABLES } from './quick-reply-model';
 const idParam = new ZodValidationPipe(z.uuid());
 /** Compartir y cambiar las compartidas depende de `quick_replies.manage`, verificado en el servidor (nunca viene de la petición). */
 const manage = (req: AuthedRequest): boolean => req.principal?.permissions?.has('quick_replies.manage') === true;
+/** Qué ve de la biblioteca quien consulta (null = no puede verla: las respuestas se comportan como sin archivos). */
+const libraryOf = (req: AuthedRequest): LibraryAccess | null => {
+  const p = req.principal?.permissions;
+  return p?.has('library.read') === true ? { manage: p.has('library.manage') } : null;
+};
 
 /**
  * Respuestas rápidas (M5.6b, ADR-50). Ver el listado va con `inbox.read`; crear y cambiar, con `inbox.reply` (una agencia en solo lectura o una empresa con la prueba
@@ -24,9 +30,9 @@ export class QuickRepliesController {
   @Get()
   @Header('Cache-Control', 'no-store')
   async list(@Req() req: AuthedRequest) {
-    const out = await this.replies.list(manage(req));
+    const out = await this.replies.list(manage(req), libraryOf(req));
     // `access.share`: ¿puede compartir con toda la empresa? (la pantalla muestra u oculta esa opción; el servidor lo vuelve a exigir)
-    return { ...out, access: { share: manage(req) }, built_in_variables: BUILT_IN_VARIABLES.map((key) => ({ key, label: BUILT_IN_LABELS[key] })) };
+    return { ...out, access: { share: manage(req), attach: libraryOf(req) !== null }, built_in_variables: BUILT_IN_VARIABLES.map((key) => ({ key, label: BUILT_IN_LABELS[key] })) };
   }
 
   @RequirePermission('inbox.reply')
@@ -34,14 +40,14 @@ export class QuickRepliesController {
   @HttpCode(201)
   @Header('Cache-Control', 'no-store')
   create(@Req() req: AuthedRequest, @Body(new ZodValidationPipe(createQuickReplySchema)) b: CreateQuickReplyDto) {
-    return this.replies.create(manage(req), b);
+    return this.replies.create(manage(req), b, libraryOf(req));
   }
 
   @RequirePermission('inbox.reply')
   @Patch(':id')
   @Header('Cache-Control', 'no-store')
   update(@Req() req: AuthedRequest, @Param('id', idParam) id: string, @Body(new ZodValidationPipe(updateQuickReplySchema)) b: UpdateQuickReplyDto) {
-    return this.replies.update(manage(req), id, b);
+    return this.replies.update(manage(req), id, b, libraryOf(req));
   }
 
   @RequirePermission('inbox.reply')

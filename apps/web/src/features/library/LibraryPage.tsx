@@ -124,6 +124,8 @@ function ConfirmArchive({ asset, onClose }: { asset: LibraryAsset; onClose: () =
   const { archive } = useLibraryMutations();
   const usage = useAssetUsage(asset.id);
   const rules = usage.data?.automations ?? [];
+  const replies = usage.data?.quick_replies ?? [];
+  const personal = usage.data?.personal_quick_replies ?? 0;
   const [error, setError] = useState<string>();
   return (
     <Modal title="Archivar archivo" onClose={onClose}>
@@ -132,6 +134,13 @@ function ConfirmArchive({ asset, onClose }: { asset: LibraryAsset; onClose: () =
         <Alert kind="info">
           <p>Este archivo lo usan {rules.length === 1 ? 'esta automatización' : 'estas automatizaciones'}: al archivarlo, ese paso fallará hasta que le pongas otro archivo.</p>
           <ul className="mt-1 list-disc pl-5">{rules.map((r) => <li key={r.id}>{r.name}{r.status === 'active' ? '' : r.status === 'paused' ? ' (en pausa)' : ' (borrador)'}</li>)}</ul>
+        </Alert>
+      ) : null}
+      {replies.length > 0 || personal > 0 ? (
+        <Alert kind="info">
+          <p>También lo usan respuestas rápidas: al archivarlo, ese archivo ya no se podrá enviar (el texto sí).</p>
+          {replies.length > 0 ? <ul className="mt-1 list-disc pl-5">{replies.map((r) => <li key={r.id}>/{r.shortcut} (compartida)</li>)}</ul> : null}
+          {personal > 0 ? <p className="mt-1">{replies.length > 0 ? 'Y ' : ''}{personal === 1 ? '1 respuesta personal' : `${personal} respuestas personales`}.</p> : null}
         </Alert>
       ) : null}
       {error ? <Alert>{error}</Alert> : null}

@@ -1042,10 +1042,21 @@ export interface QuickReply {
   can_edit: boolean;
   variables: string[];
   updated_at: string;
+  /** Archivos de la biblioteca, en orden (V25). Vacío o ausente: solo texto. */
+  assets?: QuickReplyAsset[];
+}
+export interface QuickReplyAsset {
+  id: string;
+  kind: string;
+  size_bytes: number;
+  /** null en una conversación: el chat nunca muestra nombres de archivo. */
+  name: string | null;
+  usable_by_advisors: boolean;
+  problem: 'archived' | 'not_for_advisors' | 'unscanned' | null;
 }
 export interface QuickReplyList {
   items: QuickReply[];
-  access: { share: boolean };
+  access: { share: boolean; attach?: boolean };
   built_in_variables: Array<{ key: string; label: string }>;
 }
 /** Una respuesta lista para insertar en una conversación: `text` ya trae lo que se pudo resolver y `missing` lo que falta. */

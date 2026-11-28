@@ -48,6 +48,7 @@ export function friendlyError(e: unknown, fallback = 'No pudimos completar la ac
     // Colas y reparto (ADR-07): el servidor ya redacta el motivo
     case 'META_UNAVAILABLE': case 'META_UNREACHABLE': case 'META_DISABLED': case 'EVENT_NOT_RETRYABLE': case 'EVENT_TOO_OLD': case 'APPOINTMENT_CLOSED': case 'APPOINTMENT_ALREADY_CANCELLED': case 'APPOINTMENT_NO_CONVERSATION': case 'PRODUCT_EXISTS': case 'PRODUCT_LIMIT': case 'PRODUCT_UNAVAILABLE': case 'SALE_NO_QUEUE': case 'SALE_CANCELLED': case 'SALE_ALREADY_CANCELLED': case 'PAYMENT_EXCEEDS_BALANCE': case 'CORRECTION_EXCEEDS_PAID': case 'CURRENCY_LOCKED': case 'REQUEST_LIMIT': case 'REQUEST_RESOLVED': case 'IDEMPOTENCY_MISMATCH': case 'IDEMPOTENCY_CONFLICT': case 'QUEUE_EXISTS': case 'QUEUE_LIMIT': case 'QUEUE_IN_USE': case 'QUEUE_DISTRIBUTION_OFF': return e.message;
     // Conexiones de un departamento (v7, ADR-65): el servidor ya redacta el motivo
+    case 'QUICK_REPLY_ASSET_NOT_SHARED': case 'QUICK_REPLY_ASSET_UNAVAILABLE': case 'CHANNEL_NO_MEDIA': return e.message;
     case 'DESTINATION_REQUIRED': case 'DESTINATION_SAME': return e.message;
     // GoHighLevel (ADR-52): el servidor ya redacta el motivo (sin tokens ni datos del cliente)
     case 'GHL_NOT_CONNECTED': case 'GHL_REJECTED': case 'GHL_UNAVAILABLE': case 'GHL_ALREADY_ENROLLED': case 'GHL_TEXT_ONLY': case 'GHL_SCHEDULE_UNSUPPORTED': case 'GHL_OUTBOX_NOT_FAILED': return e.message;

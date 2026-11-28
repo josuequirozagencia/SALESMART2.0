@@ -1,4 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react';
+import { ApiError } from '../../lib/api';
 import { friendlyError } from '../../lib/errors';
 import type { ChatMessage, Conversation, MentionOption, ResolvedQuickReply } from '../../lib/types';
 import { useBreakpoint } from '../../ui/breakpoints';
@@ -19,8 +20,10 @@ import { ScheduleDialog } from './ScheduleDialog';
 import { SheetButton } from './SheetButton';
 import { LibraryPicker } from '../library/LibraryPicker';
 import { useLibraryAccess } from '../library/useLibrary';
+import { useIdempotencyKey } from '../sales/useSales';
+import { QuickReplyChips } from './QuickReplyChips';
 import { TemplatePicker } from './TemplatePicker';
-import { useConversationQuickReplies, useMentionOptions, useSendMedia, useSendNote, useSendReply, useUploadAttachment } from './useInbox';
+import { useConversationQuickReplies, useMentionOptions, useSendMedia, useSendNote, useSendQuickReply, useSendReply, useUploadAttachment } from './useInbox';
 import { useLongPress } from './useLongPress';
 
 const MAX = 4096;
@@ -65,6 +68,12 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   const reply = useSendReply(c.id);
   const note = useSendNote(c.id);
   const media = useSendMedia(c.id);
+  const sendQuick = useSendQuickReply(c.id);
+  const quickKey = useIdempotencyKey();
+  // La respuesta rápida con archivos que está preparada (V25) y los que el servidor dijo que ya no están disponibles
+  const [quickFiles, setQuickFiles] = useState(() => readDraft(c.id).quick ?? null);
+  const [gone, setGone] = useState<ReadonlySet<string>>(new Set());
+  const [filesNote, setFilesNote] = useState<string>();
   const [mode, setMode] = useState<'reply' | 'note'>(() => readDraft(c.id).mode);
   const [text, setText] = useState(() => readDraft(c.id).text);
   const [caret, setCaret] = useState(() => readDraft(c.id).text.length);
@@ -104,8 +113,8 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   const mobile = useBreakpoint() === 'mobile';
   const [sheet, setSheet] = useState(false);
   useEffect(() => {
-    writeDraft(c.id, { text, mode });
-  }, [c.id, text, mode]);
+    writeDraft(c.id, { text, mode, quick: quickFiles });
+  }, [c.id, text, mode, quickFiles]);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !mobile) return;
@@ -115,7 +124,9 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   const block = replyBlock(c);
   const noteMode = mode === 'note' || block !== null;
   const canWrite = noteMode ? c.can.note : true;
-  const send = noteMode ? note : pendingAttachment ? (media as unknown as typeof reply) : reply;
+  // Con la respuesta rápida preparada, «Enviar» manda texto y archivos juntos
+  const files = !noteMode && c.channel.kind !== 'ghl' ? quickFiles : null;
+  const send = noteMode ? note : files ? (sendQuick as unknown as typeof reply) : pendingAttachment ? (media as unknown as typeof reply) : reply;
   const trimmed = text.trim();
   // v11 S4: el borrador de la IA nunca se envía solo; «Usar» lo pone en el redactor (reemplaza o se agrega al final) y la persona lo revisa
   const useDraft = (draft: string, how: 'replace' | 'append'): void => {
@@ -134,7 +145,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   const people = useMemo(() => (mention && mentionData.data ? suggestMentions(mentionData.data.items, mention.query) : []), [mention, mentionData.data]);
   const mentionOpen = mention !== null && mentionClosedAt !== mention.start && mentionData.isSuccess;
   // v13 S1.5: en móvil, mantener pulsado «Enviar» abre «Programar mensaje» (las mismas reglas que el botón «Programar»); también está en el menú «+»
-  const canSchedule = !noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment && trimmed !== '' && pending.length === 0;
+  const canSchedule = !noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment && !files && trimmed !== '' && pending.length === 0;
   const hold = useLongPress({ enabled: mobile && canSchedule, onLongPress: () => setScheduling(true) });
   // Al elegir un mensaje para responderlo, el cursor pasa al cuadro de texto (en el teléfono abre el teclado, como WhatsApp)
   const replyId = replyTo?.id;
@@ -143,7 +154,29 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
   if (!c.can.reply && !c.can.note) return block ? <p className="border-t border-line bg-surface px-4 py-3 text-[13px] text-muted">{block}</p> : null;
 
   const submit = (): void => {
-    if ((!trimmed && !pendingAttachment) || send.isPending || !canWrite || pending.length > 0) return;
+    if ((!trimmed && !pendingAttachment && !files) || send.isPending || !canWrite || pending.length > 0) return;
+    if (files) {
+      const savedFiles = files;
+      const input = { replyId: files.replyId, text: trimmed, assetIds: files.assets.map((a) => a.id) };
+      setText('');
+      setCaret(0);
+      setQuickFiles(null);
+      setFilesNote(undefined);
+      ref.current?.focus();
+      sendQuick.mutate(
+        { ...input, key: quickKey.keyFor(input) },
+        {
+          onSuccess: () => { setGone(new Set()); onReplyDone?.(); },
+          onError: (err) => {
+            // No salió nada: vuelve todo al redactor y se marca el archivo que ya no está disponible
+            setText((cur) => (cur === '' ? trimmed : cur));
+            setQuickFiles(savedFiles);
+            if (err instanceof ApiError && err.code === 'QUICK_REPLY_ASSET_UNAVAILABLE') setGone(new Set(err.details.map((d) => d.message)));
+          },
+        },
+      );
+      return;
+    }
     const caption = trimmed || undefined;
     const attachmentId = pendingAttachment?.id ?? null;
     const savedText = trimmed;
@@ -172,6 +205,16 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
     setCaret(at);
     setActive(0);
     if (send.isError) send.reset();
+    // Sus archivos (V25): se preparan bajo el cuadro, salvo donde no se pueden enviar, y se explica por qué
+    const attached = r.assets ?? [];
+    setGone(new Set());
+    setFilesNote(undefined);
+    setQuickFiles(null);
+    if (attached.length > 0) {
+      if (c.channel.kind === 'ghl') setFilesNote('GoHighLevel no admite archivos: solo se enviará el texto.');
+      else if (pendingAttachment) setFilesNote('Ya hay un archivo adjunto: quítalo y vuelve a elegir la respuesta para enviar los suyos.');
+      else setQuickFiles({ replyId: r.id, assets: attached });
+    }
     // El cursor solo se mueve si el texto sigue siendo el que se acaba de armar (si ya siguió escribiendo, moverlo mezclaría lo escrito)
     requestAnimationFrame(() => {
       ref.current?.focus();
@@ -313,6 +356,8 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
       {voice.error || voiceError ? <Alert>{voice.error ?? voiceError}</Alert> : null}
       {!noteMode ? <SuggestionCard s={suggestion} hasText={trimmed !== ''} onUse={useDraft} /> : null}
       {send.isError ? <Alert>{friendlyError(send.error, noteMode ? 'No pudimos guardar la nota.' : pendingAttachment ? 'No pudimos enviar el archivo.' : 'No pudimos enviar el mensaje.')}</Alert> : null}
+      {filesNote && !noteMode ? <p role="status" className="text-[12.5px] text-muted">{filesNote}</p> : null}
+      {files && replyTo ? <p role="status" className="text-[12.5px] text-muted">Con archivos, el mensaje sale sin citar.</p> : null}
       {pending.length > 0 ? <Alert kind="info">Falta completar {pending.join(', ')}: reemplázalo con el dato real antes de enviar.</Alert> : null}
       {replyTo && !noteMode ? (
         <div role="group" aria-label="Respondiendo a un mensaje" className="flex items-start gap-2 rounded-lg border-l-4 border-accent bg-surface2 px-2.5 py-1.5 text-[12.5px]">
@@ -360,6 +405,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
                       <span className="flex flex-wrap items-center gap-1.5">
                         <b className="font-mono text-[13px]">/{r.shortcut}</b>
                         {r.shared ? <Pill kind="info">Compartida</Pill> : null}
+                        {r.assets && r.assets.length > 0 ? <Pill kind="muted">📎 {r.assets.length === 1 ? '1 archivo' : `${r.assets.length} archivos`}</Pill> : null}
                         {r.missing.length > 0 ? <Pill kind="warn">Falta: {r.missing.map((m) => m.replace(/^contact\./, '')).join(', ')}</Pill> : null}
                       </span>
                       <span className="line-clamp-2 whitespace-pre-wrap text-[12.5px] text-muted">{r.text}</span>
@@ -395,7 +441,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
               {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
             </div>
             {/* v13 S1.5: el botón de la derecha es SIEMPRE el micrófono; al escribir cambia a «Enviar» y, sin texto, vuelve al micrófono. Si ahora no se puede grabar (conversación sin aceptar, etc.) el micrófono sigue ahí, desactivado y con su motivo */}
-            {mobile && mode === 'reply' && c.can.reply && c.channel.kind !== 'ghl' && !trimmed && !pendingAttachment ? (
+            {mobile && mode === 'reply' && c.can.reply && c.channel.kind !== 'ghl' && !trimmed && !pendingAttachment && !files ? (
               <button
                 type="button"
                 aria-label="Grabar nota de voz"
@@ -414,7 +460,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
                   title={canSchedule ? 'Enviar (mantén pulsado para programar)' : noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}
                   aria-busy={send.isPending || undefined}
                   {...(canSchedule ? { 'aria-describedby': `${listId}-hold` } : {})}
-                  disabled={send.isPending || (!trimmed && !pendingAttachment) || !canWrite || pending.length > 0}
+                  disabled={send.isPending || (!trimmed && !pendingAttachment && !files) || !canWrite || pending.length > 0}
                   onClick={() => { if (hold.consumeClick()) return; submit(); }}
                   style={hold.style}
                   {...hold.handlers}
@@ -432,16 +478,17 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
             <IconButton label="Emojis" pressed={emojis} disabled={!canWrite} onClick={() => setEmojis((v) => !v)}><SmileIcon /></IconButton>
             {emojis ? <EmojiPicker onPick={addEmoji} onClose={() => { setEmojis(false); ref.current?.focus(); }} /> : null}
           </div>
-          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
-          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Adjuntar archivo" disabled={!!block || !!pendingAttachment || !!files || voice.recording} onClick={() => setAttaching(true)}><ClipIcon /></IconButton> : null}
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' ? <IconButton label="Grabar nota de voz" disabled={!!block || !!pendingAttachment || !!files || voice.recording || upload.isPending} onClick={() => void voice.start()}><MicIcon /></IconButton> : null}
           {!noteMode && !pendingAttachment ? <SuggestButton s={suggestion} /> : null}
           {/* v13 S2.4: «Programar» es solo el icono del reloj (con su nombre accesible y su aviso) */}
-          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <IconButton label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}><ClockIcon /></IconButton> : null}
-          <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
+          {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment && !files ? <IconButton label="Programar mensaje" disabled={!trimmed || pending.length > 0} onClick={() => setScheduling(true)}><ClockIcon /></IconButton> : null}
+          <Button variant="primary" loading={send.isPending} disabled={(!trimmed && !pendingAttachment && !files) || !canWrite || pending.length > 0} onClick={submit}>{noteMode ? 'Guardar nota' : pendingAttachment ? 'Enviar archivo' : 'Enviar'}</Button>
 
           </>
         )}
       </div>
+      {files ? <QuickReplyChips files={files.assets} unavailable={gone} onRemove={(id) => { const rest = files.assets.filter((a) => a.id !== id); setQuickFiles(rest.length > 0 ? { replyId: files.replyId, assets: rest } : null); if (send.isError) send.reset(); }} /> : null}
       {sheet ? (
         <Drawer label="Más opciones del mensaje" placement="bottom" onClose={() => setSheet(false)}>
           <div className="grid w-full gap-1 p-3">
@@ -460,7 +507,7 @@ export function Composer({ c, replyTo = null, onReplyDone }: { c: Conversation; 
             {!noteMode && !pendingAttachment && suggestion.available ? <SheetButton icon="bot" disabled={suggestion.pending} hint="La IA prepara un borrador que tú revisas y envías" onClick={() => { setSheet(false); suggestion.run(); }}>Sugerir respuesta</SheetButton> : null}
             {c.can.reply && libraryAccess && c.channel.kind !== 'ghl' ? <SheetButton icon="image" disabled={!!block || !!pendingAttachment} hint="Archivos de tu empresa: catálogos, fotos, PDF" onClick={() => { setSheet(false); setLibrary(true); }}>Biblioteca</SheetButton> : null}
             {c.can.reply ? <SheetButton icon="bolt" onClick={() => { setSheet(false); setManage(true); }}>Respuestas rápidas</SheetButton> : null}
-            {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment ? <SheetButton icon="clock" disabled={!trimmed || pending.length > 0} hint={trimmed ? undefined : 'Escribe el mensaje primero'} onClick={() => { setSheet(false); setScheduling(true); }}>Programar mensaje</SheetButton> : null}
+            {!noteMode && c.can.reply && c.channel.kind !== 'ghl' && c.window.open && !pendingAttachment && !files ? <SheetButton icon="clock" disabled={!trimmed || pending.length > 0} hint={trimmed ? undefined : 'Escribe el mensaje primero'} onClick={() => { setSheet(false); setScheduling(true); }}>Programar mensaje</SheetButton> : null}
             {c.can.note ? (
               noteMode && block === null ? <SheetButton icon="reset" onClick={() => { setSheet(false); setMode('reply'); }}>Volver a responder al cliente</SheetButton> : block === null ? <SheetButton icon="list" onClick={() => { setSheet(false); setMode('note'); }}>Escribir una nota interna</SheetButton> : null
             ) : null}

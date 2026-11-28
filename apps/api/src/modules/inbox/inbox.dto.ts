@@ -34,6 +34,15 @@ export type ReactionDto = z.infer<typeof reactionSchema>;
 export const setQueueSchema = z.object({ queue_id: z.uuid() }).strict();
 export type SetQueueDto = z.infer<typeof setQueueSchema>;
 
+/** Enviar una respuesta rápida con sus archivos (V25): el texto ya resuelto (y quizá editado) y cuáles de sus archivos (por omisión, todos). */
+export const sendQuickReplySchema = z
+  .object({
+    text: z.string().trim().max(MAX_MESSAGE_LENGTH).refine((v) => !/\p{Cc}/u.test(v.replace(/[\n\r\t]/g, '')), 'caracteres no permitidos').optional(),
+    asset_ids: z.array(z.uuid()).max(3).refine((v) => new Set(v).size === v.length, 'No repitas un archivo').optional(),
+  })
+  .strict();
+export type SendQuickReplyDto = z.infer<typeof sendQuickReplySchema>;
+
 /** Enviar un adjunto ya subido ( `attachment_id` de `POST …/attachments` ), con pie opcional. */
 export const sendMediaSchema = z.object({ attachment_id: z.uuid(), caption: z.string().trim().max(1024).optional() }).strict();
 export type SendMediaDto = z.infer<typeof sendMediaSchema>;

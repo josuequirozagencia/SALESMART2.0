@@ -1,14 +1,16 @@
-import { Body, Controller, Get, Header, HttpCode, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, HttpCode, Inject, Param, Post, Req, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { z } from 'zod';
 import { readUploadBody as readBody, uploadFilenameOf as filenameOf, ZodValidationPipe } from '../../http';
 import type { AuthedRequest } from '../../http/access.guard';
 import { RequirePermission } from '../../rbac';
-import { ForbiddenError } from '../../errors';
+import { ForbiddenError, ValidationError } from '../../errors';
 import { MAX_UPLOAD_BYTES } from '../attachments';
 import { LibraryService } from '../library';
 import type { InboxAccess } from './inbox.access';
 import { ConversationAttachmentsService } from './conversation-attachments.service';
-import { sendLibrarySchema, type SendLibraryDto } from './inbox.dto';
+import { sendLibrarySchema, sendQuickReplySchema, type SendLibraryDto, type SendQuickReplyDto } from './inbox.dto';
+import { QuickReplySendService } from './quick-reply-send.service';
 import { OutboundService } from './outbound.service';
 
 const idParam = new ZodValidationPipe(z.uuid());
@@ -31,6 +33,7 @@ export class ConversationAttachmentsController {
     @Inject(ConversationAttachmentsService) private readonly attachments: ConversationAttachmentsService,
     @Inject(LibraryService) private readonly library: LibraryService,
     @Inject(OutboundService) private readonly outbound: OutboundService,
+    @Inject(QuickReplySendService) private readonly quickReplySend: QuickReplySendService,
   ) {}
 
   /**
@@ -48,6 +51,22 @@ export class ConversationAttachmentsController {
     const access = accessOf(req);
     const att = await this.attachments.fromLibrary(access, id, () => this.library.readForSend(libAccess, assetId, id));
     return this.outbound.sendMedia(access, id, { attachment_id: att.id, ...(b.caption ? { caption: b.caption } : {}) });
+  }
+
+  /**
+   * Enviar una respuesta rápida con sus archivos (V25): quien puede responder y ve la biblioteca. `Idempotency-Key` obligatoria (201 la primera vez; 200 si se repite igual). Sale todo o nada:
+   * si un archivo ya no está disponible responde 409 sin enviar nada. 409 `CHANNEL_NO_MEDIA` por GoHighLevel y `WINDOW_CLOSED` fuera de las 24 h.
+   */
+  @RequirePermission('inbox.reply')
+  @Post(':id/quick-replies/:replyId/send')
+  @Header('Cache-Control', 'no-store')
+  async sendQuickReply(@Req() req: AuthedRequest, @Res({ passthrough: true }) res: Response, @Param('id', idParam) id: string, @Param('replyId', idParam) replyId: string, @Headers('idempotency-key') key: string | undefined, @Body(new ZodValidationPipe(sendQuickReplySchema)) b: SendQuickReplyDto) {
+    const perms = req.principal?.permissions;
+    if (perms?.has('library.read') !== true) throw new ForbiddenError();
+    if (!key || !/^[A-Za-z0-9_.:-]{8,100}$/.test(key)) throw new ValidationError([{ path: 'Idempotency-Key', code: key ? 'invalid' : 'required', message: 'Envía una cabecera Idempotency-Key única por envío (8 a 100 caracteres)' }]);
+    const out = await this.quickReplySend.send(accessOf(req), { manage: perms.has('library.manage') }, id, replyId, key, b);
+    res.status(out.created ? 201 : 200);
+    return { messages: out.messages };
   }
 
   @RequirePermission('inbox.reply')

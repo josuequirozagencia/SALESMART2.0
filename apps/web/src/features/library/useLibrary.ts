@@ -77,7 +77,7 @@ export function useLibraryAccess() {
 
 /** Qué automatizaciones adjuntan un archivo (para avisar antes de archivarlo). */
 export function useAssetUsage(id: string) {
-  return useQuery({ queryKey: ['library-usage', id], retry: false, staleTime: 0, queryFn: () => api<{ automations: Array<{ id: string; name: string; status: string }> }>(`/library/assets/${id}/usage`) });
+  return useQuery({ queryKey: ['library-usage', id], retry: false, staleTime: 0, queryFn: () => api<{ automations: Array<{ id: string; name: string; status: string }>; quick_replies?: Array<{ id: string; shortcut: string }>; personal_quick_replies?: number }>(`/library/assets/${id}/usage`) });
 }
 
 /** Una dirección firmada de pocos minutos para ver o descargar el archivo. */

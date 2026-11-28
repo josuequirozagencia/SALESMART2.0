@@ -1,10 +1,11 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, count, eq, isNull, or, sql } from 'drizzle-orm';
-import { Database, quickReplies, type TenantTx } from '../../db';
-import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
+import { and, asc, count, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { Database, quickReplies, quickReplyAssets, type TenantTx } from '../../db';
+import { AppError, ConflictError, ForbiddenError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { writeAudit } from '../audit';
 import { CustomValuesService, type CustomValues } from '../custom-fields';
+import { LibraryService, type AssetProblem, type LibraryAccess } from '../library';
 import { MAX_QUICK_REPLIES_PER_SCOPE, type CreateQuickReplyDto, type UpdateQuickReplyDto } from './quick-replies.dto';
 import { customKeysIn, resolve, unknownVariables, variablesIn, type ResolveContext } from './quick-reply-model';
 
@@ -23,6 +24,19 @@ export interface QuickReplyView {
   /** Variables que usa el texto. */
   variables: string[];
   updated_at: string;
+  /** Archivos de la biblioteca, en orden (V25). Vacío para quien no puede ver la biblioteca. */
+  assets: QuickReplyAsset[];
+}
+
+export interface QuickReplyAsset {
+  id: string;
+  kind: string;
+  size_bytes: number;
+  /** El nombre solo se entrega para la pantalla de configuración; en una conversación va en null (el chat nunca muestra nombres de archivo). */
+  name: string | null;
+  usable_by_advisors: boolean;
+  /** Por qué esta persona no puede enviarlo ahora (null = puede). */
+  problem: AssetProblem | null;
 }
 
 /** Una respuesta lista para insertar en una conversación concreta. */
@@ -44,19 +58,25 @@ export class QuickRepliesService {
   constructor(
     @Inject(Database) private readonly db: Database,
     @Inject(CustomValuesService) private readonly custom: CustomValuesService,
+    @Inject(LibraryService) private readonly library: LibraryService,
   ) {}
 
-  async list(manage: boolean): Promise<{ items: QuickReplyView[] }> {
+  async list(manage: boolean, lib: LibraryAccess | null): Promise<{ items: QuickReplyView[] }> {
     const userId = this.userId();
-    const rows = await this.db.withTenant((tx) => this.visible(tx, userId));
-    return { items: rows.map((r) => this.view(r, userId, manage)) };
+    const { rows, assets } = await this.db.withTenant(async (tx) => {
+      const found = await this.visible(tx, userId);
+      return { rows: found, assets: await this.assetsOf(tx, found.map((r) => r.id), lib, true) };
+    });
+    return { items: rows.map((r) => this.view(r, userId, manage, assets.get(r.id))) };
   }
 
-  async create(manage: boolean, input: CreateQuickReplyDto): Promise<QuickReplyView> {
+  async create(manage: boolean, input: CreateQuickReplyDto, lib: LibraryAccess | null): Promise<QuickReplyView> {
     const userId = this.userId();
     const shared = input.shared ?? false;
     if (shared && !manage) throw this.noShare();
-    const row = await this.db
+    const files = input.asset_ids ?? [];
+    if (files.length > 0 && !lib) throw new ForbiddenError();
+    const out = await this.db
       .withTenant(async (tx) => {
         await this.assertVariables(tx, input.body);
         const [{ n } = { n: 0 }] = await tx
@@ -65,19 +85,21 @@ export class QuickRepliesService {
           .where(and(isNull(quickReplies.deletedAt), shared ? eq(quickReplies.shared, true) : and(eq(quickReplies.shared, false), eq(quickReplies.ownerId, userId))));
         if (n >= MAX_QUICK_REPLIES_PER_SCOPE) throw new ConflictError('QUICK_REPLY_LIMIT', `Se alcanzó el máximo de ${MAX_QUICK_REPLIES_PER_SCOPE} respuestas rápidas${shared ? ' compartidas' : ''}. Borra alguna para crear otra`);
         const [created] = await tx.insert(quickReplies).values({ ownerId: userId, shortcut: input.shortcut, body: input.body, shared }).returning();
-        await writeAudit(tx, { entityType: AUDIT, entityId: created!.id, newValue: { shortcut: created!.shortcut, body: created!.body, shared }, source: 'manual' });
-        return created!;
+        if (files.length > 0) await this.setAssets(tx, created!.id, files, lib!, shared);
+        await writeAudit(tx, { entityType: AUDIT, entityId: created!.id, newValue: { shortcut: created!.shortcut, body: created!.body, shared, ...(files.length > 0 ? { asset_ids: files } : {}) }, source: 'manual' });
+        return { row: created!, assets: await this.assetsOf(tx, [created!.id], lib, true) };
       })
       .catch((e: unknown) => {
         throw this.taken(e) ?? e;
       });
-    return this.view(row, userId, manage);
+    return this.view(out.row, userId, manage, out.assets.get(out.row.id));
   }
 
-  async update(manage: boolean, id: string, input: UpdateQuickReplyDto): Promise<QuickReplyView> {
+  async update(manage: boolean, id: string, input: UpdateQuickReplyDto, lib: LibraryAccess | null): Promise<QuickReplyView> {
     const userId = this.userId();
     if (input.shared === true && !manage) throw this.noShare();
-    const row = await this.db
+    if (input.asset_ids !== undefined && !lib) throw new ForbiddenError();
+    const out = await this.db
       .withTenant(async (tx) => {
         const cur = await this.editable(tx, userId, manage, id);
         const set: Partial<Row> = {};
@@ -95,15 +117,26 @@ export class QuickRepliesService {
           set.shared = input.shared;
           changes.push({ field: 'shared', oldValue: cur.shared, newValue: input.shared });
         }
-        if (changes.length === 0) return cur;
+        const shared = input.shared ?? cur.shared;
+        const linked = await this.linkedIds(tx, id);
+        const files = input.asset_ids;
+        if (files !== undefined && files.join() !== linked.join()) {
+          await this.setAssets(tx, id, files, lib!, shared);
+          changes.push({ field: 'asset_ids', oldValue: linked, newValue: files });
+        } else if (shared && !cur.shared) {
+          // Compartirla sin tocar los archivos: los que ya tiene deben poder usarlos los asesores
+          await this.assertShareable(tx, linked);
+        }
+        const done = async (row: Row) => ({ row, assets: await this.assetsOf(tx, [id], lib, true) });
+        if (changes.length === 0) return done(cur);
         const [updated] = await tx.update(quickReplies).set({ ...set, updatedAt: new Date() }).where(eq(quickReplies.id, id)).returning();
         for (const c of changes) await writeAudit(tx, { entityType: AUDIT, entityId: id, field: c.field, oldValue: c.oldValue, newValue: c.newValue, source: 'manual' });
-        return updated!;
+        return done(updated!);
       })
       .catch((e: unknown) => {
         throw this.taken(e) ?? e;
       });
-    return this.view(row, userId, manage);
+    return this.view(out.row, userId, manage, out.assets.get(out.row.id));
   }
 
   /** Borrado lógico. */
@@ -121,20 +154,77 @@ export class QuickRepliesService {
    * Las respuestas que esta persona puede usar (las suyas y las compartidas) ya resueltas para el contacto de una conversación. Va dentro de la transacción de quien llama,
    * que ya comprobó que la persona puede responder esa conversación. Solo se leen del contacto los campos personalizados que alguna respuesta usa.
    */
-  async resolvedFor(tx: TenantTx, contactId: string, base: Omit<ResolveContext, 'custom'>): Promise<{ items: ResolvedQuickReplyView[] }> {
+  async resolvedFor(tx: TenantTx, contactId: string, base: Omit<ResolveContext, 'custom'>, lib: LibraryAccess | null): Promise<{ items: ResolvedQuickReplyView[] }> {
     const userId = this.userId();
     const rows = await this.visible(tx, userId);
     const wanted = new Set(rows.flatMap((r) => customKeysIn(r.body)));
     const values: CustomValues = wanted.size === 0 ? {} : ((await this.custom.valuesFor(tx, 'contact', [contactId])).get(contactId) ?? {});
     const custom = Object.fromEntries(Object.entries(values).filter(([k]) => wanted.has(k)));
     const ctx: ResolveContext = { ...base, custom };
+    const assets = await this.assetsOf(tx, rows.map((r) => r.id), lib, false);
     return {
       items: rows.map((r) => {
         const out = resolve(r.body, ctx);
         // `manage` no importa aquí: el selector solo inserta, no edita
-        return { ...this.view(r, userId, false), text: out.text, missing: out.missing };
+        return { ...this.view(r, userId, false, assets.get(r.id)), text: out.text, missing: out.missing };
       }),
     };
+  }
+
+  /** La respuesta que la persona puede USAR (suya o compartida, no borrada) con los ids de sus archivos en orden; 404 si no. */
+  async usable(tx: TenantTx, id: string): Promise<{ id: string; assetIds: string[] }> {
+    const userId = this.userId();
+    const [row] = await tx
+      .select({ id: quickReplies.id })
+      .from(quickReplies)
+      .where(and(eq(quickReplies.id, id), isNull(quickReplies.deletedAt), or(eq(quickReplies.shared, true), eq(quickReplies.ownerId, userId))))
+      .limit(1);
+    if (!row) throw new NotFoundError();
+    return { id: row.id, assetIds: await this.linkedIds(tx, id) };
+  }
+
+  private async linkedIds(tx: TenantTx, replyId: string): Promise<string[]> {
+    const rows = await tx.select({ id: quickReplyAssets.assetId }).from(quickReplyAssets).where(eq(quickReplyAssets.quickReplyId, replyId)).orderBy(asc(quickReplyAssets.position));
+    return rows.map((r) => r.id);
+  }
+
+  /** Los archivos de varias respuestas como los ve esta persona (nada si no puede ver la biblioteca). */
+  private async assetsOf(tx: TenantTx, replyIds: readonly string[], lib: LibraryAccess | null, withName: boolean): Promise<Map<string, QuickReplyAsset[]>> {
+    const out = new Map<string, QuickReplyAsset[]>();
+    if (!lib || replyIds.length === 0) return out;
+    const links = await tx.select().from(quickReplyAssets).where(inArray(quickReplyAssets.quickReplyId, [...replyIds])).orderBy(asc(quickReplyAssets.position));
+    const files = await this.library.forLinks(tx, links.map((l) => l.assetId));
+    for (const l of links) {
+      const f = files.get(l.assetId);
+      if (!f) continue;
+      const problem = this.library.problemOf(lib, f);
+      // Quien no administra la biblioteca no ve el nombre de un archivo que no es para asesores
+      const name = withName && (lib.manage || f.usableByAdvisors) ? f.name : null;
+      out.set(l.quickReplyId, [...(out.get(l.quickReplyId) ?? []), { id: f.id, kind: f.kind, size_bytes: f.sizeBytes, name, usable_by_advisors: f.usableByAdvisors, problem }]);
+    }
+    return out;
+  }
+
+  /** Reemplaza los archivos de una respuesta: cada uno debe ser usable por quien guarda y, si la respuesta es compartida, también por los asesores. */
+  private async setAssets(tx: TenantTx, replyId: string, ids: readonly string[], lib: LibraryAccess, shared: boolean): Promise<void> {
+    const files = await this.library.forLinks(tx, ids);
+    ids.forEach((id, i) => {
+      const f = files.get(id);
+      // Lo que no existe (o es de otra empresa) y lo que la persona no puede ver se responden igual
+      if (!f || (!lib.manage && !f.usableByAdvisors)) throw new ValidationError([{ path: `asset_ids.${i}`, code: 'unknown_asset', message: 'Ese archivo no está disponible en la biblioteca' }]);
+      const problem = this.library.problemOf(lib, f);
+      if (problem === 'archived') throw new AppError(409, 'QUICK_REPLY_ASSET_UNAVAILABLE', `El archivo «${f.name}» está archivado: elige otro`);
+      if (problem === 'unscanned') throw new AppError(409, 'VIRUS_SCAN_REQUIRED', `El archivo «${f.name}» no se revisó con un antivirus y la empresa lo exige`);
+    });
+    if (shared) await this.assertShareable(tx, ids);
+    await tx.delete(quickReplyAssets).where(eq(quickReplyAssets.quickReplyId, replyId));
+    if (ids.length > 0) await tx.insert(quickReplyAssets).values(ids.map((assetId, position) => ({ quickReplyId: replyId, assetId, position })));
+  }
+
+  private async assertShareable(tx: TenantTx, ids: readonly string[]): Promise<void> {
+    const files = await this.library.forLinks(tx, ids);
+    const hidden = ids.map((id) => files.get(id)).find((f) => f !== undefined && !f.usableByAdvisors);
+    if (hidden) throw new AppError(409, 'QUICK_REPLY_ASSET_NOT_SHARED', `El archivo «${hidden.name}» no está disponible para asesores. Márcalo como disponible para asesores en la Biblioteca`);
   }
 
   private async visible(tx: TenantTx, userId: string): Promise<Row[]> {
@@ -162,7 +252,7 @@ export class QuickRepliesService {
     return r.shared ? manage : r.ownerId === userId;
   }
 
-  private view(r: Row, userId: string, manage: boolean): QuickReplyView {
+  private view(r: Row, userId: string, manage: boolean, assets: QuickReplyAsset[] = []): QuickReplyView {
     return {
       id: r.id,
       shortcut: r.shortcut,
@@ -172,6 +262,7 @@ export class QuickRepliesService {
       can_edit: this.canEdit(r, userId, manage),
       variables: variablesIn(r.body),
       updated_at: r.updatedAt.toISOString(),
+      assets,
     };
   }
 

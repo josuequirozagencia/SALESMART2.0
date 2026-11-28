@@ -78,6 +78,8 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     CAPTCHA_PROVIDER: 'fake',
     // Solo E2E: WhatsApp de mentira (acepta el token «fake-valid-token»); en producción la configuración rechaza el fake
     WHATSAPP_PROVIDER: 'fake',
+    // Solo E2E: almacenamiento de mentira (en memoria), para la biblioteca y los adjuntos de las respuestas rápidas
+    STORAGE_PROVIDER: 'fake',
     // Solo E2E: WhatsApp por QR de mentira (la URL y la clave de Evolution se guardan en Proveedores desde la prueba)
     QR_PROVIDER: 'fake',
     FRONTEND_BASE_URL: `http://127.0.0.1:${apiPort}`,
