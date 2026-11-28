@@ -7,6 +7,7 @@ import { AttributionService } from '../attribution';
 import { DomainEventBus } from '../events';
 import { writeAudit } from '../audit';
 import { channelQueueOf, loadConversation, scopeOf, setConversationQueue, type InboxAccess } from '../inbox';
+import { hasSales } from './currency-lock';
 import { OpportunitiesService } from '../opportunities';
 import { OrgDirectoryService, OrgMembersService, pendingPerson } from '../organizations';
 import { RealtimeService } from '../realtime';
@@ -397,7 +398,7 @@ export class SalesService {
 
   async settings(): Promise<{ currency: string; locked: boolean }> {
     const currency = await this.directory.currency();
-    const locked = await this.db.withTenant(async (tx) => ((await tx.select({ n: count() }).from(sales))[0]?.n ?? 0) > 0);
+    const locked = await this.db.withTenant(hasSales);
     return { currency, locked };
   }
 

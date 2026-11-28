@@ -14,6 +14,8 @@ interface SessionApi {
   switchContext(target: string | null): Promise<Me>;
   /** «Ver como» otro rol (solo lectura), o `null` para volver a la vista propia (M10.5). */
   viewAs(role: ViewAsRole | null): Promise<Me>;
+  /** Vuelve a preguntar «quién soy» (V25: tras cambiar el nombre de la empresa o el propio), sin cerrar sesión ni perder lo cargado. */
+  refreshMe(): Promise<void>;
 }
 
 const Ctx = createContext<SessionApi | null>(null);
@@ -96,7 +98,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return me;
   }, [qc]);
 
-  const value = useMemo(() => ({ state, login, logout, switchContext, viewAs }), [state, login, logout, switchContext, viewAs]);
+  const refreshMe = useCallback(async (): Promise<void> => {
+    const me = await api<Me>('/auth/me');
+    boot = Promise.resolve(me);
+    setState({ status: 'authed', me });
+  }, []);
+
+  const value = useMemo(() => ({ state, login, logout, switchContext, viewAs, refreshMe }), [state, login, logout, switchContext, viewAs, refreshMe]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 

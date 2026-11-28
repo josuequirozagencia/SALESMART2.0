@@ -13,6 +13,7 @@ import { MemberPhotosService } from './member-photos.service';
 import { QrRoutesService } from './qr-routes.service';
 import { ChannelRoutesService } from './channel-routes.service';
 import { OrgDirectoryService } from './org-directory.service';
+import { OrgIdentityProfileService } from './org-identity-profile.service';
 import { OrgMembersService } from './org-members.service';
 import { CompaniesService } from './companies.service';
 import { PlatformAgenciesController } from './platform-agencies.controller';
@@ -29,7 +30,7 @@ import { TrialsService } from './trials.service';
 @Module({
   imports: [AuditModule, PlatformModule, MailModule],
   controllers: [TrialsController, PlatformTrialsController, PlatformPlansController, PlatformCompaniesController, PlatformAgenciesController, AgencyClientsController],
-  providers: [SampleMarkService, TeamMembersService, MemberPhotosService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
-  exports: [SampleMarkService, TeamMembersService, MemberPhotosService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
+  providers: [OrgIdentityProfileService, SampleMarkService, TeamMembersService, MemberPhotosService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, AgencyClientsService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
+  exports: [OrgIdentityProfileService, SampleMarkService, TeamMembersService, MemberPhotosService, QrRoutesService, FormRoutesService, TrialsService, TrialExpiryJob, PlansService, CompaniesService, AgencyAccessService, AgenciesService, OrgMembersService, OrgDirectoryService, AttributionEndpointsService, GhlRoutesService, ChannelRoutesService],
 })
 export class OrganizationsModule {}

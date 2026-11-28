@@ -3185,3 +3185,30 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 - **Sin validar:** cobro real (no existe pasarela), cupo con muchas empresas, navegador real y lector de pantalla.
 
 **V23-D (ADR-70, 2026-11-27; precisiones PROPUESTAS; migración 0157).** Texto fijo opcional del agente cuando no puede escuchar un audio (apagado por omisión, una vez por conversación, sin créditos, nunca si una persona ya escribió) y elección explícita del modelo de transcripción por el Súper Admin (`ai_model_prices.preferred`, índice único parcial); sin elección manda el orden de preferencia de V23-A. Alternativa descartada: decidirlo solo por una lista fija de nombres (el Súper Admin no podría forzar otro modelo).
+
+## ADR-76 — Perfil de empresa, perfil de usuario y adjuntos en las respuestas rápidas (V25)
+
+**Estado:** decisiones APROBADAS por el responsable el 2026-11-27 (las doce del prompt V25 y las nueve recomendaciones de la Fase A, `docs/V25_FASE_A_INFORME.md`); precisiones de implementación PROPUESTAS. Tres rebanadas: **25.1 perfil de empresa (construida)** · 25.2 perfil de usuario · 25.3 adjuntos en respuestas rápidas.
+
+### Decisiones
+1. **Perfil de empresa:** lo edita el administrador del cliente; la agencia nivel «administrador» y el Súper Admin en «Soporte» por la misma ruta (`acting_as` en la auditoría). **No hay ruta nueva en la Consola** (hasta V25 nadie podía cambiar el nombre).
+2. **Zona horaria y país editables**; la zona pide confirmación con sus efectos. **Moneda solo lectura** (regla de M6.2). **Sin logo.**
+3. **Dos permisos:** `organization.read` (administrador y asesor; entra en solo lectura) y `organization.manage` (administrador; no concedible a un asesor).
+4. **Auditoría en una segunda transacción** para nombre, país y zona (la identidad y la auditoría usan roles distintos, ADR-25). Del nombre, país y zona se guarda antes y después; de los datos de contacto, solo el nombre del campo.
+5. **La prueba vencida sigue dejando al cliente en pausa**; solo agencia y soporte quedan en solo lectura.
+6. **Mi perfil (25.2):** correo de solo lectura; teléfono sin verificar, se puede cambiar pero no vaciar (nada le envía mensajes automáticos); el administrador no edita el perfil de otros.
+7. **Adjuntos (25.3):** hasta 3 archivos **elegidos de la biblioteca** (referencia); una respuesta compartida exige archivos «para asesores»; si un archivo ya no está disponible se rechaza todo el envío y la persona lo quita; un texto de más de 1 024 caracteres sale aparte antes de los archivos; el nombre del archivo no se muestra en el chat; de las respuestas personales solo se informa un conteo.
+8. **Tres migraciones:** `0159` (25.1), `0160` (25.2), `0161` (25.3).
+
+### Precisiones de la 25.1 (PROPUESTAS)
+- Tabla `organization_profiles` (RLS forzada, sin DELETE, una fila por empresa creada al primer guardado). `GET|PATCH /v1/organization/profile`; `PATCH` cambia solo lo enviado, una cadena vacía borra el dato y la moneda o cualquier campo desconocido dan 400.
+- El `PATCH` usa dos transacciones: si la segunda fallara tras cambiar la identidad, queda un error en el registro con los campos sin auditar. La pantalla guarda por bloque.
+- La validación Zod vive en el módulo de la API (como el resto de los DTO), no en `packages/shared`.
+- Cambiar la zona olvida la memoria de 30 s de la zona; con varias instancias habría hasta 30 s de retraso. El nombre del calendario propio de Google no se renombra.
+
+### Alternativas descartadas
+Mover el nombre o la zona a la tabla de negocio (rompe la identidad como fuente única); dar a `app_identity` permiso sobre `audit_logs` (rompe ADR-25); un solo permiso (la agencia en solo lectura no podría consultar).
+
+### Sin validar
+Navegador real del responsable, lector de pantalla y una zona horaria cambiada con datos reales (SLA, citas y analítica).
+

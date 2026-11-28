@@ -8,6 +8,7 @@ export { OrgMembersService, pendingPerson, type OrgPerson } from './org-members.
 export { MemberPhotosService } from './member-photos.service';
 export { SampleMarkService } from './sample-mark.service';
 export { OrgDirectoryService, type OrgDirectory } from './org-directory.service';
+export { OrgIdentityProfileService, type OrgIdentityProfile, type OrgIdentityPatch } from './org-identity-profile.service';
 export { AgencyAccessService, AGENCY_DEFAULT_ACCESS_LEVEL, type ReconcileResult } from './agency-access.service';
 export { PLAN_FEATURES, PLAN_FEATURE_KEYS, normalizeFeatures, type PlanFeatureKey } from './plan-features';
 export { TrialExpiryJob, TRIAL_EXPIRY_BATCH } from './trial-expiry.job';

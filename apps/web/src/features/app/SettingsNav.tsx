@@ -1,14 +1,20 @@
 import { NavLink } from 'react-router-dom';
+import { useSession } from '../../lib/session';
 import { PAGE_TITLE } from '../../ui/PageHeader';
 
 const tab = ({ isActive }: { isActive: boolean }): string => `-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-[13.5px] font-semibold ${isActive ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg'}`;
 
 /** Encabezado y pestañas de Configuración (las secciones nuevas se añaden aquí). */
 export function SettingsNav() {
+  const { state } = useSession();
+  // «Empresa» (V25): para quien mira la empresa como administrador (también agencia, soporte y «Ver como»); el servidor decide si puede editar
+  const me = state.status === 'authed' ? state.me : null;
+  const company = me !== null && me.organization.kind === 'client' && me.role !== 'advisor' && me.access_level !== 'advisor' && me.viewing_as !== 'advisor';
   return (
     <div className="grid gap-3">
       <h1 className={PAGE_TITLE}>Configuración</h1>
       <nav aria-label="Secciones de configuración" className="flex flex-wrap gap-1 border-b border-line">
+        {company ? <NavLink to="/settings/company" className={tab}>Empresa</NavLink> : null}
         <NavLink to="/settings/fields" className={tab}>Campos personalizados</NavLink>
         <NavLink to="/settings/tags" className={tab}>Etiquetas</NavLink>
         <NavLink to="/settings/attribution" className={tab}>Atribución de Meta</NavLink>

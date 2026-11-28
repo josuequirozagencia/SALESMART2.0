@@ -89,6 +89,8 @@ export const PERMISSION_META: Readonly<Record<ManageableKey, PermissionMeta>> = 
   'notifications.read': own('conversations', 'Ver sus avisos', 'Ver los avisos propios, como cuando alguien lo menciona en una nota.'),
   'notifications.write': own('conversations', 'Marcar sus avisos como leídos', 'Marcar como leídos los avisos propios.'),
   'library.read': own('conversations', 'Ver la biblioteca de archivos', 'Ver y enviar desde el chat los archivos de la biblioteca marcados para asesores.'),
+  'organization.read': own('setup', 'Ver el perfil de la empresa', 'Ver el nombre, la zona horaria y los datos básicos de la empresa.'),
+  'organization.manage': cfg('team', 'Editar el perfil de la empresa', 'Cambiar el nombre, el país, la zona horaria y los datos básicos.', false),
   'library.manage': cfg('setup', 'Biblioteca de archivos', 'Subir, ordenar, marcar usos y archivar los archivos de la biblioteca.', false),
   'ghl.enroll': own('channels', 'Inscribir en flujos de GoHighLevel', 'Inscribir un contacto en un flujo.'),
   'channels.manage': cfg('channels', 'Conectar canales', 'Conectar, cambiar y desconectar los números de WhatsApp.'),
