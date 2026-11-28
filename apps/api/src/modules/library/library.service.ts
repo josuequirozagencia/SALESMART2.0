@@ -1,8 +1,8 @@
 import { uuidv7 } from '@sales-smart/shared';
 import { Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, ilike, isNull, lt, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, isNull, lt, or, sql, type SQL, inArray } from 'drizzle-orm';
 import type { AppConfig } from '../../config';
-import { automations, Database, mediaAssets, mediaFolders, type TenantTx } from '../../db';
+import { automations, Database, mediaAssets, mediaFolders, type TenantTx, quickReplies, quickReplyAssets } from '../../db';
 import { AppError, ConflictError, NotFoundError, ValidationError } from '../../errors';
 import { TenantContext } from '../../tenant';
 import { APP_CONFIG } from '../../tokens';
@@ -13,6 +13,8 @@ import { openRequestIn, StorageQuotaService } from '../storage';
 import type { AssetView, FolderDto, FolderView, ListLibraryQuery, UpdateAssetDto, UploadAssetQuery, UsageView } from './library.dto';
 
 /** Quién consulta: `manage` = el administrador (sube, ordena, ve archivados y el uso); si no, un asesor, que solo ve lo marcado para asesores. */
+export type AssetProblem = 'archived' | 'not_for_advisors' | 'unscanned';
+
 export interface LibraryAccess {
   readonly manage: boolean;
 }
@@ -140,6 +142,34 @@ export class LibraryService {
     if (!r) return { ok: false, reason: 'missing' };
     if (this.cfg.attachments.requireVirusScan && r.scanStatus === 'skipped') return { ok: false, reason: 'unscanned' };
     return { ok: true, row: r };
+  }
+
+  /** Los archivos que enlaza una respuesta rápida (V25), en cualquier estado, para decir cómo está cada uno. Dentro de la transacción de quien llama. */
+  async forLinks(tx: TenantTx, ids: readonly string[]): Promise<Map<string, AssetRow>> {
+    if (ids.length === 0) return new Map();
+    const rows = await tx.select().from(mediaAssets).where(inArray(mediaAssets.id, [...new Set(ids)]));
+    return new Map(rows.map((r) => [r.id, r]));
+  }
+
+  /** Por qué esta persona NO puede usar ahora un archivo (null = sí puede). Quien no administra la biblioteca solo usa lo marcado para asesores. */
+  problemOf(access: LibraryAccess, row: AssetRow): AssetProblem | null {
+    if (row.state !== 'ready') return 'archived';
+    if (!access.manage && !row.usableByAdvisors) return 'not_for_advisors';
+    if (this.cfg.attachments.requireVirusScan && row.scanStatus === 'skipped') return 'unscanned';
+    return null;
+  }
+
+  /** Qué respuestas rápidas usan este archivo: las compartidas por su atajo; de las personales SOLO cuántas (son privadas incluso para el administrador). */
+  async usedByQuickReplies(id: string): Promise<{ shared: Array<{ id: string; shortcut: string }>; personal: number }> {
+    return this.db.withTenant(async (tx) => {
+      const rows = await tx
+        .select({ id: quickReplies.id, shortcut: quickReplies.shortcut, shared: quickReplies.shared })
+        .from(quickReplyAssets)
+        .innerJoin(quickReplies, and(eq(quickReplies.organizationId, quickReplyAssets.organizationId), eq(quickReplies.id, quickReplyAssets.quickReplyId)))
+        .where(and(eq(quickReplyAssets.assetId, id), isNull(quickReplies.deletedAt)))
+        .orderBy(asc(quickReplies.shortcut));
+      return { shared: rows.filter((r) => r.shared).map((r) => ({ id: r.id, shortcut: r.shortcut })), personal: rows.filter((r) => !r.shared).length };
+    });
   }
 
   /** El contenido del objeto de un archivo de la biblioteca (para copiarlo a un adjunto propio). */

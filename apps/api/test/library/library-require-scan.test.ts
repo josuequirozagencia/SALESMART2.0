@@ -10,11 +10,12 @@ import { configureApp, HttpModule } from '../../src/http';
 import { AuthModule, LocalAccessResolver } from '../../src/modules/auth';
 import { LibraryModule } from '../../src/modules/library';
 import { OrganizationsModule } from '../../src/modules/organizations';
+import { QuickRepliesModule } from '../../src/modules/quick-replies';
 import { Argon2idHasher } from '../../src/security';
 import { ORG_A, TEST_AUTH_KEY } from '../support/constants';
 import { requireDb } from '../support/harness';
 
-@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, LibraryModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
+@Module({ imports: [CoreModule, DbModule, AuthModule, OrganizationsModule, LibraryModule, QuickRepliesModule, HttpModule.forRoot({ accessResolver: LocalAccessResolver, imports: [AuthModule] })] })
 class TestAppModule {}
 
 const info = requireDb();
@@ -29,7 +30,7 @@ let T: Record<'alice' | 'carol', string>;
 const saved = { ...process.env };
 
 async function seed(): Promise<void> {
-  await admin.query('TRUNCATE media_assets, media_folders, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
+  await admin.query('TRUNCATE quick_reply_assets, quick_replies, media_assets, media_folders, audit_logs, access_sessions, sessions, auth_throttle, trials, organization_members, organizations, users CASCADE');
   for (const [id, kind, name] of [[IDS.platformOrg, 'platform', 'Plataforma'], [ORG_A, 'client', 'Barbería Norte']] as const) await admin.query(`INSERT INTO organizations(id,kind,name,timezone) VALUES ($1,$2,$3,'UTC')`, [id, kind, name]);
   for (const [id, email, name] of [[IDS.alice, 'alice@a.test', 'Alicia Torres'], [IDS.carol, 'carol@a.test', 'Carolina Vera']] as const) {
     await admin.query(`INSERT INTO users(id,email,password_hash,status,email_verified_at,full_name) VALUES ($1,$2,$3,'active',now(),$4)`, [id, email, hash, name]);
@@ -80,5 +81,13 @@ describe('antivirus obligatorio y sin antivirus', () => {
     }
     expect((await call('PATCH', `/library/assets/${a.id}`, T.alice, { name: 'Renombrado', usable_by_advisors: false })).status).toBe(200); // lo demás sigue permitido
     expect((await admin.query(`SELECT usable_by_advisors FROM media_assets`)).rows).toEqual([{ usable_by_advisors: false }]);
+  });
+
+  it('una respuesta rápida no puede enlazar un archivo sin revisar', async () => {
+    const a = (await (await up(T.alice)).json()) as { id: string };
+    const r = await call('POST', '/quick-replies', T.alice, { shortcut: 'foto', body: 'Mira', asset_ids: [a.id] });
+    expect(r.status).toBe(409);
+    expect(((await r.json()) as { error: { code: string } }).error.code).toBe('VIRUS_SCAN_REQUIRED');
+    expect((await admin.query('SELECT count(*)::int n FROM quick_replies')).rows[0].n).toBe(0);
   });
 });

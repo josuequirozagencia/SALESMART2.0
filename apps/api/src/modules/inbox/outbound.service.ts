@@ -125,7 +125,7 @@ export class OutboundService {
    * tener permiso de responder: el selector se ofrece mientras se escribe, y quien lo use verá igual los avisos de por qué no puede enviar. Los datos de identidad (nombre de quien
    * escribe y de la empresa) se leen antes de la transacción.
    */
-  async listQuickReplies(access: InboxAccess, conversationId: string): Promise<{ items: ResolvedQuickReplyView[] }> {
+  async listQuickReplies(access: InboxAccess, conversationId: string, lib: { manage: boolean } | null): Promise<{ items: ResolvedQuickReplyView[] }> {
     const scope = scopeOf(access);
     if (!scope.canReply) throw new ForbiddenError();
     const [orgName, labels] = await Promise.all([this.directory.organizationName(), this.members.labels([scope.userId])]);
@@ -133,7 +133,7 @@ export class OutboundService {
     return this.db.withTenant(async (tx) => {
       const { c, contactName } = await loadConversation(tx, scope, conversationId);
       const [phone] = await tx.select({ e164: contactPhones.e164 }).from(contactPhones).where(and(eq(contactPhones.contactId, c.contactId), isNull(contactPhones.deletedAt), eq(contactPhones.isPrimary, true))).limit(1);
-      return this.quickReplies.resolvedFor(tx, c.contactId, { contactName, contactPhone: phone?.e164 ?? null, agentName, orgName });
+      return this.quickReplies.resolvedFor(tx, c.contactId, { contactName, contactPhone: phone?.e164 ?? null, agentName, orgName }, lib);
     });
   }
 

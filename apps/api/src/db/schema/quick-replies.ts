@@ -1,8 +1,10 @@
 import { sql } from 'drizzle-orm';
-import { boolean, check, index, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
+import { boolean, check, foreignKey, index, primaryKey, smallint, text, timestamp, unique, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { uuidv7 } from '@sales-smart/shared';
 import { tenantTable } from './helpers';
 import { users } from './identity';
+import { conversations } from './conversations';
+import { mediaAssets } from './library';
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: 'date' });
 
@@ -31,5 +33,49 @@ export const quickReplies = tenantTable(
     uniqueIndex('quick_replies_shared_shortcut_uq').on(t['organizationId']!, t['shortcut']!).where(sql`${t['shared']!} AND ${t['deletedAt']!} IS NULL`),
     uniqueIndex('quick_replies_owner_shortcut_uq').on(t['organizationId']!, t['ownerId']!, t['shortcut']!).where(sql`NOT ${t['shared']!} AND ${t['deletedAt']!} IS NULL`),
     index('quick_replies_org_idx').on(t['organizationId']!, t['ownerId']!).where(sql`${t['deletedAt']!} IS NULL`),
+  ],
+);
+
+/**
+ * Archivos de una respuesta rápida (V25, ADR-76): hasta 3 de la BIBLIOTECA (referencia, no copia). Tabla de ENLACE: guardar reemplaza el conjunto, así que `app_rw` tiene DELETE y no UPDATE.
+ * El tope de 3 lo impone la base: posición 0–2 y única por respuesta. Las claves foráneas compuestas impiden enlazar un archivo de otra empresa.
+ */
+export const quickReplyAssets = tenantTable(
+  'quick_reply_assets',
+  {
+    quickReplyId: uuid('quick_reply_id').notNull(),
+    assetId: uuid('asset_id').notNull(),
+    position: smallint('position').notNull(),
+  },
+  (t) => [
+    primaryKey({ name: 'quick_reply_assets_pk', columns: [t['organizationId']!, t['quickReplyId']!, t['position']!] }),
+    unique('quick_reply_assets_asset_uq').on(t['organizationId']!, t['quickReplyId']!, t['assetId']!),
+    foreignKey({ name: 'quick_reply_assets_reply_fk', columns: [t['organizationId']!, t['quickReplyId']!], foreignColumns: [quickReplies.organizationId, quickReplies.id] }),
+    foreignKey({ name: 'quick_reply_assets_asset_fk', columns: [t['organizationId']!, t['assetId']!], foreignColumns: [mediaAssets.organizationId, mediaAssets.id] }),
+    check('quick_reply_assets_position_valid', sql`${t['position']!} BETWEEN 0 AND 2`),
+    index('quick_reply_assets_asset_idx').on(t['organizationId']!, t['assetId']!),
+  ],
+);
+
+/**
+ * Envíos de una respuesta rápida con su `Idempotency-Key` (V25): repetir la misma petición devuelve los mismos mensajes sin duplicarlos. Solo inserción. No guarda el texto.
+ */
+export const quickReplySends = tenantTable(
+  'quick_reply_sends',
+  {
+    idempotencyKey: text('idempotency_key').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id),
+    conversationId: uuid('conversation_id').notNull(),
+    quickReplyId: uuid('quick_reply_id').notNull(),
+    requestHash: text('request_hash').notNull(),
+    messageIds: uuid('message_ids').array().notNull(),
+    createdAt: ts('created_at').notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ name: 'quick_reply_sends_pk', columns: [t['organizationId']!, t['idempotencyKey']!] }),
+    foreignKey({ name: 'quick_reply_sends_conversation_fk', columns: [t['organizationId']!, t['conversationId']!], foreignColumns: [conversations.organizationId, conversations.id] }),
+    foreignKey({ name: 'quick_reply_sends_reply_fk', columns: [t['organizationId']!, t['quickReplyId']!], foreignColumns: [quickReplies.organizationId, quickReplies.id] }),
+    check('quick_reply_sends_key_shape', sql`length(${t['idempotencyKey']!}) BETWEEN 8 AND 100`),
+    check('quick_reply_sends_hash_shape', sql`${t['requestHash']!} ~ '^[0-9a-f]{64}$'`),
   ],
 );

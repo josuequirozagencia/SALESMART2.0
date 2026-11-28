@@ -106,6 +106,16 @@ export function useSendReply(id: string) {
   return useMutation({ mutationFn: (input: string | { text: string; reply_to_message_id?: string | undefined }) => api<ChatMessage>(`/conversations/${id}/messages`, { method: 'POST', body: typeof input === 'string' ? { text: input } : { text: input.text, ...(input.reply_to_message_id ? { reply_to_message_id: input.reply_to_message_id } : {}) } }), onSettled: refresh });
 }
 
+/** Envía una respuesta rápida con sus archivos (V25): sale todo o nada. La llave evita duplicar al reintentar. */
+export function useSendQuickReply(id: string) {
+  const refresh = useRefresh(id);
+  return useMutation({
+    mutationFn: ({ replyId, key, text, assetIds }: { replyId: string; key: string; text: string; assetIds: string[] }) =>
+      api<{ messages: ChatMessage[] }>(`/conversations/${id}/quick-replies/${replyId}/send`, { method: 'POST', headers: { 'idempotency-key': key }, body: { text, asset_ids: assetIds } }),
+    onSettled: refresh,
+  });
+}
+
 /** Las plantillas que se pueden enviar en esta conversación (las de su conexión). Solo se piden al abrir el selector. */
 export function useConversationTemplates(id: string, enabled: boolean) {
   return useQuery({ queryKey: ['conversation-templates', id], enabled, staleTime: 0, retry: false, queryFn: () => api<TemplateList>(`/conversations/${id}/templates`) });

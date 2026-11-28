@@ -198,7 +198,8 @@ export class InboxController {
   @Get(':id/quick-replies')
   @Header('Cache-Control', 'no-store')
   quickReplies(@Req() req: AuthedRequest, @Param('id', idParam) id: string) {
-    return this.outbound.listQuickReplies(accessOf(req), id);
+    const p = req.principal?.permissions;
+    return this.outbound.listQuickReplies(accessOf(req), id, p?.has('library.read') === true ? { manage: p.has('library.manage') } : null);
   }
 
   /** Envía una plantilla aprobada, dentro o fuera de las 24 h. 400 si una variable no vale, 409 `TEMPLATE_NOT_AVAILABLE` si ya no se puede enviar. */

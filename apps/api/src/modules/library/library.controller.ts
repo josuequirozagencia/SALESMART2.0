@@ -51,12 +51,13 @@ export class LibraryController {
     return this.library.update(id, b);
   }
 
-  /** Qué automatizaciones adjuntan este archivo (para avisar antes de archivarlo). */
+  /** Qué automatizaciones y respuestas rápidas usan este archivo (para avisar antes de archivarlo). De las respuestas personales, solo el conteo. */
   @RequirePermission('library.manage')
   @Get('assets/:id/usage')
   @Header('Cache-Control', 'no-store')
   async assetUsage(@Param('id', idParam) id: string) {
-    return { automations: await this.library.usedByAutomations(id) };
+    const [automations, replies] = await Promise.all([this.library.usedByAutomations(id), this.library.usedByQuickReplies(id)]);
+    return { automations, quick_replies: replies.shared, personal_quick_replies: replies.personal };
   }
 
   @RequirePermission('library.manage')

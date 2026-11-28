@@ -203,8 +203,8 @@ describe('permisos y aislamiento', () => {
 
   it('con la lista se entregan las variables de la casa y si la persona puede compartir', async () => {
     const l = await list(T.carol);
-    expect(l.access).toEqual({ share: false });
-    expect((await list(T.alice)).access).toEqual({ share: true });
+    expect(l.access).toEqual({ share: false, attach: true });
+    expect((await list(T.alice)).access).toEqual({ share: true, attach: true });
     expect(l.built_in_variables.map((v) => v.key)).toEqual(['primer_nombre', 'nombre', 'telefono', 'mi_nombre', 'empresa']);
     expect(l.built_in_variables.every((v) => v.label.length > 0)).toBe(true);
   });

@@ -3214,6 +3214,13 @@ Plantillas de marketing contra Meta real (nivel de mensajería y errores exactos
 - Con la prueba vencida la interfaz muestra la pantalla de «vencida», así que el cliente no llega a «Mi perfil» aunque la API lo permita.
 - No se construyó una pantalla de historial del equipo.
 
+### Precisiones de la 25.3 (PROPUESTAS)
+- Los archivos de una respuesta son **referencias** a la biblioteca (`quick_reply_assets`: el tope de 3 lo impone la base con posición 0–2 única). Una respuesta compartida exige archivos «para asesores».
+- `POST /v1/conversations/:id/quick-replies/:replyId/send` (`inbox.reply` + `library.read`): comprueba sin escribir, copia cada archivo fuera de la transacción y en UNA transacción revalida, guarda la llave y los mensajes con `sent_at` creciente; si algo falla no sale nada y las copias se borran. Repetir la llave devuelve los mismos mensajes (200).
+- Orden: el texto es pie del primer archivo que lo admite; con un audio primero, audio y luego texto aparte (como en las automatizaciones; los seguimientos del agente mandan el texto antes); un texto de más de 1 024 caracteres sale aparte antes de los archivos. Sin archivos, la web usa la ruta de texto de siempre.
+- El chat nunca recibe nombres de archivo; en Configuración sí. Con archivos preparados no se cita un mensaje ni se programa.
+- No hay estado «antivirus pendiente» en la biblioteca: con `REQUIRE_VIRUS_SCAN`, un archivo sin revisar no se puede enlazar ni enviar.
+
 ### Alternativas descartadas
 Mover el nombre o la zona a la tabla de negocio (rompe la identidad como fuente única); dar a `app_identity` permiso sobre `audit_logs` (rompe ADR-25); un solo permiso (la agencia en solo lectura no podría consultar).
 

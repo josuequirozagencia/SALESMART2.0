@@ -17,6 +17,8 @@ export interface QuickReplyInput {
   shortcut: string;
   body: string;
   shared: boolean;
+  /** Archivos de la biblioteca (V25); solo se envía si la persona puede verla. */
+  asset_ids?: string[];
 }
 
 export function useCreateQuickReply() {

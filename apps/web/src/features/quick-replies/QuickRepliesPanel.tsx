@@ -8,6 +8,7 @@ import { Modal } from '../../ui/Modal';
 import { Pill } from '../../ui/Pill';
 import { useCustomFields } from '../custom-fields/useCustomFields';
 import { previewParts, sampleValues, SAMPLE_CONTACT, splitVariables } from './preview';
+import { filesLabel, QuickReplyFiles } from './QuickReplyFiles';
 import { useCreateQuickReply, useDeleteQuickReply, useQuickReplies, useUpdateQuickReply } from './useQuickReplies';
 
 const MAX = 4096;
@@ -35,13 +36,14 @@ function Preview({ body }: { body: string }) {
 }
 
 /** Alta o cambio de una respuesta: atajo, texto con variables que se insertan con un clic y, si la persona puede, compartirla con toda la empresa. */
-function QuickReplyForm({ reply, canShare, variables, onClose }: { reply?: QuickReply; canShare: boolean; variables: Array<{ key: string; label: string }>; onClose: () => void }) {
+function QuickReplyForm({ reply, canShare, canAttach, variables, onClose }: { reply?: QuickReply; canShare: boolean; canAttach: boolean; variables: Array<{ key: string; label: string }>; onClose: () => void }) {
   const create = useCreateQuickReply();
   const update = useUpdateQuickReply();
   const fields = useCustomFields().data?.items ?? [];
   const [shortcut, setShortcut] = useState(reply?.shortcut ?? '');
   const [body, setBody] = useState(reply?.body ?? '');
   const [shared, setShared] = useState(reply?.shared ?? false);
+  const [files, setFiles] = useState(reply?.assets ?? []);
   const [errors, setErrors] = useState<{ shortcut?: string; body?: string }>({});
   const [error, setError] = useState<string>();
   const area = useRef<HTMLTextAreaElement>(null);
@@ -90,8 +92,12 @@ function QuickReplyForm({ reply, canShare, variables, onClose }: { reply?: Quick
       }
       setError(friendlyError(e, 'No pudimos guardar la respuesta.'));
     };
-    if (reply) update.mutate({ id: reply.id, input: { shortcut: clean, body: body.trim(), shared } }, { onSuccess: onClose, onError });
-    else create.mutate({ shortcut: clean, body: body.trim(), shared }, { onSuccess: onClose, onError });
+    const ids = files.map((f) => f.id);
+    // Los archivos se mandan solo si la persona los cambió: así editar el texto no toca los enlaces
+    const changed = canAttach && ids.join() !== (reply?.assets ?? []).map((f) => f.id).join();
+    const input = { shortcut: clean, body: body.trim(), shared, ...(changed ? { asset_ids: ids } : {}) };
+    if (reply) update.mutate({ id: reply.id, input }, { onSuccess: onClose, onError });
+    else create.mutate(input, { onSuccess: onClose, onError });
   }
 
   return (
@@ -121,6 +127,7 @@ function QuickReplyForm({ reply, canShare, variables, onClose }: { reply?: Quick
         <span className="text-[12px] text-muted">Se reemplazan al usar la respuesta en una conversación. Si el contacto no tiene el dato, lo verás marcado para completarlo antes de enviar.</span>
       </div>
       <Preview body={body} />
+      {canAttach ? <QuickReplyFiles files={files} shared={shared} onChange={setFiles} /> : null}
       {canShare ? (
         <label className="flex items-start gap-2 text-[13px]">
           <input type="checkbox" checked={shared} onChange={(e) => setShared(e.target.checked)} className="mt-0.5 size-4" />
@@ -185,7 +192,7 @@ export function QuickRepliesPanel() {
                 <p className="line-clamp-3 min-w-0 whitespace-pre-wrap break-words text-[13px]">
                   {splitVariables(r.body).map((p, i) => (p.variable ? <span key={i} className="font-mono text-[12px] text-accent">{p.text}</span> : <span key={i}>{p.text}</span>))}
                 </p>
-                <span>{r.shared ? <Pill kind="accent">Compartida</Pill> : <Pill kind="muted">Solo mía</Pill>}</span>
+                <span className="flex flex-wrap items-center gap-1">{r.shared ? <Pill kind="accent">Compartida</Pill> : <Pill kind="muted">Solo mía</Pill>}{r.assets && r.assets.length > 0 ? <Pill kind="info">📎 {filesLabel(r.assets.length)}</Pill> : null}</span>
                 <span className="flex gap-1.5 md:justify-end">
                   {r.can_edit ? (
                     <>
@@ -199,7 +206,7 @@ export function QuickRepliesPanel() {
           </ul>
         </div>
       ) : null}
-      {editing && q.data ? <QuickReplyForm key={editing === 'new' ? 'new' : editing.id} {...(editing === 'new' ? {} : { reply: editing })} canShare={q.data.access.share} variables={q.data.built_in_variables} onClose={() => setEditing(undefined)} /> : null}
+      {editing && q.data ? <QuickReplyForm key={editing === 'new' ? 'new' : editing.id} {...(editing === 'new' ? {} : { reply: editing })} canShare={q.data.access.share} canAttach={q.data.access.attach === true} variables={q.data.built_in_variables} onClose={() => setEditing(undefined)} /> : null}
       {deleting ? <ConfirmDelete reply={deleting} onClose={() => setDeleting(undefined)} /> : null}
     </div>
   );

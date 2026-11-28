@@ -25,6 +25,7 @@ import { OutboundJob } from './outbound.job';
 import { LibraryModule } from '../library';
 import { OutboundService } from './outbound.service';
 import { OwnerReleaseService } from './owner-release.service';
+import { QuickReplySendService } from './quick-reply-send.service';
 import { ReactionsService } from './reactions.service';
 import { ReassignService } from './reassign.service';
 import { ScheduledMessagesJob } from './scheduled-messages.job';
@@ -39,7 +40,7 @@ import { SlaSweepJob } from './sla-sweep.job';
 @Module({
   imports: [AttachmentsModule, LibraryModule, QrModule, ChannelsModule, ContactsModule, NotificationsModule, OpportunitiesModule, OrganizationsModule, QueuesModule, QuickRepliesModule, RealtimeModule, SlaModule, TagsModule, TemplatesModule],
   controllers: [InboxController, ContactConversationController, MessagesController, ScheduledController, ConversationAttachmentsController, AttachmentsController],
-  providers: [AssignmentViewService, MessageQuotesService, ConversationAttachmentsService, OwnerReleaseService, ReactionsService, MentionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
+  providers: [QuickReplySendService, AssignmentViewService, MessageQuotesService, ConversationAttachmentsService, OwnerReleaseService, ReactionsService, MentionsService, InboxService, OutboundService, SharingService, OutboundDispatcher, OutboundJob, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
   exports: [OwnerReleaseService, OutboundJob, OutboundDispatcher, ReassignService, AutoCloseService, SlaSweepJob, ScheduledMessagesService, ScheduledMessagesJob],
 })
 export class InboxModule {}

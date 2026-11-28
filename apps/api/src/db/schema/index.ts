@@ -11,7 +11,7 @@ export { pipelines, pipelineStages, opportunities, stageHistory } from './pipeli
 export { channelAccounts, whatsappAccounts, qrAccounts, channelRoutes } from './channels';
 export { webhookEvents, webhookIgnored, IGNORED_REASONS, conversations, messages, conversationParticipants, conversationFavorites } from './conversations';
 export { messageTemplates } from './templates';
-export { quickReplies } from './quick-replies';
+export { quickReplies, quickReplyAssets, quickReplySends } from './quick-replies';
 export { scheduledMessages } from './scheduled-messages';
 export { messageMentions, notifications } from './notifications';
 export { pushSubscriptions } from './push';

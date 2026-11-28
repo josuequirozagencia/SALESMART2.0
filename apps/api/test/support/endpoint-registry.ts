@@ -376,6 +376,7 @@ export const ENDPOINTS: readonly EndpointEntry[] = [
   { route: 'PUT /v1/conversations/:id/favorite', kind: 'tenant', isolationTest: '../../inbox/favorites.test.ts' },
   { route: 'DELETE /v1/conversations/:id/favorite', kind: 'tenant', isolationTest: '../../inbox/favorites.test.ts' },
   { route: 'PUT /v1/conversations/:id/queue', kind: 'tenant', isolationTest: '../../inbox/conversation-queue.test.ts' },
+  { route: 'POST /v1/conversations/:id/quick-replies/:replyId/send', kind: 'tenant', isolationTest: '../../inbox/quick-reply-send.test.ts' },
   { route: 'GET /v1/me/profile', kind: 'self', test: '../../auth/my-profile.test.ts' },
   { route: 'PATCH /v1/me/profile', kind: 'self', test: '../../auth/my-profile.test.ts' },
   { route: 'GET /v1/organization/profile', kind: 'tenant', isolationTest: '../../organizations/organization-profile.test.ts' },
